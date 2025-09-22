@@ -16,16 +16,16 @@ jobs:
     - name: Setup SSH
       uses: webfactory/ssh-agent@v0.7.0
       with:
-        ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+        ssh-private-key: ${{ secrets.SERVER_SSH_KEY }}
         
     - name: Add known hosts
       run: |
         mkdir -p ~/.ssh
-        ssh-keyscan -H 193.160.208.206 >> ~/.ssh/known_hosts
+        ssh-keyscan -H ${{ secrets.SERVER_HOST }} >> ~/.ssh/known_hosts
         
     - name: Deploy to server
       run: |
-        ssh root@193.160.208.206 << 'EOF'
+        ssh ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} << 'EOF'
           # Create project directory
           mkdir -p /home/root/appointo
           cd /home/root/appointo
@@ -38,10 +38,10 @@ jobs:
         EOF
         
         # Copy files to server
-        scp -r . root@193.160.208.206:/home/root/appointo/
+        scp -r . ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:/home/root/appointo/
         
         # Deploy on server
-        ssh root@193.160.208.206 << 'EOF'
+        ssh ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} << 'EOF'
           cd /home/root/appointo
           
           # Build and start containers
@@ -57,4 +57,4 @@ jobs:
     - name: Health check
       run: |
         sleep 30
-        curl -f http://193.160.208.206/health || exit 1 
+        curl -f http://${{ secrets.SERVER_HOST }}/health || exit 1 
