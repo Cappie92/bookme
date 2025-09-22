@@ -13,10 +13,10 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v3
       
-    - name: Setup SSH
-      uses: webfactory/ssh-agent@v0.7.0
-      with:
-        ssh-private-key: ${{ secrets.SERVER_SSH_KEY }}
+    - name: Install sshpass
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y sshpass
         
     - name: Add known hosts
       run: |
@@ -25,7 +25,7 @@ jobs:
         
     - name: Deploy to server
       run: |
-        ssh ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} << 'EOF'
+        sshpass -p '${{ secrets.SERVER_PASSWORD }}' ssh ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} << 'EOF'
           # Create project directory
           mkdir -p /home/root/appointo
           cd /home/root/appointo
@@ -38,10 +38,10 @@ jobs:
         EOF
         
         # Copy files to server
-        scp -r . ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:/home/root/appointo/
+        sshpass -p '${{ secrets.SERVER_PASSWORD }}' scp -r . ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:/home/root/appointo/
         
         # Deploy on server
-        ssh ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} << 'EOF'
+        sshpass -p '${{ secrets.SERVER_PASSWORD }}' ssh ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} << 'EOF'
           cd /home/root/appointo
           
           # Build and start containers
