@@ -1,0 +1,21 @@
+name: Daily architecture overview
+
+on:
+  schedule:
+    - cron:  '0 3 * * *'   # каждый день 03:00 UTC
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # нужно на push
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./docs.sh init
+      - run: ./docs.sh overview-scan
+      - name: Commit & push if changed
+        uses: EndBug/add-and-commit@v9
+        with:
+          message: "chore(docs): daily system overview auto-update"
+          add: "docs/c4/_inventory.md docs/system_overview.md docs/c4/context.md docs/c4/containers.md site" 

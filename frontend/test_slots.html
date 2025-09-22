@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Тест API слотов</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; }
+        input, select { width: 200px; padding: 5px; }
+        button { padding: 10px 20px; background: #007bff; color: white; border: none; cursor: pointer; }
+        button:hover { background: #0056b3; }
+        .result { margin-top: 20px; padding: 10px; border: 1px solid #ccc; background: #f9f9f9; }
+        .error { color: red; }
+        .success { color: green; }
+    </style>
+</head>
+<body>
+    <h1>Тест API доступных слотов</h1>
+    
+    <div class="form-group">
+        <label for="date">Дата:</label>
+        <input type="date" id="date" value="2025-07-21">
+    </div>
+    
+    <div class="form-group">
+        <label for="service_duration">Длительность услуги (минуты):</label>
+        <input type="number" id="service_duration" value="120">
+    </div>
+    
+    <div class="form-group">
+        <label for="owner_type">Тип владельца:</label>
+        <select id="owner_type">
+            <option value="master">Мастер</option>
+            <option value="salon">Салон</option>
+        </select>
+    </div>
+    
+    <div class="form-group">
+        <label for="owner_id">ID владельца:</label>
+        <input type="number" id="owner_id" value="3">
+    </div>
+    
+    <button onclick="testSlots()">Получить слоты</button>
+    
+    <div id="result" class="result" style="display: none;"></div>
+    
+    <script>
+        async function testSlots() {
+            const date = document.getElementById('date').value;
+            const service_duration = document.getElementById('service_duration').value;
+            const owner_type = document.getElementById('owner_type').value;
+            const owner_id = document.getElementById('owner_id').value;
+            
+            const params = new URLSearchParams({
+                date: date + 'T00:00:00',
+                service_duration: service_duration,
+                owner_type: owner_type,
+                owner_id: owner_id
+            });
+            
+            const resultDiv = document.getElementById('result');
+            resultDiv.style.display = 'block';
+            resultDiv.innerHTML = '<p>Загрузка...</p>';
+            
+            try {
+                console.log('Отправляем запрос с параметрами:', {
+                    date: date + 'T00:00:00',
+                    service_duration,
+                    owner_type,
+                    owner_id
+                });
+                
+                const response = await fetch(`/bookings/available-slots/public?${params}`);
+                console.log('Статус ответа:', response.status);
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    console.log('Получены данные:', data);
+                    
+                    if (data.length > 0) {
+                        let html = `<p class="success">Найдено ${data.length} слотов:</p><ul>`;
+                        data.forEach((slot, index) => {
+                            const startTime = new Date(slot.start_time).toLocaleTimeString('ru-RU', { 
+                                hour: '2-digit', 
+                                minute: '2-digit' 
+                            });
+                            const endTime = new Date(slot.end_time).toLocaleTimeString('ru-RU', { 
+                                hour: '2-digit', 
+                                minute: '2-digit' 
+                            });
+                            html += `<li>${startTime} - ${endTime}</li>`;
+                        });
+                        html += '</ul>';
+                        resultDiv.innerHTML = html;
+                    } else {
+                        resultDiv.innerHTML = '<p class="error">Нет доступных слотов</p>';
+                    }
+                } else {
+                    const errorText = await response.text();
+                    resultDiv.innerHTML = `<p class="error">Ошибка ${response.status}: ${errorText}</p>`;
+                }
+            } catch (error) {
+                console.error('Ошибка:', error);
+                resultDiv.innerHTML = `<p class="error">Ошибка запроса: ${error.message}</p>`;
+            }
+        }
+    </script>
+</body>
+</html> 

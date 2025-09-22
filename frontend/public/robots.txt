@@ -1,0 +1,18 @@
+User-agent: *
+Disallow: /
+
+# Block all search engines
+User-agent: Googlebot
+Disallow: /
+
+User-agent: Bingbot
+Disallow: /
+
+User-agent: YandexBot
+Disallow: /
+
+User-agent: DuckDuckBot
+Disallow: /
+
+# Sitemap (optional)
+# Sitemap: https://yourdomain.com/sitemap.xml 

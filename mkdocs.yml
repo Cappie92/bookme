@@ -1,0 +1,19 @@
+site_name: "appointo"
+theme:
+  name: material
+  features:
+    - navigation.instant
+    - navigation.tabs
+plugins:
+  - search
+  - mermaid2
+markdown_extensions:
+  - admonition
+  - toc
+  - attr_list
+docs_dir: docs
+strict: true
+nav:
+  - Home: index.md
+  - System overview: system_overview.md
+  - C4: c4/context.md 

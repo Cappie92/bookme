@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Отладка токенов и API</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .section { margin-bottom: 30px; padding: 15px; border: 1px solid #ccc; border-radius: 5px; }
+        .success { color: green; }
+        .error { color: red; }
+        .info { color: blue; }
+        button { padding: 10px 20px; margin: 5px; background: #007bff; color: white; border: none; cursor: pointer; }
+        button:hover { background: #0056b3; }
+        pre { background: #f5f5f5; padding: 10px; border-radius: 3px; overflow-x: auto; }
+    </style>
+</head>
+<body>
+    <h1>Отладка токенов и API</h1>
+    
+    <div class="section">
+        <h2>1. Проверка localStorage</h2>
+        <button onclick="checkLocalStorage()">Проверить localStorage</button>
+        <div id="localStorageInfo"></div>
+    </div>
+    
+    <div class="section">
+        <h2>2. Тест API личного кабинета</h2>
+        <button onclick="testClientAPI()">Тест API /client/bookings/</button>
+        <div id="clientAPIResult"></div>
+    </div>
+    
+    <div class="section">
+        <h2>3. Тест API пользователя</h2>
+        <button onclick="testUserAPI()">Тест API /auth/users/me</button>
+        <div id="userAPIResult"></div>
+    </div>
+    
+    <div class="section">
+        <h2>4. Создание нового бронирования</h2>
+        <button onclick="createNewBooking()">Создать бронирование</button>
+        <div id="bookingResult"></div>
+    </div>
+    
+    <div class="section">
+        <h2>5. Проверка пароля</h2>
+        <input type="password" id="passwordInput" placeholder="Введите пароль" value="test123">
+        <button onclick="verifyPassword()">Проверить пароль</button>
+        <div id="passwordResult"></div>
+    </div>
+    
+    <script>
+        function checkLocalStorage() {
+            const div = document.getElementById('localStorageInfo');
+            const token = localStorage.getItem('access_token');
+            const newClientSetup = localStorage.getItem('new_client_setup');
+            const existingClientVerification = localStorage.getItem('existing_client_verification');
+            
+            let html = '<h3>Содержимое localStorage:</h3>';
+            html += `<p><strong>access_token:</strong> ${token ? token.substring(0, 20) + '...' : 'НЕТ'}</p>`;
+            html += `<p><strong>new_client_setup:</strong> ${newClientSetup || 'НЕТ'}</p>`;
+            html += `<p><strong>existing_client_verification:</strong> ${existingClientVerification || 'НЕТ'}</p>`;
+            
+            if (token) {
+                html += '<p class="success">✅ Токен найден</p>';
+            } else {
+                html += '<p class="error">❌ Токен не найден</p>';
+            }
+            
+            div.innerHTML = html;
+        }
+        
+        async function testClientAPI() {
+            const div = document.getElementById('clientAPIResult');
+            const token = localStorage.getItem('access_token');
+            
+            if (!token) {
+                div.innerHTML = '<p class="error">❌ Токен не найден в localStorage</p>';
+                return;
+            }
+            
+            try {
+                const response = await fetch('/client/bookings/', {
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+                
+                div.innerHTML = `<p><strong>Статус:</strong> ${response.status}</p>`;
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    div.innerHTML += `<p class="success">✅ API работает</p>`;
+                    div.innerHTML += `<p><strong>Количество записей:</strong> ${data.length}</p>`;
+                    div.innerHTML += `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+                } else {
+                    const errorData = await response.json();
+                    div.innerHTML += `<p class="error">❌ Ошибка API: ${JSON.stringify(errorData)}</p>`;
+                }
+            } catch (error) {
+                div.innerHTML += `<p class="error">❌ Ошибка сети: ${error.message}</p>`;
+            }
+        }
+        
+        async function testUserAPI() {
+            const div = document.getElementById('userAPIResult');
+            const token = localStorage.getItem('access_token');
+            
+            if (!token) {
+                div.innerHTML = '<p class="error">❌ Токен не найден в localStorage</p>';
+                return;
+            }
+            
+            try {
+                const response = await fetch('/auth/users/me', {
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+                
+                div.innerHTML = `<p><strong>Статус:</strong> ${response.status}</p>`;
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    div.innerHTML += `<p class="success">✅ Пользователь найден</p>`;
+                    div.innerHTML += `<p><strong>Телефон:</strong> ${data.phone}</p>`;
+                    div.innerHTML += `<p><strong>Email:</strong> ${data.email}</p>`;
+                    div.innerHTML += `<p><strong>Роль:</strong> ${data.role}</p>`;
+                } else {
+                    const errorData = await response.json();
+                    div.innerHTML += `<p class="error">❌ Ошибка API: ${JSON.stringify(errorData)}</p>`;
+                }
+            } catch (error) {
+                div.innerHTML += `<p class="error">❌ Ошибка сети: ${error.message}</p>`;
+            }
+        }
+        
+        async function createNewBooking() {
+            const div = document.getElementById('bookingResult');
+            
+            try {
+                const bookingData = {
+                    service_id: 1,
+                    master_id: 3,
+                    salon_id: null,
+                    start_time: "2025-07-21T13:00:00",
+                    end_time: "2025-07-21T15:00:00",
+                    notes: "Тестовое бронирование"
+                };
+                
+                const params = new URLSearchParams({ client_phone: '+76666666666' });
+                
+                const response = await fetch(`/bookings/public?${params}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(bookingData)
+                });
+                
+                div.innerHTML = `<p><strong>Статус:</strong> ${response.status}</p>`;
+                
+                if (response.ok) {
+                    const result = await response.json();
+                    div.innerHTML += `<p class="success">✅ Бронирование создано</p>`;
+                    div.innerHTML += `<p><strong>ID:</strong> ${result.booking.id}</p>`;
+                    div.innerHTML += `<p><strong>Токен:</strong> ${result.access_token.substring(0, 20)}...</p>`;
+                    div.innerHTML += `<p><strong>Проверка пароля:</strong> ${result.needs_password_verification}</p>`;
+                    
+                    // Сохраняем токен
+                    localStorage.setItem('access_token', result.access_token);
+                    if (result.needs_password_verification) {
+                        localStorage.setItem('existing_client_verification', 'true');
+                    }
+                    
+                    div.innerHTML += `<p class="info">💾 Токен сохранен в localStorage</p>`;
+                } else {
+                    const errorData = await response.json();
+                    div.innerHTML += `<p class="error">❌ Ошибка: ${JSON.stringify(errorData)}</p>`;
+                }
+            } catch (error) {
+                div.innerHTML += `<p class="error">❌ Ошибка сети: ${error.message}</p>`;
+            }
+        }
+        
+        async function verifyPassword() {
+            const div = document.getElementById('passwordResult');
+            const password = document.getElementById('passwordInput').value;
+            const token = localStorage.getItem('access_token');
+            
+            if (!token) {
+                div.innerHTML = '<p class="error">❌ Токен не найден в localStorage</p>';
+                return;
+            }
+            
+            try {
+                const response = await fetch('/auth/verify-password', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({
+                        password: password
+                    })
+                });
+                
+                div.innerHTML = `<p><strong>Статус:</strong> ${response.status}</p>`;
+                
+                if (response.ok) {
+                    const result = await response.json();
+                    div.innerHTML += `<p class="success">✅ Пароль подтвержден</p>`;
+                    div.innerHTML += `<p><strong>Сообщение:</strong> ${result.message}</p>`;
+                    
+                    // Удаляем флаг
+                    localStorage.removeItem('existing_client_verification');
+                    div.innerHTML += `<p class="info">💾 Флаг existing_client_verification удален</p>`;
+                } else {
+                    const errorData = await response.json();
+                    div.innerHTML += `<p class="error">❌ Ошибка: ${JSON.stringify(errorData)}</p>`;
+                }
+            } catch (error) {
+                div.innerHTML += `<p class="error">❌ Ошибка сети: ${error.message}</p>`;
+            }
+        }
+        
+        // Автоматически проверяем localStorage при загрузке
+        window.onload = function() {
+            checkLocalStorage();
+        };
+    </script>
+</body>
+</html> 

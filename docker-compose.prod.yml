@@ -1,0 +1,33 @@
+version: '3.8'
+
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./logs:/app/logs
+    environment:
+      - ENVIRONMENT=production
+      - JWT_SECRET_KEY=your-secret-key-here-change-in-production
+      - ACCESS_TOKEN_EXPIRE_DAYS=7
+      - REFRESH_TOKEN_EXPIRE_DAYS=30
+    restart: unless-stopped
+    networks:
+      - appointo-network
+
+  frontend:
+    build: 
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - appointo-network
+
+networks:
+  appointo-network:
+    driver: bridge 

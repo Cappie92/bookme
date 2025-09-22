@@ -1,0 +1,6 @@
+mkdocs==1.*
+mkdocs-material==9.*
+mkdocs-mermaid2-plugin==1.*
+plantuml
+graphviz
+PyYAML 

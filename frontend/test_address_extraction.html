@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Тест извлечения адреса из ссылок Яндекс.Карт</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .test-section {
+            margin: 20px 0;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+        }
+        .result {
+            margin-top: 10px;
+            padding: 10px;
+            border-radius: 4px;
+        }
+        .success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .warning {
+            background-color: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeaa7;
+        }
+        input[type="text"] {
+            width: 100%;
+            padding: 8px;
+            margin: 5px 0;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px 5px 5px 0;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        .example-links {
+            margin: 10px 0;
+            padding: 10px;
+            background-color: #f8f9fa;
+            border-radius: 4px;
+        }
+        .example-link {
+            display: block;
+            margin: 5px 0;
+            padding: 5px;
+            background-color: white;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 12px;
+            word-break: break-all;
+            cursor: pointer;
+        }
+        .example-link:hover {
+            background-color: #f0f0f0;
+        }
+        .link-type {
+            font-size: 10px;
+            color: #666;
+            margin-bottom: 5px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Тест извлечения адреса из ссылок Яндекс.Карт</h1>
+    
+    <div class="test-section">
+        <h2>Тест извлечения адреса</h2>
+        <p>Вставьте ссылку на Яндекс.Карты для извлечения адреса:</p>
+        <input type="text" id="yandexLink" placeholder="https://yandex.ru/maps/...">
+        <button onclick="extractAddress()">Извлечь адрес</button>
+        <button onclick="clearResults()">Очистить</button>
+        <div id="extractionResult"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>Примеры ссылок для тестирования</h2>
+        <div class="example-links">
+            <p><strong>Кликните на ссылку для автоматического тестирования:</strong></p>
+            
+            <div class="link-type">✅ Поддерживается - с параметром text</div>
+            <div class="example-link" onclick="testLink(this.textContent)">
+                https://yandex.ru/maps/213/moscow/?ll=37.617635%2C55.755814&z=16&text=улица%20Тверская%2C%201
+            </div>
+            
+            <div class="link-type">✅ Поддерживается - с координатами (обратное геокодирование)</div>
+            <div class="example-link" onclick="testLink(this.textContent)">
+                https://yandex.ru/maps/213/moscow/?ll=37.617635%2C55.755814&z=16
+            </div>
+            
+            <div class="link-type">✅ Поддерживается - с адресом в пути</div>
+            <div class="example-link" onclick="testLink(this.textContent)">
+                https://yandex.ru/maps/213/moscow/улица%20Тверская%2C%201
+            </div>
+            
+            <div class="link-type">✅ Поддерживается - Санкт-Петербург</div>
+            <div class="example-link" onclick="testLink(this.textContent)">
+                https://yandex.ru/maps/2/saint-petersburg/?ll=30.314923%2C59.938630&z=16&text=Невский%20проспект%2C%201
+            </div>
+            
+            <div class="link-type">❌ НЕ поддерживается - короткая ссылка</div>
+            <div class="example-link" onclick="testLink(this.textContent)" style="opacity: 0.6;">
+                https://yandex.ru/maps/-/CHXXEC87
+            </div>
+        </div>
+    </div>
+
+    <div class="test-section">
+        <h2>Инструкция по получению ссылки</h2>
+        <ol>
+            <li>Откройте <a href="https://yandex.ru/maps" target="_blank">Яндекс.Карты</a></li>
+            <li>Найдите нужный адрес</li>
+            <li>Нажмите "Поделиться" → "Скопировать ссылку"</li>
+            <li>Вставьте ссылку в поле выше</li>
+        </ol>
+        <div class="warning" style="margin-top: 10px; padding: 10px;">
+            <strong>Важно:</strong> Короткие ссылки (начинающиеся с /maps/-/) не поддерживаются. Используйте полные ссылки с адресом или координатами.
+        </div>
+    </div>
+
+    <script>
+        async function extractAddressFromYandexLink(url) {
+            try {
+                // Проверяем, что это ссылка на Яндекс.Карты
+                if (!url.includes('yandex.ru/maps') && !url.includes('maps.yandex.ru')) {
+                    return { error: 'Пожалуйста, вставьте ссылку на Яндекс.Карты' }
+                }
+
+                const urlObj = new URL(url)
+                const path = urlObj.pathname
+                
+                // Пытаемся извлечь адрес из различных форматов ссылок
+                let address = null
+
+                // Формат 1: /maps/213/moscow/?ll=37.617635%2C55.755814&z=16&text=улица%20Тверская%2C%201
+                const textParam = urlObj.searchParams.get('text')
+                if (textParam) {
+                    address = decodeURIComponent(textParam)
+                }
+
+                // Формат 2: /maps/213/moscow/?ll=37.617635%2C55.755814&z=16
+                // В этом случае используем обратное геокодирование
+                if (!address) {
+                    const llParam = urlObj.searchParams.get('ll')
+                    if (llParam) {
+                        try {
+                            const [lon, lat] = llParam.split(',').map(Number)
+                            
+                            // Используем обратное геокодирование для получения адреса
+                            const response = await fetch(
+                                `https://geocode-maps.yandex.ru/1.x/?format=json&geocode=${lon},${lat}&lang=ru_RU`
+                            )
+                            
+                            if (response.ok) {
+                                const data = await response.json()
+                                const featureMember = data.response.GeoObjectCollection.featureMember
+                                
+                                if (featureMember.length > 0) {
+                                    address = featureMember[0].GeoObject.metaDataProperty.GeocoderMetaData.text
+                                }
+                            }
+                        } catch (error) {
+                            console.error('Ошибка при обратном геокодировании:', error)
+                        }
+                    }
+                }
+
+                // Формат 3: /maps/213/moscow/улица%20Тверская%2C%201
+                if (!address) {
+                    const pathParts = path.split('/')
+                    if (pathParts.length >= 4) {
+                        // Пытаемся найти адрес в path
+                        const possibleAddress = pathParts.slice(3).join('/')
+                        if (possibleAddress && 
+                            possibleAddress !== 'moscow' && 
+                            possibleAddress !== 'spb' && 
+                            possibleAddress !== 'saint-petersburg' &&
+                            !possibleAddress.match(/^\d+$/) &&
+                            !possibleAddress.startsWith('-/')) {
+                            address = decodeURIComponent(possibleAddress)
+                        }
+                    }
+                }
+
+                // Формат 4: /maps/-/CHXXEC87 (короткие ссылки)
+                if (!address) {
+                    const shortLinkMatch = path.match(/\/maps\/-\/([^\/\?]+)/)
+                    if (shortLinkMatch) {
+                        return { error: 'Короткие ссылки Яндекс.Карт не поддерживаются. Пожалуйста, используйте полную ссылку с адресом.' }
+                    }
+                }
+
+                if (address) {
+                    // Очищаем адрес от лишних символов
+                    address = address
+                        .replace(/\+/g, ' ')
+                        .replace(/\s+/g, ' ')
+                        .trim()
+                    
+                    return { success: true, address: address }
+                } else {
+                    return { error: 'Не удалось извлечь адрес из ссылки. Убедитесь, что ссылка содержит адрес или координаты.' }
+                }
+            } catch (error) {
+                console.error('Ошибка при обработке ссылки:', error)
+                return { error: 'Ошибка при обработке ссылки' }
+            }
+        }
+
+        async function extractAddress() {
+            const input = document.getElementById('yandexLink')
+            const resultDiv = document.getElementById('extractionResult')
+            
+            if (!input.value) {
+                resultDiv.innerHTML = '<div class="error">Введите ссылку на Яндекс.Карты</div>'
+                return
+            }
+
+            resultDiv.innerHTML = '<div>Загрузка...</div>'
+
+            const result = await extractAddressFromYandexLink(input.value)
+            
+            if (result.error) {
+                resultDiv.innerHTML = `<div class="error">${result.error}</div>`
+            } else {
+                resultDiv.innerHTML = `
+                    <div class="success">
+                        <strong>Успешно извлечен адрес:</strong><br>
+                        ${result.address}
+                    </div>
+                `
+            }
+        }
+
+        function testLink(link) {
+            document.getElementById('yandexLink').value = link
+            extractAddress()
+        }
+
+        function clearResults() {
+            document.getElementById('yandexLink').value = ''
+            document.getElementById('extractionResult').innerHTML = ''
+        }
+
+        // Автоматическое извлечение при вставке ссылки
+        document.getElementById('yandexLink').addEventListener('input', function(e) {
+            const value = e.target.value
+            if (value.includes('yandex.ru/maps') || value.includes('maps.yandex.ru')) {
+                setTimeout(extractAddress, 500) // Небольшая задержка для завершения вставки
+            }
+        })
+    </script>
+</body>
+</html> 

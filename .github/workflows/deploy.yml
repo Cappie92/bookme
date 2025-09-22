@@ -1,0 +1,60 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+      
+    - name: Setup SSH
+      uses: webfactory/ssh-agent@v0.7.0
+      with:
+        ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+        
+    - name: Add known hosts
+      run: |
+        mkdir -p ~/.ssh
+        ssh-keyscan -H 193.160.208.206 >> ~/.ssh/known_hosts
+        
+    - name: Deploy to server
+      run: |
+        ssh root@193.160.208.206 << 'EOF'
+          # Create project directory
+          mkdir -p /home/root/appointo
+          cd /home/root/appointo
+          
+          # Stop existing containers
+          docker-compose -f docker-compose.prod.yml down || true
+          
+          # Clean up old images
+          docker system prune -f || true
+        EOF
+        
+        # Copy files to server
+        scp -r . root@193.160.208.206:/home/root/appointo/
+        
+        # Deploy on server
+        ssh root@193.160.208.206 << 'EOF'
+          cd /home/root/appointo
+          
+          # Build and start containers
+          docker-compose -f docker-compose.prod.yml build
+          docker-compose -f docker-compose.prod.yml up -d
+          
+          # Clean up
+          docker system prune -f
+          
+          echo "Deployment completed!"
+        EOF
+        
+    - name: Health check
+      run: |
+        sleep 30
+        curl -f http://193.160.208.206/health || exit 1 

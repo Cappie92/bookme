@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Тест авторизации</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 600px;
+            margin: 50px auto;
+            padding: 20px;
+        }
+        .container {
+            background: #f5f5f5;
+            padding: 20px;
+            border-radius: 8px;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 10px 5px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        input {
+            width: 100%;
+            padding: 8px;
+            margin: 10px 0;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .status {
+            margin: 20px 0;
+            padding: 10px;
+            border-radius: 4px;
+        }
+        .success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Тест авторизации</h1>
+        
+        <div>
+            <label for="token">Токен:</label>
+            <input type="text" id="token" placeholder="Вставьте токен сюда">
+        </div>
+        
+        <button onclick="setToken()">Установить токен</button>
+        <button onclick="checkToken()">Проверить токен</button>
+        <button onclick="clearToken()">Очистить токен</button>
+        <button onclick="testAPI()">Тест API</button>
+        <button onclick="goToMaster()">Перейти к мастеру</button>
+        
+        <div id="status"></div>
+    </div>
+
+    <script>
+        function setToken() {
+            const token = document.getElementById('token').value;
+            if (token) {
+                localStorage.setItem('access_token', token);
+                showStatus('Токен установлен!', 'success');
+            } else {
+                showStatus('Введите токен!', 'error');
+            }
+        }
+        
+        function checkToken() {
+            const token = localStorage.getItem('access_token');
+            if (token) {
+                showStatus('Токен найден: ' + token.substring(0, 50) + '...', 'success');
+            } else {
+                showStatus('Токен не найден!', 'error');
+            }
+        }
+        
+        function clearToken() {
+            localStorage.removeItem('access_token');
+            showStatus('Токен удален!', 'success');
+        }
+        
+        async function testAPI() {
+            const token = localStorage.getItem('access_token');
+            if (!token) {
+                showStatus('Сначала установите токен!', 'error');
+                return;
+            }
+            
+            try {
+                const response = await fetch('http://localhost:8000/master/settings', {
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    showStatus('API работает! Пользователь: ' + data.user.full_name, 'success');
+                } else {
+                    showStatus('Ошибка API: ' + response.status, 'error');
+                }
+            } catch (error) {
+                showStatus('Ошибка сети: ' + error.message, 'error');
+            }
+        }
+        
+        function goToMaster() {
+            window.location.href = '/master';
+        }
+        
+        function showStatus(message, type) {
+            const statusDiv = document.getElementById('status');
+            statusDiv.textContent = message;
+            statusDiv.className = 'status ' + type;
+        }
+        
+        // Автоматически вставляем тестовый токен
+        document.getElementById('token').value = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJzZGFkc2FzZEBzZGZkZi5zZCIsInJvbGUiOiJtYXN0ZXIiLCJleHAiOjE3NTM4MjM2MTB9.AVeHnBB7vwSeuNhwrCo6-_Up7X1uQB8K6NzmHMT6b-E';
+    </script>
+</body>
+</html> 

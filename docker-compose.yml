@@ -1,33 +1,35 @@
-version: '3.8'
-
 services:
-  db:
-    image: postgres:15
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    env_file:
-      - .env
-    ports:
-      - "5432:5432"
-
   backend:
     build: ./backend
     ports:
       - "8000:8000"
-    depends_on:
-      - db
-    env_file:
-      - .env
     volumes:
       - ./backend:/app
+      - ./logs:/app/logs
+    environment:
+      - ENVIRONMENT=development
+      - JWT_SECRET_KEY=your-secret-key-here-change-in-production
+      - ACCESS_TOKEN_EXPIRE_DAYS=7
+      - REFRESH_TOKEN_EXPIRE_DAYS=30
+    restart: unless-stopped
+    networks:
+      - appointo-network
 
   frontend:
     build: ./frontend
     ports:
-      - "3000:3000"
+      - "5173:5173"
     volumes:
       - ./frontend:/app
       - /app/node_modules
+    environment:
+      - VITE_API_BASE_URL=http://backend:8000
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - appointo-network
 
-volumes:
-  postgres_data: 
+networks:
+  appointo-network:
+    driver: bridge 

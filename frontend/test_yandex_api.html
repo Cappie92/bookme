@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Тест Яндекс API</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .test-section {
+            margin: 20px 0;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+        }
+        .result {
+            margin-top: 10px;
+            padding: 10px;
+            border-radius: 4px;
+        }
+        .success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        input[type="text"] {
+            width: 100%;
+            padding: 8px;
+            margin: 5px 0;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        button:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
+        }
+    </style>
+</head>
+<body>
+    <h1>Тест Яндекс API</h1>
+    
+    <div class="test-section">
+        <h2>1. Тест Геосаджеста (Suggest API)</h2>
+        <p>Ключ: <code>af4cc42b-a0a0-40d3-a433-7e667ee203a3</code></p>
+        <input type="text" id="suggestInput" placeholder="Введите адрес для автодополнения (например: Москва, ул)">
+        <button onclick="testSuggest()">Тестировать Suggest API</button>
+        <div id="suggestResult"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>2. Тест Геокодирования</h2>
+        <p>Ключ: <code>32d81139-8da9-4182-9f0a-ef47cfe6733f</code></p>
+        <input type="text" id="geocodeInput" placeholder="Введите адрес для геокодирования (например: Москва, ул. Тверская, 1)">
+        <button onclick="testGeocode()">Тестировать Geocode API</button>
+        <div id="geocodeResult"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>3. Проверка переменных окружения</h2>
+        <button onclick="checkEnvVars()">Проверить переменные окружения</button>
+        <div id="envResult"></div>
+    </div>
+
+    <script>
+        // API ключи
+        const SUGGEST_API_KEY = 'af4cc42b-a0a0-40d3-a433-7e667ee203a3';
+        const GEOCODE_API_KEY = '32d81139-8da9-4182-9f0a-ef47cfe6733f';
+
+        async function testSuggest() {
+            const input = document.getElementById('suggestInput').value;
+            const resultDiv = document.getElementById('suggestResult');
+            
+            if (!input) {
+                resultDiv.innerHTML = '<div class="error">Введите текст для поиска</div>';
+                return;
+            }
+
+            resultDiv.innerHTML = '<div>Загрузка...</div>';
+
+            try {
+                const response = await fetch(
+                    `https://suggest-maps.yandex.ru/v1/suggest?apikey=${SUGGEST_API_KEY}&text=${encodeURIComponent(input)}&lang=ru_RU&type=address&results=5`
+                );
+
+                if (response.ok) {
+                    const data = await response.json();
+                    const results = data.results || [];
+                    
+                    if (results.length > 0) {
+                        const suggestions = results.map(item => `<li>${item.value}</li>`).join('');
+                        resultDiv.innerHTML = `
+                            <div class="success">
+                                <strong>Успешно! Найдено ${results.length} вариантов:</strong>
+                                <ul>${suggestions}</ul>
+                            </div>
+                        `;
+                    } else {
+                        resultDiv.innerHTML = '<div class="error">Варианты не найдены</div>';
+                    }
+                } else {
+                    resultDiv.innerHTML = `<div class="error">Ошибка API: ${response.status} ${response.statusText}</div>`;
+                }
+            } catch (error) {
+                resultDiv.innerHTML = `<div class="error">Ошибка сети: ${error.message}</div>`;
+            }
+        }
+
+        async function testGeocode() {
+            const input = document.getElementById('geocodeInput').value;
+            const resultDiv = document.getElementById('geocodeResult');
+            
+            if (!input) {
+                resultDiv.innerHTML = '<div class="error">Введите адрес для геокодирования</div>';
+                return;
+            }
+
+            resultDiv.innerHTML = '<div>Загрузка...</div>';
+
+            try {
+                const response = await fetch(
+                    `https://geocode-maps.yandex.ru/1.x/?apikey=${GEOCODE_API_KEY}&format=json&geocode=${encodeURIComponent(input)}&lang=ru_RU`
+                );
+
+                if (response.ok) {
+                    const data = await response.json();
+                    const featureMember = data.response.GeoObjectCollection.featureMember;
+                    
+                    if (featureMember.length > 0) {
+                        const coordinates = featureMember[0].GeoObject.Point.pos.split(' ');
+                        const lat = parseFloat(coordinates[1]);
+                        const lon = parseFloat(coordinates[0]);
+                        
+                        resultDiv.innerHTML = `
+                            <div class="success">
+                                <strong>Успешно! Адрес найден:</strong><br>
+                                Координаты: ${lat}, ${lon}<br>
+                                Полный адрес: ${featureMember[0].GeoObject.metaDataProperty.GeocoderMetaData.text}
+                            </div>
+                        `;
+                    } else {
+                        resultDiv.innerHTML = '<div class="error">Адрес не найден</div>';
+                    }
+                } else {
+                    resultDiv.innerHTML = `<div class="error">Ошибка API: ${response.status} ${response.statusText}</div>`;
+                }
+            } catch (error) {
+                resultDiv.innerHTML = `<div class="error">Ошибка сети: ${error.message}</div>`;
+            }
+        }
+
+        function checkEnvVars() {
+            const resultDiv = document.getElementById('envResult');
+            
+            // Проверяем, можем ли мы получить переменные окружения
+            const envInfo = {
+                'VITE_YANDEX_MAPS_API_KEY': '32d81139-8da9-4182-9f0a-ef47cfe6733f',
+                'SUGGEST_API_KEY': SUGGEST_API_KEY,
+                'GEOCODE_API_KEY': GEOCODE_API_KEY
+            };
+
+            const envList = Object.entries(envInfo).map(([key, value]) => 
+                `<li><strong>${key}:</strong> ${value ? '✓ Установлен' : '✗ Не установлен'}</li>`
+            ).join('');
+
+            resultDiv.innerHTML = `
+                <div class="success">
+                    <strong>Переменные окружения:</strong>
+                    <ul>${envList}</ul>
+                </div>
+            `;
+        }
+    </script>
+</body>
+</html> 

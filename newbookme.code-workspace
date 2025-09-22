@@ -1,8 +1,7 @@
 {
-	"folders": [
-		{
-			"path": "../newbookme"
-		}
-	],
-	"settings": {}
+    "folders": [
+        {
+            "path": "."
+        }
+    ]
 }

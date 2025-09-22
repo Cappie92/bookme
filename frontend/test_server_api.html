@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Тест серверного API для извлечения адреса</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .test-section {
+            margin: 20px 0;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+        }
+        .result {
+            margin-top: 10px;
+            padding: 10px;
+            border-radius: 4px;
+        }
+        .success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .warning {
+            background-color: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeaa7;
+        }
+        input[type="text"] {
+            width: 100%;
+            padding: 8px;
+            margin: 5px 0;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px 5px 5px 0;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        .example-links {
+            margin: 10px 0;
+            padding: 10px;
+            background-color: #f8f9fa;
+            border-radius: 4px;
+        }
+        .example-link {
+            display: block;
+            margin: 5px 0;
+            padding: 5px;
+            background-color: white;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 12px;
+            word-break: break-all;
+            cursor: pointer;
+        }
+        .link-type {
+            font-size: 10px;
+            color: #666;
+            margin-bottom: 5px;
+        }
+        .api-status {
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        .status-ok {
+            background-color: #d4edda;
+            color: #155724;
+        }
+        .status-error {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+    </style>
+</head>
+<body>
+    <h1>Тест серверного API для извлечения адреса</h1>
+    
+    <div class="test-section">
+        <h2>Статус API</h2>
+        <div id="apiStatus">Проверяем статус API...</div>
+    </div>
+
+    <div class="test-section">
+        <h2>Тест извлечения адреса через серверный API</h2>
+        <p>Вставьте ссылку на Яндекс.Карты для извлечения адреса:</p>
+        <input type="text" id="yandexLink" placeholder="https://yandex.ru/maps/...">
+        <button onclick="extractAddress()">Извлечь адрес</button>
+        <button onclick="clearResults()">Очистить</button>
+        <div id="extractionResult"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>Примеры ссылок для тестирования</h2>
+        <div class="example-links">
+            <p><strong>Кликните на ссылку для автоматического тестирования:</strong></p>
+            
+            <div class="link-type">✅ Поддерживается - полная ссылка с адресом</div>
+            <div class="example-link" onclick="testLink(this.textContent)">
+                https://yandex.ru/maps/213/moscow/?ll=37.617635%2C55.755814&z=16&text=улица%20Тверская%2C%201
+            </div>
+            
+            <div class="link-type">✅ Поддерживается - полная ссылка с координатами</div>
+            <div class="example-link" onclick="testLink(this.textContent)">
+                https://yandex.ru/maps/213/moscow/?ll=37.617635%2C55.755814&z=16
+            </div>
+            
+            <div class="link-type">✅ Поддерживается - короткая ссылка (серверный скрапинг)</div>
+            <div class="example-link" onclick="testLink(this.textContent)">
+                https://yandex.ru/maps/-/CHXXEC87
+            </div>
+            
+            <div class="link-type">✅ Поддерживается - другая короткая ссылка</div>
+            <div class="example-link" onclick="testLink(this.textContent)">
+                https://yandex.ru/maps/-/CCUu8XeB
+            </div>
+        </div>
+    </div>
+
+    <div class="test-section">
+        <h2>Как работает серверный API</h2>
+        <ol>
+            <li><strong>Фронтенд отправляет запрос</strong> на `/api/extract-address?url=...`</li>
+            <li><strong>Сервер анализирует ссылку</strong> и определяет её тип</li>
+            <li><strong>Для обычных ссылок:</strong> парсит URL и извлекает адрес</li>
+            <li><strong>Для коротких ссылок:</strong> загружает страницу и парсит HTML</li>
+            <li><strong>Для координат:</strong> использует обратное геокодирование</li>
+            <li><strong>Возвращает результат</strong> в формате JSON</li>
+        </ol>
+        
+        <div class="warning" style="margin-top: 10px; padding: 10px;">
+            <strong>Преимущества серверного API:</strong>
+            <ul>
+                <li>✅ Нет ограничений CORS</li>
+                <li>✅ Поддерживает все типы ссылок</li>
+                <li>✅ Надежный веб-скрапинг</li>
+                <li>✅ Обработка ошибок</li>
+            </ul>
+        </div>
+    </div>
+
+    <script>
+        // Проверяем статус API при загрузке страницы
+        window.addEventListener('load', checkApiStatus);
+
+        async function checkApiStatus() {
+            const statusDiv = document.getElementById('apiStatus');
+            
+            try {
+                const response = await fetch('/api/extract-address?url=https://yandex.ru/maps/213/moscow/?text=test')
+                
+                if (response.ok) {
+                    statusDiv.innerHTML = '<div class="api-status status-ok">✅ API работает корректно</div>'
+                } else {
+                    statusDiv.innerHTML = '<div class="api-status status-error">❌ API недоступен</div>'
+                }
+            } catch (error) {
+                statusDiv.innerHTML = '<div class="api-status status-error">❌ Ошибка подключения к API</div>'
+            }
+        }
+
+        async function extractAddressFromServer(url) {
+            try {
+                const response = await fetch(`/api/extract-address?url=${encodeURIComponent(url)}`)
+                
+                if (response.ok) {
+                    const data = await response.json()
+                    return { success: true, address: data.address }
+                } else {
+                    const errorData = await response.json()
+                    return { error: errorData.detail || 'Ошибка при извлечении адреса' }
+                }
+            } catch (error) {
+                console.error('Ошибка при запросе к API:', error)
+                return { error: 'Ошибка подключения к серверу' }
+            }
+        }
+
+        async function extractAddress() {
+            const input = document.getElementById('yandexLink')
+            const resultDiv = document.getElementById('extractionResult')
+            
+            if (!input.value) {
+                resultDiv.innerHTML = '<div class="error">Введите ссылку на Яндекс.Карты</div>'
+                return
+            }
+
+            resultDiv.innerHTML = '<div>Загрузка...</div>'
+
+            const result = await extractAddressFromServer(input.value)
+            
+            if (result.error) {
+                resultDiv.innerHTML = `<div class="error">${result.error}</div>`
+            } else {
+                resultDiv.innerHTML = `
+                    <div class="success">
+                        <strong>Успешно извлечен адрес:</strong><br>
+                        ${result.address}
+                    </div>
+                `
+            }
+        }
+
+        function testLink(link) {
+            document.getElementById('yandexLink').value = link
+            extractAddress()
+        }
+
+        function clearResults() {
+            document.getElementById('yandexLink').value = ''
+            document.getElementById('extractionResult').innerHTML = ''
+        }
+
+        // Автоматическое извлечение при вставке ссылки
+        document.getElementById('yandexLink').addEventListener('input', function(e) {
+            const value = e.target.value
+            if (value.includes('yandex.ru/maps') || value.includes('maps.yandex.ru')) {
+                setTimeout(extractAddress, 500) // Небольшая задержка для завершения вставки
+            }
+        })
+    </script>
+</body>
+</html> 

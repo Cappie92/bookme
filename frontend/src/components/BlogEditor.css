@@ -1,0 +1,35 @@
+.blog-editor-content [contenteditable="true"] {
+  outline: none !important;
+  box-shadow: none !important;
+  border: none !important;
+  min-height: 400px !important;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.blog-editor-container {
+  border: 1px solid #d1d5db !important; /* Tailwind gray-300 */
+  border-radius: 0.5rem;
+  background: #fff;
+  min-height: 400px;
+  transition: border-color 0.2s;
+  position: relative;
+}
+
+.blog-editor-container:focus-within {
+  border-color: #2563eb !important; /* Tailwind blue-600 */
+}
+
+/* Убеждаемся, что EditorContent занимает всю область */
+.blog-editor-content {
+  width: 100% !important;
+  min-height: 400px !important;
+  height: 100% !important;
+}
+
+/* Делаем весь контейнер кликабельным */
+.blog-editor-container > div {
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 400px !important;
+} 

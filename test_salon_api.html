@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Salon API</title>
+</head>
+<body>
+    <h1>Test Salon API</h1>
+    <button onclick="testAPI()">Test /salon/masters</button>
+    <div id="result"></div>
+
+    <script>
+        async function testAPI() {
+            const resultDiv = document.getElementById('result');
+            resultDiv.innerHTML = 'Testing...';
+            
+            try {
+                // Сначала попробуем войти
+                const loginResponse = await fetch('http://localhost:8000/auth/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        phone: '+73333333333',
+                        password: '123456'
+                    })
+                });
+                
+                if (!loginResponse.ok) {
+                    resultDiv.innerHTML = `Login failed: ${loginResponse.status} - ${await loginResponse.text()}`;
+                    return;
+                }
+                
+                const loginData = await loginResponse.json();
+                const token = loginData.access_token;
+                
+                console.log('Login successful, token:', token);
+                
+                // Теперь тестируем /salon/masters
+                const mastersResponse = await fetch('http://localhost:8000/salon/masters', {
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                if (!mastersResponse.ok) {
+                    resultDiv.innerHTML = `Masters API failed: ${mastersResponse.status} - ${await mastersResponse.text()}`;
+                    return;
+                }
+                
+                const mastersData = await mastersResponse.json();
+                console.log('Masters data:', mastersData);
+                
+                resultDiv.innerHTML = `
+                    <h3>API Response:</h3>
+                    <pre>${JSON.stringify(mastersData, null, 2)}</pre>
+                    <h3>Masters count: ${mastersData.masters ? mastersData.masters.length : 0}</h3>
+                    <h3>Invited count: ${mastersData.invited ? mastersData.invited.length : 0}</h3>
+                `;
+                
+            } catch (error) {
+                resultDiv.innerHTML = `Error: ${error.message}`;
+                console.error('Error:', error);
+            }
+        }
+    </script>
+</body>
+</html> 
