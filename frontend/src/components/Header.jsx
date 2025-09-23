@@ -1,11 +1,12 @@
 import React, { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { Button, Logo } from './ui'
 import { useAuth } from '../contexts/AuthContext'
 
 export default function Header() {
   const [isMenuOpen, setIsMenuOpen] = useState(false)
   const { isAuthenticated, user, logout, openAuthModal } = useAuth()
+  const navigate = useNavigate()
 
   const handleLoginClick = () => {
     openAuthModal('client')
@@ -13,6 +14,21 @@ export default function Header() {
 
   const handleLogoutClick = () => {
     logout()
+  }
+
+  const handleDashboardClick = () => {
+    const role = localStorage.getItem('user_role')
+    if (role === 'CLIENT') {
+      navigate('/client')
+    } else if (role === 'MASTER') {
+      navigate('/master')
+    } else if (role === 'SALON') {
+      navigate('/salon')
+    } else if (role === 'ADMIN') {
+      navigate('/admin')
+    } else {
+      navigate('/dashboard')
+    }
   }
 
   return (
@@ -38,11 +54,9 @@ export default function Header() {
           <div className="hidden md:flex items-center space-x-4">
             {isAuthenticated ? (
               <div className="flex items-center space-x-4">
-                <Link to="/dashboard">
-                  <Button variant="secondary" size="sm">
-                    Личный кабинет
-                  </Button>
-                </Link>
+                <Button variant="secondary" size="sm" onClick={handleDashboardClick}>
+                  Личный кабинет
+                </Button>
                 <Button variant="primary" size="sm" onClick={handleLogoutClick}>
                   Выйти
                 </Button>
@@ -112,11 +126,9 @@ export default function Header() {
             <div className="flex flex-col space-y-2 mt-4 px-4">
               {isAuthenticated ? (
                 <>
-                  <Link to="/dashboard">
-                    <Button variant="secondary" size="sm" className="w-full justify-start">
-                      Личный кабинет
-                    </Button>
-                  </Link>
+                  <Button variant="secondary" size="sm" className="w-full justify-start" onClick={handleDashboardClick}>
+                    Личный кабинет
+                  </Button>
                   <Button variant="primary" size="sm" className="w-full justify-start" onClick={handleLogoutClick}>
                     Выйти
                   </Button>
