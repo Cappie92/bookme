@@ -48,12 +48,21 @@ def test_zvonok_service():
     # Тест отправки звонка (только если API доступен)
     print("\n4. Тест отправки звонка:")
     test_phone = "+79123456789"
-    test_code = "1234"
     
     try:
-        result = zvonok_service.send_verification_call(test_phone, test_code)
+        result = zvonok_service.send_verification_call(test_phone)
         if result["success"]:
             print(f"   ✅ Звонок отправлен: {result}")
+            call_id = result.get("call_id")
+            
+            # Тест проверки введенных цифр
+            print("\n5. Тест проверки введенных цифр:")
+            test_digits = "1234"
+            verify_result = zvonok_service.verify_phone_digits(call_id, test_digits)
+            if verify_result["success"]:
+                print(f"   ✅ Цифры проверены: {verify_result}")
+            else:
+                print(f"   ❌ Ошибка проверки цифр: {verify_result}")
         else:
             print(f"   ❌ Ошибка отправки звонка: {result}")
     except Exception as e:

@@ -1319,7 +1319,8 @@ class PhoneVerificationResponse(BaseModel):
 
 class VerifyPhoneRequest(BaseModel):
     phone: str = Field(..., pattern=r"^\+?1?\d{9,15}$")
-    code: str = Field(..., min_length=4, max_length=6)
+    call_id: str = Field(..., min_length=1)
+    phone_digits: str = Field(..., min_length=4, max_length=4, pattern=r"^\d{4}$")
 
 
 class VerifyPhoneResponse(BaseModel):

@@ -56,13 +56,12 @@ class ZvonokService:
             logger.error(f"Ошибка при создании кампании: {str(e)}")
             return None
     
-    def send_verification_call(self, phone_number: str, verification_code: str) -> Dict[str, Any]:
+    def send_verification_call(self, phone_number: str) -> Dict[str, Any]:
         """
-        Отправляет звонок с кодом верификации на указанный номер
+        Отправляет звонок для верификации номера телефона
         
         Args:
             phone_number: Номер телефона в формате +7XXXXXXXXXX
-            verification_code: Код верификации для произношения
             
         Returns:
             Dict с результатом операции
@@ -86,11 +85,12 @@ class ZvonokService:
                 }
             
             # Mock-режим: симулируем успешную отправку звонка
-            logger.info(f"Mock: Звонок с кодом {verification_code} отправлен на номер {clean_phone}")
+            # В реальном API здесь будет запрос на звонок, где Zvonok сам определит номер для звонка
+            logger.info(f"Mock: Звонок для верификации отправлен на номер {clean_phone}")
             return {
                 "success": True,
-                "call_id": f"mock_call_{hash(clean_phone + verification_code)}",
-                "message": "Звонок с кодом верификации отправлен (mock-режим)"
+                "call_id": f"mock_call_{hash(clean_phone)}",
+                "message": "Звонок для верификации отправлен. Введите последние 4 цифры номера, с которого вам звонят."
             }
             
             # Закомментированный код для реального API:
@@ -132,6 +132,44 @@ class ZvonokService:
             logger.error(f"Ошибка при отправке звонка: {str(e)}")
             return {
                 "success": False,
+                "error": f"Ошибка сервиса: {str(e)}"
+            }
+    
+    def verify_phone_digits(self, call_id: str, phone_digits: str) -> Dict[str, Any]:
+        """
+        Проверяет введенные пользователем последние 4 цифры номера
+        
+        Args:
+            call_id: ID звонка
+            phone_digits: Последние 4 цифры номера, введенные пользователем
+            
+        Returns:
+            Dict с результатом проверки
+        """
+        try:
+            # Mock-режим: симулируем проверку
+            # В реальном API здесь будет запрос к Zvonok для проверки введенных цифр
+            logger.info(f"Mock: Проверка цифр {phone_digits} для звонка {call_id}")
+            
+            # В mock-режиме принимаем любые 4 цифры как правильные
+            if len(phone_digits) == 4 and phone_digits.isdigit():
+                return {
+                    "success": True,
+                    "verified": True,
+                    "message": "Номер телефона успешно верифицирован"
+                }
+            else:
+                return {
+                    "success": False,
+                    "verified": False,
+                    "message": "Неверные цифры номера телефона"
+                }
+                
+        except Exception as e:
+            logger.error(f"Ошибка при проверке цифр номера: {str(e)}")
+            return {
+                "success": False,
+                "verified": False,
                 "error": f"Ошибка сервиса: {str(e)}"
             }
     

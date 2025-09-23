@@ -101,12 +101,7 @@ async def register(user_in: UserCreate, db: Session = Depends(get_db)) -> Any:
 
     # Отправляем звонок для верификации телефона
     try:
-        verification_code = VerificationService.generate_verification_code()
-        user.phone_verification_code = verification_code
-        user.phone_verification_expires = datetime.utcnow() + timedelta(minutes=5)
-        db.commit()
-        
-        call_result = zvonok_service.send_verification_call(user_in.phone, verification_code)
+        call_result = zvonok_service.send_verification_call(user_in.phone)
         if not call_result["success"]:
             print(f"Ошибка отправки звонка верификации: {call_result['message']}")
     except Exception as e:
@@ -617,20 +612,12 @@ async def request_phone_verification(request: PhoneVerificationRequest, db: Sess
                 success=False
             )
         
-        # Генерируем код верификации
-        verification_code = VerificationService.generate_verification_code()
-        
-        # Сохраняем код в базе данных
-        user.phone_verification_code = verification_code
-        user.phone_verification_expires = datetime.utcnow() + timedelta(minutes=5)
-        db.commit()
-        
-        # Инициируем звонок через Zvonok
-        call_result = zvonok_service.send_verification_call(request.phone, verification_code)
+        # Инициируем звонок через Zvonok (без генерации кода)
+        call_result = zvonok_service.send_verification_call(request.phone)
         
         if call_result["success"]:
             return PhoneVerificationResponse(
-                message="Звонок с кодом верификации инициирован",
+                message="Звонок для верификации инициирован. Введите последние 4 цифры номера, с которого вам звонят.",
                 success=True,
                 call_id=call_result.get("call_id")
             )
@@ -660,11 +647,10 @@ async def verify_phone(request: VerifyPhoneRequest, db: Session = Depends(get_db
                 success=False
             )
         
-        # Проверяем код верификации
-        if (user.phone_verification_code == request.code and 
-            user.phone_verification_expires and 
-            user.phone_verification_expires > datetime.utcnow()):
-            
+        # Проверяем введенные цифры через Zvonok
+        verification_result = zvonok_service.verify_phone_digits(request.call_id, request.phone_digits)
+        
+        if verification_result["success"] and verification_result["verified"]:
             # Отмечаем телефон как верифицированный
             user.is_phone_verified = True
             user.phone_verification_code = None
@@ -678,7 +664,7 @@ async def verify_phone(request: VerifyPhoneRequest, db: Session = Depends(get_db
             )
         else:
             return VerifyPhoneResponse(
-                message="Неверный код или код истек",
+                message=verification_result.get("message", "Неверные цифры номера телефона"),
                 success=False
             )
             
@@ -806,7 +792,7 @@ async def request_reverse_phone_verification(request: PhoneVerificationRequest, 
         
         if call_result["success"]:
             return PhoneVerificationResponse(
-                message="Звонок с кодом верификации инициирован",
+                message="Звонок для верификации инициирован. Введите последние 4 цифры номера, с которого вам звонят.",
                 success=True,
                 call_id=call_result.get("call_id")
             )
