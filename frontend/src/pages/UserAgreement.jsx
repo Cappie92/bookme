@@ -1,5 +1,4 @@
 import Header from "../components/Header"
-import Footer from "../components/Footer"
 
 export default function UserAgreement() {
   return (
@@ -16,7 +15,6 @@ export default function UserAgreement() {
           <p>Дата последнего обновления: 26 июня 2025 г.</p>
         </div>
       </main>
-      <Footer />
     </div>
   )
 } 
