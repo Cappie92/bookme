@@ -20,7 +20,7 @@ function renderAgreement(text) {
       return <div key={i} style={{fontSize:20, margin:'12px 0 12px 32px'}}>{line}</div>
     }
     if (/^Дата последнего обновления/.test(line)) {
-      return <div key={i} style={{fontSize:16, marginTop:32, color:'#888'}}>{line}</div>
+      return <div key={i} style={{fontSize:14, marginTop:16, color:'#999', textAlign:'center', padding:'16px 0'}}>{line}</div>
     }
     if (/^Пользовательское соглашение/.test(line)) {
       return <h1 key={i} style={{fontSize:32, fontWeight:'bold', margin:'32px 0 12px 0'}}>{line}</h1>
@@ -40,7 +40,6 @@ export default function UserAgreement() {
     <MainLayout>
       <div style={{marginTop:200, paddingLeft:'15%', paddingRight:'15%', paddingBottom:'60px'}}>
         {renderAgreement(agreement)}
-        <hr style={{margin:'32px 0'}} />
         {renderAgreement(content)}
       </div>
     </MainLayout>

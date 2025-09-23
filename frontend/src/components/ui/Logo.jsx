@@ -18,7 +18,7 @@ const Logo = ({
       {/* Логотип из изображения */}
       <div className={`${sizes[size]} flex-shrink-0`}>
         <img 
-          src="/dedato_wht.jpg" 
+          src="/dedato_trnsp.png" 
           alt="Dedato" 
           className="w-full h-full object-contain"
         />

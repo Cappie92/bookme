@@ -99,8 +99,8 @@ export default function DesignSystemDemo() {
                 <button 
                   onClick={() => {
                     const link = document.createElement('a');
-                    link.href = '/dedato_wht.jpg';
-                    link.download = 'dedato-logo.jpg';
+                    link.href = '/dedato_trnsp.png';
+                    link.download = 'dedato-logo.png';
                     link.click();
                   }}
                   className="px-4 py-2 bg-[#4CAF50] text-white rounded-lg hover:bg-[#45A049] transition-colors"
