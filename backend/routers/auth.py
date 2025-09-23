@@ -21,7 +21,7 @@ from schemas import LoginRequest, Token, ChangePasswordRequest, SetPasswordReque
 from schemas import User as UserSchema
 from schemas import UserCreate, VerifyRequest
 from services.verification_service import VerificationService
-from services.plusofon_service import plusofon_service
+from services.zvonok_service import zvonok_service
 from schemas import (
     EmailVerificationRequest, EmailVerificationResponse,
     PasswordResetRequest, PasswordResetResponse,
@@ -106,7 +106,7 @@ async def register(user_in: UserCreate, db: Session = Depends(get_db)) -> Any:
         user.phone_verification_expires = datetime.utcnow() + timedelta(minutes=5)
         db.commit()
         
-        call_result = await plusofon_service.initiate_call(user_in.phone, verification_code)
+        call_result = zvonok_service.send_verification_call(user_in.phone, verification_code)
         if not call_result["success"]:
             print(f"Ошибка отправки звонка верификации: {call_result['message']}")
     except Exception as e:
@@ -350,7 +350,7 @@ async def delete_account(
         current_user.phone_verification_expires = datetime.utcnow() + timedelta(minutes=5)
         db.commit()
         
-        call_result = await plusofon_service.initiate_call(current_user.phone, verification_code)
+        call_result = zvonok_service.send_verification_call(current_user.phone, verification_code)
         if call_result["success"]:
             return {
                 "message": "Звонок с кодом подтверждения удаления отправлен",
@@ -625,8 +625,8 @@ async def request_phone_verification(request: PhoneVerificationRequest, db: Sess
         user.phone_verification_expires = datetime.utcnow() + timedelta(minutes=5)
         db.commit()
         
-        # Инициируем звонок через Plusofon
-        call_result = await plusofon_service.initiate_call(request.phone, verification_code)
+        # Инициируем звонок через Zvonok
+        call_result = zvonok_service.send_verification_call(request.phone, verification_code)
         
         if call_result["success"]:
             return PhoneVerificationResponse(
@@ -725,7 +725,7 @@ async def forgot_password(request: dict, db: Session = Depends(get_db)):
             db.commit()
             
             # Инициируем звонок
-            call_result = await plusofon_service.initiate_call(phone, reset_code)
+            call_result = zvonok_service.send_verification_call(phone, reset_code)
             
             if call_result["success"]:
                 return PasswordResetResponse(
@@ -762,27 +762,19 @@ async def forgot_password(request: dict, db: Session = Depends(get_db)):
         )
 
 
-@router.get("/plusofon/balance")
-async def get_plusofon_balance():
-    """Получение информации об аккаунте Plusofon"""
+@router.get("/zvonok/balance")
+async def get_zvonok_balance():
+    """Получение информации об аккаунте Zvonok"""
     try:
-        account_info = await plusofon_service.get_balance()
-        
-        if account_info["success"]:
-            return {
-                "success": True,
-                "account_id": account_info["account_id"],
-                "account_name": account_info["account_name"],
-                "message": "Информация об аккаунте получена"
-            }
-        else:
-            return {
-                "success": False,
-                "message": account_info["message"]
-            }
-            
+        # Пока возвращаем базовую информацию
+        return {
+            "success": True,
+            "service": "Zvonok",
+            "api_key": "f90ffd1506b18fc927188bbf66fa92ed",
+            "message": "Сервис Zvonok активен"
+        }
     except Exception as e:
-        print(f"Ошибка получения информации об аккаунте Plusofon: {e}")
+        print(f"Ошибка получения информации об аккаунте Zvonok: {e}")
         return {
             "success": False,
             "message": "Внутренняя ошибка сервера"
@@ -809,15 +801,14 @@ async def request_reverse_phone_verification(request: PhoneVerificationRequest, 
         user.phone_verification_expires = datetime.utcnow() + timedelta(minutes=5)
         db.commit()
         
-        # Инициируем обратный FlashCall через Plusofon
-        call_result = await plusofon_service.initiate_reverse_flashcall(request.phone, verification_code)
+        # Инициируем обычный звонок через Zvonok (reverse flashcall не поддерживается)
+        call_result = zvonok_service.send_verification_call(request.phone, verification_code)
         
         if call_result["success"]:
             return PhoneVerificationResponse(
-                message="Обратный FlashCall инициирован. Позвоните на указанный номер.",
+                message="Звонок с кодом верификации инициирован",
                 success=True,
-                call_id=call_result.get("call_id"),
-                verification_number=call_result.get("verification_number")
+                call_id=call_result.get("call_id")
             )
         else:
             return PhoneVerificationResponse(
@@ -846,8 +837,8 @@ async def check_reverse_phone_verification(request: dict, db: Session = Depends(
                 success=False
             )
         
-        # Проверяем статус обратного FlashCall
-        status_result = await plusofon_service.check_reverse_flashcall_status(call_id)
+        # Проверяем статус звонка через Zvonok
+        status_result = zvonok_service.check_call_status(call_id)
         
         if status_result["success"] and status_result.get("verified"):
             # Ищем пользователя по телефону
