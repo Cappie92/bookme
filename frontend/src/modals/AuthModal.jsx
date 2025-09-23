@@ -245,6 +245,7 @@ export default function AuthModal() {
         // Сохраняем токены в localStorage
         localStorage.setItem('access_token', data.access_token)
         localStorage.setItem('refresh_token', data.refresh_token)
+        localStorage.setItem('user_role', role)
         
         // Обновляем состояние авторизации
         login(data)
@@ -469,26 +470,43 @@ export default function AuthModal() {
       
       if (result.success) {
         console.log('✅ Телефон успешно верифицирован!')
+        console.log('🎯 Показываем окно успешной регистрации')
+        
         // Телефон успешно верифицирован
         setPhoneVerificationStep('none')
         setPhoneVerificationData(null)
         setVerificationDigits('')
         
         // Показываем окно успешной регистрации
+        console.log('🎯 Устанавливаем showSuccessMessage = true')
         setShowSuccessMessage(true)
+        console.log('🎯 showSuccessMessage установлен в true')
         
         // Автоматически закрываем модальное окно и перенаправляем через 3 секунды
         setTimeout(() => {
+          console.log('⏰ Таймаут сработал, закрываем модальное окно')
           setShowSuccessMessage(false)
           onClose()
           
           // Редирект по роли
           const role = localStorage.getItem('user_role')
-          if (role === 'ADMIN') navigate('/admin');
-          else if (role === 'CLIENT') navigate('/client');
-          else if (role === 'MASTER') navigate('/master');
-          else if (role === 'SALON') navigate('/salon');
-          else navigate('/');
+          console.log('🔍 Роль пользователя для редиректа:', role)
+          if (role === 'ADMIN') {
+            console.log('➡️ Перенаправляем в /admin')
+            navigate('/admin');
+          } else if (role === 'CLIENT') {
+            console.log('➡️ Перенаправляем в /client')
+            navigate('/client');
+          } else if (role === 'MASTER') {
+            console.log('➡️ Перенаправляем в /master')
+            navigate('/master');
+          } else if (role === 'SALON') {
+            console.log('➡️ Перенаправляем в /salon')
+            navigate('/salon');
+          } else {
+            console.log('➡️ Перенаправляем в / (роль не определена)')
+            navigate('/');
+          }
         }, 3000)
       } else {
         console.error('❌ Ошибка верификации:', result.message)
@@ -611,6 +629,7 @@ export default function AuthModal() {
             </div>
           ) : showSuccessMessage ? (
             <div className="text-center py-8">
+              {console.log('🎯 Рендерим окно успешной регистрации, showSuccessMessage =', showSuccessMessage)}
               <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
                 <svg className="w-8 h-8 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
