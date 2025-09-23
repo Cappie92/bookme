@@ -22,7 +22,7 @@ export default function Header({ openAuthModal }) {
           {/* Логотип */}
           <Link to="/" className="flex items-center h-full">
             <div className="h-24 flex items-center"> {/* Логотип по высоте хедера */}
-              <Logo size="xl" />
+              <Logo size="2xl" />
             </div>
           </Link>
 

@@ -73,7 +73,7 @@ export default function DesignSystemDemo() {
           {/* Логотип в заголовке */}
           <div className="text-center mb-8">
             <div className="flex justify-center mb-4">
-              <Logo size="xl" />
+              <Logo size="2xl" />
             </div>
             <h1 className="text-4xl font-bold mb-4 text-[#4CAF50]">
               Дизайн-система Dedato
@@ -90,10 +90,10 @@ export default function DesignSystemDemo() {
             <Card>
               <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-4">
-                  <Logo size="xl" />
+                  <Logo size="2xl" />
                   <div>
                     <h3 className="text-xl font-semibold">Логотип Dedato</h3>
-                    <p className="text-sm text-neutral-600">Основной логотип бренда</p>
+                    <p className="text-sm text-neutral-600">Основной логотип бренда (размер для хэддера)</p>
                   </div>
                 </div>
                 <button 
@@ -109,6 +109,33 @@ export default function DesignSystemDemo() {
                 </button>
               </div>
             </Card>
+
+            {/* Размеры логотипа */}
+            <div className="mt-6">
+              <h3 className="text-lg font-semibold mb-4">Размеры логотипа</h3>
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                <div className="text-center">
+                  <Logo size="sm" />
+                  <p className="text-xs text-neutral-600 mt-2">sm (24px)</p>
+                </div>
+                <div className="text-center">
+                  <Logo size="md" />
+                  <p className="text-xs text-neutral-600 mt-2">md (32px)</p>
+                </div>
+                <div className="text-center">
+                  <Logo size="lg" />
+                  <p className="text-xs text-neutral-600 mt-2">lg (48px)</p>
+                </div>
+                <div className="text-center">
+                  <Logo size="xl" />
+                  <p className="text-xs text-neutral-600 mt-2">xl (64px)</p>
+                </div>
+                <div className="text-center">
+                  <Logo size="2xl" />
+                  <p className="text-xs text-neutral-600 mt-2">2xl (80px)</p>
+                </div>
+              </div>
+            </div>
           </section>
 
           {/* Кнопки */}
