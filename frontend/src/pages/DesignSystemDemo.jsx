@@ -99,8 +99,8 @@ export default function DesignSystemDemo() {
                 <button 
                   onClick={() => {
                     const link = document.createElement('a');
-                    link.href = '/Логотип dedato - Яркий зеленый_прозрачный_big.png';
-                    link.download = 'dedato-logo.png';
+                    link.href = '/dedato_wht.jpg';
+                    link.download = 'dedato-logo.jpg';
                     link.click();
                   }}
                   className="px-4 py-2 bg-[#4CAF50] text-white rounded-lg hover:bg-[#45A049] transition-colors"

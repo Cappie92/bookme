@@ -17,11 +17,11 @@ const Logo = ({
     <div className={`flex items-center ${className}`} {...props}>
       {/* Логотип из изображения */}
       <div className={`${sizes[size]} flex-shrink-0`}>
-              <img 
-        src="/Логотип dedato - Яркий зеленый_прозрачный_big.png" 
-        alt="Dedato" 
-        className="w-full h-full object-contain"
-      />
+        <img 
+          src="/dedato_wht.jpg" 
+          alt="Dedato" 
+          className="w-full h-full object-contain"
+        />
       </div>
     </div>
   )

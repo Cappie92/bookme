@@ -38,7 +38,7 @@ function renderAgreement(text) {
 export default function UserAgreement() {
   return (
     <MainLayout>
-      <div style={{marginTop:200, paddingLeft:'15%', paddingRight:'15%'}}>
+      <div style={{marginTop:200, paddingLeft:'15%', paddingRight:'15%', paddingBottom:'60px'}}>
         {renderAgreement(agreement)}
         <hr style={{margin:'32px 0'}} />
         {renderAgreement(content)}
