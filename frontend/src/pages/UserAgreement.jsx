@@ -49,8 +49,10 @@ export default function UserAgreement() {
     <div className="flex flex-col min-h-screen w-full">
       <Header openAuthModal={() => {}} />
       <main className="flex-1 w-full bg-[#F9F7F6]" style={{marginTop:200, paddingLeft:'15%', paddingRight:'15%', paddingBottom:'60px'}}>
-        {renderAgreement(agreement)}
-        {renderAgreement(content)}
+        <div className="prose max-w-none">
+          {renderAgreement(agreement)}
+          {renderAgreement(content)}
+        </div>
       </main>
       <Footer />
     </div>
