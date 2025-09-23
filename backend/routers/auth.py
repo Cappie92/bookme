@@ -613,15 +613,19 @@ async def request_phone_verification(request: PhoneVerificationRequest, db: Sess
             )
         
         # Инициируем звонок через Zvonok (без генерации кода)
+        print(f"🔔 Инициируем верификацию телефона для пользователя {user.id}: {request.phone}")
         call_result = zvonok_service.send_verification_call(request.phone)
+        print(f"📞 Результат отправки звонка: {call_result}")
         
         if call_result["success"]:
+            print(f"✅ Звонок успешно отправлен: call_id={call_result.get('call_id')}")
             return PhoneVerificationResponse(
                 message="Звонок для верификации инициирован. Введите последние 4 цифры номера, с которого вам звонят.",
                 success=True,
                 call_id=call_result.get("call_id")
             )
         else:
+            print(f"❌ Ошибка отправки звонка: {call_result['message']}")
             return PhoneVerificationResponse(
                 message=f"Ошибка инициации звонка: {call_result['message']}",
                 success=False
@@ -648,10 +652,13 @@ async def verify_phone(request: VerifyPhoneRequest, db: Session = Depends(get_db
             )
         
         # Проверяем введенные цифры через Zvonok
+        print(f"🔍 Проверяем цифры для пользователя {user.id}: call_id={request.call_id}, digits={request.phone_digits}")
         verification_result = zvonok_service.verify_phone_digits(request.call_id, request.phone_digits)
+        print(f"📋 Результат проверки цифр: {verification_result}")
         
         if verification_result["success"] and verification_result["verified"]:
             # Отмечаем телефон как верифицированный
+            print(f"✅ Телефон {request.phone} успешно верифицирован для пользователя {user.id}")
             user.is_phone_verified = True
             user.phone_verification_code = None
             user.phone_verification_expires = None
@@ -663,6 +670,7 @@ async def verify_phone(request: VerifyPhoneRequest, db: Session = Depends(get_db
                 user_id=user.id
             )
         else:
+            print(f"❌ Ошибка верификации: {verification_result.get('message', 'Неверные цифры номера телефона')}")
             return VerifyPhoneResponse(
                 message=verification_result.get("message", "Неверные цифры номера телефона"),
                 success=False

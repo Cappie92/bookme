@@ -92,7 +92,7 @@ function App() {
           <Route path="/admin/functions" element={<AdminLayout openAuthModal={openAuthModal}><AdminFunctions/></AdminLayout>} />
           <Route path="/admin/always-free-logs" element={<AdminLayout openAuthModal={openAuthModal}><AdminAlwaysFreeLogs/></AdminLayout>} />
           <Route path="/admin/settings" element={<AdminLayout openAuthModal={openAuthModal}><AdminSettings/></AdminLayout>} />
-          <Route path="/user-agreement" element={<UserAgreement/>} />
+          <Route path="/user-agreement" element={<UserAgreement openAuthModal={openAuthModal}/>} />
           <Route path="/client" element={<ClientLayout><ClientDashboard/></ClientLayout>} />
           <Route path="/client/" element={<ClientLayout><ClientDashboard/></ClientLayout>} />
           <Route path="/client/dashboard" element={<ClientLayout><ClientDashboard/></ClientLayout>} />

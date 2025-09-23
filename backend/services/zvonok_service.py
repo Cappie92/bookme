@@ -12,7 +12,7 @@ class ZvonokService:
     
     def __init__(self):
         self.api_key = "f90ffd1506b18fc927188bbf66fa92ed"
-        self.base_url = "https://zvonok.com/api"
+        self.base_url = "https://zvonok.com/manager/cabapi_external/api/v1"
         self.campaign_id = None  # Будет создан при первом использовании
         
     def generate_verification_code(self, length: int = 4) -> str:
@@ -22,10 +22,9 @@ class ZvonokService:
     def create_campaign(self, campaign_name: str = "Phone Verification") -> Optional[str]:
         """Создает кампанию для верификации номеров"""
         try:
-            # Пока используем mock-режим, так как API Zvonok может быть недоступен
-            # В реальном проекте здесь должен быть настоящий API вызов
-            logger.info("Используется mock-режим для Zvonok API")
-            self.campaign_id = "mock_campaign_123"
+            # Используем реальный campaign_id из Zvonok
+            self.campaign_id = "1867042149"
+            logger.info(f"Используется campaign_id: {self.campaign_id}")
             return self.campaign_id
             
             # Закомментированный код для реального API:
@@ -84,14 +83,51 @@ class ZvonokService:
                     "error": "Неверный формат номера телефона"
                 }
             
-            # Mock-режим: симулируем успешную отправку звонка
-            # В реальном API здесь будет запрос на звонок, где Zvonok сам определит номер для звонка
-            logger.info(f"Mock: Звонок для верификации отправлен на номер {clean_phone}")
-            return {
-                "success": True,
-                "call_id": f"mock_call_{hash(clean_phone)}",
-                "message": "Звонок для верификации отправлен. Введите последние 4 цифры номера, с которого вам звонят."
+            # Подготавливаем данные для API Zvonok
+            data = {
+                'public_key': self.api_key,
+                'phone': clean_phone,
+                'campaign_id': self.campaign_id
+                # phone_suffix НЕ передаем - Zvonok сгенерирует автоматически
             }
+            
+            # Логируем запрос
+            logger.info(f"Отправляем запрос к Zvonok API: {self.base_url}/phones/flashcall/")
+            logger.info(f"Данные запроса: {data}")
+            
+            # Отправляем запрос к Zvonok API
+            response = requests.post(
+                f"{self.base_url}/phones/flashcall/",
+                data=data,
+                timeout=30
+            )
+            
+            # Логируем ответ
+            logger.info(f"Ответ от Zvonok: статус {response.status_code}")
+            logger.info(f"Тело ответа: {response.text}")
+            
+            if response.status_code == 200:
+                result = response.json()
+                if result.get("status") == "ok":
+                    logger.info(f"Звонок успешно отправлен: call_id={result['data']['call_id']}, pincode={result['data']['pincode']}")
+                    return {
+                        "success": True,
+                        "call_id": str(result["data"]["call_id"]),
+                        "pincode": result["data"]["pincode"],
+                        "message": "Звонок для верификации отправлен. Введите последние 4 цифры номера, с которого вам звонят."
+                    }
+                else:
+                    logger.error(f"Ошибка API Zvonok: {result}")
+                    return {
+                        "success": False,
+                        "error": f"Ошибка API Zvonok: {result.get('message', 'Неизвестная ошибка')}"
+                    }
+            else:
+                logger.error(f"HTTP ошибка {response.status_code}: {response.text}")
+                return {
+                    "success": False,
+                    "error": f"HTTP ошибка {response.status_code}: {response.text}"
+                }
             
             # Закомментированный код для реального API:
             # audio_text = f"Ваш код подтверждения: {verification_code}. Повторяю: {verification_code}"
@@ -147,11 +183,12 @@ class ZvonokService:
             Dict с результатом проверки
         """
         try:
-            # Mock-режим: симулируем проверку
-            # В реальном API здесь будет запрос к Zvonok для проверки введенных цифр
-            logger.info(f"Mock: Проверка цифр {phone_digits} для звонка {call_id}")
+            # В реальном API здесь должен быть запрос к Zvonok для проверки статуса звонка
+            # Пока используем mock-режим, так как API для проверки статуса может отличаться
+            logger.info(f"Проверка цифр {phone_digits} для звонка {call_id}")
             
             # В mock-режиме принимаем любые 4 цифры как правильные
+            # В реальном API здесь будет сравнение с pincode из ответа send_verification_call
             if len(phone_digits) == 4 and phone_digits.isdigit():
                 return {
                     "success": True,

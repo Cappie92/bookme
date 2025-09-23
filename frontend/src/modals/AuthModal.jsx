@@ -87,11 +87,13 @@ export default function AuthModal({ open = false, onClose = () => {}, defaultReg
   const [resetPasswordErrors, setResetPasswordErrors] = useState({})
   const [resetPasswordLoading, setResetPasswordLoading] = useState(false)
   
-  // Состояние для обратного FlashCall
-  const [reverseFlashCallLoading, setReverseFlashCallLoading] = useState(false)
-  const [reverseFlashCallError, setReverseFlashCallError] = useState('')
-  const [reverseFlashCallData, setReverseFlashCallData] = useState(null)
-  const [checkingReverseStatus, setCheckingReverseStatus] = useState(false)
+  // Состояние для верификации телефона через Zvonok
+  const [phoneVerificationLoading, setPhoneVerificationLoading] = useState(false)
+  const [phoneVerificationError, setPhoneVerificationError] = useState('')
+  const [phoneVerificationData, setPhoneVerificationData] = useState(null)
+  const [phoneVerificationStep, setPhoneVerificationStep] = useState('none') // 'none', 'calling', 'enter_digits'
+  const [verificationDigits, setVerificationDigits] = useState('')
+  const [verificationDigitsError, setVerificationDigitsError] = useState('')
   
   const navigate = useNavigate();
 
@@ -247,17 +249,11 @@ export default function AuthModal({ open = false, onClose = () => {}, defaultReg
         // Обновляем состояние авторизации
         login(data)
         
-        setForm({})
-        onClose()
+        // Инициируем верификацию телефона
+        await initiatePhoneVerification(form.phone)
         
-        // Редирект по роли
-        if (role === 'ADMIN') navigate('/admin');
-        else if (role === 'CLIENT') navigate('/client');
-        else if (role === 'MASTER') navigate('/master');
-        else if (role === 'SALON') navigate('/salon');
-        else if (role === 'INDIE') navigate('/master');
-        else if (role === 'MODERATOR') navigate('/admin');
-        else navigate('/');
+        setForm({})
+        // НЕ закрываем модальное окно - показываем форму верификации
       } else {
         const err = await res.json()
         alert('Ошибка: ' + (err.detail || 'Не удалось зарегистрироваться'))
@@ -400,12 +396,15 @@ export default function AuthModal({ open = false, onClose = () => {}, defaultReg
     }
   }
 
-  const handleReverseFlashCall = async (phone) => {
-    setReverseFlashCallLoading(true)
-    setReverseFlashCallError('')
+  const initiatePhoneVerification = async (phone) => {
+    console.log('🔔 Инициируем верификацию телефона:', phone)
+    setPhoneVerificationLoading(true)
+    setPhoneVerificationError('')
+    setPhoneVerificationStep('calling')
     
     try {
-      const response = await fetch('/api/auth/request-reverse-phone-verification', {
+      console.log('📡 Отправляем запрос на /api/auth/request-phone-verification')
+      const response = await fetch('/api/auth/request-phone-verification', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -413,61 +412,86 @@ export default function AuthModal({ open = false, onClose = () => {}, defaultReg
         body: JSON.stringify({ phone })
       })
       
+      console.log('📨 Получен ответ:', response.status, response.statusText)
       const result = await response.json()
+      console.log('📋 Данные ответа:', result)
       
       if (result.success) {
-        setReverseFlashCallData({
+        console.log('✅ Звонок успешно инициирован, call_id:', result.call_id)
+        setPhoneVerificationData({
           call_id: result.call_id,
-          verification_number: result.verification_number,
           phone: phone
         })
-        // Начинаем проверку статуса
-        startReverseStatusCheck(result.call_id, phone)
+        setPhoneVerificationStep('enter_digits')
       } else {
-        setReverseFlashCallError(result.message || 'Ошибка инициации обратного FlashCall')
+        console.error('❌ Ошибка инициации звонка:', result.message)
+        setPhoneVerificationError(result.message || 'Ошибка инициации верификации телефона')
+        setPhoneVerificationStep('none')
       }
     } catch (error) {
-      console.error('Ошибка обратного FlashCall:', error)
-      setReverseFlashCallError('Ошибка сети при инициации обратного FlashCall')
+      console.error('❌ Ошибка сети при верификации телефона:', error)
+      setPhoneVerificationError('Ошибка сети при инициации верификации телефона')
+      setPhoneVerificationStep('none')
     } finally {
-      setReverseFlashCallLoading(false)
+      setPhoneVerificationLoading(false)
     }
   }
   
-  const startReverseStatusCheck = (call_id, phone) => {
-    setCheckingReverseStatus(true)
-    
-    const checkStatus = async () => {
-      try {
-        const response = await fetch('/api/auth/check-reverse-phone-verification', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({ call_id, phone })
-        })
-        
-        const result = await response.json()
-        
-        if (result.success) {
-          setCheckingReverseStatus(false)
-          setReverseFlashCallData(null)
-          alert('Телефон успешно верифицирован!')
-          // Закрываем модальное окно или переходим к следующему шагу
-          onClose()
-        } else {
-          // Продолжаем проверку через 2 секунды
-          setTimeout(checkStatus, 2000)
-        }
-      } catch (error) {
-        console.error('Ошибка проверки статуса:', error)
-        setCheckingReverseStatus(false)
-        setReverseFlashCallError('Ошибка проверки статуса верификации')
-      }
+  const verifyPhoneDigits = async () => {
+    if (!verificationDigits || verificationDigits.length !== 4) {
+      setVerificationDigitsError('Введите 4 цифры номера телефона')
+      return
     }
     
-    // Запускаем первую проверку через 5 секунд
-    setTimeout(checkStatus, 5000)
+    console.log('🔍 Проверяем введенные цифры:', verificationDigits)
+    console.log('📞 Данные верификации:', phoneVerificationData)
+    
+    setPhoneVerificationLoading(true)
+    setVerificationDigitsError('')
+    
+    try {
+      console.log('📡 Отправляем запрос на /api/auth/verify-phone')
+      const response = await fetch('/api/auth/verify-phone', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          phone: phoneVerificationData.phone,
+          call_id: phoneVerificationData.call_id,
+          phone_digits: verificationDigits
+        })
+      })
+      
+      console.log('📨 Получен ответ:', response.status, response.statusText)
+      const result = await response.json()
+      console.log('📋 Результат верификации:', result)
+      
+      if (result.success) {
+        console.log('✅ Телефон успешно верифицирован!')
+        // Телефон успешно верифицирован
+        setPhoneVerificationStep('none')
+        setPhoneVerificationData(null)
+        setVerificationDigits('')
+        onClose()
+        
+        // Редирект по роли
+        const role = localStorage.getItem('user_role')
+        if (role === 'ADMIN') navigate('/admin');
+        else if (role === 'CLIENT') navigate('/client');
+        else if (role === 'MASTER') navigate('/master');
+        else if (role === 'SALON') navigate('/salon');
+        else navigate('/');
+      } else {
+        console.error('❌ Ошибка верификации:', result.message)
+        setVerificationDigitsError(result.message || 'Неверные цифры номера телефона')
+      }
+    } catch (error) {
+      console.error('❌ Ошибка сети при верификации цифр:', error)
+      setVerificationDigitsError('Ошибка сети при верификации')
+    } finally {
+      setPhoneVerificationLoading(false)
+    }
   }
 
   return (
@@ -507,7 +531,84 @@ export default function AuthModal({ open = false, onClose = () => {}, defaultReg
               Регистрация
             </button>
           </div>
-          {tab === 'login' ? (
+          {phoneVerificationStep === 'enter_digits' ? (
+            <div>
+              <div className="text-center mb-6">
+                <h3 className="text-lg font-semibold text-gray-800 mb-2">Верификация телефона</h3>
+                <p className="text-sm text-gray-600">
+                  На ваш номер {phoneVerificationData?.phone} поступит звонок. 
+                  Введите последние 4 цифры номера, с которого вам звонят.
+                </p>
+              </div>
+              
+              <div className="flex flex-col gap-4">
+                <div>
+                  <label className="text-sm font-medium text-gray-700 mb-2 block">
+                    Последние 4 цифры номера
+                  </label>
+                  <input
+                    type="text"
+                    maxLength="4"
+                    placeholder="1234"
+                    value={verificationDigits}
+                    onChange={(e) => {
+                      const value = e.target.value.replace(/\D/g, '')
+                      setVerificationDigits(value)
+                      setVerificationDigitsError('')
+                    }}
+                    className="border rounded px-3 py-2 w-full text-center text-lg tracking-widest"
+                    style={{ letterSpacing: '0.5em' }}
+                  />
+                  {verificationDigitsError && (
+                    <span className="text-xs text-red-500 mt-1 block">{verificationDigitsError}</span>
+                  )}
+                </div>
+                
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => {
+                      setPhoneVerificationStep('none')
+                      setPhoneVerificationData(null)
+                      setVerificationDigits('')
+                      setVerificationDigitsError('')
+                    }}
+                    className="flex-1"
+                  >
+                    Отмена
+                  </Button>
+                  <Button
+                    type="button"
+                    onClick={verifyPhoneDigits}
+                    disabled={phoneVerificationLoading || verificationDigits.length !== 4}
+                    className="flex-1"
+                  >
+                    {phoneVerificationLoading ? 'Проверка...' : 'Подтвердить'}
+                  </Button>
+                </div>
+                
+                <div className="text-center">
+                  <button
+                    type="button"
+                    onClick={() => initiatePhoneVerification(phoneVerificationData?.phone)}
+                    disabled={phoneVerificationLoading}
+                    className="text-sm text-[#4CAF50] hover:underline"
+                  >
+                    Отправить звонок повторно
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : phoneVerificationStep === 'calling' ? (
+            <div className="text-center py-8">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#4CAF50] mx-auto mb-4"></div>
+              <h3 className="text-lg font-semibold text-gray-800 mb-2">Отправка звонка</h3>
+              <p className="text-sm text-gray-600">
+                Инициируем звонок на номер {phoneVerificationData?.phone}...
+              </p>
+            </div>
+          ) : tab === 'login' ? (
             showResetPassword ? (
               <div>
                 <div className="flex items-center mb-4">
@@ -725,6 +826,12 @@ export default function AuthModal({ open = false, onClose = () => {}, defaultReg
                   <input id="infoAgree" type="checkbox" checked={infoAgree} onChange={e=>setInfoAgree(e.target.checked)} className="mt-1" />
                   <label htmlFor="infoAgree" className="text-xs text-gray-700 select-none">Я даю согласие на получение информационных сообщений</label>
                 </div>
+                {phoneVerificationError && (
+                  <div className="p-3 bg-red-50 border border-red-200 rounded">
+                    <p className="text-sm text-red-800">{phoneVerificationError}</p>
+                  </div>
+                )}
+                
                 <Button type="submit" disabled={!agree || loading}>
                   {loading ? 'Регистрация...' : 'Зарегистрироваться'}
                 </Button>
