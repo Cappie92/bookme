@@ -15,6 +15,14 @@ function renderAgreement(text) {
       // Подпункт (1.1, 2.3 ...)
       return <div key={i} style={{fontSize:18, fontWeight:400, margin:'12px 0'}}>{line}</div>
     }
+    if (/^•\tООО «Appointo»/.test(line)) {
+      // Первая строка контактной информации - добавляем отступ сверху
+      return <div key={i} style={{fontSize:16, margin:'24px 0 8px 32px', color:'#666', borderTop:'1px solid #eee', paddingTop:'16px'}}>{line}</div>
+    }
+    if (/^•\tЮридический адрес/.test(line) || /^•\tE-mail: support@appointo.ru/.test(line) || /^•\tТелефон/.test(line)) {
+      // Остальная контактная информация
+      return <div key={i} style={{fontSize:16, margin:'8px 0 8px 32px', color:'#666'}}>{line}</div>
+    }
     if (/^•/.test(line)) {
       // Маркированный список
       return <div key={i} style={{fontSize:20, margin:'12px 0 12px 32px'}}>{line}</div>
