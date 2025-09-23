@@ -58,8 +58,12 @@ export default function Header({ openAuthModal }) {
           {/* Мобильное меню */}
           <div className="md:hidden">
             <button
-              onClick={() => setIsMenuOpen(!isMenuOpen)}
+              onClick={() => {
+                console.log('Mobile menu clicked, current state:', isMenuOpen);
+                setIsMenuOpen(!isMenuOpen);
+              }}
               className="p-2 rounded-lg text-neutral-600 hover:text-neutral-900 hover:bg-neutral-100 transition-colors duration-200"
+              style={{zIndex: 1000}}
             >
               <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 {isMenuOpen ? (
@@ -74,7 +78,7 @@ export default function Header({ openAuthModal }) {
 
         {/* Мобильное меню */}
         {isMenuOpen && (
-          <div className="md:hidden border-t border-neutral-200 py-4 animate-slide-down">
+          <div className="md:hidden border-t border-neutral-200 py-4 animate-slide-down" style={{zIndex: 999}}>
             <nav className="flex flex-col space-y-4">
               <Link 
                 to="/" 
