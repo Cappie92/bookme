@@ -99,6 +99,7 @@ export default function AuthModal() {
   const [phoneVerificationStep, setPhoneVerificationStep] = useState('none') // 'none', 'calling', 'enter_digits'
   const [verificationDigits, setVerificationDigits] = useState('')
   const [verificationDigitsError, setVerificationDigitsError] = useState('')
+  const [showSuccessMessage, setShowSuccessMessage] = useState(false)
   
   const navigate = useNavigate();
 
@@ -472,15 +473,23 @@ export default function AuthModal() {
         setPhoneVerificationStep('none')
         setPhoneVerificationData(null)
         setVerificationDigits('')
-        onClose()
         
-        // Редирект по роли
-        const role = localStorage.getItem('user_role')
-        if (role === 'ADMIN') navigate('/admin');
-        else if (role === 'CLIENT') navigate('/client');
-        else if (role === 'MASTER') navigate('/master');
-        else if (role === 'SALON') navigate('/salon');
-        else navigate('/');
+        // Показываем окно успешной регистрации
+        setShowSuccessMessage(true)
+        
+        // Автоматически закрываем модальное окно и перенаправляем через 3 секунды
+        setTimeout(() => {
+          setShowSuccessMessage(false)
+          onClose()
+          
+          // Редирект по роли
+          const role = localStorage.getItem('user_role')
+          if (role === 'ADMIN') navigate('/admin');
+          else if (role === 'CLIENT') navigate('/client');
+          else if (role === 'MASTER') navigate('/master');
+          else if (role === 'SALON') navigate('/salon');
+          else navigate('/');
+        }, 3000)
       } else {
         console.error('❌ Ошибка верификации:', result.message)
         setVerificationDigitsError(result.message || 'Неверные цифры номера телефона')
@@ -598,6 +607,22 @@ export default function AuthModal() {
                     Отправить звонок повторно
                   </button>
                 </div>
+              </div>
+            </div>
+          ) : showSuccessMessage ? (
+            <div className="text-center py-8">
+              <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <svg className="w-8 h-8 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+              </div>
+              <h3 className="text-xl font-semibold text-gray-800 mb-2">Регистрация успешна!</h3>
+              <p className="text-sm text-gray-600 mb-4">
+                Ваш аккаунт создан и телефон верифицирован.<br/>
+                Перенаправляем в личный кабинет...
+              </p>
+              <div className="w-full bg-gray-200 rounded-full h-2">
+                <div className="bg-[#4CAF50] h-2 rounded-full animate-pulse" style={{width: '100%'}}></div>
               </div>
             </div>
           ) : phoneVerificationStep === 'calling' ? (

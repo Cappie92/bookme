@@ -99,13 +99,8 @@ async def register(user_in: UserCreate, db: Session = Depends(get_db)) -> Any:
         print(f"Ошибка отправки письма верификации: {e}")
         # Не прерываем регистрацию, если письмо не отправилось
 
-    # Отправляем звонок для верификации телефона
-    try:
-        call_result = zvonok_service.send_verification_call(user_in.phone)
-        if not call_result["success"]:
-            print(f"Ошибка отправки звонка верификации: {call_result['message']}")
-    except Exception as e:
-        print(f"Ошибка отправки звонка верификации: {e}")
+    # Звонок для верификации телефона будет отправлен по запросу пользователя
+    # через /api/auth/request-phone-verification
 
     # Генерируем токены для входа
     access_token = create_access_token(
@@ -625,9 +620,10 @@ async def request_phone_verification(request: PhoneVerificationRequest, db: Sess
                 call_id=call_result.get("call_id")
             )
         else:
-            print(f"❌ Ошибка отправки звонка: {call_result['message']}")
+            error_message = call_result.get('error', 'Неизвестная ошибка')
+            print(f"❌ Ошибка отправки звонка: {error_message}")
             return PhoneVerificationResponse(
-                message=f"Ошибка инициации звонка: {call_result['message']}",
+                message=f"Ошибка инициации звонка: {error_message}",
                 success=False
             )
             

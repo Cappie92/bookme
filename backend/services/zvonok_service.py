@@ -124,10 +124,23 @@ class ZvonokService:
                     }
             else:
                 logger.error(f"HTTP ошибка {response.status_code}: {response.text}")
-                return {
-                    "success": False,
-                    "error": f"HTTP ошибка {response.status_code}: {response.text}"
-                }
+                try:
+                    error_data = response.json()
+                    if response.status_code == 429:
+                        return {
+                            "success": False,
+                            "error": "Превышен лимит звонков. Попробуйте через несколько секунд."
+                        }
+                    else:
+                        return {
+                            "success": False,
+                            "error": f"Ошибка API Zvonok: {error_data.get('data', 'Неизвестная ошибка')}"
+                        }
+                except:
+                    return {
+                        "success": False,
+                        "error": f"HTTP ошибка {response.status_code}: {response.text}"
+                    }
             
             # Закомментированный код для реального API:
             # audio_text = f"Ваш код подтверждения: {verification_code}. Повторяю: {verification_code}"
