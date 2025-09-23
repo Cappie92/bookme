@@ -32,7 +32,6 @@ export default function Header({ openAuthModal }) {
             <Link to="/pricing" className="nav-link">Тарифы</Link>
             <Link to="/blog" className="nav-link">Блог</Link>
             <Link to="/about" className="nav-link">О нас</Link>
-            <Link to="/user-agreement" className="nav-link">Пользовательское соглашение</Link>
           </nav>
 
           {/* Кнопки для десктопа */}
@@ -107,13 +106,6 @@ export default function Header({ openAuthModal }) {
                 onClick={() => setIsMenuOpen(false)}
               >
                 О нас
-              </Link>
-              <Link 
-                to="/user-agreement" 
-                className="nav-link px-4 py-2 rounded-lg hover:bg-neutral-100"
-                onClick={() => setIsMenuOpen(false)}
-              >
-                Пользовательское соглашение
               </Link>
             </nav>
             
