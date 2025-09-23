@@ -3,9 +3,9 @@ import { Link } from 'react-router-dom'
 import { Button, Logo } from './ui'
 import { useAuth } from '../contexts/AuthContext'
 
-export default function Header({ openAuthModal }) {
+export default function Header() {
   const [isMenuOpen, setIsMenuOpen] = useState(false)
-  const { isAuthenticated, user, logout } = useAuth()
+  const { isAuthenticated, user, logout, openAuthModal } = useAuth()
 
   const handleLoginClick = () => {
     openAuthModal('client')

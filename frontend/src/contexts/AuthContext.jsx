@@ -7,6 +7,8 @@ export function AuthProvider({ children }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [authModalOpen, setAuthModalOpen] = useState(false)
+  const [authModalType, setAuthModalType] = useState('client')
   const navigate = useNavigate()
 
   const getAuthHeaders = () => {
@@ -65,6 +67,15 @@ export function AuthProvider({ children }) {
     setIsAuthenticated(true)
   }
 
+  const openAuthModal = (type = 'client') => {
+    setAuthModalType(type)
+    setAuthModalOpen(true)
+  }
+
+  const closeAuthModal = () => {
+    setAuthModalOpen(false)
+  }
+
   useEffect(() => {
     checkAuthStatus()
   }, [])
@@ -76,7 +87,11 @@ export function AuthProvider({ children }) {
     getAuthHeaders,
     logout,
     login,
-    checkAuthStatus
+    checkAuthStatus,
+    openAuthModal,
+    closeAuthModal,
+    authModalOpen,
+    authModalType
   }
 
   return (

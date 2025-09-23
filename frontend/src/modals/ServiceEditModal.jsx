@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react"
+import { useModal } from '../hooks/useModal'
 
 export default function ServiceEditModal({ service, categories, onSave, onClose, onCategoryCreated, open }) {
   if (!open) return null;
@@ -108,11 +109,7 @@ export default function ServiceEditModal({ service, categories, onSave, onClose,
     setFormData(prev => ({ ...prev, [field]: value }))
   }
 
-  const handleBackdropClick = (e) => {
-    if (e.target === e.currentTarget) {
-      onClose()
-    }
-  }
+  const { handleBackdropClick, handleMouseDown } = useModal(onClose)
 
   const handleCloseClick = () => {
     onClose()
@@ -122,6 +119,7 @@ export default function ServiceEditModal({ service, categories, onSave, onClose,
     <div 
       className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
       onClick={handleBackdropClick}
+      onMouseDown={handleMouseDown}
     >
       <div className="bg-white rounded-lg p-6 w-full max-w-xl max-h-[90vh] overflow-y-auto">
         <h2 className="text-xl font-semibold mb-4">

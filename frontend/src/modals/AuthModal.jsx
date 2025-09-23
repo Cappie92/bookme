@@ -4,6 +4,7 @@ import { getVerificationDeviceType, supportsReverseFlashCall } from '../utils/de
 import { Button, Logo } from '../components/ui'
 import { useAuth } from '../contexts/AuthContext'
 import { isSalonFeaturesEnabled } from '../config/features'
+import { useModal } from '../hooks/useModal'
 
 const REGISTER_FIELDS = {
   client: [
@@ -59,8 +60,12 @@ function validateDob(dob) {
   return date <= now && date >= min
 }
 
-export default function AuthModal({ open = false, onClose = () => {}, defaultRegType = 'client' }) {
-  const { login } = useAuth()
+export default function AuthModal() {
+  const { login, authModalOpen, authModalType, closeAuthModal } = useAuth()
+  const open = authModalOpen
+  const onClose = closeAuthModal
+  const defaultRegType = authModalType
+  const { handleBackdropClick, handleMouseDown } = useModal(onClose)
   const [tab, setTab] = useState('login')
   const [regType, setRegType] = useState(defaultRegType)
   
@@ -109,12 +114,6 @@ export default function AuthModal({ open = false, onClose = () => {}, defaultReg
   }, [])
 
   if (!open) return null
-
-  const handleBackdropClick = (e) => {
-    if (e.target === e.currentTarget) {
-      onClose()
-    }
-  }
 
   const handleCloseClick = () => {
     onClose()
@@ -498,6 +497,7 @@ export default function AuthModal({ open = false, onClose = () => {}, defaultReg
     <div 
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 pt-16"
       onClick={handleBackdropClick}
+      onMouseDown={handleMouseDown}
     >
       <div className="bg-[#F9F7F6] rounded-xl shadow-xl w-full max-w-2xl max-h-[80vh] overflow-y-auto p-10 relative animate-fade-in my-8">
         <button onClick={handleCloseClick} className="absolute top-6 right-6 text-gray-400 hover:text-gray-700 text-lg z-10">✕</button>

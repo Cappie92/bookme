@@ -45,54 +45,39 @@ import TestAnyMaster from "./pages/TestAnyMaster"
 import ClientLayout from "./layouts/ClientLayout"
 
 function App() {
-  const [authModalOpen, setAuthModalOpen] = useState(false)
-  const [authModalType, setAuthModalType] = useState('client')
-
-  const openAuthModal = (type = 'client') => {
-    setAuthModalType(type)
-    setAuthModalOpen(true)
-  }
-
-  const closeAuthModal = () => {
-    setAuthModalOpen(false)
-  }
 
   return (
     <HelmetProvider>
       <BrowserRouter>
-        <AuthProvider>
-          <AuthModal 
-            open={authModalOpen} 
-            onClose={closeAuthModal}
-            defaultRegType={authModalType}
-          />
-          <MasterModal />
-          <ScheduleModal />
-          <BookingModal />
+            <AuthProvider>
+              <AuthModal />
+              <MasterModal />
+              <ScheduleModal />
+              <BookingModal />
         <Routes>
           {/* Роуты для поддоменов */}
           <Route path="/domain/:subdomain" element={<SubdomainPage />} />
           
           {/* Основные роуты */}
-          <Route path="/" element={<MainLayout openAuthModal={openAuthModal}><Home/></MainLayout>} />
-          <Route path="/pricing" element={<MainLayout openAuthModal={openAuthModal}><Pricing/></MainLayout>} />
-          <Route path="/about" element={<MainLayout openAuthModal={openAuthModal}><About/></MainLayout>} />
-          <Route path="/blog" element={<MainLayout openAuthModal={openAuthModal}><BlogList/></MainLayout>} />
-          <Route path="/blog/:slug" element={<MainLayout openAuthModal={openAuthModal}><BlogPost/></MainLayout>} />
-          <Route path="/dashboard" element={<MainLayout openAuthModal={openAuthModal}><ClientDashboard/></MainLayout>} />
-          <Route path="/dashboard/service" element={<MainLayout openAuthModal={openAuthModal}><ServiceDashboard/></MainLayout>} />
-          <Route path="/dashboard/branches" element={<MainLayout openAuthModal={openAuthModal}><BranchesDashboard/></MainLayout>} />
-          <Route path="/dashboard/places" element={<MainLayout openAuthModal={openAuthModal}><PlacesDashboard/></MainLayout>} />
-          <Route path="/profile/:slug" element={<MainLayout openAuthModal={openAuthModal}><PublicProfile/></MainLayout>} />
-          <Route path="/admin" element={<AdminLayout openAuthModal={openAuthModal}><AdminDashboard/></AdminLayout>} />
-          <Route path="/admin/users" element={<AdminLayout openAuthModal={openAuthModal}><AdminUsers/></AdminLayout>} />
-          <Route path="/admin/moderators" element={<AdminLayout openAuthModal={openAuthModal}><AdminModerators/></AdminLayout>} />
-          <Route path="/admin/blog" element={<AdminLayout openAuthModal={openAuthModal}><AdminBlog/></AdminLayout>} />
-          <Route path="/admin/stats" element={<AdminLayout openAuthModal={openAuthModal}><AdminStats/></AdminLayout>} />
-          <Route path="/admin/functions" element={<AdminLayout openAuthModal={openAuthModal}><AdminFunctions/></AdminLayout>} />
-          <Route path="/admin/always-free-logs" element={<AdminLayout openAuthModal={openAuthModal}><AdminAlwaysFreeLogs/></AdminLayout>} />
-          <Route path="/admin/settings" element={<AdminLayout openAuthModal={openAuthModal}><AdminSettings/></AdminLayout>} />
-          <Route path="/user-agreement" element={<UserAgreement openAuthModal={openAuthModal}/>} />
+          <Route path="/" element={<MainLayout><Home/></MainLayout>} />
+          <Route path="/pricing" element={<MainLayout><Pricing/></MainLayout>} />
+          <Route path="/about" element={<MainLayout><About/></MainLayout>} />
+          <Route path="/blog" element={<MainLayout><BlogList/></MainLayout>} />
+          <Route path="/blog/:slug" element={<MainLayout><BlogPost/></MainLayout>} />
+          <Route path="/dashboard" element={<MainLayout><ClientDashboard/></MainLayout>} />
+          <Route path="/dashboard/service" element={<MainLayout><ServiceDashboard/></MainLayout>} />
+          <Route path="/dashboard/branches" element={<MainLayout><BranchesDashboard/></MainLayout>} />
+          <Route path="/dashboard/places" element={<MainLayout><PlacesDashboard/></MainLayout>} />
+          <Route path="/profile/:slug" element={<MainLayout><PublicProfile/></MainLayout>} />
+          <Route path="/admin" element={<AdminLayout><AdminDashboard/></AdminLayout>} />
+          <Route path="/admin/users" element={<AdminLayout><AdminUsers/></AdminLayout>} />
+          <Route path="/admin/moderators" element={<AdminLayout><AdminModerators/></AdminLayout>} />
+          <Route path="/admin/blog" element={<AdminLayout><AdminBlog/></AdminLayout>} />
+          <Route path="/admin/stats" element={<AdminLayout><AdminStats/></AdminLayout>} />
+          <Route path="/admin/functions" element={<AdminLayout><AdminFunctions/></AdminLayout>} />
+          <Route path="/admin/always-free-logs" element={<AdminLayout><AdminAlwaysFreeLogs/></AdminLayout>} />
+          <Route path="/admin/settings" element={<AdminLayout><AdminSettings/></AdminLayout>} />
+          <Route path="/user-agreement" element={<UserAgreement/>} />
           <Route path="/client" element={<ClientLayout><ClientDashboard/></ClientLayout>} />
           <Route path="/client/" element={<ClientLayout><ClientDashboard/></ClientLayout>} />
           <Route path="/client/dashboard" element={<ClientLayout><ClientDashboard/></ClientLayout>} />
@@ -101,19 +86,19 @@ function App() {
           <Route path="/client/master-notes" element={<ClientLayout><ClientMasterNotes/></ClientLayout>} />
           <Route path="/master" element={<MasterDashboard/>} />
           <Route path="/salon" element={<ServiceDashboard/>} />
-          <Route path="/test/booking" element={<MainLayout openAuthModal={openAuthModal}><BookingForm/></MainLayout>} />
-          <Route path="/test/auth" element={<MainLayout openAuthModal={openAuthModal}><AuthTest/></MainLayout>} />
-          <Route path="/test/domain" element={<MainLayout openAuthModal={openAuthModal}><DomainTest/></MainLayout>} />
-          <Route path="/test/simple-domain" element={<MainLayout openAuthModal={openAuthModal}><SimpleDomainTest/></MainLayout>} />
-          <Route path="/test/working-hours" element={<MainLayout openAuthModal={openAuthModal}><WorkingHoursTest/></MainLayout>} />
-          <Route path="/test/schedule" element={<MainLayout openAuthModal={openAuthModal}><ScheduleTest/></MainLayout>} />
-          <Route path="/test/yandex-geocoder" element={<MainLayout openAuthModal={openAuthModal}><YandexGeocoderTest/></MainLayout>} />
-          <Route path="/design-system" element={<MainLayout openAuthModal={openAuthModal}><DesignSystemDemo/></MainLayout>} />
+          <Route path="/test/booking" element={<MainLayout><BookingForm/></MainLayout>} />
+          <Route path="/test/auth" element={<MainLayout><AuthTest/></MainLayout>} />
+          <Route path="/test/domain" element={<MainLayout><DomainTest/></MainLayout>} />
+          <Route path="/test/simple-domain" element={<MainLayout><SimpleDomainTest/></MainLayout>} />
+          <Route path="/test/working-hours" element={<MainLayout><WorkingHoursTest/></MainLayout>} />
+          <Route path="/test/schedule" element={<MainLayout><ScheduleTest/></MainLayout>} />
+          <Route path="/test/yandex-geocoder" element={<MainLayout><YandexGeocoderTest/></MainLayout>} />
+          <Route path="/design-system" element={<MainLayout><DesignSystemDemo/></MainLayout>} />
           <Route path="/booking/:salonId/:branchId" element={<BranchBookingPage />} />
-          <Route path="/test/any-master" element={<MainLayout openAuthModal={openAuthModal}><TestAnyMaster/></MainLayout>} />
+          <Route path="/test/any-master" element={<MainLayout><TestAnyMaster/></MainLayout>} />
           
           {/* Catch-all роут для несуществующих путей */}
-          <Route path="*" element={<MainLayout openAuthModal={openAuthModal}><Home/></MainLayout>} />
+          <Route path="*" element={<MainLayout><Home/></MainLayout>} />
         </Routes>
         </AuthProvider>
       </BrowserRouter>

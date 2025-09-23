@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { API_BASE_URL } from '../utils/config';
+import { useModal } from '../hooks/useModal';
 
 export default function DepositModal({ isOpen, onClose, onSuccess, currentBalance, availableBalance }) {
   const [amount, setAmount] = useState('');
@@ -48,10 +49,16 @@ export default function DepositModal({ isOpen, onClose, onSuccess, currentBalanc
 
   const quickAmounts = [100, 500, 1000, 2000, 5000];
 
+  const { handleBackdropClick, handleMouseDown } = useModal(onClose);
+
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+    <div 
+      className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+      onClick={handleBackdropClick}
+      onMouseDown={handleMouseDown}
+    >
       <div className="bg-white rounded-lg p-6 w-full max-w-md mx-4">
         <div className="flex justify-between items-center mb-4">
           <h2 className="text-xl font-semibold text-gray-900">Пополнить баланс</h2>
