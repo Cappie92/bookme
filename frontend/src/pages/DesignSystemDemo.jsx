@@ -73,7 +73,7 @@ export default function DesignSystemDemo() {
           {/* Логотип в заголовке */}
           <div className="text-center mb-8">
             <div className="flex justify-center mb-4">
-              <Logo size="2xl" />
+              <Logo size="3xl" />
             </div>
             <h1 className="text-4xl font-bold mb-4 text-[#4CAF50]">
               Дизайн-система Dedato
@@ -90,7 +90,7 @@ export default function DesignSystemDemo() {
             <Card>
               <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-4">
-                  <Logo size="2xl" />
+                  <Logo size="3xl" />
                   <div>
                     <h3 className="text-xl font-semibold">Логотип Dedato</h3>
                     <p className="text-sm text-neutral-600">Основной логотип бренда (размер для хэддера)</p>
@@ -113,7 +113,7 @@ export default function DesignSystemDemo() {
             {/* Размеры логотипа */}
             <div className="mt-6">
               <h3 className="text-lg font-semibold mb-4">Размеры логотипа</h3>
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+              <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
                 <div className="text-center">
                   <Logo size="sm" />
                   <p className="text-xs text-neutral-600 mt-2">sm (24px)</p>
@@ -133,6 +133,10 @@ export default function DesignSystemDemo() {
                 <div className="text-center">
                   <Logo size="2xl" />
                   <p className="text-xs text-neutral-600 mt-2">2xl (80px)</p>
+                </div>
+                <div className="text-center">
+                  <Logo size="3xl" />
+                  <p className="text-xs text-neutral-600 mt-2">3xl (100px)</p>
                 </div>
               </div>
             </div>
