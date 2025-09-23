@@ -1,4 +1,5 @@
-import MainLayout from "../layouts/MainLayout"
+import Header from "../components/Header"
+import Footer from "../components/Footer"
 
 const agreement = `Пользовательское соглашение\n(далее – «Соглашение»)\nДля сервиса Appointo (домен – appointo.ru)`
 
@@ -45,11 +46,13 @@ function renderAgreement(text) {
 
 export default function UserAgreement() {
   return (
-    <MainLayout>
-      <div style={{marginTop:200, paddingLeft:'15%', paddingRight:'15%', paddingBottom:'60px'}}>
+    <div className="flex flex-col min-h-screen w-full">
+      <Header openAuthModal={() => {}} />
+      <main className="flex-1 w-full bg-[#F9F7F6]" style={{marginTop:200, paddingLeft:'15%', paddingRight:'15%', paddingBottom:'60px'}}>
         {renderAgreement(agreement)}
         {renderAgreement(content)}
-      </div>
-    </MainLayout>
+      </main>
+      <Footer />
+    </div>
   )
 } 
