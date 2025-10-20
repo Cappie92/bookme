@@ -46,6 +46,7 @@ export default function Pricing() {
         ((clientType === "individual" || !isSalonFeaturesEnabled()) && monthlyBookings)) {
       calculatePrice()
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clientType, branchCount, employeeCount, monthlyBookings])
 
   const handleRegisterClick = () => {

@@ -58,6 +58,7 @@ export default function BranchManagementPage() {
 
   useEffect(() => {
     loadBranchData()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [branchId])
 
   if (loading) {

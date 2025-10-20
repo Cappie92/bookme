@@ -70,6 +70,7 @@ const AdminBlog = () => {
   useEffect(() => {
     fetchPosts();
     fetchTags();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filterStatus, searchTerm]);
 
   const fetchPosts = async () => {

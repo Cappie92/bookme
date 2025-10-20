@@ -40,7 +40,7 @@ export default function DepositModal({ isOpen, onClose, onSuccess, currentBalanc
         const errorData = await response.json();
         setError(errorData.detail || 'Ошибка пополнения баланса');
       }
-    } catch (err) {
+    } catch {
       setError('Ошибка сети');
     } finally {
       setLoading(false);

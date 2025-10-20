@@ -75,6 +75,7 @@ export default function SalonBookingModule({
       loadBranches()
       checkCurrentUser()
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [salonId])
   
   // Загрузка доступных слотов при изменении даты или услуги
@@ -82,6 +83,7 @@ export default function SalonBookingModule({
     if (selectedDate && selectedService) {
       loadAvailableSlots()
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedDate, selectedService, selectedMaster])
   
   // Загрузка календаря при изменении услуги или мастера
@@ -89,6 +91,7 @@ export default function SalonBookingModule({
     if (selectedService) {
       loadCalendarDates()
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedService, selectedMaster])
   
   const loadMasters = async () => {

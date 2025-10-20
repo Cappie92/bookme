@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getVerificationDeviceType, supportsReverseFlashCall } from '../utils/deviceUtils'
-import { Button, Logo } from '../components/ui'
+import { Button } from '../components/ui'
 import { useAuth } from '../contexts/AuthContext'
 import { isSalonFeaturesEnabled } from '../config/features'
 import { useModal } from '../hooks/useModal'
@@ -113,6 +112,40 @@ export default function AuthModal() {
       setTab('login')
     }
   }, [])
+
+  // Удаляем логотип из модального окна если он есть
+  useEffect(() => {
+    if (!open) return
+
+    const removeLogo = () => {
+      // Ищем логотип по различным селекторам
+      const logoSelectors = [
+        '[class*="absolute"][class*="left-0"][class*="right-0"][class*="top-6"]',
+        '.absolute.left-0.right-0.top-6',
+        'img[src="/dedato_trnsp.png"]',
+        'img[alt="Dedato"]',
+        '[class*="w-16"][class*="h-16"][class*="flex-shrink-0"]'
+      ]
+
+      logoSelectors.forEach(selector => {
+        const elements = document.querySelectorAll(selector)
+        elements.forEach(element => {
+          // Проверяем, что элемент находится в модальном окне
+          const modal = element.closest('[class*="fixed"][class*="inset-0"][class*="z-50"]')
+          if (modal) {
+            console.log('Удаляем логотип:', element)
+            element.remove()
+          }
+        })
+      })
+    }
+
+    // Удаляем логотип сразу и через небольшую задержку
+    removeLogo()
+    const timeout = setTimeout(removeLogo, 100)
+
+    return () => clearTimeout(timeout)
+  }, [open])
 
   if (!open) return null
 
@@ -240,7 +273,9 @@ export default function AuthModal() {
         try {
           const payload = JSON.parse(atob(data.access_token.split('.')[1]))
           role = payload.role
-        } catch (e) {}
+        } catch {
+          // Игнорируем ошибки декодирования токена
+        }
         
         // Сохраняем токены в localStorage
         localStorage.setItem('access_token', data.access_token)
@@ -259,7 +294,7 @@ export default function AuthModal() {
         const err = await res.json()
         alert('Ошибка: ' + (err.detail || 'Не удалось зарегистрироваться'))
       }
-    } catch (e) {
+    } catch {
       alert('Ошибка сети или сервера')
     } finally {
       setLoading(false)
@@ -289,29 +324,40 @@ export default function AuthModal() {
         try {
           const payload = JSON.parse(atob(data.access_token.split('.')[1]))
           role = payload.role
-        } catch (e) {}
+        } catch {
+          // Игнорируем ошибки декодирования токена
+        }
         setLoginForm({ phone: '+7', password: '' })
         onClose()
         // Сохраняем токены в localStorage
         localStorage.setItem('access_token', data.access_token)
         localStorage.setItem('refresh_token', data.refresh_token)
         
+        // Сохраняем роль в localStorage
+        if (role) {
+          localStorage.setItem('user_role', role)
+        }
+        
         // Обновляем состояние авторизации
         login(data)
         
         // Редирект по роли
-        if (role === 'ADMIN') navigate('/admin');
-        else if (role === 'CLIENT') navigate('/client');
-        else if (role === 'MASTER') navigate('/master');
-        else if (role === 'SALON') navigate('/salon');
-        else if (role === 'INDIE') navigate('/master');
-        else if (role === 'MODERATOR') navigate('/admin');
-        else navigate('/');
+        if (role === 'ADMIN') {
+          navigate('/admin');
+        } else if (role === 'CLIENT') {
+          navigate('/client');
+        } else if (role === 'MASTER') {
+          navigate('/master');
+        } else if (role === 'SALON') {
+          navigate('/salon');
+        } else {
+          navigate('/');
+        }
       } else {
         const err = await res.json()
         alert('Ошибка: ' + (err.detail || 'Не удалось войти'))
       }
-    } catch (e) {
+    } catch {
       alert('Ошибка сети или сервера')
     } finally {
       setLoginLoading(false)
@@ -351,7 +397,7 @@ export default function AuthModal() {
         const err = await res.json()
         alert('Ошибка: ' + (err.detail || 'Не удалось отправить инструкции'))
       }
-    } catch (e) {
+    } catch {
       alert('Ошибка сети или сервера')
     } finally {
       setForgotPasswordLoading(false)
@@ -390,7 +436,7 @@ export default function AuthModal() {
         const err = await res.json()
         alert('Ошибка: ' + (err.detail || 'Не удалось изменить пароль'))
       }
-    } catch (e) {
+    } catch {
       alert('Ошибка сети или сервера')
     } finally {
       setResetPasswordLoading(false)
@@ -528,10 +574,7 @@ export default function AuthModal() {
     >
       <div className="bg-[#F9F7F6] rounded-xl shadow-xl w-full max-w-2xl max-h-[80vh] overflow-y-auto p-10 relative animate-fade-in my-8">
         <button onClick={handleCloseClick} className="absolute top-6 right-6 text-gray-400 hover:text-gray-700 text-lg z-10">✕</button>
-        <div className="absolute left-0 right-0 top-6 flex justify-center pointer-events-none select-none">
-          <Logo size="xl" />
-        </div>
-        <div className="pt-16">
+        <div className="pt-6">
           <div className="flex mb-6 border-b">
             <button 
               className={`flex-1 py-2 font-semibold ${tab==='login' ? 'border-b-2 border-[#4CAF50] text-[#4CAF50]' : 'text-gray-500'}`} 
@@ -754,39 +797,6 @@ export default function AuthModal() {
                                       <p className="text-sm text-gray-600">
                       Введите номер телефона или email, указанные при регистрации. Мы отправим инструкции по восстановлению пароля.
                     </p>
-                    
-                    {/* Показываем кнопку обратного FlashCall только на мобильных устройствах */}
-                    {supportsReverseFlashCall() && forgotPasswordMethod === 'phone' && (
-                      <div className="mt-4 p-4 bg-[#E8F5E8] border border-[#4CAF50] rounded-lg">
-                        <p className="text-sm text-[#2E7D32] mb-3">
-                          <strong>Мобильная верификация:</strong> Позвоните на номер для автоматической верификации
-                        </p>
-                        <Button 
-                          onClick={() => handleReverseFlashCall(forgotPasswordForm.phone)}
-                          disabled={reverseFlashCallLoading || checkingReverseStatus}
-                          className="w-full"
-                        >
-                          {reverseFlashCallLoading ? 'Инициация...' : 
-                           checkingReverseStatus ? 'Проверка звонка...' : 
-                           'Позвонить для верификации'}
-                        </Button>
-                        {reverseFlashCallData && (
-                          <div className="mt-3 p-3 bg-[#E8F5E8] border border-[#4CAF50] rounded">
-                            <p className="text-sm text-[#2E7D32]">
-                              <strong>Номер для звонка:</strong> {reverseFlashCallData.verification_number}
-                            </p>
-                            <p className="text-xs text-[#388E3C] mt-1">
-                              Позвоните на этот номер с вашего телефона для автоматической верификации
-                            </p>
-                          </div>
-                        )}
-                        {reverseFlashCallError && (
-                          <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded">
-                            <p className="text-sm text-red-800">{reverseFlashCallError}</p>
-                          </div>
-                        )}
-                      </div>
-                    )}
                     
                     <Button type="submit" disabled={forgotPasswordLoading}>
                       {forgotPasswordLoading ? 'Отправка...' : 'Отправить инструкции'}

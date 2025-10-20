@@ -9,6 +9,7 @@ const BlogNavigation = ({ currentSlug }) => {
 
   useEffect(() => {
     fetchNavigationPosts();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentSlug]);
 
   const fetchNavigationPosts = async () => {

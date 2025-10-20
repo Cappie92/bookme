@@ -23,7 +23,7 @@ export default function DomainChecker() {
       } else {
         setResult({ error: data.detail || 'Ошибка проверки поддомена' })
       }
-    } catch (error) {
+    } catch {
       setResult({ error: 'Ошибка сети при проверке поддомена' })
     } finally {
       setLoading(false)

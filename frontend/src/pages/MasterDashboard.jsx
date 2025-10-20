@@ -10,13 +10,18 @@ import PaymentMethodSelector from '../components/PaymentMethodSelector'
 import { API_BASE_URL } from '../utils/config'
 import DepositModal from '../modals/DepositModal'
 import MasterDashboardStats from '../components/MasterDashboardStats'
+import MasterStats from '../components/MasterStats'
+import MasterAccounting from '../components/MasterAccounting'
+import PastAppointments from '../components/PastAppointments'
 import { isSalonFeaturesEnabled } from '../config/features'
 
 function MasterSidebar({ activeTab, setActiveTab, refreshKey, masterSettings, scheduleConflicts }) {
   const [pendingInvitations, setPendingInvitations] = useState(0)
+  const [unconfirmedBookings, setUnconfirmedBookings] = useState(0)
 
   useEffect(() => {
     loadPendingInvitations()
+    loadUnconfirmedBookings()
   }, [refreshKey])
 
   const loadPendingInvitations = async () => {
@@ -43,6 +48,26 @@ function MasterSidebar({ activeTab, setActiveTab, refreshKey, masterSettings, sc
     }
   }
 
+  const loadUnconfirmedBookings = async () => {
+    const token = localStorage.getItem('access_token')
+    if (!token) return
+    
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/master/accounting/pending-confirmations`, {
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        }
+      })
+      if (res.ok) {
+        const data = await res.json()
+        setUnconfirmedBookings(data.count || 0)
+      }
+    } catch (err) {
+      console.error('Ошибка загрузки неподтвержденных услуг:', err)
+    }
+  }
+
   return (
     <div className="fixed left-0 top-0 w-64 h-full bg-[#F5F5F5] border-r border-gray-200">
       <nav className="space-y-2 p-4 pt-[160px]">
@@ -64,6 +89,11 @@ function MasterSidebar({ activeTab, setActiveTab, refreshKey, masterSettings, sc
           }`}
         >
           📊 Дашборд
+          {unconfirmedBookings > 0 && (
+            <span className="ml-2 bg-orange-500 text-white text-xs px-2 py-1 rounded-full">
+              {unconfirmedBookings}
+            </span>
+          )}
         </button>
         
         {/* Расписание - показываем всегда */}
@@ -113,6 +143,30 @@ function MasterSidebar({ activeTab, setActiveTab, refreshKey, masterSettings, sc
             )}
           </button>
         )}
+        
+        {/* Статистика - показываем всегда */}
+        <button
+          onClick={() => setActiveTab('stats')}
+          className={`w-full text-left px-4 py-2 rounded-lg transition-colors ${
+            activeTab === 'stats'
+              ? 'bg-blue-100 text-blue-700'
+              : 'text-gray-700 hover:bg-gray-100'
+          }`}
+        >
+          📈 Статистика
+        </button>
+        
+        {/* Бухгалтерия - показываем всегда */}
+        <button
+          onClick={() => setActiveTab('accounting')}
+          className={`w-full text-left px-4 py-2 rounded-lg transition-colors bg-red-200 border-2 border-red-500 ${
+            activeTab === 'accounting'
+              ? 'bg-blue-100 text-blue-700'
+              : 'text-gray-700 hover:bg-gray-100'
+          }`}
+        >
+          💰 Финансы
+        </button>
         
         {/* Мой тариф - показываем всегда */}
         <button
@@ -369,11 +423,65 @@ function ServicesSection() {
           </div>
         </div>
 
-        {categories.length === 0 ? (
-          <div className="text-center py-8">
-            <div className="text-gray-500 mb-4">У вас пока нет категорий</div>
-            <p className="text-sm text-gray-400">Создайте первую категорию, нажав кнопку "Создать категорию"</p>
+        {/* Услуги без категорий */}
+        {services.filter(service => !service.category_id).length > 0 && (
+          <div className="mb-6">
+            <div className="border rounded-lg overflow-hidden">
+              <div className="bg-gray-50 px-4 py-3 border-b">
+                <div className="flex justify-between items-center">
+                  <div>
+                    <h3 className="font-semibold text-lg text-gray-800">Без категории</h3>
+                    <p className="text-sm text-gray-600">{services.filter(service => !service.category_id).length} услуг</p>
+                  </div>
+                </div>
+              </div>
+              <div className="divide-y">
+                {services.filter(service => !service.category_id).map(service => (
+                  <div key={service.id} className="p-4 pl-8 hover:bg-gray-50 transition-colors">
+                    <div className="flex justify-between items-start">
+                      <div className="flex-1">
+                        <h4 className="font-medium text-lg">{service.name}</h4>
+                        {service.description && (
+                          <p className="text-sm text-gray-600 mt-1">{service.description}</p>
+                        )}
+                        <div className="flex gap-4 mt-2 text-sm text-gray-500">
+                          <span>Стоимость: {service.price} ₽</span>
+                          <span>Длительность: {service.duration} мин</span>
+                        </div>
+                      </div>
+                      <div className="flex gap-2 ml-4">
+                        <button
+                          onClick={() => {
+                            setEditingService(service)
+                            setShowServiceModal(true)
+                          }}
+                          className="text-blue-600 hover:text-blue-800 text-sm font-medium"
+                        >
+                          Редактировать
+                        </button>
+                        <button
+                          onClick={() => handleDeleteService(service.id)}
+                          className="text-red-600 hover:text-red-800 text-sm font-medium"
+                        >
+                          Удалить
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
+        )}
+
+        {/* Категории с услугами */}
+        {categories.length === 0 ? (
+          services.filter(service => !service.category_id).length === 0 ? (
+            <div className="text-center py-8">
+              <div className="text-gray-500 mb-4">У вас пока нет услуг</div>
+              <p className="text-sm text-gray-400">Создайте первую услугу, нажав кнопку "Создать услугу"</p>
+            </div>
+          ) : null
         ) : (
           <div className="space-y-6">
             {categories.map(category => {
@@ -827,7 +935,7 @@ function SalonWorkSection({ onInvitationUpdate }) {
                                   {dayList.join(', ')}: {timeRange.split('-')[0]} - {timeRange.split('-')[1]}
                                 </p>
                               ));
-                            } catch (e) {
+                            } catch {
                               return <p className="text-gray-500">{selectedSalon.working_hours}</p>;
                             }
                           })()}
@@ -890,6 +998,7 @@ export default function MasterDashboard() {
   const [scheduleError, setScheduleError] = useState('')
   const [currentWeekOffset, setCurrentWeekOffset] = useState(0)
   const [refreshInvitations, setRefreshInvitations] = useState(0)
+  const [refreshKey, setRefreshKey] = useState(0)
   const [scheduleConflicts, setScheduleConflicts] = useState(0)
   const [allConflicts, setAllConflicts] = useState([])
   const [masterSettings, setMasterSettings] = useState(null)
@@ -898,6 +1007,7 @@ export default function MasterDashboard() {
   const [subscriptionStatus, setSubscriptionStatus] = useState(null)
   const [showDepositModal, setShowDepositModal] = useState(false)
   const [isAuthorized, setIsAuthorized] = useState(false)
+  const [scheduleView, setScheduleView] = useState('schedule') // 'schedule' или 'past'
 
   // Проверка авторизации
   const checkAuth = () => {
@@ -981,6 +1091,18 @@ export default function MasterDashboard() {
             ✂️ Услуги
           </button>
           
+          {/* Статистика */}
+          <button
+            onClick={() => setActiveTab('stats')}
+            className={`w-full text-left px-4 py-2 rounded-lg transition-colors ${
+              activeTab === 'stats'
+                ? 'bg-blue-100 text-blue-700'
+                : 'text-gray-700 hover:bg-gray-100'
+            }`}
+          >
+            📈 Статистика
+          </button>
+          
           {/* Работа в салоне - показываем только если включены функции салона */}
           {isSalonFeaturesEnabled() && (
             <button
@@ -999,6 +1121,18 @@ export default function MasterDashboard() {
               )}
             </button>
           )}
+          
+          {/* Бухгалтерия - показываем всегда */}
+          <button
+            onClick={() => setActiveTab('accounting')}
+            className={`w-full text-left px-4 py-2 rounded-lg transition-colors ${
+              activeTab === 'accounting'
+                ? 'bg-blue-100 text-blue-700'
+                : 'text-gray-700 hover:bg-gray-100'
+            }`}
+          >
+            💰 Финансы
+          </button>
           
           {/* Мой тариф - показываем всегда */}
           <button
@@ -1156,6 +1290,7 @@ export default function MasterDashboard() {
     loadMasterSettings()
     loadBalanceAndSubscription()
     loadScheduleConflicts() // Загружаем конфликты при входе
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // Перезагружаем расписание при изменении недели
@@ -1163,6 +1298,7 @@ export default function MasterDashboard() {
     if (activeTab === 'schedule') {
       loadSchedule()
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentWeekOffset, activeTab])
 
   // Загрузка расписания
@@ -1211,6 +1347,7 @@ export default function MasterDashboard() {
     if (activeTab === 'schedule') {
       loadSchedule()
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab])
 
   // Обработка массовых изменений
@@ -1437,43 +1574,85 @@ export default function MasterDashboard() {
                 </div>
               )}
               
-              {/* Основная информация дашборда */}
-              <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200 mb-6">
-                <h2 className="text-xl font-semibold text-gray-900 mb-4">Обзор</h2>
-                <p className="text-gray-600">
-                  Добро пожаловать в панель управления мастера. Здесь вы можете управлять своим расписанием, 
-                  услугами и настройками работы.
-                </p>
-              </div>
-              
               {/* Статистика дашборда */}
-              <MasterDashboardStats />
+              <MasterDashboardStats 
+                onNavigateToStats={() => setActiveTab('stats')} 
+                onConfirmSuccess={() => {
+                  setRefreshKey(prev => prev + 1);
+                }}
+              />
             </div>
           )}
           {activeTab === 'schedule' && (
             <div>
               <h1 className="text-3xl font-bold mb-6">Расписание</h1>
-              {scheduleError && (
-                <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
-                  {scheduleError}
+              
+              {/* Навигация между расписанием и прошедшими записями */}
+              <div className="mb-6">
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setScheduleView('schedule')}
+                    className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                      scheduleView === 'schedule'
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                    }`}
+                  >
+                    Расписание
+                  </button>
+                  <button
+                    onClick={() => setScheduleView('past')}
+                    className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                      scheduleView === 'past'
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                    }`}
+                  >
+                    Прошедшие записи
+                  </button>
                 </div>
-              )}
-              {scheduleLoading ? (
-                <div className="text-center py-8">Загрузка расписания...</div>
+              </div>
+
+              {/* Контент в зависимости от выбранного вида */}
+              {scheduleView === 'schedule' ? (
+                <>
+                  {scheduleError && (
+                    <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
+                      {scheduleError}
+                    </div>
+                  )}
+                  {scheduleLoading ? (
+                    <div className="text-center py-8">Загрузка расписания...</div>
+                  ) : (
+                    <MasterScheduleCalendar
+                        key="master-schedule-calendar"
+                        schedule={schedule}
+                        onChange={handleScheduleChange}
+                        currentWeekOffset={currentWeekOffset}
+                        setCurrentWeekOffset={setCurrentWeekOffset}
+                        onWeekChange={handleWeekChange}
+                        allConflicts={allConflicts}
+                      />
+                  )}
+                </>
               ) : (
-                <MasterScheduleCalendar
-                    key="master-schedule-calendar"
-                    schedule={schedule}
-                    onChange={handleScheduleChange}
-                    currentWeekOffset={currentWeekOffset}
-                    setCurrentWeekOffset={setCurrentWeekOffset}
-                    onWeekChange={handleWeekChange}
-                    allConflicts={allConflicts}
-                  />
+                <PastAppointments />
               )}
             </div>
           )}
           {activeTab === 'services' && <ServicesSection />}
+          {activeTab === 'stats' && (
+            <div>
+              <h1 className="text-3xl font-bold mb-6">Статистика</h1>
+              <MasterStats />
+            </div>
+          )}
+          {activeTab === 'accounting' && (
+            <div>
+              <h1 className="text-3xl font-bold mb-6">Финансы</h1>
+              <MasterAccounting />
+            </div>
+          )}
           {isSalonFeaturesEnabled() && activeTab === 'salon-work' && (
             <SalonWorkSection onInvitationUpdate={refreshInvitationsCount} />
           )}

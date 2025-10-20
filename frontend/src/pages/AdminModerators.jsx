@@ -20,6 +20,7 @@ export default function AdminModerators() {
 
   useEffect(() => {
     fetchModerators()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search])
 
   const checkAndRefreshToken = async () => {

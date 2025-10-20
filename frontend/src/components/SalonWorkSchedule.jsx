@@ -4,7 +4,7 @@ import { format } from 'date-fns'
 import PopupCard from './PopupCard'
 
 const HOURS = Array.from({ length: 24 }, (_, i) => i) // 00:00 - 23:00
-const MINUTES = [0, 30]
+const MINUTES = [0, 10, 20, 30, 40, 50]
 
 export default function SalonWorkSchedule({ salonData, selectedSalon, onWeekChange }) {
   const [currentWeekOffset, setCurrentWeekOffset] = useState(0)
@@ -24,6 +24,7 @@ export default function SalonWorkSchedule({ salonData, selectedSalon, onWeekChan
       loadSchedule()
       loadBookings()
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentWeekOffset, selectedSalon, weekDates])
 
   // Обновляем даты недели при изменении offset
@@ -72,7 +73,7 @@ export default function SalonWorkSchedule({ salonData, selectedSalon, onWeekChan
     setBookingsLoading(true)
     try {
       const token = localStorage.getItem('access_token')
-      const response = await fetch('/api/master/bookings', {
+      const response = await fetch('/api/master/bookings/detailed', {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
@@ -265,7 +266,7 @@ export default function SalonWorkSchedule({ salonData, selectedSalon, onWeekChan
                           const startTime = new Date(booking.start_time)
                           const endTime = new Date(booking.end_time)
                           const duration = (endTime - startTime) / (1000 * 60) // в минутах
-                          const height = Math.max(16, (duration / 30) * 32) // высота в пикселях
+                          const height = Math.max(16, (duration / 10) * 24) // высота в пикселях для 10-минутных слотов
                           
                           return (
                             <div

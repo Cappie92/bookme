@@ -1,0 +1,88 @@
+# Список шагов деплоя для пошагового выполнения
+# Выполнять по одному шагу, проверяя результат после каждого
+
+# ШАГ 1: Подключение к серверу и проверка текущего состояния
+ssh -o ServerAliveInterval=60 -o ServerAliveCountMax=10 root@193.160.208.206
+
+# ШАГ 2: Проверка статуса контейнеров
+docker-compose -f docker-compose.prod.yml ps
+
+# ШАГ 3: Остановка всех контейнеров
+docker-compose -f docker-compose.prod.yml down
+
+# ШАГ 4: Копирование обновленных файлов фронтенда
+scp -r frontend/src root@193.160.208.206:/home/root/dedato/frontend/
+scp frontend/package.json root@193.160.208.206:/home/root/dedato/frontend/
+scp frontend/package-lock.json root@193.160.208.206:/home/root/dedato/frontend/
+
+# ШАГ 5: Копирование обновленных файлов бэкенда
+scp -r backend/models root@193.160.208.206:/home/root/dedato/backend/
+scp -r backend/routers root@193.160.208.206:/home/root/dedato/backend/
+scp -r backend/services root@193.160.208.206:/home/root/dedato/backend/
+scp backend/main.py root@193.160.208.206:/home/root/dedato/backend/
+scp backend/requirements.txt root@193.160.208.206:/home/root/dedato/backend/
+
+# ШАГ 6: Копирование миграций
+scp -r backend/alembic root@193.160.208.206:/home/root/dedato/backend/
+scp backend/migrate_unified_master.py root@193.160.208.206:/home/root/dedato/backend/
+
+# ШАГ 7: Пересборка и запуск контейнеров
+docker-compose -f docker-compose.prod.yml up -d --build
+
+# ШАГ 8: Проверка статуса после пересборки
+docker-compose -f docker-compose.prod.yml ps
+
+# ШАГ 9: Проверка логов бэкенда
+docker-compose -f docker-compose.prod.yml logs backend | tail -20
+
+# ШАГ 10: Проверка логов фронтенда
+docker-compose -f docker-compose.prod.yml logs frontend | tail -20
+
+# ШАГ 11: Проверка доступности API
+curl -s http://localhost:8000/health
+
+# ШАГ 12: Проверка доступности фронтенда
+curl -s -I http://localhost:5173 | head -5
+
+# ШАГ 13: Проверка структуры базы данных
+docker-compose -f docker-compose.prod.yml exec backend python -c "
+import sqlite3
+conn = sqlite3.connect('/app/bookme.db')
+cursor = conn.cursor()
+cursor.execute('PRAGMA table_info(salon_masters)')
+salon_columns = [row[1] for row in cursor.fetchall()]
+print('Salon masters columns:', salon_columns)
+cursor.execute('PRAGMA table_info(indie_masters)')
+indie_columns = [row[1] for row in cursor.fetchall()]
+print('Indie masters columns:', indie_columns)
+conn.close()
+"
+
+# ШАГ 14: Проверка данных после миграции
+docker-compose -f docker-compose.prod.yml exec backend python -c "
+import sqlite3
+conn = sqlite3.connect('/app/bookme.db')
+cursor = conn.cursor()
+cursor.execute('SELECT COUNT(*) FROM salon_masters')
+salon_count = cursor.fetchone()[0]
+cursor.execute('SELECT COUNT(*) FROM indie_masters')
+indie_count = cursor.fetchone()[0]
+print(f'Salon masters: {salon_count}, Indie masters: {indie_count}')
+conn.close()
+"
+
+# ШАГ 15: Проверка работы API эндпоинтов
+curl -s "http://localhost:8000/api/salon/profile/public?salon_id=1"
+
+# ШАГ 16: Проверка работы фронтенда в браузере
+# Открыть http://193.160.208.206:5173 в браузере и проверить:
+# - Загружается ли страница быстро
+# - Есть ли логотип в модальном окне входа/регистрации
+# - Работает ли логин для пользователей с ролью SALON
+# - Правильно ли работает редирект после логина
+
+# ШАГ 17: Если есть проблемы - откат к предыдущей версии
+# docker-compose -f docker-compose.prod.yml down
+# git checkout HEAD~1
+# docker-compose -f docker-compose.prod.yml up -d --build
+

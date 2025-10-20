@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { apiGet, apiFetch, getAuthHeaders } from '../utils/api'
+import { apiGet, apiFetch } from '../utils/api'
 import { PencilIcon, TrashIcon } from "@heroicons/react/24/outline"
 import PasswordSetupModal from "../modals/PasswordSetupModal"
 import ManagerInvitations from "../components/ManagerInvitations"
@@ -153,12 +153,12 @@ export default function ClientDashboard() {
       
       // Загружаем будущие записи
       const futureData = await apiGet('client/bookings/')
-      setFutureBookings(futureData)
+      setFutureBookings(Array.isArray(futureData) ? futureData : (futureData?.bookings || []))
       setFutureLoading(false)
       
       // Загружаем прошедшие записи
       const pastData = await apiGet('client/bookings/past')
-      setBookings(pastData)
+      setBookings(Array.isArray(pastData) ? pastData : (pastData?.bookings || []))
       setLoading(false)
     } catch (error) {
       console.error('Ошибка при загрузке данных:', error)
@@ -235,6 +235,7 @@ export default function ClientDashboard() {
     return () => {
       removeBeforeUnloadHandler()
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [navigate])
 
   useEffect(() => {
@@ -366,7 +367,8 @@ export default function ClientDashboard() {
     if (!selectedBooking) return
     
     setShowTimeEditModal(true)
-    setSelectedMonth(new Date(selectedBooking.date))
+    // TODO: setSelectedMonth was removed, need to restore if needed
+    // setSelectedMonth(new Date(selectedBooking.date))
     setSelectedDate(selectedBooking.date)
     
     // Загружаем доступность для месяца записи
@@ -794,7 +796,7 @@ export default function ClientDashboard() {
               </tr>
             </thead>
             <tbody>
-              {bookings.slice(0, 3).map(b => (
+              {(Array.isArray(bookings) ? bookings : []).slice(0, 3).map(b => (
                 <tr key={b.id} className="border-b hover:bg-gray-100">
                   <td className="py-2 px-3">
                     {b.salon_name && b.salon_name !== '-' && b.master_name && b.master_name !== '-' ? (

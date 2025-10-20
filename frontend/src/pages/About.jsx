@@ -1,8 +1,8 @@
 import MainLayout from "../layouts/MainLayout"
 
-export default function About({ openAuthModal }) {
+export default function About() {
   return (
-    <MainLayout openAuthModal={openAuthModal}>
+    <MainLayout>
       <h1 className="text-3xl font-bold">О сервисе</h1>
     </MainLayout>
   )

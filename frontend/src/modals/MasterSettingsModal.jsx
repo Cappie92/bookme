@@ -42,6 +42,7 @@ export default function MasterSettingsModal({
       loadMasterSettings()
       loadSalonWorkingHours()
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, master])
 
   const loadSalonData = async () => {

@@ -238,7 +238,8 @@ const BranchModal = ({ isOpen, onClose, branch, onSave, maxBranches, currentCoun
         alert('Приглашение отправлено!')
         setSearchQuery('')
         setFormData({...formData, manager_id: null})
-        loadBranches() // Перезагружаем филиалы
+        // TODO: Перезагрузить филиалы после отправки приглашения
+        // loadBranches() 
       } else {
         const errorData = await response.json()
         throw new Error(errorData.detail || 'Ошибка отправки приглашения')
@@ -310,6 +311,7 @@ const BranchModal = ({ isOpen, onClose, branch, onSave, maxBranches, currentCoun
     
     // Сбрасываем активную вкладку на основную информацию
     setActiveTab('basic')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [branch])
 
   const handleSubmit = (e) => {
@@ -752,12 +754,14 @@ export default function BranchesDashboard() {
       setLoading(false)
     }
     loadData()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {
     if (salon) {
       loadBranches()
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [salon])
 
   const handleCreateBranch = () => {

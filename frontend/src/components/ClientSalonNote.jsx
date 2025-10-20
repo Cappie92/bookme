@@ -11,6 +11,7 @@ const ClientSalonNote = ({ salonId, branchId, salonName, branchName, onNoteChang
   // Загружаем существующую заметку при монтировании
   useEffect(() => {
     loadNote()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [salonId, branchId])
 
   const loadNote = async () => {

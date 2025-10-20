@@ -50,11 +50,11 @@ async def setup_master_schedule():
                 if schedule_config[day_of_week]:
                     start_time, end_time = schedule_config[day_of_week]
                     
-                    # Создаем слоты по 30 минут
+                    # Создаем слоты по 10 минут
                     current_time = start_time
                     while current_time < end_time:
-                        # Вычисляем время окончания слота (30 минут)
-                        end_minute = current_time.minute + 30
+                        # Вычисляем время окончания слота (10 минут)
+                        end_minute = current_time.minute + 10
                         end_hour = current_time.hour
                         if end_minute >= 60:
                             end_hour += 1

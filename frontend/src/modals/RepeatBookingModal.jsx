@@ -26,6 +26,7 @@ export default function RepeatBookingModal({
     if (isOpen && booking) {
       loadBookingDetails()
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, booking])
 
   // Загружаем доступные даты при изменении месяца
@@ -34,6 +35,7 @@ export default function RepeatBookingModal({
       const currentMonth = new Date()
       loadAvailableDatesForMonth(currentMonth)
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [serviceInfo])
 
   // Закрываем календарь при клике вне его
@@ -177,6 +179,7 @@ export default function RepeatBookingModal({
     if (selectedDate) {
       loadAvailableSlots()
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedDate])
 
   const handleSubmit = async (e) => {

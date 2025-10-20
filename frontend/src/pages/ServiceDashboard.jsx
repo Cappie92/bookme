@@ -469,7 +469,7 @@ export default function ServiceDashboard() {
         setSalonProfile(null)
         return null
       }
-    } catch (err) {
+    } catch {
       console.error('Ошибка загрузки профиля салона:', err)
       setSalonProfile(null)
       return null
@@ -496,7 +496,7 @@ export default function ServiceDashboard() {
         const errorData = await response.json()
         setError(`Ошибка создания профиля: ${errorData.detail || 'Неизвестная ошибка'}`)
       }
-    } catch (err) {
+    } catch {
       console.error('Ошибка создания профиля салона:', err)
       setError('Ошибка создания профиля салона')
     }
@@ -517,7 +517,7 @@ export default function ServiceDashboard() {
         console.error('Error loading services:', response.status)
         setError('Ошибка загрузки услуг')
       }
-    } catch (err) {
+    } catch {
       console.error('Ошибка загрузки услуг:', err)
       setError('Ошибка загрузки услуг')
     } finally {
@@ -538,7 +538,7 @@ export default function ServiceDashboard() {
       } else {
         console.error('Error loading categories:', response.status)
       }
-    } catch (err) {
+    } catch {
       console.error('Error loading categories:', err)
     }
   }
@@ -557,7 +557,7 @@ export default function ServiceDashboard() {
           email: userData.email || ''
         }))
       }
-    } catch (err) {
+    } catch {
       console.error('Ошибка загрузки данных пользователя:', err)
     }
   }
@@ -689,6 +689,7 @@ export default function ServiceDashboard() {
         loadSchedule()
       }
     })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const handleServiceCreated = () => {
@@ -741,7 +742,7 @@ export default function ServiceDashboard() {
         const errorData = await response.json()
         throw new Error(errorData.detail || 'Ошибка сохранения категории')
       }
-    } catch (err) {
+    } catch {
       console.error('Ошибка сохранения категории:', err)
       throw err
     }
@@ -763,7 +764,7 @@ export default function ServiceDashboard() {
         const errorText = await response.text()
         setError(`Ошибка удаления категории: ${errorText}`)
       }
-    } catch (err) {
+    } catch {
       console.error('Ошибка удаления категории:', err)
       setError('Ошибка удаления категории')
     }
@@ -801,7 +802,7 @@ export default function ServiceDashboard() {
         const errorText = await response.text()
         setError(`Ошибка удаления услуги: ${errorText}`)
       }
-    } catch (err) {
+    } catch {
       setError('Ошибка удаления услуги')
     }
   }
@@ -906,7 +907,7 @@ export default function ServiceDashboard() {
         const errorData = await response.json()
         setProfileSaveError(`Ошибка сохранения: ${errorData.detail || 'Неизвестная ошибка'}`)
       }
-    } catch (err) {
+    } catch {
       console.error('Ошибка сохранения профиля:', err)
       setProfileSaveError('Ошибка сохранения профиля')
     }
@@ -967,7 +968,7 @@ export default function ServiceDashboard() {
         setProfileSaveError(`Ошибка обновления настроек сайта: ${errorData.detail || 'Неизвестная ошибка'}`)
         setProfileSaveSuccess('')
       }
-    } catch (err) {
+    } catch {
       console.error('Ошибка обновления настроек сайта:', err)
       setProfileSaveError('Ошибка обновления настроек сайта')
       setProfileSaveSuccess('')
@@ -1034,7 +1035,7 @@ export default function ServiceDashboard() {
         const errorData = await response.json()
         setProfileSaveError(`Ошибка создания профиля: ${errorData.detail || 'Неизвестная ошибка'}`)
       }
-    } catch (err) {
+    } catch {
       console.error('Ошибка создания профиля салона:', err)
       setProfileSaveError('Ошибка создания профиля салона')
     }
@@ -1060,7 +1061,7 @@ export default function ServiceDashboard() {
         const errorData = await response.json()
         setProfileSaveError(`Ошибка удаления салона: ${errorData.detail || 'Неизвестная ошибка'}`)
       }
-    } catch (err) {
+    } catch {
       console.error('Ошибка удаления салона:', err)
       setProfileSaveError('Ошибка удаления салона')
     }

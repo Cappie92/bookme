@@ -27,6 +27,7 @@ export default function SubdomainPage() {
       document.body.style.backgroundColor = ''
       document.body.style.background = ''
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [subdomain])
 
   const checkCurrentUser = () => {

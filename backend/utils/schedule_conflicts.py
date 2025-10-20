@@ -156,7 +156,7 @@ def generate_slots_from_settings(
                 start_hour, start_minute = map(int, start_time_str.split(':'))
                 end_hour, end_minute = map(int, end_time_str.split(':'))
                 
-                # Генерируем слоты по 30 минут
+                # Генерируем слоты по 10 минут
                 current_hour = start_hour
                 current_minute = start_minute
                 
@@ -172,7 +172,7 @@ def generate_slots_from_settings(
                     })
                     
                     # Переходим к следующему слоту
-                    current_minute += 30
+                    current_minute += 10
                     if current_minute >= 60:
                         current_hour += 1
                         current_minute = 0
@@ -374,7 +374,7 @@ def get_schedule_with_conflicts(
                     conflict_type = conflict['type']
                     break
         
-        # Создаем слоты по 30 минут (оптимизированная версия)
+        # Создаем слоты по 10 минут (оптимизированная версия)
         start_minutes = record.start_time.hour * 60 + record.start_time.minute
         end_minutes = record.end_time.hour * 60 + record.end_time.minute
         
@@ -390,8 +390,8 @@ def get_schedule_with_conflicts(
             'place_id': record.place_id
         }
         
-        # Генерируем слоты по 30 минут
-        for slot_minutes in range(start_minutes, end_minutes, 30):
+        # Генерируем слоты по 10 минут
+        for slot_minutes in range(start_minutes, end_minutes, 10):
             slot_hour = slot_minutes // 60
             slot_minute = slot_minutes % 60
             

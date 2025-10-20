@@ -17,6 +17,7 @@ const SEOAnalyzer = ({ title, content, metaDescription, excerpt }) => {
 
   useEffect(() => {
     analyzeSEO();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [title, content, metaDescription, excerpt]);
 
   const analyzeSEO = () => {

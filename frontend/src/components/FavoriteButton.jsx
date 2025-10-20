@@ -30,6 +30,7 @@ export default function FavoriteButton({
     if (isAuthenticated && itemId) {
       checkFavoriteStatus()
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthenticated, itemId])
 
   const checkFavoriteStatus = async () => {

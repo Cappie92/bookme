@@ -258,6 +258,26 @@
   .center-fixed {
     @apply fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2;
   }
+  
+  /* Скрываем логотип в модальном окне */
+  .modal-logo-hide {
+    display: none !important;
+  }
+  
+  /* Скрываем логотип в модальном окне по классам */
+  [class*="absolute"][class*="left-0"][class*="right-0"][class*="top-6"] {
+    display: none !important;
+  }
+  
+  /* Более специфичное правило для логотипа в модальном окне */
+  .absolute.left-0.right-0.top-6.flex.justify-center.pointer-events-none.select-none {
+    display: none !important;
+  }
+  
+  /* Альтернативное правило для логотипа */
+  div[class*="absolute"][class*="left-0"][class*="right-0"][class*="top-6"][class*="flex"][class*="justify-center"] {
+    display: none !important;
+  }
 }
 
 @keyframes slideDown {

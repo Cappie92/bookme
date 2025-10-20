@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState } from 'react'
 
 const HOURS = Array.from({ length: 24 }, (_, i) => i)
-const MINUTES = [0, 30]
+const MINUTES = [0, 10, 20, 30, 40, 50]
 
 function getTimeLabel(hour, minute) {
   return `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`
@@ -58,7 +58,7 @@ export default function PlacesManagementCalendar({
         time: getTimeLabel(currentHour, currentMinute)
       })
       
-      currentMinute += 30
+      currentMinute += 10
       if (currentMinute >= 60) {
         currentMinute = 0
         currentHour += 1

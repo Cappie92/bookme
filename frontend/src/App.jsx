@@ -1,48 +1,70 @@
 import { BrowserRouter, Routes, Route } from "react-router-dom"
 import { HelmetProvider } from 'react-helmet-async'
-import { useState, useEffect } from 'react'
+import { lazy, Suspense } from 'react'
 import { AuthProvider } from './contexts/AuthContext'
 import MainLayout from "./layouts/MainLayout"
 import AdminLayout from "./layouts/AdminLayout"
+import ClientLayout from "./layouts/ClientLayout"
+
+// Критичные компоненты для первого рендера (загружаются сразу)
 import Home from "./pages/Home"
-import Pricing from "./pages/Pricing"
-import About from "./pages/About"
-import BlogList from "./pages/BlogList"
-import BlogPost from "./pages/BlogPost"
-import ClientDashboard from "./pages/ClientDashboard"
-import ClientProfile from "./pages/ClientProfile"
-import AuthTest from "./pages/AuthTest"
-import ServiceDashboard from "./pages/ServiceDashboard"
-import PlacesDashboard from "./pages/PlacesDashboard"
-import BranchesDashboard from "./pages/BranchesDashboard"
-import PublicProfile from "./pages/PublicProfile"
-import AdminDashboard from "./pages/AdminDashboard"
-import AdminUsers from "./pages/AdminUsers"
-import AdminBlog from "./pages/AdminBlog"
-import AdminStats from "./pages/AdminStats"
-import AdminSettings from "./pages/AdminSettings"
-import AdminModerators from "./pages/AdminModerators"
-import AdminFunctions from "./pages/AdminFunctions"
-import AdminAlwaysFreeLogs from "./pages/AdminAlwaysFreeLogs"
 import AuthModal from "./modals/AuthModal"
 import MasterModal from "./modals/MasterModal"
 import ScheduleModal from "./modals/ScheduleModal"
 import BookingModal from "./modals/BookingModal"
-import UserAgreement from "./pages/UserAgreement"
-import MasterDashboard from "./pages/MasterDashboard"
-import BookingForm from "./pages/test/BookingForm"
-import SubdomainPage from "./pages/SubdomainPage"
-import DomainTest from "./pages/test/DomainTest"
-import SimpleDomainTest from "./pages/test/SimpleDomainTest"
-import WorkingHoursTest from "./pages/test/WorkingHoursTest"
-import ScheduleTest from "./pages/test/ScheduleTest"
-import YandexGeocoderTest from "./pages/test/YandexGeocoderTest"
-import DesignSystemDemo from "./pages/DesignSystemDemo"
-import BranchBookingPage from "./pages/BranchBookingPage"
-import ClientMasterNotes from "./pages/ClientMasterNotes"
-import ClientFavorite from "./pages/ClientFavorite"
-import TestAnyMaster from "./pages/TestAnyMaster"
-import ClientLayout from "./layouts/ClientLayout"
+
+// Lazy-loaded компоненты (загружаются по требованию)
+const Pricing = lazy(() => import("./pages/Pricing"))
+const About = lazy(() => import("./pages/About"))
+const BlogList = lazy(() => import("./pages/BlogList"))
+const BlogPost = lazy(() => import("./pages/BlogPost"))
+const UserAgreement = lazy(() => import("./pages/UserAgreement"))
+const PublicProfile = lazy(() => import("./pages/PublicProfile"))
+const SubdomainPage = lazy(() => import("./pages/SubdomainPage"))
+const BranchBookingPage = lazy(() => import("./pages/BranchBookingPage"))
+const DesignSystemDemo = lazy(() => import("./pages/DesignSystemDemo"))
+
+// Client pages
+const ClientDashboard = lazy(() => import("./pages/ClientDashboard"))
+const ClientProfile = lazy(() => import("./pages/ClientProfile"))
+const ClientFavorite = lazy(() => import("./pages/ClientFavorite"))
+const ClientMasterNotes = lazy(() => import("./pages/ClientMasterNotes"))
+
+// Service dashboards
+const ServiceDashboard = lazy(() => import("./pages/ServiceDashboard"))
+const PlacesDashboard = lazy(() => import("./pages/PlacesDashboard"))
+const BranchesDashboard = lazy(() => import("./pages/BranchesDashboard"))
+const MasterDashboard = lazy(() => import("./pages/MasterDashboard"))
+
+// Admin pages
+const AdminDashboard = lazy(() => import("./pages/AdminDashboard"))
+const AdminUsers = lazy(() => import("./pages/AdminUsers"))
+const AdminBlog = lazy(() => import("./pages/AdminBlog"))
+const AdminStats = lazy(() => import("./pages/AdminStats"))
+const AdminSettings = lazy(() => import("./pages/AdminSettings"))
+const AdminModerators = lazy(() => import("./pages/AdminModerators"))
+const AdminFunctions = lazy(() => import("./pages/AdminFunctions"))
+const AdminAlwaysFreeLogs = lazy(() => import("./pages/AdminAlwaysFreeLogs"))
+
+// Test pages
+const AuthTest = lazy(() => import("./pages/AuthTest"))
+const BookingForm = lazy(() => import("./pages/test/BookingForm"))
+const DomainTest = lazy(() => import("./pages/test/DomainTest"))
+const SimpleDomainTest = lazy(() => import("./pages/test/SimpleDomainTest"))
+const WorkingHoursTest = lazy(() => import("./pages/test/WorkingHoursTest"))
+const ScheduleTest = lazy(() => import("./pages/test/ScheduleTest"))
+const YandexGeocoderTest = lazy(() => import("./pages/test/YandexGeocoderTest"))
+const TestAnyMaster = lazy(() => import("./pages/TestAnyMaster"))
+
+// Loading компонент для Suspense
+const PageLoader = () => (
+  <div className="flex items-center justify-center min-h-screen">
+    <div className="text-center">
+      <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-[#4CAF50]"></div>
+      <p className="mt-4 text-gray-600">Загрузка...</p>
+    </div>
+  </div>
+)
 
 function App() {
 
@@ -54,6 +76,7 @@ function App() {
               <MasterModal />
               <ScheduleModal />
               <BookingModal />
+        <Suspense fallback={<PageLoader />}>
         <Routes>
           {/* Роуты для поддоменов */}
           <Route path="/domain/:subdomain" element={<SubdomainPage />} />
@@ -100,6 +123,7 @@ function App() {
           {/* Catch-all роут для несуществующих путей */}
           <Route path="*" element={<MainLayout><Home/></MainLayout>} />
         </Routes>
+        </Suspense>
         </AuthProvider>
       </BrowserRouter>
     </HelmetProvider>

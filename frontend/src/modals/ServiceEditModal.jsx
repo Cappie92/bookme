@@ -2,8 +2,6 @@ import { useState, useEffect } from "react"
 import { useModal } from '../hooks/useModal'
 
 export default function ServiceEditModal({ service, categories, onSave, onClose, onCategoryCreated, open }) {
-  if (!open) return null;
-  
   const [formData, setFormData] = useState({
     name: '',
     description: '',
@@ -17,9 +15,9 @@ export default function ServiceEditModal({ service, categories, onSave, onClose,
   const [localCategories, setLocalCategories] = useState([])
   const [error, setError] = useState('')
 
-  // Генерируем варианты длительности от 30 минут до 8 часов
+  // Генерируем варианты длительности от 10 минут до 8 часов с шагом 10 минут
   const durationOptions = []
-  for (let minutes = 30; minutes <= 480; minutes += 30) {
+  for (let minutes = 10; minutes <= 480; minutes += 10) {
     const hours = Math.floor(minutes / 60)
     const mins = minutes % 60
     const displayText = hours > 0 
@@ -110,6 +108,8 @@ export default function ServiceEditModal({ service, categories, onSave, onClose,
   }
 
   const { handleBackdropClick, handleMouseDown } = useModal(onClose)
+
+  if (!open) return null;
 
   const handleCloseClick = () => {
     onClose()

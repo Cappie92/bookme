@@ -38,6 +38,11 @@ export function AuthProvider({ children }) {
         const userData = await response.json()
         setUser(userData)
         setIsAuthenticated(true)
+        
+        // Сохраняем роль в localStorage
+        if (userData.role) {
+          localStorage.setItem('user_role', userData.role)
+        }
       } else {
         // Токен недействителен
         localStorage.removeItem('access_token')
@@ -55,6 +60,8 @@ export function AuthProvider({ children }) {
 
   const logout = () => {
     localStorage.removeItem('access_token')
+    localStorage.removeItem('refresh_token')
+    localStorage.removeItem('user_role')
     localStorage.removeItem('new_client_setup')
     localStorage.removeItem('existing_client_verification')
     setIsAuthenticated(false)
@@ -78,6 +85,7 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     checkAuthStatus()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const value = {

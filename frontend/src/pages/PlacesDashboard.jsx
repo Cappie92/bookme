@@ -216,6 +216,7 @@ export default function PlacesDashboard() {
   useEffect(() => {
     loadUserData()
     loadSalonProfile()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {
@@ -223,12 +224,14 @@ export default function PlacesDashboard() {
       loadBranches()
       loadPlaces()
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [salon, selectedBranch])
 
   useEffect(() => {
     if (places.length > 0 && places.every(place => place.branch_id)) {
       loadSchedule()
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [places, selectedDate, selectedBranch])
 
   // Инициализация количества мест по филиалам

@@ -12,6 +12,7 @@ export default function BranchBookingPage() {
 
   useEffect(() => {
     loadSalonAndBranch()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [salonId, branchId])
 
   const loadSalonAndBranch = async () => {

@@ -8,6 +8,7 @@ const ClientMasterNote = ({ masterId, salonId, masterName, salonName, branchId, 
   // Загружаем существующие заметки при монтировании
   useEffect(() => {
     loadNotes()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [masterId, salonId])
 
   const loadNotes = async () => {
@@ -18,7 +19,7 @@ const ClientMasterNote = ({ masterId, salonId, masterName, salonName, branchId, 
         if (masterData.note) {
           setMasterNote(masterData.note)
         }
-      } catch (error) {
+      } catch {
         // Заметка о мастере не найдена - это нормально
         console.log('Заметка о мастере не найдена')
       }

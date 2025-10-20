@@ -1,7 +1,7 @@
 import React, { useState, useRef } from 'react'
 import ConflictsList from './ConflictsList'
 import PopupCard from './PopupCard'
-import { getWeekDays, getMonthDays, getDayOfWeek, calculateWeekOffset, hasWorkingSlots, getMonthName, getDayNames, getWeekDates } from '../utils/calendarUtils'
+import { getMonthDays, calculateWeekOffset, hasWorkingSlots, getMonthName, getDayNames, getWeekDates } from '../utils/calendarUtils'
 
 const HOURS = Array.from({ length: 24 }, (_, i) => i) // 0:00 - 23:00
 
@@ -40,7 +40,7 @@ const selectedSlotStyles = `
     height: 4px;
   }
 `
-const MINUTES = [0, 30]
+const MINUTES = [0, 10, 20, 30, 40, 50]
 
 
 function getTimeLabel(hour, minute) {
@@ -111,7 +111,7 @@ export default function MasterScheduleCalendar({ schedule, onChange, currentWeek
   const loadBookings = async () => {
     setBookingsLoading(true)
     try {
-      const response = await fetch('/api/master/bookings', {
+      const response = await fetch('/api/master/bookings/detailed', {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('access_token')}`
         }
@@ -292,8 +292,8 @@ export default function MasterScheduleCalendar({ schedule, onChange, currentWeek
         }
       }
 
-      // Обновляем локальное состояние
-      setSchedule(prev => ({ ...prev, ...updates }))
+      // Обновляем расписание через callback
+      onChange({ ...schedule, ...updates })
 
       // Отправляем изменения на сервер
       const response = await fetch('/api/master/schedule/weekly', {
@@ -318,13 +318,11 @@ export default function MasterScheduleCalendar({ schedule, onChange, currentWeek
       if (!response.ok) {
         console.error('Ошибка при удалении личного расписания')
         // Откатываем изменения при ошибке
-        setSchedule(prev => {
-          const newSchedule = { ...prev }
-          Object.keys(updates).forEach(key => {
-            delete newSchedule[key]
-          })
-          return newSchedule
+        const newSchedule = { ...schedule }
+        Object.keys(updates).forEach(key => {
+          delete newSchedule[key]
         })
+        onChange(newSchedule)
       }
     } catch (error) {
       console.error('Ошибка при удалении личного расписания:', error)
@@ -373,7 +371,7 @@ export default function MasterScheduleCalendar({ schedule, onChange, currentWeek
     })
   }
 
-  const handleSlotMouseEnter = (slotKey) => (e) => {
+  const handleSlotMouseEnter = (slotKey) => () => {
     if (!dragging) return
     setSelected(prev => {
       const next = new Set(prev)
@@ -384,7 +382,7 @@ export default function MasterScheduleCalendar({ schedule, onChange, currentWeek
   }
 
   // Обработка перетаскивания с улучшенной логикой
-  const handleSlotMouseMove = (slotKey, dayIndex, timeIndex) => (e) => {
+  const handleSlotMouseMove = (slotKey, dayIndex, timeIndex) => () => {
     if (!dragging || !dragStart) return
     
     // Выделяем все ячейки в прямоугольнике между начальной и текущей позицией
@@ -522,7 +520,7 @@ export default function MasterScheduleCalendar({ schedule, onChange, currentWeek
     const scrollTo8AM = () => {
       if (tableRef.current) {
         // 8 часов * 2 слота в час * 32px высота строки = 512px
-        const scrollPosition = 8 * 2 * 32
+        const scrollPosition = 8 * 6 * 24
         tableRef.current.scrollTop = scrollPosition
       }
     }
@@ -539,7 +537,7 @@ export default function MasterScheduleCalendar({ schedule, onChange, currentWeek
     const scrollTo8AM = () => {
     if (tableRef.current) {
         // 8 часов * 2 слота в час * 32px высота строки = 512px
-        const scrollPosition = 8 * 2 * 32
+        const scrollPosition = 8 * 6 * 24
         tableRef.current.scrollTop = scrollPosition
       }
     }
@@ -555,6 +553,7 @@ export default function MasterScheduleCalendar({ schedule, onChange, currentWeek
     if (showMonthlyView) {
       loadMonthlySchedule()
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentMonth, showMonthlyView])
 
 
@@ -636,18 +635,15 @@ export default function MasterScheduleCalendar({ schedule, onChange, currentWeek
       if (!validUntil) {
         newErrors.validUntil = 'Укажите дату окончания действия расписания'
       } else {
-        // Проверяем формат DD-MM-YYYY
-        const dateRegex = /^(\d{2})-(\d{2})-(\d{4})$/
-        if (!dateRegex.test(validUntil)) {
-          newErrors.validUntil = 'Дата должна быть в формате DD-MM-YYYY'
-        } else {
-          const [, day, month, year] = validUntil.match(dateRegex)
-          const date = new Date(year, month - 1, day)
-          if (date.getDate() != day || date.getMonth() != month - 1 || date.getFullYear() != year) {
-            newErrors.validUntil = 'Некорректная дата'
-          } else if (date < new Date()) {
-            newErrors.validUntil = 'Дата не может быть в прошлом'
-          }
+        // Проверяем формат YYYY-MM-DD
+        const date = new Date(validUntil)
+        const today = new Date()
+        today.setHours(0, 0, 0, 0)
+        
+        if (isNaN(date.getTime())) {
+          newErrors.validUntil = 'Некорректная дата'
+        } else if (date < today) {
+          newErrors.validUntil = 'Дата не может быть в прошлом'
         }
       }
 
@@ -703,16 +699,10 @@ export default function MasterScheduleCalendar({ schedule, onChange, currentWeek
           return
         }
 
-        // Конвертируем дату из DD-MM-YYYY в YYYY-MM-DD для API
-        const convertDateFormat = (dateStr) => {
-          const [day, month, year] = dateStr.split('-')
-          return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`
-        }
-
         // Подготавливаем данные для отправки
         const requestData = {
           type: scheduleType,
-          validUntil: convertDateFormat(validUntil)
+          validUntil: validUntil // Дата уже в формате YYYY-MM-DD
         }
 
         if (scheduleType === 'weekdays') {
@@ -985,24 +975,10 @@ export default function MasterScheduleCalendar({ schedule, onChange, currentWeek
           <div className="mb-6">
             <label className="block text-sm font-medium mb-1">Расписание действует до:</label>
             <input
-              type="text"
-              placeholder="DD-MM-YYYY"
+              type="date"
               value={validUntil}
-              onChange={(e) => {
-                let value = e.target.value
-                // Удаляем все нецифровые символы кроме дефисов
-                value = value.replace(/[^\d-]/g, '')
-                // Ограничиваем длину
-                if (value.length > 10) value = value.substring(0, 10)
-                // Автоматически добавляем дефисы
-                if (value.length >= 2 && value.charAt(2) !== '-') {
-                  value = value.substring(0, 2) + '-' + value.substring(2)
-                }
-                if (value.length >= 5 && value.charAt(5) !== '-') {
-                  value = value.substring(0, 5) + '-' + value.substring(5)
-                }
-                setValidUntil(value)
-              }}
+              onChange={(e) => setValidUntil(e.target.value)}
+              min={new Date().toISOString().split('T')[0]}
               className="w-full border rounded px-3 py-2"
             />
             {errors.validUntil && <p className="text-red-500 text-sm mt-1">{errors.validUntil}</p>}
@@ -1239,8 +1215,8 @@ export default function MasterScheduleCalendar({ schedule, onChange, currentWeek
                       setShowViewModal(false)
                       
                       // Перезагружаем расписание
-                      if (onScheduleChange) {
-                        onScheduleChange({})
+                      if (onChange) {
+                        onChange({})
                       }
                     } else {
                       const error = await response.json()
@@ -1270,9 +1246,9 @@ export default function MasterScheduleCalendar({ schedule, onChange, currentWeek
 
 
   const MonthlyCalendarModal = () => {
-    if (!showMonthlyView) return null;
-
     const [currentMonth, setCurrentMonth] = useState(new Date())
+    
+    if (!showMonthlyView) return null;
     
     // Генерируем календарь на месяц
     const generateMonthlyCalendar = () => {
@@ -1283,8 +1259,6 @@ export default function MasterScheduleCalendar({ schedule, onChange, currentWeek
       // Добавляем информацию о рабочих слотах
       return days.map(day => {
         const hasWorking = hasWorkingSlots(day.date, schedule)
-        if (hasWorking) {
-        }
         return {
           ...day,
           hasWorkingSlots: hasWorking
@@ -1694,7 +1668,7 @@ export default function MasterScheduleCalendar({ schedule, onChange, currentWeek
             </thead>
             <tbody>
               {HOURS.flatMap(hour => MINUTES.map(minute => (
-                <tr key={hour + ':' + minute} style={{ height: 32 }}>
+                <tr key={hour + ':' + minute} style={{ height: 24 }}>
                   <td
                     className="text-xs text-gray-500 text-right pr-2 cursor-pointer"
                     style={{ transition: 'background-color 0.2s', width: '80px' }}
@@ -1711,11 +1685,11 @@ export default function MasterScheduleCalendar({ schedule, onChange, currentWeek
                     const workType = slotData?.work_type
                     const hasConflict = slotData?.has_conflict || false
                     const isSelected = selected.has(slotKey)
-                    const timeIndex = hour * 2 + (minute === 30 ? 1 : 0)
+                    const timeIndex = hour * 6 + (minute / 10)
                     const slotBookings = getBookingsForSlot(day.date, hour, minute)
                     
                     // Определяем цвет ячейки
-                    let cellClass = 'h-8 cursor-pointer transition-colors border border-gray-200 relative '
+                    let cellClass = 'h-6 cursor-pointer transition-colors border border-gray-200 relative '
                     if (isSelected) {
                       cellClass += 'selected-slot'
                     } else if (isActive) {
@@ -1744,7 +1718,7 @@ export default function MasterScheduleCalendar({ schedule, onChange, currentWeek
                           const startTime = new Date(booking.start_time)
                           const endTime = new Date(booking.end_time)
                           const duration = (endTime - startTime) / (1000 * 60) // в минутах
-                          const height = Math.max(16, (duration / 30) * 32) // высота в пикселях
+                          const height = Math.max(16, (duration / 10) * 24) // высота в пикселях для 10-минутных слотов
                           
                           return (
                             <div

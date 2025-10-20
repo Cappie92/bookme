@@ -55,7 +55,7 @@ export default function SalonMasters({ getAuthHeaders }) {
         console.error('Error loading masters:', errorData)
         setMastersError('Ошибка загрузки мастеров')
       }
-    } catch (err) {
+    } catch {
       console.error('Ошибка загрузки мастеров:', err)
       setMastersError('Ошибка загрузки мастеров')
     } finally {
@@ -94,7 +94,7 @@ export default function SalonMasters({ getAuthHeaders }) {
         console.error('Invitation error:', errorData)
         setInviteError(errorData.detail || 'Ошибка отправки приглашения')
       }
-    } catch (err) {
+    } catch {
       console.error('Ошибка отправки приглашения:', err)
       setInviteError('Ошибка отправки приглашения')
     } finally {
@@ -119,7 +119,7 @@ export default function SalonMasters({ getAuthHeaders }) {
         console.error('Master removal error:', errorData)
         setMastersError(errorData.detail || 'Ошибка удаления мастера')
       }
-    } catch (err) {
+    } catch {
       console.error('Ошибка удаления мастера:', err)
       setMastersError('Ошибка удаления мастера')
     }
@@ -137,7 +137,7 @@ export default function SalonMasters({ getAuthHeaders }) {
       } else {
         alert('Ошибка удаления приглашения')
       }
-    } catch (err) {
+    } catch {
       alert('Ошибка удаления приглашения')
     }
   }
@@ -191,6 +191,7 @@ export default function SalonMasters({ getAuthHeaders }) {
   useEffect(() => {
     loadMasters()
     loadBranches()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   return (

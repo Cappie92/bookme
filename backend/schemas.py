@@ -32,7 +32,7 @@ class User(UserBase):
     id: int
     role: UserRole
     is_active: bool
-    is_verified: bool
+    is_verified: Optional[bool] = False
     is_always_free: bool = False
     created_at: datetime
     updated_at: datetime
@@ -328,7 +328,7 @@ class BookingBase(BaseModel):
     branch_id: Optional[int] = None
     start_time: datetime
     end_time: datetime
-    status: BookingStatus = BookingStatus.PENDING
+    status: BookingStatus = BookingStatus.CREATED
     notes: Optional[str] = None
     
     # Информация об оплате
@@ -384,7 +384,7 @@ class BookingEditRequestUpdate(BaseModel):
 
 class Booking(BaseModel):
     id: int
-    client_id: int
+    client_id: Optional[int] = None
     service_id: int
     master_id: Optional[int] = None
     indie_master_id: Optional[int] = None
@@ -394,6 +394,12 @@ class Booking(BaseModel):
     end_time: datetime
     status: BookingStatus
     notes: Optional[str] = None
+    
+    # Информация об оплате
+    payment_method: Optional[str] = None
+    payment_amount: Optional[float] = None
+    is_paid: Optional[bool] = None
+    
     created_at: datetime
     updated_at: datetime
     edit_requests: List[Any] = []  # Убираем циклическую зависимость
@@ -758,8 +764,8 @@ class MasterServiceOut(BaseModel):
     description: Optional[str] = None
     duration: int
     price: float
-    category_id: int
-    category_name: str
+    category_id: Optional[int] = None
+    category_name: Optional[str] = None
     master_id: int
     created_at: datetime
 

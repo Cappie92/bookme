@@ -33,6 +33,7 @@ const ClientRestrictionsManager = ({
 
   useEffect(() => {
     loadRestrictions()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const loadRestrictions = async () => {
@@ -50,7 +51,7 @@ const ClientRestrictionsManager = ({
       } else {
         setError('Ошибка загрузки ограничений')
       }
-    } catch (err) {
+    } catch {
       setError('Ошибка сети')
     } finally {
       setLoading(false)
@@ -84,7 +85,7 @@ const ClientRestrictionsManager = ({
         const errorData = await response.json()
         setError(errorData.detail || 'Ошибка сохранения')
       }
-    } catch (err) {
+    } catch {
       setError('Ошибка сети')
     }
   }
@@ -106,7 +107,7 @@ const ClientRestrictionsManager = ({
       } else {
         setError('Ошибка удаления')
       }
-    } catch (err) {
+    } catch {
       setError('Ошибка сети')
     }
   }

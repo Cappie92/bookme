@@ -75,6 +75,7 @@ export default function BranchBookingModule({
       loadBranch()
       checkCurrentUser()
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [salonId, branchId])
   
   // Загрузка доступных слотов при изменении даты или услуги
@@ -82,6 +83,7 @@ export default function BranchBookingModule({
     if (selectedDate && selectedService) {
       loadAvailableSlots()
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedDate, selectedService, selectedMaster])
   
   // Загрузка календаря при изменении услуги или мастера
@@ -89,6 +91,7 @@ export default function BranchBookingModule({
     if (selectedService) {
       loadCalendarDates()
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedService, selectedMaster])
   
   const loadBranch = async () => {

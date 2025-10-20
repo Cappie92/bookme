@@ -37,7 +37,7 @@ def _check_time_overlap(
 def _get_slots_for_duration(start_time: time, end_time: time, service_duration_minutes: int) -> List[time]:
     """
     Генерирует список начальных времен слотов для услуги заданной длительности
-    Слоты начинаются в 00 и 30 минут каждого часа
+    Слоты начинаются каждые 10 минут
     """
     slots = []
     current_time = start_time
@@ -46,16 +46,16 @@ def _get_slots_for_duration(start_time: time, end_time: time, service_duration_m
     start_minutes = start_time.hour * 60 + start_time.minute
     end_minutes = end_time.hour * 60 + end_time.minute
     
-    # Генерируем слоты с шагом 30 минут
+    # Генерируем слоты с шагом 10 минут
     current_minutes = start_minutes
     while current_minutes + service_duration_minutes <= end_minutes:
-        # Проверяем, что слот начинается в 00 или 30 минут
-        if current_minutes % 30 == 0:
+        # Проверяем, что слот начинается в кратных 10 минутам
+        if current_minutes % 10 == 0:
             slot_hour = current_minutes // 60
             slot_minute = current_minutes % 60
             slots.append(time(hour=slot_hour, minute=slot_minute))
         
-        current_minutes += 30
+        current_minutes += 10
     
     return slots
 
@@ -145,7 +145,7 @@ def get_available_slots(
 ) -> List[dict]:
     """
     Получает доступные слоты для бронирования на указанную дату
-    Новая логика: слоты по 30 минут, услуга может занимать несколько слотов
+    Новая логика: слоты по 10 минут, услуга может занимать несколько слотов
     """
     print(f"DEBUG: Получение слотов для {owner_type} ID {owner_id} на {date}")
     
@@ -186,12 +186,12 @@ def get_available_slots(
             # Используем индивидуальное расписание мастера
             print(f"DEBUG: Найдено {len(master_schedule)} слотов индивидуального расписания")
             
-            # Вычисляем количество необходимых 30-минутных слотов
-            required_slots = service_duration // 30
-            if service_duration % 30 != 0:
+            # Вычисляем количество необходимых 10-минутных слотов
+            required_slots = service_duration // 10
+            if service_duration % 10 != 0:
                 required_slots += 1
             
-            print(f"DEBUG: Требуется {required_slots} последовательных 30-минутных слотов")
+            print(f"DEBUG: Требуется {required_slots} последовательных 10-минутных слотов")
             
             # Проверяем каждую возможную начальную позицию
             for i in range(len(master_schedule) - required_slots + 1):
@@ -258,12 +258,12 @@ def get_available_slots(
             # Используем индивидуальное расписание мастера
             print(f"DEBUG: Найдено {len(indie_master_schedule)} слотов индивидуального расписания")
             
-            # Вычисляем количество необходимых 30-минутных слотов
-            required_slots = service_duration // 30
-            if service_duration % 30 != 0:
+            # Вычисляем количество необходимых 10-минутных слотов
+            required_slots = service_duration // 10
+            if service_duration % 10 != 0:
                 required_slots += 1
             
-            print(f"DEBUG: Требуется {required_slots} последовательных 30-минутных слотов")
+            print(f"DEBUG: Требуется {required_slots} последовательных 10-минутных слотов")
             
             # Для каждого расписания создаем слоты длиной в service_duration минут
             for schedule in indie_master_schedule:
@@ -287,8 +287,8 @@ def get_available_slots(
                     })
                     print(f"DEBUG: Создан слот: {slot_start} - {slot_end}")
                     
-                    # Переходим к следующему слоту с шагом 30 минут
-                    current_time += timedelta(minutes=30)
+                    # Переходим к следующему слоту с шагом 10 минут
+                    current_time += timedelta(minutes=10)
                 
                 print(f"DEBUG: После обработки расписания доступно слотов: {len(availability_slots)}")
             
@@ -372,8 +372,8 @@ def get_available_slots(
         
         print(f"DEBUG: Проверяем слот доступности: {start_time} - {end_time}")
         
-        # Генерируем 30-минутные слоты внутри доступного времени
-        time_slots = _get_slots_for_duration(start_time, end_time, 30)
+        # Генерируем 10-минутные слоты внутри доступного времени
+        time_slots = _get_slots_for_duration(start_time, end_time, 10)
         
         for slot_start in time_slots:
             # Проверяем доступность слота
@@ -498,8 +498,8 @@ def get_available_slots_any_master_logic(
             start_time = availability_slot.start_time
             end_time = availability_slot.end_time
             
-            # Генерируем 30-минутные слоты внутри доступного времени
-            time_slots = _get_slots_for_duration(start_time, end_time, 30)
+            # Генерируем 10-минутные слоты внутри доступного времени
+            time_slots = _get_slots_for_duration(start_time, end_time, 10)
             
             for slot_start in time_slots:
                 # Проверяем доступность слота

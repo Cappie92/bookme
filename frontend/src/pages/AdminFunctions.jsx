@@ -112,6 +112,7 @@ export default function AdminFunctions() {
     } else if (activeTab === 'promo-codes') {
       fetchPromoCodes()
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters, activeTab, promoCodeFilters])
 
   const fetchFunctions = async () => {

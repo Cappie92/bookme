@@ -123,7 +123,7 @@ export default function ClientDashboardStats() {
         <div className="bg-white p-4 rounded-lg shadow">
           <h3 className="text-lg font-semibold mb-3">Топ салонов</h3>
           <div className="space-y-2">
-            {stats.top_salons.slice(0, 3).map((salon, index) => (
+            {stats.top_salons.slice(0, 3).map((salon) => (
               <div key={salon.salon_id} className="flex justify-between items-center">
                 <span className="text-sm">{salon.salon_name}</span>
                 <span className="text-sm font-medium">{salon.booking_count} записей</span>
@@ -137,7 +137,7 @@ export default function ClientDashboardStats() {
         <div className="bg-white p-4 rounded-lg shadow">
           <h3 className="text-lg font-semibold mb-3">Топ мастеров</h3>
           <div className="space-y-2">
-            {stats.top_masters.slice(0, 3).map((master, index) => (
+            {stats.top_masters.slice(0, 3).map((master) => (
               <div key={master.master_id} className="flex justify-between items-center">
                 <span className="text-sm">{master.master_name}</span>
                 <span className="text-sm font-medium">{master.booking_count} записей</span>
@@ -151,7 +151,7 @@ export default function ClientDashboardStats() {
         <div className="bg-white p-4 rounded-lg shadow">
           <h3 className="text-lg font-semibold mb-3">Топ индивидуальных мастеров</h3>
           <div className="space-y-2">
-            {stats.top_indie_masters.slice(0, 3).map((master, index) => (
+            {stats.top_indie_masters.slice(0, 3).map((master) => (
               <div key={master.indie_master_id} className="flex justify-between items-center">
                 <span className="text-sm">{master.indie_master_name}</span>
                 <span className="text-sm font-medium">{master.booking_count} записей</span>

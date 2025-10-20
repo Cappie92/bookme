@@ -101,6 +101,21 @@ async def create_booking(
             detail="Время окончания должно быть больше времени начала"
         )
     
+    # Проверяем, что время начала кратно 10 минутам
+    start_minute = booking.start_time.minute
+    if start_minute % 10 != 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Время записи должно быть кратно 10 минутам (например, 14:20, 14:30, 14:40)"
+        )
+    
+    # Проверяем, что длительность услуги кратна 10 минутам
+    if booking.service_duration % 10 != 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Длительность услуги должна быть кратна 10 минутам"
+        )
+    
     # Проверяем, что продолжительность соответствует времени
     duration_minutes = (booking.end_time - booking.start_time).total_seconds() / 60
     if abs(duration_minutes - booking.service_duration) > 1:  # Допускаем погрешность в 1 минуту
@@ -693,7 +708,7 @@ async def create_booking_with_any_master(
             start_time=start_time,
             end_time=end_time,
             notes=notes,
-            status=BookingStatus.CONFIRMED,
+            status=BookingStatus.CREATED,
             created_at=datetime.utcnow()
         )
         

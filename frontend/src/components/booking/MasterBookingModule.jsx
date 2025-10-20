@@ -74,6 +74,7 @@ export default function MasterBookingModule({
       loadServices()
       checkCurrentUser()
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [masterId])
   
   // Загрузка доступных слотов при изменении даты или услуги
@@ -81,6 +82,7 @@ export default function MasterBookingModule({
     if (selectedDate && selectedService) {
       loadAvailableSlots()
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedDate, selectedService])
   
   // Загрузка календаря при изменении услуги
@@ -88,6 +90,7 @@ export default function MasterBookingModule({
     if (selectedService) {
       loadCalendarDates()
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedService])
   
   const loadServices = async () => {

@@ -1426,7 +1426,7 @@ def get_places_schedule(
         open_time = datetime.strptime(day_hours['open'], '%H:%M').time()
         close_time = datetime.strptime(day_hours['close'], '%H:%M').time()
         
-        # Создаем слоты по 30 минут
+        # Создаем слоты по 10 минут
         current_time = open_time
         while current_time < close_time:
             for place in places:
@@ -1461,8 +1461,8 @@ def get_places_schedule(
                 )
                 slots.append(slot)
             
-            # Переходим к следующему 30-минутному интервалу
-            current_minutes = current_time.hour * 60 + current_time.minute + 30
+            # Переходим к следующему 10-минутному интервалу
+            current_minutes = current_time.hour * 60 + current_time.minute + 10
             current_time = time(hour=current_minutes // 60, minute=current_minutes % 60)
     
     return PlaceScheduleResponse(
@@ -2059,8 +2059,8 @@ def get_salon_dashboard_stats(
                 )
                 
                 # Получаем общее количество доступных слотов (примерная оценка)
-                # Предполагаем, что рабочий день 8 часов, слоты по 30 минут
-                total_slots = 16  # 8 часов * 2 слота в час
+                # Предполагаем, что рабочий день 8 часов, слоты по 10 минут
+                total_slots = 48  # 8 часов * 6 слотов в час
                 
                 loading_percentage = min((bookings_count / total_slots) * 100, 100) if total_slots > 0 else 0
                 

@@ -17,14 +17,14 @@ const ClientMasterNotes = () => {
   useEffect(() => {
     // Фильтруем заметки по поисковому запросу
     if (searchQuery.trim()) {
-      const filtered = notes.filter(note => 
+      const filtered = (Array.isArray(notes) ? notes : []).filter(note => 
         note.master_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
         note.salon_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
         note.note.toLowerCase().includes(searchQuery.toLowerCase())
       )
       setFilteredNotes(filtered)
     } else {
-      setFilteredNotes(notes)
+      setFilteredNotes(Array.isArray(notes) ? notes : [])
     }
   }, [searchQuery, notes])
 
@@ -32,8 +32,9 @@ const ClientMasterNotes = () => {
     try {
       setLoading(true)
       const data = await apiGet('client/all-notes')
-      setNotes(data)
-      setFilteredNotes(data)
+      const notesArray = Array.isArray(data) ? data : (data?.notes || [])
+      setNotes(notesArray)
+      setFilteredNotes(notesArray)
       setError('')
     } catch (err) {
       console.error('Ошибка загрузки заметок:', err)
@@ -99,18 +100,18 @@ const ClientMasterNotes = () => {
         {/* Статистика */}
         <div className="mb-6 grid grid-cols-1 md:grid-cols-3 gap-4">
           <div className="bg-white rounded-lg border p-4">
-            <div className="text-2xl font-bold text-blue-600">{notes.length}</div>
+            <div className="text-2xl font-bold text-blue-600">{(Array.isArray(notes) ? notes : []).length}</div>
             <div className="text-sm text-gray-600">Всего заметок</div>
           </div>
           <div className="bg-white rounded-lg border p-4">
             <div className="text-2xl font-bold text-green-600">
-              {new Set(notes.map(note => note.master_id)).size}
+              {new Set((Array.isArray(notes) ? notes : []).map(note => note.master_id)).size}
             </div>
             <div className="text-sm text-gray-600">Мастера</div>
           </div>
           <div className="bg-white rounded-lg border p-4">
             <div className="text-2xl font-bold text-purple-600">
-              {new Set(notes.map(note => note.salon_id)).size}
+              {new Set((Array.isArray(notes) ? notes : []).map(note => note.salon_id)).size}
             </div>
             <div className="text-sm text-gray-600">Салоны</div>
           </div>

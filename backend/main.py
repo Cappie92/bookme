@@ -6,10 +6,11 @@ from fastapi.responses import FileResponse
 import os
 
 from database import Base, engine
-from routers import admin, auth, bookings, client, master, salon, blog, moderator, domain, subscriptions, balance, loyalty, expenses, promo_codes
+from routers import admin, auth, bookings, client, master, salon, blog, moderator, domain, subscriptions, balance, loyalty, expenses, promo_codes, accounting, tax_rates
 from routers.address_extraction import router as address_router
 from routers.yandex_geocoder import router as geocoder_router
 from services.daily_charges import run_daily_charges_task
+from services.recurring_expenses import run_recurring_expenses_task
 
 # Создаем таблицы в базе данных
 Base.metadata.create_all(bind=engine)
@@ -65,6 +66,8 @@ app.include_router(balance.router, prefix="/api")
 app.include_router(loyalty.router, prefix="/api")
 app.include_router(expenses.router, prefix="/api")
 app.include_router(promo_codes.router, prefix="/api")
+app.include_router(accounting.router)
+app.include_router(tax_rates.router)
 app.include_router(address_router, prefix="/api")
 app.include_router(geocoder_router, prefix="/api/geocoder")
 
@@ -73,6 +76,8 @@ app.include_router(geocoder_router, prefix="/api/geocoder")
 async def startup_event():
     # Запускаем фоновую задачу ежедневных списаний
     app.state.daily_charges_task = asyncio.create_task(run_daily_charges_task())
+    # Запускаем фоновую задачу создания циклических расходов
+    app.state.recurring_expenses_task = asyncio.create_task(run_recurring_expenses_task())
 
 
 @app.on_event("shutdown")
@@ -83,6 +88,14 @@ async def shutdown_event():
         task.cancel()
         try:
             await task
+        except asyncio.CancelledError:
+            pass
+    
+    recurring_task = getattr(app.state, "recurring_expenses_task", None)
+    if recurring_task:
+        recurring_task.cancel()
+        try:
+            await recurring_task
         except asyncio.CancelledError:
             pass
 

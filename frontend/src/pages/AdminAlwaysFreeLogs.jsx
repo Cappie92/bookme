@@ -20,6 +20,7 @@ export default function AdminAlwaysFreeLogs() {
   useEffect(() => {
     fetchLogs()
     fetchStats()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters])
 
   const fetchLogs = async () => {

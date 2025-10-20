@@ -24,6 +24,7 @@ const BlogPost = () => {
     fetchPost();
     fetchRelatedPosts();
     trackPageView();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug]);
 
   const fetchPost = async () => {

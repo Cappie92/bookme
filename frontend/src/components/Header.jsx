@@ -5,7 +5,7 @@ import { useAuth } from '../contexts/AuthContext'
 
 export default function Header() {
   const [isMenuOpen, setIsMenuOpen] = useState(false)
-  const { isAuthenticated, user, logout, openAuthModal } = useAuth()
+  const { isAuthenticated, logout, openAuthModal } = useAuth()
   const navigate = useNavigate()
 
   const handleLoginClick = () => {

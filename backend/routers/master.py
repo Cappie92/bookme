@@ -1,14 +1,22 @@
 import os
 import uuid
+import logging
 from datetime import datetime, time, timedelta, date
 from typing import Any, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Body, File, Form, UploadFile, Query
 from sqlalchemy.orm import Session
+from sqlalchemy import desc
 
 from auth import get_current_active_user, require_master
+import models
 from database import get_db
+from utils.booking_status import get_effective_booking_status, apply_effective_status_to_bookings
+
+logger = logging.getLogger(__name__)
 from models import Booking, Master, MasterSchedule, MasterScheduleSettings, User, BookingStatus, Service, ServiceCategory, MasterServiceCategory, MasterService, SalonMasterInvitation, SalonMasterInvitationStatus, ClientRestriction, Salon, SalonBranch, Income
+# Явный алиас для модели ограничений, чтобы не путать с pydantic-схемой
+from models import ClientRestriction as ClientRestrictionModel
 from schemas import Booking as BookingSchema
 from schemas import Salon as SalonSchema
 from schemas import Schedule as ScheduleSchema
@@ -44,7 +52,7 @@ def get_bookings(
     db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)
 ) -> Any:
     """
-    Получение списка предстоящих бронирований мастера.
+    Получение списка всех бронирований мастера (включая прошедшие для отображения в расписании).
     """
     master = db.query(Master).filter(Master.user_id == current_user.id).first()
     if not master:
@@ -54,12 +62,176 @@ def get_bookings(
         db.query(Booking)
         .filter(
             Booking.master_id == master.id,
-            Booking.start_time > datetime.utcnow(),
             Booking.status != BookingStatus.CANCELLED,
         )
+        .order_by(Booking.start_time.desc())
         .all()
     )
+    
+    # Применяем актуальные статусы с учетом времени
+    apply_effective_status_to_bookings(bookings, db)
+    
     return bookings
+
+@router.get("/bookings/detailed")
+def get_detailed_bookings(
+    db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)
+) -> Any:
+    """
+    Получение списка всех бронирований мастера с полной информацией об услугах.
+    """
+    master = db.query(Master).filter(Master.user_id == current_user.id).first()
+    if not master:
+        raise HTTPException(status_code=404, detail="Профиль мастера не найден")
+
+    bookings = (
+        db.query(Booking)
+        .filter(
+            Booking.master_id == master.id,
+            Booking.status != BookingStatus.CANCELLED,
+        )
+        .order_by(Booking.start_time.desc())
+        .all()
+    )
+    
+    # Применяем актуальные статусы с учетом времени
+    apply_effective_status_to_bookings(bookings, db)
+    
+    # Формируем ответ с полной информацией
+    detailed_bookings = []
+    for booking in bookings:
+        # Получаем услугу
+        service = db.query(Service).filter(Service.id == booking.service_id).first()
+        
+        # Получаем клиента
+        client = db.query(User).filter(User.id == booking.client_id).first()
+        client_name = client.full_name if client and client.full_name else "Клиент"
+        
+        detailed_bookings.append({
+            "id": booking.id,
+            "client_id": booking.client_id,
+            "client_name": client_name,
+            "service_id": booking.service_id,
+            "service_name": service.name if service else "Услуга",
+            "service_duration": service.duration if service else 60,
+            "service_price": service.price if service else 0,
+            "master_id": booking.master_id,
+            "indie_master_id": booking.indie_master_id,
+            "salon_id": booking.salon_id,
+            "branch_id": booking.branch_id,
+            "start_time": booking.start_time.isoformat(),
+            "end_time": booking.end_time.isoformat(),
+            "status": booking.status,
+            "notes": booking.notes,
+            "payment_method": booking.payment_method,
+            "payment_amount": booking.payment_amount,
+            "created_at": booking.created_at.isoformat() if booking.created_at else None,
+            "updated_at": booking.updated_at.isoformat() if booking.updated_at else None
+        })
+    
+    return detailed_bookings
+
+
+@router.get("/past-appointments")
+def get_past_appointments(
+    start_date: Optional[str] = Query(None, description="Начальная дата в формате YYYY-MM-DD"),
+    end_date: Optional[str] = Query(None, description="Конечная дата в формате YYYY-MM-DD"),
+    status: Optional[str] = Query(None, description="Фильтр по статусу: completed, cancelled, confirmed"),
+    page: int = Query(1, ge=1, description="Номер страницы"),
+    limit: int = Query(20, ge=1, le=100, description="Количество записей на странице"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Получить прошедшие записи мастера из базы данных.
+    Возвращает только РЕАЛЬНЫЕ данные из таблицы bookings.
+    """
+    # Находим мастера
+    master = db.query(Master).filter(Master.user_id == current_user.id).first()
+    if not master:
+        raise HTTPException(status_code=404, detail="Профиль мастера не найден")
+
+    # Строим запрос к базе данных
+    query = db.query(Booking).filter(
+        Booking.master_id == master.id,
+        Booking.start_time < datetime.utcnow()  # Только прошедшие записи
+    )
+
+    # Применяем фильтры
+    if start_date:
+        try:
+            start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+            query = query.filter(Booking.start_time >= start_dt)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Неверный формат start_date")
+    
+    if end_date:
+        try:
+            end_dt = datetime.strptime(end_date, "%Y-%m-%d").replace(hour=23, minute=59, second=59)
+            query = query.filter(Booking.start_time <= end_dt)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Неверный формат end_date")
+
+    if status:
+        valid_statuses = ['created', 'awaiting_confirmation', 'completed', 'cancelled', 'cancelled_by_client_early', 'cancelled_by_client_late']
+        if status not in valid_statuses:
+            raise HTTPException(status_code=400, detail=f"Неверный статус. Доступные: {', '.join(valid_statuses)}")
+        query = query.filter(Booking.status == status)
+
+    # Получаем общее количество
+    total = query.count()
+
+    # Получаем записи с пагинацией
+    bookings = query.order_by(desc(Booking.start_time)).offset((page - 1) * limit).limit(limit).all()
+    
+    # Применяем актуальные статусы с учетом времени
+    apply_effective_status_to_bookings(bookings, db)
+    
+    # Формируем ответ
+    appointments = []
+    for booking in bookings:
+        # Получаем услугу
+        service = db.query(Service).filter(Service.id == booking.service_id).first()
+        
+        # Получаем клиента
+        client = db.query(User).filter(User.id == booking.client_id).first()
+        client_name = client.full_name if client and client.full_name else "Клиент"
+        
+        # Определяем цвет статуса
+        status_color_map = {
+            'created': 'blue',
+            'awaiting_confirmation': 'orange',
+            'completed': 'green',
+            'cancelled': 'red',
+            'cancelled_by_client_early': 'purple',
+            'cancelled_by_client_late': 'pink',
+            'confirmed': 'orange',  # для обратной совместимости
+            'pending': 'orange'      # для обратной совместимости
+        }
+        status_color = status_color_map.get(booking.status, 'gray')
+
+        appointments.append({
+            "id": booking.id,
+            "date": booking.start_time.strftime("%Y-%m-%d"),
+            "time": booking.start_time.strftime("%H:%M"),
+            "client_name": client_name,
+            "service_name": service.name if service else "Услуга",
+            "service_duration": service.duration if service else 60,
+            "service_price": service.price if service else 0,
+            "status": booking.status,
+            "status_color": status_color,
+            "payment_amount": booking.payment_amount if booking.payment_amount else 0,
+            "start_time": booking.start_time.isoformat(),
+            "end_time": booking.end_time.isoformat()
+        })
+
+    return {
+        "appointments": appointments,
+        "total": total,
+        "page": page,
+        "limit": limit,
+        "pages": (total + limit - 1) // limit if total > 0 else 1
+    }
 
 
 @router.get("/bookings/conflicts", response_model=List[dict])
@@ -448,24 +620,24 @@ def get_master_weekly_schedule(
     # Находим понедельник текущей недели
     monday = today - timedelta(days=current_day)
     
-    print(f"DEBUG: Исходный понедельник: {monday}")
-    print(f"DEBUG: week_offset: {week_offset}")
-    print(f"DEBUG: weeks_ahead: {weeks_ahead}")
+    logger.debug(f"Исходный понедельник: {monday}")
+    logger.debug(f"week_offset: {week_offset}")
+    logger.debug(f"weeks_ahead: {weeks_ahead}")
     
     # Добавляем offset недель
     monday = monday + timedelta(days=week_offset * 7)
     
-    print(f"DEBUG: Понедельник после offset: {monday}")
+    logger.debug(f"Понедельник после offset: {monday}")
     
     # Получаем существующее расписание для текущей недели и следующих недель
     week_start = monday
     week_end = monday + timedelta(days=(weeks_ahead * 7) - 1)
-    print(f"DEBUG: week_offset={week_offset}, weeks_ahead={weeks_ahead}, получаем расписание с {week_start} по {week_end}")
+    logger.debug(f"week_offset={week_offset}, weeks_ahead={weeks_ahead}, получаем расписание с {week_start} по {week_end}")
     
     # Получаем расписание с информацией о конфликтах
     schedule_slots = get_schedule_with_conflicts(db, master.id, week_start, week_end)
     
-    print(f"DEBUG: Найдено слотов с конфликтами: {len(schedule_slots)}")
+    logger.debug(f"Найдено слотов с конфликтами: {len(schedule_slots)}")
     
     # Создаем словарь для быстрого поиска
     schedule_dict = {}
@@ -479,7 +651,7 @@ def get_master_weekly_schedule(
         for i in range(7):  # 7 дней недели
             current_date = monday + timedelta(days=(week * 7) + i)
             for hour in range(24):  # 0:00 - 23:00
-                for minute in [0, 30]:
+                for minute in [0, 10, 20, 30, 40, 50]:
                     day_key = f"{current_date}_{hour}_{minute}"
                     slot_data = schedule_dict.get(day_key, {
                         'is_working': False,
@@ -522,12 +694,12 @@ def get_master_monthly_schedule(
     else:
         month_end = date(year, month + 1, 1) - timedelta(days=1)
     
-    print(f"DEBUG: Месячное расписание с {month_start} по {month_end}")
+    logger.debug(f"Месячное расписание с {month_start} по {month_end}")
     
     # Получаем расписание с информацией о конфликтах
     schedule_slots = get_schedule_with_conflicts(db, master.id, month_start, month_end)
     
-    print(f"DEBUG: Найдено слотов с конфликтами: {len(schedule_slots)}")
+    logger.debug(f"Найдено слотов с конфликтами: {len(schedule_slots)}")
     
     # Создаем словарь для быстрого поиска
     schedule_dict = {}
@@ -540,7 +712,7 @@ def get_master_monthly_schedule(
     current_date = month_start
     while current_date <= month_end:
         for hour in range(24):
-            for minute in [0, 30]:
+            for minute in [0, 10, 20, 30, 40, 50]:
                 day_key = f"{current_date}_{hour}_{minute}"
                 slot_data = schedule_dict.get(day_key, {
                     'is_working': False,
@@ -623,35 +795,35 @@ def create_schedule_rules(
     # Генерируем слоты расписания на основе правил
     slots_to_create = []
     
-    print(f"DEBUG: Создание расписания типа: {schedule_type}")
-    print(f"DEBUG: Дата окончания: {valid_until_date}")
+    logger.info(f"Создание расписания типа: {schedule_type}")
+    logger.debug(f"Дата окончания: {valid_until_date}")
     
     if schedule_type == 'weekdays':
         weekdays = rules_data.get('weekdays', {})
         if not weekdays:
             raise HTTPException(status_code=400, detail="Не выбраны рабочие дни")
         
-        print(f"DEBUG: Выбранные дни недели: {weekdays}")
+        logger.debug(f"Выбранные дни недели: {weekdays}")
         
         # Генерируем слоты для каждого дня недели до даты окончания
         current_date = datetime.now().date()
-        print(f"DEBUG: Начинаем с даты: {current_date}")
+        logger.debug(f"Начинаем с даты: {current_date}")
         
         while current_date <= valid_until_date:
             weekday = current_date.weekday()  # 0 = понедельник, 6 = воскресенье
             # Преобразуем в формат 1-7 (пн-вс)
             weekday_key = weekday + 1  # Понедельник = 1, воскресенье = 7
             
-            print(f"DEBUG: Дата {current_date}, день недели {weekday}, ключ {weekday_key}")
+            logger.debug(f"Дата {current_date}, день недели {weekday}, ключ {weekday_key}")
             
             if str(weekday_key) in weekdays:
                 day_config = weekdays[str(weekday_key)]
                 start_time = day_config.get('start', '09:00')
                 end_time = day_config.get('end', '18:00')
                 
-                print(f"DEBUG: Создаем слоты для {current_date} с {start_time} до {end_time}")
+                logger.debug(f"Создаем слоты для {current_date} с {start_time} до {end_time}")
                 
-                # Создаем слоты по 30 минут
+                # Создаем слоты по 10 минут
                 start_hour, start_minute = map(int, start_time.split(':'))
                 end_hour, end_minute = map(int, end_time.split(':'))
                 
@@ -666,7 +838,7 @@ def create_schedule_rules(
                         'is_working': True
                     })
                     
-                    current_minute += 30
+                    current_minute += 10
                     if current_minute >= 60:
                         current_hour += 1
                         current_minute = 0
@@ -688,7 +860,7 @@ def create_schedule_rules(
                 start_time = day_config.get('start', '09:00')
                 end_time = day_config.get('end', '18:00')
                 
-                # Создаем слоты по 30 минут
+                # Создаем слоты по 10 минут
                 start_hour, start_minute = map(int, start_time.split(':'))
                 end_hour, end_minute = map(int, end_time.split(':'))
                 
@@ -703,7 +875,7 @@ def create_schedule_rules(
                         'is_working': True
                     })
                     
-                    current_minute += 30
+                    current_minute += 10
                     if current_minute >= 60:
                         current_hour += 1
                         current_minute = 0
@@ -747,7 +919,7 @@ def create_schedule_rules(
                 
             current_date += timedelta(days=1)
     
-    print(f"DEBUG: Всего слотов для создания: {len(slots_to_create)}")
+    logger.info(f"Всего слотов для создания: {len(slots_to_create)}")
     
     # Проверяем конфликты с существующими записями
     conflicts = []
@@ -770,7 +942,7 @@ def create_schedule_rules(
         # Проверяем каждый слот на конфликт с записями
         for slot_data in slots_to_create:
             slot_start = datetime.combine(slot_data['date'], time(hour=slot_data['hour'], minute=slot_data['minute']))
-            slot_end = slot_start + timedelta(minutes=30)
+            slot_end = slot_start + timedelta(minutes=10)
             
             for booking in bookings:
                 if (slot_start < booking.end_time and slot_end > booking.start_time):
@@ -878,11 +1050,11 @@ def update_master_weekly_schedule(
 
     # Создаем новое расписание из слотов
     for slot in schedule_update.slots:
-        # Создаем time для start_time и end_time (end_time = start_time + 30 минут)
+        # Создаем time для start_time и end_time (end_time = start_time + 10 минут)
         start_time = time(hour=slot.hour, minute=slot.minute, second=0, microsecond=0)
         
-        # Вычисляем end_time (start_time + 30 минут)
-        end_minute = slot.minute + 30
+        # Вычисляем end_time (start_time + 10 минут)
+        end_minute = slot.minute + 10
         end_hour = slot.hour
         if end_minute >= 60:
             end_hour += 1
@@ -951,14 +1123,14 @@ def create_master_category(
     """
     Создание новой категории услуг мастера.
     """
-    print(f"Creating category for user: {current_user.email}, role: {current_user.role}")
+    logger.info(f"Creating category for user: {current_user.email}, role: {current_user.role}")
     
     master = db.query(Master).filter(Master.user_id == current_user.id).first()
     if not master:
-        print(f"Профиль мастера не найден for user {current_user.id}")
+        logger.warning(f"Профиль мастера не найден for user {current_user.id}")
         raise HTTPException(status_code=404, detail="Профиль мастера не найден")
     
-    print(f"Found master: {master.id}")
+    logger.debug(f"Found master: {master.id}")
     
     # Проверяем уникальность названия категории для этого мастера
     existing_category = db.query(MasterServiceCategory).filter(
@@ -977,7 +1149,7 @@ def create_master_category(
     db.add(category)
     db.commit()
     db.refresh(category)
-    print(f"Created category: {category.id}")
+    logger.info(f"Created category: {category.id}")
     return category
 
 @router.put("/categories/{category_id}", response_model=MasterServiceCategoryOut)
@@ -1060,23 +1232,21 @@ def get_master_services(
     if not master:
         raise HTTPException(status_code=404, detail="Профиль мастера не найден")
     
-    # Получаем услуги с информацией о категориях
-    services = db.query(MasterService, MasterServiceCategory).join(
-        MasterServiceCategory, MasterService.category_id == MasterServiceCategory.id
-    ).filter(MasterService.master_id == master.id).all()
+    # Получаем услуги из таблицы services, где indie_master_id соответствует master.id
+    services = db.query(Service).filter(Service.indie_master_id == master.id).all()
     
     # Преобразуем в нужный формат
     result = []
-    for service, category in services:
+    for service in services:
         result.append({
             "id": service.id,
             "name": service.name,
             "description": service.description,
             "category_id": service.category_id,
-            "category_name": category.name,
+            "category_name": None,  # Услуги из services не имеют категорий в master_services
             "price": service.price,
             "duration": service.duration,
-            "master_id": service.master_id,
+            "master_id": master.id,
             "created_at": service.created_at
         })
     
@@ -1563,7 +1733,7 @@ def get_salon_work_schedule(
             end_hour = schedule_item.end_time.hour
             end_minute = schedule_item.end_time.minute
             
-            # Генерируем слоты с интервалом 30 минут
+            # Генерируем слоты с интервалом 10 минут
             current_hour = start_hour
             current_minute = start_minute
             
@@ -1572,9 +1742,8 @@ def get_salon_work_schedule(
                 schedule[slot_key] = True
                 
                 # Переходим к следующему слоту
-                if current_minute == 0:
-                    current_minute = 30
-                else:
+                current_minute += 10
+                if current_minute >= 60:
                     current_minute = 0
                     current_hour += 1
 
@@ -1665,9 +1834,10 @@ def get_master_restrictions(
     if not master.can_work_independently:
         raise HTTPException(status_code=403, detail="Only independent masters can manage restrictions")
     
-    restrictions = db.query(ClientRestriction).filter(
-        ClientRestriction.indie_master_id == master.id,
-        ClientRestriction.is_active == True
+    # Используем модель БД, а не pydantic-схему
+    restrictions = db.query(ClientRestrictionModel).filter(
+        ClientRestrictionModel.indie_master_id == master.id,
+        ClientRestrictionModel.is_active == True
     ).all()
     
     blacklist = [r for r in restrictions if r.restriction_type == 'blacklist']
@@ -1696,17 +1866,17 @@ def create_master_restriction(
         raise HTTPException(status_code=403, detail="Only independent masters can manage restrictions")
     
     # Проверяем, не существует ли уже такое ограничение
-    existing = db.query(ClientRestriction).filter(
-        ClientRestriction.indie_master_id == master.id,
-        ClientRestriction.client_phone == restriction.client_phone,
-        ClientRestriction.restriction_type == restriction.restriction_type,
-        ClientRestriction.is_active == True
+    existing = db.query(ClientRestrictionModel).filter(
+        ClientRestrictionModel.indie_master_id == master.id,
+        ClientRestrictionModel.client_phone == restriction.client_phone,
+        ClientRestrictionModel.restriction_type == restriction.restriction_type,
+        ClientRestrictionModel.is_active == True
     ).first()
     
     if existing:
         raise HTTPException(status_code=400, detail="Restriction already exists for this client")
     
-    new_restriction = ClientRestriction(
+    new_restriction = ClientRestrictionModel(
         indie_master_id=master.id,
         client_phone=restriction.client_phone,
         restriction_type=restriction.restriction_type,
@@ -1829,6 +1999,8 @@ def check_master_client_restriction(
 # Новые эндпоинты для мастерского дашборда
 @router.get("/dashboard/stats")
 def get_master_dashboard_stats(
+    period: str = Query("week", description="Period: day, week, month, quarter, year"),
+    offset: int = Query(0, description="Time offset for navigation"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ) -> Any:
@@ -1837,7 +2009,7 @@ def get_master_dashboard_stats(
     """
     try:
         from sqlalchemy import func, or_
-        from models import Income, Service, SalonBranch, BookingStatus, Subscription
+        from models import Income, Service, SalonBranch, BookingStatus, Subscription, IndieMaster
         
         master = db.query(Master).filter(Master.user_id == current_user.id).first()
         if not master:
@@ -1875,13 +2047,252 @@ def get_master_dashboard_stats(
         from datetime import timedelta, date
         today = date.today()
         
+        # Функция для расчета периодов
+        def get_period_dates(period_type: str, offset: int = 0):
+            today = datetime.now().date()
+            
+            if period_type == "day":
+                # День: сегодня + 2 дня до и 2 дня после
+                base_date = today + timedelta(days=offset)
+                periods = []
+                for i in range(-2, 3):  # -2, -1, 0, 1, 2
+                    period_date = base_date + timedelta(days=i)
+                    periods.append({
+                        'start': period_date,
+                        'end': period_date,
+                        'label': period_date.strftime("%d-%m"),
+                        'is_current': i == 0,
+                        'is_past': i < 0,
+                        'is_future': i > 0
+                    })
+                return periods
+            
+            elif period_type == "week":
+                # Неделя: 5 недель (-2, -1, 0, +1, +2)
+                current_week_monday = today - timedelta(days=today.weekday()) + timedelta(days=offset * 7)
+                periods = []
+                for i in range(-2, 3):
+                    week_monday = current_week_monday + timedelta(days=i * 7)
+                    week_sunday = week_monday + timedelta(days=6)
+                    periods.append({
+                        'start': week_monday,
+                        'end': week_sunday,
+                        'label': week_monday.strftime("%d-%m"),
+                        'is_current': i == 0,
+                        'is_past': i < 0,
+                        'is_future': i > 0
+                    })
+                return periods
+            
+            elif period_type == "month":
+                # Месяц: 5 месяцев (-2, -1, 0, +1, +2)
+                current_month = today.replace(day=1) + timedelta(days=offset * 32)  # Примерное смещение
+                # Корректируем на первый день месяца
+                current_month = current_month.replace(day=1)
+                periods = []
+                for i in range(-2, 3):
+                    # Вычисляем месяц с учетом смещения
+                    if i == 0:
+                        month_start = current_month
+                    else:
+                        # Добавляем месяцы
+                        month_start = current_month
+                        for _ in range(abs(i)):
+                            if i > 0:
+                                # Следующий месяц
+                                if month_start.month == 12:
+                                    month_start = month_start.replace(year=month_start.year + 1, month=1)
+                                else:
+                                    month_start = month_start.replace(month=month_start.month + 1)
+                            else:
+                                # Предыдущий месяц
+                                if month_start.month == 1:
+                                    month_start = month_start.replace(year=month_start.year - 1, month=12)
+                                else:
+                                    month_start = month_start.replace(month=month_start.month - 1)
+                    
+                    # Последний день месяца
+                    if month_start.month == 12:
+                        next_month = month_start.replace(year=month_start.year + 1, month=1)
+                    else:
+                        next_month = month_start.replace(month=month_start.month + 1)
+                    month_end = next_month - timedelta(days=1)
+                    
+                    periods.append({
+                        'start': month_start,
+                        'end': month_end,
+                        'label': month_start.strftime("%m-%Y"),
+                        'is_current': i == 0,
+                        'is_past': i < 0,
+                        'is_future': i > 0
+                    })
+                return periods
+            
+            elif period_type == "quarter":
+                # Квартал: 5 кварталов (-2, -1, 0, +1, +2)
+                current_year = today.year
+                current_quarter = (today.month - 1) // 3 + 1 + offset
+                # Корректируем год и квартал
+                while current_quarter > 4:
+                    current_quarter -= 4
+                    current_year += 1
+                while current_quarter < 1:
+                    current_quarter += 4
+                    current_year -= 1
+                
+                periods = []
+                for i in range(-2, 3):
+                    quarter = current_quarter + i
+                    year = current_year
+                    # Корректируем квартал и год
+                    while quarter > 4:
+                        quarter -= 4
+                        year += 1
+                    while quarter < 1:
+                        quarter += 4
+                        year -= 1
+                    
+                    # Первый месяц квартала
+                    quarter_start_month = (quarter - 1) * 3 + 1
+                    quarter_start = date(year, quarter_start_month, 1)
+                    
+                    # Последний месяц квартала
+                    quarter_end_month = quarter * 3
+                    quarter_end = date(year, quarter_end_month, 1)
+                    # Последний день месяца
+                    if quarter_end_month == 12:
+                        next_month = date(year + 1, 1, 1)
+                    else:
+                        next_month = date(year, quarter_end_month + 1, 1)
+                    quarter_end = next_month - timedelta(days=1)
+                    
+                    periods.append({
+                        'start': quarter_start,
+                        'end': quarter_end,
+                        'label': f"Q{quarter} {year}",
+                        'is_current': i == 0,
+                        'is_past': i < 0,
+                        'is_future': i > 0
+                    })
+                return periods
+            
+            elif period_type == "year":
+                # Год: 5 лет (-2, -1, 0, +1, +2)
+                current_year = today.year + offset
+                periods = []
+                for i in range(-2, 3):
+                    year = current_year + i
+                    year_start = date(year, 1, 1)
+                    year_end = date(year, 12, 31)
+                    
+                    periods.append({
+                        'start': year_start,
+                        'end': year_end,
+                        'label': str(year),
+                        'is_current': i == 0,
+                        'is_past': i < 0,
+                        'is_future': i > 0
+                    })
+                return periods
+            
+            return []
+        
+        # Получаем периоды для выбранного типа
+        periods = get_period_dates(period, offset)
+        
+        # Находим текущий период для расчета динамики
+        current_period = next((p for p in periods if p['is_current']), None)
+        previous_period = None
+        
+        if current_period:
+            # Находим предыдущий период
+            current_index = periods.index(current_period)
+            if current_index > 0:
+                previous_period = periods[current_index - 1]
+        
+        logger.debug(f"Период: {period}, offset: {offset}")
+        logger.debug(f"Текущий период: {current_period}")
+        logger.debug(f"Предыдущий период: {previous_period}")
+        
+        # Статистика за текущий период
+        current_bookings = 0
+        current_income = 0
+        if current_period:
+            current_bookings = (
+                db.query(func.count(Booking.id))
+                .filter(
+                    or_(Booking.master_id == master.id, Booking.indie_master_id == master.id),
+                    Booking.start_time >= current_period['start'],
+                    Booking.start_time <= current_period['end']
+                )
+                .scalar() or 0
+            )
+            
+            current_income = (
+                db.query(func.sum(Booking.payment_amount))
+                .filter(
+                    or_(Booking.master_id == master.id, Booking.indie_master_id == master.id),
+                    Booking.start_time >= current_period['start'],
+                    Booking.start_time <= current_period['end']
+                )
+                .scalar() or 0
+            )
+        
+        # Статистика за предыдущий период
+        previous_bookings = 0
+        previous_income = 0
+        if previous_period:
+            previous_bookings = (
+                db.query(func.count(Booking.id))
+                .filter(
+                    or_(Booking.master_id == master.id, Booking.indie_master_id == master.id),
+                    Booking.start_time >= previous_period['start'],
+                    Booking.start_time <= previous_period['end']
+                )
+                .scalar() or 0
+            )
+            
+            previous_income = (
+                db.query(func.sum(Booking.payment_amount))
+                .filter(
+                    or_(Booking.master_id == master.id, Booking.indie_master_id == master.id),
+                    Booking.start_time >= previous_period['start'],
+                    Booking.start_time <= previous_period['end']
+                )
+                .scalar() or 0
+            )
+        
+        # Расчет динамики
+        income_dynamics = 0
+        if previous_income and previous_income > 0:
+            income_dynamics = ((current_income - previous_income) / previous_income) * 100
+        
+        bookings_dynamics = 0
+        if previous_bookings and previous_bookings > 0:
+            bookings_dynamics = ((current_bookings - previous_bookings) / previous_bookings) * 100
+        
+        logger.info(f"💰 Доходы: текущий период {current_income} ₽, предыдущий период {previous_income} ₽, динамика {income_dynamics:.1f}%")
+        logger.info(f"📅 Записи: текущий период {current_bookings}, предыдущий период {previous_bookings}")
+        
+        # Будущие записи (все после текущего периода)
+        future_bookings = 0
+        if current_period:
+            future_bookings = (
+                db.query(func.count(Booking.id))
+                .filter(
+                    or_(Booking.master_id == master.id, Booking.indie_master_id == master.id),
+                    Booking.start_time > current_period['end']
+                )
+                .scalar() or 0
+            )
+        
         # Получаем ближайшие записи
         next_bookings = (
             db.query(Booking)
             .filter(
                 or_(Booking.master_id == master.id, Booking.indie_master_id == master.id),
                 Booking.start_time > datetime.utcnow(),
-                Booking.status.in_([BookingStatus.PENDING, BookingStatus.CONFIRMED])
+                Booking.status.in_([BookingStatus.CREATED, BookingStatus.AWAITING_CONFIRMATION])
             )
             .order_by(Booking.start_time.asc())
             .limit(3)
@@ -1910,90 +2321,150 @@ def get_master_dashboard_stats(
                 "service_name": next_booking.service.name if next_booking.service else "Неизвестная услуга"
             }
         
-        # Заработок за последнюю неделю
-        week_ago = datetime.utcnow() - timedelta(days=7)
-        two_weeks_ago = datetime.utcnow() - timedelta(days=14)
-        
-        # Заработок за последнюю неделю (только для индивидуальных мастеров)
-        current_week_income = 0
-        previous_week_income = 0
-        income_dynamics = 0
-        
-        if is_indie_master:
-            # Получаем доходы за последние две недели только для индивидуальных мастеров
-            current_week_income = (
-                db.query(func.sum(Income.master_earnings))
-                .filter(
-                    Income.indie_master_id == master.id,
-                    Income.income_date >= week_ago.date()
-                )
-                .scalar() or 0
-            )
-            
-            previous_week_income = (
-                db.query(func.sum(Income.master_earnings))
-                .filter(
-                    Income.indie_master_id == master.id,
-                    Income.income_date >= two_weeks_ago.date(),
-                    Income.income_date < week_ago.date()
-                )
-                .scalar() or 0
-            )
-            
-            # Динамика неделя к неделе
-            if previous_week_income > 0:
-                income_dynamics = ((current_week_income - previous_week_income) / previous_week_income) * 100
-        
-        # Динамика записей
-        current_week_bookings = (
-            db.query(func.count(Booking.id))
+        # Расчет данных для периодов (для гистограмм)
+        periods_data = []
+        for period_data in periods:
+            # Количество записей
+            period_bookings = (
+                db.query(func.count(Booking.id))
             .filter(
                 or_(Booking.master_id == master.id, Booking.indie_master_id == master.id),
-                Booking.start_time >= week_ago,
-                Booking.status.in_([BookingStatus.COMPLETED, BookingStatus.CANCELLED])
+                    Booking.start_time >= period_data['start'],
+                    Booking.start_time <= period_data['end']
             )
             .scalar() or 0
         )
         
-        previous_week_bookings = (
-            db.query(func.count(Booking.id))
+            # Доход
+            period_income = (
+            db.query(func.sum(Booking.payment_amount))
             .filter(
                 or_(Booking.master_id == master.id, Booking.indie_master_id == master.id),
-                Booking.start_time >= two_weeks_ago,
-                Booking.start_time < week_ago,
-                Booking.status.in_([BookingStatus.COMPLETED, BookingStatus.CANCELLED])
+                    Booking.start_time >= period_data['start'],
+                    Booking.start_time <= period_data['end']
             )
             .scalar() or 0
         )
         
-        future_week_bookings = (
-            db.query(func.count(Booking.id))
-            .filter(
-                or_(Booking.master_id == master.id, Booking.indie_master_id == master.id),
-                Booking.start_time > datetime.utcnow(),
-                Booking.start_time <= datetime.utcnow() + timedelta(days=7),
-                Booking.status.in_([BookingStatus.PENDING, BookingStatus.CONFIRMED])
-            )
-            .scalar() or 0
-        )
+            periods_data.append({
+                "period_label": period_data['label'],
+                "period_start": period_data['start'].isoformat(),
+                "period_end": period_data['end'].isoformat(),
+                "bookings": period_bookings,
+                "income": float(period_income),
+                "is_current": period_data['is_current'],
+                "is_past": period_data['is_past'],
+                "is_future": period_data['is_future']
+            })
         
-        # Топ-3 услуг по количеству записей
-        top_services_by_bookings = (
-            db.query(
-                Booking.service_id,
-                func.count(Booking.id).label("booking_count")
-            )
-            .filter(
-                or_(Booking.master_id == master.id, Booking.indie_master_id == master.id),
-                Booking.status.in_([BookingStatus.COMPLETED, BookingStatus.CANCELLED])
-            )
-            .group_by(Booking.service_id)
-            .order_by(func.count(Booking.id).desc())
-            .limit(3)
-            .all()
-        )
+        # Подготовим границы для агрегатов по услугам в зависимости от периода
+        # Дашборд (без периода) или period='week' с offset=0: текущая неделя + 2 прошлые
+        # День: последние 7 дней
+        # Неделя: текущая неделя + 2 прошлые
+        # Месяц: текущий месяц + 2 прошлых
+        # Квартал: только текущий квартал (с начала квартала)
+        # Год: только текущий год (с начала года)
         
-        # Получаем названия услуг
+        today = datetime.now().date()
+        agg_start = None
+        agg_end = None
+        
+        if period == "day":
+            # Последние 7 дней
+            agg_start = today - timedelta(days=6)
+            agg_end = today
+        elif period == "week":
+            # Текущая неделя + 2 прошлые (всего 3 недели)
+            current_week_monday = today - timedelta(days=today.weekday())
+            agg_start = current_week_monday - timedelta(days=14)  # 2 недели назад
+            agg_end = current_week_monday + timedelta(days=6)  # Конец текущей недели
+        elif period == "month":
+            # Текущий месяц + 2 прошлых
+            current_month_start = today.replace(day=1)
+            # Вычисляем начало 2 месяца назад
+            if current_month_start.month >= 3:
+                agg_start = current_month_start.replace(month=current_month_start.month - 2)
+            elif current_month_start.month == 2:
+                agg_start = current_month_start.replace(year=current_month_start.year - 1, month=12)
+            else:  # month == 1
+                agg_start = current_month_start.replace(year=current_month_start.year - 1, month=11)
+            # Конец текущего месяца
+            if current_month_start.month == 12:
+                next_month = current_month_start.replace(year=current_month_start.year + 1, month=1)
+            else:
+                next_month = current_month_start.replace(month=current_month_start.month + 1)
+            agg_end = next_month - timedelta(days=1)
+        elif period == "quarter":
+            # Только текущий квартал
+            current_quarter = (today.month - 1) // 3 + 1
+            quarter_start_month = (current_quarter - 1) * 3 + 1
+            agg_start = today.replace(month=quarter_start_month, day=1)
+            # Конец квартала
+            quarter_end_month = current_quarter * 3
+            if quarter_end_month == 12:
+                next_month = date(today.year + 1, 1, 1)
+            else:
+                next_month = date(today.year, quarter_end_month + 1, 1)
+            agg_end = next_month - timedelta(days=1)
+        elif period == "year":
+            # Только текущий год
+            agg_start = today.replace(month=1, day=1)
+            agg_end = today.replace(month=12, day=31)
+        else:
+            # По умолчанию (для дашборда): текущая неделя + 2 прошлые
+            current_week_monday = today - timedelta(days=today.weekday())
+            agg_start = current_week_monday - timedelta(days=14)
+            agg_end = current_week_monday + timedelta(days=6)
+
+        # Определим профиль независимого мастера (если есть)
+        indie_master = db.query(IndieMaster).filter(IndieMaster.user_id == current_user.id).first()
+        
+        # Для отладки - проверим, есть ли записи у мастера
+        total_bookings = db.query(func.count(Booking.id)).filter(
+            or_(Booking.master_id == master.id, Booking.indie_master_id == master.id),
+            Booking.salon_id == None
+        ).scalar()
+        logger.info(f"🔍 Всего записей мастера (без салона): {total_bookings}")
+        
+        if indie_master:
+            indie_services = db.query(func.count(Service.id)).filter(Service.indie_master_id == indie_master.id).scalar()
+            logger.info(f"🔍 Услуг у IndieMaster: {indie_services}")
+        else:
+            logger.info("🔍 IndieMaster профиль не найден")
+
+        # Топ-3 услуг по количеству записей (за текущий период)
+        q_bookings = db.query(
+            Booking.service_id,
+            func.count(Booking.id).label("booking_count")
+        )
+        # Привязка к мастеру и исключение салонных записей
+        if indie_master is not None:
+            q_bookings = q_bookings.filter(
+                or_(Booking.master_id == master.id, Booking.indie_master_id == indie_master.id),
+                Booking.salon_id == None,
+                Booking.status.in_([BookingStatus.COMPLETED.value, BookingStatus.CANCELLED.value])
+            )
+        else:
+            q_bookings = q_bookings.filter(
+                Booking.master_id == master.id,
+                Booking.salon_id == None,
+                Booking.status.in_([BookingStatus.COMPLETED.value, BookingStatus.CANCELLED.value])
+            )
+        # Фильтр по периоду
+        if agg_start and agg_end:
+            q_bookings = q_bookings.filter(Booking.start_time >= agg_start, Booking.start_time <= agg_end)
+        # Если есть профиль независимого мастера, учитываем только его услуги
+        # Но если у IndieMaster нет услуг, показываем все услуги мастера
+        if indie_master is not None:
+            indie_services_count = db.query(func.count(Service.id)).filter(Service.indie_master_id == indie_master.id).scalar()
+            if indie_services_count > 0:
+                q_bookings = q_bookings.join(Service, Service.id == Booking.service_id).filter(Service.indie_master_id == indie_master.id)
+                logger.info("🔍 Фильтруем по IndieMaster услугам")
+            else:
+                logger.info("🔍 IndieMaster услуг нет, показываем все услуги мастера")
+        top_services_by_bookings = q_bookings.group_by(Booking.service_id).order_by(func.count(Booking.id).desc()).limit(3).all()
+        
+        # Получаем названия услуг из Service (безопасно, исключаем потенциальные ошибки модели MasterService)
         service_names = {}
         for service_id, _ in top_services_by_bookings:
             service = db.query(Service).filter(Service.id == service_id).first()
@@ -2009,53 +2480,133 @@ def get_master_dashboard_stats(
             for service_id, count in top_services_by_bookings
         ]
         
-        # Топ-3 услуг по заработку (только для индивидуальных мастеров)
-        top_services_by_earnings_with_names = []
+        # Топ-3 услуг по заработку за текущий период
+        # Для индивидуальных мастеров используем Income.master_earnings, иначе суммируем Booking.payment_amount
         if is_indie_master:
-            # Получаем топ услуг по заработку через связь с Booking
-            top_services_by_earnings = (
-                db.query(
-                    Booking.service_id,
-                    func.sum(Income.master_earnings).label("total_earnings")
-                )
-                .join(Income, Income.booking_id == Booking.id)
-                .filter(
-                    Income.indie_master_id == master.id
-                )
-                .group_by(Booking.service_id)
-                .order_by(func.sum(Income.master_earnings).desc())
-                .limit(3)
-                .all()
+            earnings_query = db.query(
+                Booking.service_id,
+                func.sum(Income.master_earnings).label("total_earnings")
+            ).join(Income, Income.booking_id == Booking.id).filter(
+                Income.indie_master_id == master.id,
+                Booking.salon_id == None
             )
-            
-            # Получаем названия услуг для заработка
-            service_earnings_names = {}
-            for service_id, _ in top_services_by_earnings:
-                service = db.query(Service).filter(Service.id == service_id).first()
-                if service:
-                    service_earnings_names[service_id] = service.name
-            
-            top_services_by_earnings_with_names = [
-                {
-                    "service_id": service_id,
-                    "service_name": service_earnings_names.get(service_id, "Неизвестная услуга"),
-                    "total_earnings": float(earnings)
-                }
-                for service_id, earnings in top_services_by_earnings
-            ]
+            if agg_start and agg_end:
+                earnings_query = earnings_query.filter(Booking.start_time >= agg_start, Booking.start_time <= agg_end)
+            if indie_master is not None:
+                indie_services_count = db.query(func.count(Service.id)).filter(Service.indie_master_id == indie_master.id).scalar()
+                if indie_services_count > 0:
+                    earnings_query = earnings_query.join(Service, Service.id == Booking.service_id).filter(Service.indie_master_id == indie_master.id)
+            earnings_query = earnings_query.group_by(Booking.service_id).order_by(func.sum(Income.master_earnings).desc()).limit(3)
+        else:
+            if indie_master is not None:
+                earnings_query = db.query(
+                    Booking.service_id,
+                    func.sum(Booking.payment_amount).label("total_earnings")
+                ).filter(
+                    or_(Booking.master_id == master.id, Booking.indie_master_id == indie_master.id),
+                    Booking.salon_id == None
+                )
+            else:
+                earnings_query = db.query(
+                    Booking.service_id,
+                    func.sum(Booking.payment_amount).label("total_earnings")
+                ).filter(
+                    Booking.master_id == master.id,
+                    Booking.salon_id == None
+                )
+            if agg_start and agg_end:
+                earnings_query = earnings_query.filter(Booking.start_time >= agg_start, Booking.start_time <= agg_end)
+            if indie_master is not None:
+                indie_services_count = db.query(func.count(Service.id)).filter(Service.indie_master_id == indie_master.id).scalar()
+                if indie_services_count > 0:
+                    earnings_query = earnings_query.join(Service, Service.id == Booking.service_id).filter(Service.indie_master_id == indie_master.id)
+            earnings_query = earnings_query.group_by(Booking.service_id).order_by(func.sum(Booking.payment_amount).desc()).limit(3)
+
+        top_services_by_earnings = earnings_query.all()
+        # Fallback: если данных о доходах в Income нет (dev/seed), считаем по сумме оплат из Booking
+        if not top_services_by_earnings:
+            if indie_master is not None:
+                q_fallback = db.query(
+                    Booking.service_id,
+                    func.sum(Booking.payment_amount).label("total_earnings")
+                ).filter(
+                    or_(Booking.master_id == master.id, Booking.indie_master_id == indie_master.id),
+                    Booking.salon_id == None
+                )
+            else:
+                q_fallback = db.query(
+                    Booking.service_id,
+                    func.sum(Booking.payment_amount).label("total_earnings")
+                ).filter(
+                    Booking.master_id == master.id,
+                    Booking.salon_id == None
+                )
+            if agg_start and agg_end:
+                q_fallback = q_fallback.filter(Booking.start_time >= agg_start, Booking.start_time <= agg_end)
+            if indie_master is not None:
+                indie_services_count = db.query(func.count(Service.id)).filter(Service.indie_master_id == indie_master.id).scalar()
+                if indie_services_count > 0:
+                    q_fallback = q_fallback.join(Service, Service.id == Booking.service_id).filter(Service.indie_master_id == indie_master.id)
+            top_services_by_earnings = q_fallback.group_by(Booking.service_id).order_by(func.sum(Booking.payment_amount).desc()).limit(3).all()
+
+        # Получаем названия услуг для заработка из Service
+        service_earnings_names = {}
+        for service_id, _ in top_services_by_earnings:
+            service = db.query(Service).filter(Service.id == service_id).first()
+            if service:
+                service_earnings_names[service_id] = service.name
+        
+        top_services_by_earnings_with_names = [
+            {
+                "service_id": service_id,
+                "service_name": service_earnings_names.get(service_id, "Неизвестная услуга"),
+                "total_earnings": float(earnings or 0)
+            }
+            for service_id, earnings in top_services_by_earnings
+        ]
+
+        # Метки периода для отображения на фронте
+        # Формируем правильную метку в зависимости от периода
+        top_period_label = None
+        top_period_range = None
+        
+        if period == "day":
+            top_period_label = "Последние 7 дней"
+            top_period_range = f"{agg_start.strftime('%d.%m.%Y')} — {agg_end.strftime('%d.%m.%Y')}"
+        elif period == "week":
+            top_period_label = "Текущая + 2 прошлые недели"
+            top_period_range = f"{agg_start.strftime('%d.%m.%Y')} — {agg_end.strftime('%d.%m.%Y')}"
+        elif period == "month":
+            top_period_label = "Текущий + 2 прошлых месяца"
+            top_period_range = f"{agg_start.strftime('%d.%m.%Y')} — {agg_end.strftime('%d.%m.%Y')}"
+        elif period == "quarter":
+            top_period_label = f"Q{(today.month - 1) // 3 + 1} {today.year}"
+            top_period_range = f"{agg_start.strftime('%d.%m.%Y')} — {agg_end.strftime('%d.%m.%Y')}"
+        elif period == "year":
+            top_period_label = str(today.year)
+            top_period_range = f"{agg_start.strftime('%d.%m.%Y')} — {agg_end.strftime('%d.%m.%Y')}"
+        else:
+            # Для дашборда (по умолчанию)
+            top_period_label = "Текущая + 2 прошлые недели"
+            top_period_range = f"{agg_start.strftime('%d.%m.%Y')} — {agg_end.strftime('%d.%m.%Y')}"
         
         return {
             "is_indie_master": is_indie_master,
             "subscription_info": subscription_info,
             "next_working_info": next_working_info,
-            "current_week_income": float(current_week_income),
-            "previous_week_income": float(previous_week_income),
+            "current_week_income": float(current_income),
+            "previous_week_income": float(previous_income),
             "income_dynamics": round(income_dynamics, 2),
-            "current_week_bookings": current_week_bookings,
-            "previous_week_bookings": previous_week_bookings,
-            "future_week_bookings": future_week_bookings,
+            "current_week_bookings": current_bookings,
+            "previous_week_bookings": previous_bookings,
+            "future_week_bookings": future_bookings,
+            "weeks_data": periods_data,  # Данные для гистограмм (5 периодов)
+            "period": period,
+            "offset": offset,
             "top_services_by_bookings": top_services_by_bookings_with_names,
-            "top_services_by_earnings": top_services_by_earnings_with_names
+            "top_services_by_earnings": top_services_by_earnings_with_names,
+            "top_period_label": top_period_label,
+            "top_period_range": top_period_range
         }
         
     except Exception as e:
@@ -2225,4 +2776,6 @@ def bulk_delete_schedule(
             status_code=500,
             detail=f"Ошибка при удалении расписания: {str(e)}"
         )
+
+
 

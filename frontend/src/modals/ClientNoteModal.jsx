@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { apiGet, apiGetSilent, apiPost, apiDelete } from '../utils/api'
+import { apiGetSilent, apiPost, apiDelete } from '../utils/api'
 import { useModal } from '../hooks/useModal'
 
 const ClientNoteModal = ({ 
@@ -43,6 +43,7 @@ const ClientNoteModal = ({
     if (isOpen && noteType && targetId) {
       loadExistingNotes()
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, noteType, targetId])
 
   const loadExistingNotes = async () => {
@@ -57,7 +58,7 @@ const ClientNoteModal = ({
             setExistingMasterNote(masterNote)
             setMasterNote(masterNote.note || '')
           }
-        } catch (error) {
+        } catch {
           console.log('Заметка о мастере не найдена')
         }
         
@@ -72,7 +73,7 @@ const ClientNoteModal = ({
             setExistingSalonNote(salonNote)
             setSalonNote(salonNote.note || '')
           }
-        } catch (error) {
+        } catch {
           console.log('Заметка о салоне не найдена')
         }
       } else {
@@ -232,8 +233,6 @@ const ClientNoteModal = ({
     onClose()
   }
 
-  if (!isOpen) return null
-
   // Определяем заголовки и поля в зависимости от типа заметки
   const getModalContent = () => {
     if (noteType === 'salon') {
@@ -285,6 +284,8 @@ const ClientNoteModal = ({
 
   const { title, fields } = getModalContent()
   const { handleBackdropClick, handleMouseDown } = useModal(onClose)
+
+  if (!isOpen) return null;
 
   return (
     <div 

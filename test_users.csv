@@ -1,0 +1,2 @@
+email,phone,full_name,password,role,specialization
+test@example.com,+79123456789,Тест Пользователь,password123,CLIENT,

@@ -95,14 +95,16 @@ const PopupCard = ({ booking, position, visible, onClose }) => {
       <div className="mb-3">
         <div className="flex items-center">
           <div className={`w-2 h-2 rounded-full mr-2 ${
-            booking.status === 'confirmed' ? 'bg-green-500' :
-            booking.status === 'pending' ? 'bg-yellow-500' :
+            booking.status === 'completed' ? 'bg-green-500' :
+            booking.status === 'awaiting_confirmation' ? 'bg-orange-500' :
+            booking.status === 'created' ? 'bg-blue-500' :
             booking.status === 'cancelled' ? 'bg-red-500' :
             'bg-gray-500'
           }`}></div>
           <span className="text-sm text-gray-600 capitalize">
-            {booking.status === 'confirmed' ? 'Подтверждена' :
-             booking.status === 'pending' ? 'Ожидает подтверждения' :
+            {booking.status === 'completed' ? 'Подтверждена' :
+             booking.status === 'awaiting_confirmation' ? 'На подтверждение' :
+             booking.status === 'created' ? 'Создана' :
              booking.status === 'cancelled' ? 'Отменена' :
              booking.status}
           </span>

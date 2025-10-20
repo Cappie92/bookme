@@ -106,7 +106,7 @@ export default function ClientLayout({ children }) {
   const loadManagedBranches = async () => {
     try {
       // Загружаем филиалы, которыми управляет пользователь
-      const branches = await apiGet('salon/my-managed-branches')
+      const branches = await apiGet('/api/salon/my-managed-branches')
       setManagedBranches(branches || [])
     } catch (error) {
       console.error('Ошибка загрузки управляемых филиалов:', error)

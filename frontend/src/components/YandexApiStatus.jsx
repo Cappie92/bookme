@@ -13,7 +13,7 @@ const YandexApiStatus = () => {
             const response = await fetch('/api/geocoder/api-status');
             const data = await response.json();
             setStatus(data);
-        } catch (error) {
+        } catch {
             setStatus({
                 api_key: '32d81139-8da9-4182-9f0a-ef47cfe6733f',
                 is_working: false,

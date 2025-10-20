@@ -69,7 +69,7 @@ class User(Base):
     master_profile = relationship("Master", back_populates="user", uselist=False)
     salon_profile = relationship("Salon", back_populates="user", uselist=False)
     indie_profile = relationship("IndieMaster", back_populates="user", uselist=False)
-    bookings = relationship("Booking", back_populates="client")
+    bookings = relationship("Booking", back_populates="client", foreign_keys="Booking.client_id")
     moderator_permissions = relationship("ModeratorPermissions", back_populates="user", uselist=False)
     subscriptions = relationship("Subscription", back_populates="user")
     balance = relationship("UserBalance", back_populates="user", uselist=False)
@@ -218,10 +218,12 @@ class IndieMaster(Base):
 
 
 class BookingStatus(str, enum.Enum):
-    PENDING = "pending"
-    CONFIRMED = "confirmed"
+    CREATED = "created"  # было PENDING
+    AWAITING_CONFIRMATION = "awaiting_confirmation"  # новый
+    COMPLETED = "completed"  # было CONFIRMED
     CANCELLED = "cancelled"
-    COMPLETED = "completed"
+    CANCELLED_BY_CLIENT_EARLY = "cancelled_by_client_early"  # Отменено клиентом заранее
+    CANCELLED_BY_CLIENT_LATE = "cancelled_by_client_late"    # Отменено клиентом менее чем за 12 часов
     AWAITING_PAYMENT = "awaiting_payment"  # Ожидает оплаты
     PAYMENT_EXPIRED = "payment_expired"    # Время оплаты истекло
 
@@ -244,7 +246,7 @@ class Booking(Base):
     branch_id = Column(Integer, ForeignKey("salon_branches.id"), nullable=True)
     start_time = Column(DateTime)
     end_time = Column(DateTime)
-    status = Column(Enum(BookingStatus), default=BookingStatus.PENDING)
+    status = Column(String(16), default=BookingStatus.CREATED.value)
     notes = Column(Text, nullable=True)
     
     # Информация об оплате
@@ -253,10 +255,14 @@ class Booking(Base):
     payment_amount = Column(Float, nullable=True)  # Сумма к оплате
     is_paid = Column(Boolean, default=False)  # Оплачено ли бронирование
     
+    # Информация об отмене
+    cancelled_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    cancellation_reason = Column(String(255), nullable=True)
+    
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    client = relationship("User", back_populates="bookings")
+    client = relationship("User", back_populates="bookings", foreign_keys=[client_id])
     service = relationship("Service", back_populates="bookings")
     master = relationship("Master", back_populates="bookings")
     indie_master = relationship("IndieMaster", back_populates="bookings")
@@ -266,6 +272,7 @@ class Booking(Base):
     applied_discounts = relationship("AppliedDiscount")
     income = relationship("Income", back_populates="booking", uselist=False)
     missed_revenue = relationship("MissedRevenue", back_populates="booking", uselist=False)
+    cancelled_by = relationship("User", foreign_keys=[cancelled_by_user_id])
 
 
 class MasterSchedule(Base):
@@ -1507,4 +1514,83 @@ class PromoCodeActivation(Base):
         Index('idx_promo_activations_promo_code', 'promo_code_id'),
         Index('idx_promo_activations_user', 'user_id'),
         Index('idx_promo_activations_activated_at', 'activated_at'),
+    )
+
+
+class MasterExpense(Base):
+    """Модель расходов мастера"""
+    __tablename__ = "master_expenses"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    master_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    name = Column(String(255), nullable=False)  # Название расхода
+    expense_type = Column(String(20), nullable=False)  # recurring, service_based, one_time
+    amount = Column(Float, nullable=False)
+    
+    # Для циклических расходов
+    recurrence_type = Column(String(20))  # monthly, weekly, daily, conditional
+    condition_type = Column(String(50))  # has_bookings, schedule_open (для conditional)
+    
+    # Для расходов по услуге
+    service_id = Column(Integer, ForeignKey("services.id"))
+    
+    # Для разовых расходов
+    expense_date = Column(DateTime)
+    
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, onupdate=datetime.utcnow)
+    
+    # Связи
+    master = relationship("User", foreign_keys=[master_id])
+    service = relationship("Service", foreign_keys=[service_id])
+    
+    # Индексы
+    __table_args__ = (
+        Index('idx_master_expenses_master_id', 'master_id'),
+        Index('idx_master_expenses_expense_type', 'expense_type'),
+        Index('idx_master_expenses_expense_date', 'expense_date'),
+        Index('idx_master_expenses_service_id', 'service_id'),
+    )
+
+
+class BookingConfirmation(Base):
+    """Модель подтверждения завершенных услуг"""
+    __tablename__ = "booking_confirmations"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    booking_id = Column(Integer, ForeignKey("bookings.id"), unique=True, nullable=False)
+    master_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    confirmed_at = Column(DateTime, default=datetime.utcnow)
+    confirmed_income = Column(Float, nullable=False)  # Подтвержденный доход
+    
+    # Связи
+    booking = relationship("Booking", foreign_keys=[booking_id])
+    master = relationship("User", foreign_keys=[master_id])
+    
+    # Индексы
+    __table_args__ = (
+        Index('idx_booking_confirmations_booking_id', 'booking_id'),
+        Index('idx_booking_confirmations_master_id', 'master_id'),
+        Index('idx_booking_confirmations_confirmed_at', 'confirmed_at'),
+    )
+
+
+class TaxRate(Base):
+    """Модель налоговых ставок мастера"""
+    __tablename__ = "tax_rates"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    master_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    rate = Column(Float, nullable=False)  # Процент налога (0-100)
+    effective_from_date = Column(Date, nullable=False)  # Дата начала действия ставки
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Связи
+    master = relationship("User", foreign_keys=[master_id])
+    
+    # Индексы
+    __table_args__ = (
+        Index('idx_tax_rates_master', 'master_id'),
+        Index('idx_tax_rates_date', 'effective_from_date'),
     )

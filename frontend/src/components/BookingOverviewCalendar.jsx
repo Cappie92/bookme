@@ -1,7 +1,7 @@
 import React, { useState, useRef } from 'react'
 
 const HOURS = Array.from({ length: 24 }, (_, i) => i)
-const MINUTES = [0, 30]
+const MINUTES = [0, 10, 20, 30, 40, 50]
 
 // Функция для получения дат текущей недели
 function getCurrentWeekDates(weekOffset = 0) {
@@ -171,6 +171,7 @@ export default function BookingOverviewCalendar({ schedule, bookings, places, wo
       const { startHour } = getWeekTimeRange()
       tableRef.current.scrollTop = startHour * 32 // 32px — высота строки
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [weekOffset])
 
   const { startHour, endHour } = getWeekTimeRange()

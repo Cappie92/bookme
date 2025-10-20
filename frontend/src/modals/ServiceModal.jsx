@@ -2,7 +2,7 @@ import { useEffect, useState } from "react"
 import ConfirmCloseModal from './ConfirmCloseModal'
 
 export default function ServiceModal({ open = false, onClose = () => {}, onCreated = () => {} }) {
-  const [form, setForm] = useState({ name: '', category_id: '', price: '', duration: '' })
+  const [form, setForm] = useState({ name: '', category_id: '', price: '', duration: 30 })
   const [categories, setCategories] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -20,7 +20,7 @@ export default function ServiceModal({ open = false, onClose = () => {}, onCreat
 
   useEffect(() => {
     if (open) {
-      setForm({ name: '', category_id: '', price: '', duration: '' })
+      setForm({ name: '', category_id: '', price: '', duration: 30 })
       setError('')
       fetch('/salon/categories', {
         headers: getAuthHeaders()
@@ -180,8 +180,26 @@ export default function ServiceModal({ open = false, onClose = () => {}, onCreat
               <input name="price" type="number" min="0" value={form.price} onChange={handleChange} className="border rounded px-3 py-2 w-full" />
             </div>
             <div>
-              <label className="block text-sm font-medium mb-1">Длительность (мин)</label>
-              <input name="duration" type="number" min="1" value={form.duration} onChange={handleChange} className="border rounded px-3 py-2 w-full" />
+              <label className="block text-sm font-medium mb-1">Длительность</label>
+              <select name="duration" value={form.duration} onChange={handleChange} className="border rounded px-3 py-2 w-full">
+                <option value="">Выберите длительность</option>
+                {(() => {
+                  const durationOptions = []
+                  for (let minutes = 10; minutes <= 480; minutes += 10) {
+                    const hours = Math.floor(minutes / 60)
+                    const mins = minutes % 60
+                    const displayText = hours > 0 
+                      ? `${hours}ч${mins > 0 ? ` ${mins}мин` : ''}`
+                      : `${mins}мин`
+                    durationOptions.push({ value: minutes, label: displayText })
+                  }
+                  return durationOptions.map(option => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))
+                })()}
+              </select>
             </div>
             {error && <div className="text-red-500 text-sm mt-2">{error}</div>}
             <div className="flex gap-3 mt-4">

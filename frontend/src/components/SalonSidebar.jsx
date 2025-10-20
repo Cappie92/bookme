@@ -30,6 +30,7 @@ export default function SalonSidebar({ activeTab, setActiveTab }) {
 
   useEffect(() => {
     loadSubscription()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // Базовые пункты меню
