@@ -78,7 +78,8 @@ class User(Base):
     master_notes = relationship("ClientMasterNote", back_populates="client")
     salon_notes = relationship("ClientSalonNote", back_populates="client")
     missed_revenues = relationship("MissedRevenue", back_populates="client")
-    # favorites = relationship("ClientFavorite", back_populates="client")
+    favorites = relationship("ClientFavorite", back_populates="client")
+    subscription_price_snapshots = relationship("SubscriptionPriceSnapshot", back_populates="user")
 
 
 class Salon(Base):
@@ -174,6 +175,8 @@ class Master(Base):
     city = Column(String, nullable=True)  # Город работы мастера
     timezone = Column(String, default="Europe/Moscow")  # Часовой пояс (UTC+3 по умолчанию)
     branch_id = Column(Integer, ForeignKey("salon_branches.id"), nullable=True)  # Филиал салона
+    auto_confirm_bookings = Column(Boolean, default=False)  # Автоматическое подтверждение записей
+    site_description = Column(Text, nullable=True)  # Описание для страницы записи
     created_at = Column(DateTime, default=datetime.utcnow)
 
     user = relationship("User", back_populates="master_profile")
@@ -185,8 +188,11 @@ class Master(Base):
     master_services = relationship("MasterService", back_populates="master")
     bookings = relationship("Booking", back_populates="master")
     schedule = relationship("MasterSchedule", back_populates="master")
+    page_modules = relationship("MasterPageModule", back_populates="master")
     invitations = relationship("SalonMasterInvitation", back_populates="master")
     client_notes = relationship("ClientMasterNote", back_populates="master")
+    restriction_rules = relationship("ClientRestrictionRule", back_populates="master")
+    payment_settings = relationship("MasterPaymentSettings", back_populates="master", uselist=False)
 
 
 class IndieMaster(Base):
@@ -258,6 +264,9 @@ class Booking(Base):
     # Информация об отмене
     cancelled_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     cancellation_reason = Column(String(255), nullable=True)
+    
+    # Информация о лояльности
+    loyalty_points_used = Column(Integer, nullable=True, default=0)  # Количество списанных баллов
     
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -669,6 +678,11 @@ class Subscription(Base):
     
     # Активность подписки
     is_active = Column(Boolean, default=True)
+    
+    # Связь с планом подписки
+    plan_id = Column(Integer, ForeignKey("subscription_plans.id"), nullable=True)
+    plan = relationship("SubscriptionPlan", back_populates="subscriptions")
+    
 
 
 class SubscriptionReservation(Base):
@@ -688,6 +702,73 @@ class SubscriptionReservation(Base):
     __table_args__ = (
         Index('idx_subscription_reservation_user', 'user_id'),
         Index('idx_subscription_reservation_subscription', 'subscription_id'),
+    )
+
+
+class SubscriptionPriceSnapshot(Base):
+    __tablename__ = "subscription_price_snapshots"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    plan_id = Column(Integer, ForeignKey("subscription_plans.id"), nullable=False)
+    duration_months = Column(Integer, nullable=False)
+    
+    # Зафиксированные цены на момент расчета
+    price_1month = Column(Float, nullable=False)
+    price_3months = Column(Float, nullable=False)
+    price_6months = Column(Float, nullable=False)
+    price_12months = Column(Float, nullable=False)
+    total_price = Column(Float, nullable=False)  # Общая стоимость выбранного пакета
+    monthly_price = Column(Float, nullable=False)  # Цена за месяц для выбранного пакета
+    daily_price = Column(Float, nullable=False)  # Цена за день
+    
+    # Дополнительная информация для расчета
+    reserved_balance = Column(Float, default=0.0)  # Зарезервированный баланс на момент расчета
+    final_price = Column(Float, nullable=False)  # Итоговая цена с учетом резерва
+    upgrade_type = Column(String, nullable=True)  # 'immediate', 'after_expiry', 'renewal', 'downgrade'
+    
+    # Время жизни snapshot
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    expires_at = Column(DateTime, nullable=False)  # created_at + 20 минут
+    
+    # Связи
+    user = relationship("User", back_populates="subscription_price_snapshots")
+    plan = relationship("SubscriptionPlan")
+    
+    __table_args__ = (
+        Index('idx_snapshot_expires', 'expires_at'),
+        Index('idx_snapshot_user_created', 'user_id', 'created_at'),
+    )
+
+
+class SubscriptionFreeze(Base):
+    __tablename__ = "subscription_freezes"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    
+    # Связь с подпиской
+    subscription_id = Column(Integer, ForeignKey("subscriptions.id"), nullable=False, index=True)
+    subscription = relationship("Subscription", backref="freezes")
+    
+    # Период заморозки (начало в 00:00, конец в 23:59)
+    start_date = Column(DateTime, nullable=False)  # 00:00 первого дня
+    end_date = Column(DateTime, nullable=False)    # 23:59 последнего дня
+    
+    # Количество дней заморозки
+    freeze_days = Column(Integer, nullable=False)
+    
+    # Статус заморозки
+    is_cancelled = Column(Boolean, default=False)
+    cancelled_at = Column(DateTime, nullable=True)
+    
+    # Технические поля
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Индексы
+    __table_args__ = (
+        Index('idx_subscription_freeze_subscription', 'subscription_id'),
+        Index('idx_subscription_freeze_dates', 'start_date', 'end_date'),
     )
 
 
@@ -1149,6 +1230,79 @@ class ClientRestriction(Base):
     )
 
 
+class ClientRestrictionRule(Base):
+    """Правила автоматических ограничений клиентов"""
+    __tablename__ = "client_restriction_rules"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    master_id = Column(Integer, ForeignKey("masters.id"), nullable=False)
+    cancellation_reason = Column(String, nullable=False)  # 'client_requested', 'client_no_show', 'mutual_agreement', 'master_unavailable'
+    cancel_count = Column(Integer, nullable=False)  # Количество отмен для срабатывания правила
+    period_days = Column(Integer, nullable=True)  # Период проверки в днях (NULL = все время)
+    restriction_type = Column(String, nullable=False)  # 'blacklist' или 'advance_payment_only'
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Связи
+    master = relationship("Master", back_populates="restriction_rules")
+    
+    # Индексы
+    __table_args__ = (
+        Index("idx_restriction_rules_master", "master_id"),
+        Index("idx_restriction_rules_master_reason", "master_id", "cancellation_reason", "restriction_type"),
+    )
+
+
+class MasterPaymentSettings(Base):
+    """Настройки оплаты мастера"""
+    __tablename__ = "master_payment_settings"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    master_id = Column(Integer, ForeignKey("masters.id"), nullable=False, unique=True)
+    accepts_online_payment = Column(Boolean, default=False)  # Принимает ли мастер оплату через систему DeDato
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Связи
+    master = relationship("Master", back_populates="payment_settings")
+    
+    # Индексы
+    __table_args__ = (
+        Index("idx_payment_settings_master", "master_id", unique=True),
+    )
+
+
+class TemporaryBooking(Base):
+    """Временные бронирования на период оплаты (20 минут)"""
+    __tablename__ = "temporary_bookings"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    master_id = Column(Integer, ForeignKey("masters.id"), nullable=False)
+    client_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    service_id = Column(Integer, ForeignKey("services.id"), nullable=False)
+    start_time = Column(DateTime, nullable=False)
+    end_time = Column(DateTime, nullable=False)
+    payment_amount = Column(Float, nullable=False)
+    expires_at = Column(DateTime, nullable=False)  # Время истечения (start_time + 20 минут)
+    payment_session_id = Column(String, nullable=True)  # ID сессии платежа
+    payment_link = Column(String, nullable=True)  # Ссылка на оплату
+    status = Column(String, nullable=False, default='pending')  # 'pending', 'paid', 'expired', 'cancelled'
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Связи
+    master = relationship("Master")
+    client = relationship("User")
+    service = relationship("Service")
+    
+    # Индексы
+    __table_args__ = (
+        Index("idx_temporary_bookings_master", "master_id"),
+        Index("idx_temporary_bookings_client", "client_id"),
+        Index("idx_temporary_bookings_expires", "expires_at"),
+        Index("idx_temporary_bookings_status", "status"),
+    )
+
+
 class ExpenseType(Base):
     __tablename__ = "expense_types"
     
@@ -1345,43 +1499,39 @@ class MissedRevenue(Base):
     )
 
 
-# class ClientFavorite(Base):
-#     __tablename__ = "client_favorites"
+class ClientFavorite(Base):
+    __tablename__ = "client_favorites"
 
-#     id = Column(Integer, primary_key=True, index=True)
-#     client_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    client_favorite_id = Column(Integer, primary_key=True, index=True)
+    client_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     
-#     # Тип избранного элемента
-#     favorite_type = Column(String, nullable=False)  # 'salon', 'master', 'indie_master', 'service'
+    # Тип избранного элемента
+    favorite_type = Column(String, nullable=False)  # 'salon', 'master', 'indie_master', 'service'
     
-#     # ID избранного элемента (может быть null для некоторых типов)
-#     salon_id = Column(Integer, ForeignKey("salons.id"), nullable=True)
-#     master_id = Column(Integer, ForeignKey("masters.id"), nullable=True)
-#     indie_master_id = Column(Integer, ForeignKey("indie_masters.id"), nullable=True)
-#     service_id = Column(Integer, ForeignKey("services.id"), nullable=True)
+    # ID избранного элемента (может быть null для некоторых типов)
+    salon_id = Column(Integer, ForeignKey("salons.id"), nullable=True)
+    master_id = Column(Integer, ForeignKey("masters.id"), nullable=True)
+    indie_master_id = Column(Integer, ForeignKey("indie_masters.id"), nullable=True)
+    service_id = Column(Integer, ForeignKey("services.id"), nullable=True)
     
-#     # Дополнительные данные для быстрого доступа
-#     favorite_name = Column(String, nullable=False)  # Название для отображения
-#     favorite_description = Column(Text, nullable=True)  # Описание
-#     favorite_image = Column(String, nullable=True)  # URL изображения
+    # Дополнительные данные для быстрого доступа
+    favorite_name = Column(String, nullable=False)  # Название для отображения
     
-#     created_at = Column(DateTime, default=datetime.utcnow)
+    # Связи
+    client = relationship("User", back_populates="favorites")
+    salon = relationship("Salon", overlaps="client_restrictions,expense_types,expenses,expense_templates")
+    master = relationship("Master")
+    indie_master = relationship("IndieMaster", overlaps="client_restrictions,expense_types,expenses,expense_templates")
+    service = relationship("Service")
     
-#     # Связи
-#     client = relationship("User", back_populates="favorites")
-#     salon = relationship("Salon", overlaps="client_restrictions,expense_types,expenses,expense_templates")
-#     master = relationship("Master")
-#     indie_master = relationship("IndieMaster", overlaps="client_restrictions,expense_types,expenses,expense_templates")
-#     service = relationship("Service")
-    
-#     # Уникальные индексы для предотвращения дублирования
-#     __table_args__ = (
-#         UniqueConstraint('client_id', 'favorite_type', 'salon_id', name='unique_salon_favorite'),
-#         UniqueConstraint('client_id', 'favorite_type', 'master_id', name='unique_master_favorite'),
-#         UniqueConstraint('client_id', 'favorite_type', 'indie_master_id', name='unique_indie_master_favorite'),
-#         UniqueConstraint('client_id', 'favorite_type', 'service_id', name='unique_service_favorite'),
-#         {'extend_existing': True}
-#     )
+    # Уникальные индексы для предотвращения дублирования
+    __table_args__ = (
+        UniqueConstraint('client_id', 'favorite_type', 'salon_id', name='unique_salon_favorite'),
+        UniqueConstraint('client_id', 'favorite_type', 'master_id', name='unique_master_favorite'),
+        UniqueConstraint('client_id', 'favorite_type', 'indie_master_id', name='unique_indie_master_favorite'),
+        UniqueConstraint('client_id', 'favorite_type', 'service_id', name='unique_service_favorite'),
+        {'extend_existing': True}
+    )
 
 class ClientNote(Base):
     __tablename__ = "client_notes"
@@ -1593,4 +1743,121 @@ class TaxRate(Base):
     __table_args__ = (
         Index('idx_tax_rates_master', 'master_id'),
         Index('idx_tax_rates_date', 'effective_from_date'),
+    )
+
+
+class SubscriptionType(str, enum.Enum):
+    MASTER = "master"
+    SALON = "salon"
+
+
+class SubscriptionPlan(Base):
+    """Модель для планов подписки"""
+    __tablename__ = "subscription_plans"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, unique=True, nullable=False)
+    display_name = Column(String, nullable=True)  # Отображаемое название для пользователей
+    subscription_type = Column(Enum(SubscriptionType), nullable=False)
+    price_1month = Column(Float, nullable=False)  # Цена за 1 месяц в пакете на 1 месяц
+    price_3months = Column(Float, nullable=False)  # Цена за 1 месяц в пакете на 3 месяца
+    price_6months = Column(Float, nullable=False)  # Цена за 1 месяц в пакете на 6 месяцев
+    price_12months = Column(Float, nullable=False)  # Цена за 1 месяц в пакете на 12 месяцев
+    features = Column(JSON, default=dict)  # JSONB for PostgreSQL, JSON for SQLite
+    limits = Column(JSON, default=dict)
+    is_active = Column(Boolean, default=True)
+    display_order = Column(Integer, default=0)
+    
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    subscriptions = relationship("Subscription", back_populates="plan")
+
+
+
+
+class MasterPageModule(Base):
+    """Модель для модулей страницы мастера"""
+    __tablename__ = "master_page_modules"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    master_id = Column(Integer, ForeignKey("masters.id"), nullable=False)
+    module_type = Column(String, nullable=False)  # e.g., "text", "image", "video", "booking_form"
+    position = Column(Integer, default=0)
+    config = Column(JSON, default=dict)  # JSONB for PostgreSQL, JSON for SQLite
+    is_active = Column(Boolean, default=True)
+    
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    master = relationship("Master", back_populates="page_modules")
+
+
+class ServiceFunction(Base):
+    """Модель для функций сервиса"""
+    __tablename__ = "service_functions"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)  # Название функции
+    display_name = Column(String, nullable=True)  # Отображаемое название для пользователей
+    description = Column(Text, nullable=True)  # Описание
+    # Тип функции: FREE, SUBSCRIPTION, VOLUME_BASED (храним в БД в верхнем регистре)
+    # Используем String вместо Enum, чтобы избежать проблем с несовпадением значений/регистра
+    function_type = Column(String, nullable=False, default=ServiceType.FREE.name)
+    is_active = Column(Boolean, default=True)  # Активна ли функция
+    display_order = Column(Integer, default=0)  # Порядок отображения
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class LoyaltySettings(Base):
+    """Модель настроек программы лояльности мастера"""
+    __tablename__ = "loyalty_settings"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    master_id = Column(Integer, ForeignKey("masters.id"), nullable=False, unique=True)
+    is_enabled = Column(Boolean, default=False, nullable=False)
+    accrual_percent = Column(Integer, nullable=True)  # Процент начисления (1-100)
+    max_payment_percent = Column(Integer, nullable=True)  # Максимальный % оплаты баллами (1-100)
+    points_lifetime_days = Column(Integer, nullable=True)  # Срок жизни баллов в днях (NULL = бесконечно)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Связи
+    master = relationship("Master", backref="loyalty_settings")
+    
+    # Индексы
+    __table_args__ = (
+        Index('idx_loyalty_settings_master', 'master_id'),
+    )
+
+
+class LoyaltyTransaction(Base):
+    """Модель транзакций начисления и списания баллов лояльности"""
+    __tablename__ = "loyalty_transactions"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    master_id = Column(Integer, ForeignKey("masters.id"), nullable=False)
+    client_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    booking_id = Column(Integer, ForeignKey("bookings.id"), nullable=True)
+    transaction_type = Column(String, nullable=False)  # 'earned' (начисление) или 'spent' (списание)
+    points = Column(Integer, nullable=False)  # Количество баллов (положительное число)
+    earned_at = Column(DateTime, nullable=False)  # Дата начисления (для earned) или списания (для spent)
+    expires_at = Column(DateTime, nullable=True)  # Дата истечения (только для earned, NULL = бесконечно)
+    service_id = Column(Integer, ForeignKey("services.id"), nullable=True)  # ID услуги, за которую начислены баллы
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Связи
+    master = relationship("Master", backref="loyalty_transactions")
+    client = relationship("User", backref="loyalty_transactions")
+    booking = relationship("Booking", backref="loyalty_transactions")
+    service = relationship("Service", backref="loyalty_transactions")
+    
+    # Индексы
+    __table_args__ = (
+        Index('idx_loyalty_transactions_master_client', 'master_id', 'client_id'),
+        Index('idx_loyalty_transactions_client', 'client_id'),
+        Index('idx_loyalty_transactions_booking', 'booking_id'),
+        Index('idx_loyalty_transactions_expires', 'expires_at'),
+        Index('idx_loyalty_transactions_type', 'transaction_type'),
     )

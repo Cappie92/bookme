@@ -1,6 +1,6 @@
 from datetime import datetime, time, date
 from enum import Enum
-from typing import List, Optional, Any
+from typing import List, Optional, Any, Dict
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
@@ -249,6 +249,7 @@ class MasterProfileUpdate(BaseModel):
     experience_years: Optional[int] = None
     city: Optional[str] = None
     timezone: Optional[str] = None
+    auto_confirm_bookings: Optional[bool] = None  # Автоматическое подтверждение записей
     
     # Настройки автоматизации ограничений
     missed_sessions_advance_payment_threshold: Optional[int] = Field(3, ge=1, le=100, description="Количество пропущенных сеансов для обязательной предоплаты")
@@ -341,6 +342,7 @@ class BookingCreate(BookingBase):
     service_name: str  # Обязательное название услуги
     service_duration: int  # Обязательная продолжительность услуги в минутах
     service_price: float  # Обязательная стоимость услуги
+    use_loyalty_points: Optional[bool] = False  # Использовать ли баллы лояльности
 
 
 class BookingUpdate(BaseModel):
@@ -653,6 +655,7 @@ class BookingFutureShort(BaseModel):
     service_id: Optional[int] = None
     salon_id: Optional[int] = None
     branch_id: Optional[int] = None
+    master_domain: Optional[str] = None  # Domain мастера для ссылки на страницу записи
 
     class Config:
         from_attributes = True
@@ -678,6 +681,7 @@ class BookingPastShort(BaseModel):
     service_id: Optional[int] = None
     salon_id: Optional[int] = None
     branch_id: Optional[int] = None
+    master_domain: Optional[str] = None  # Domain мастера для ссылки на страницу записи
 
     class Config:
         from_attributes = True
@@ -708,6 +712,7 @@ class SetPasswordRequest(BaseModel):
 
 
 class MasterScheduleSlot(BaseModel):
+    is_frozen: Optional[bool] = False  # Флаг замороженного дня
     schedule_date: date = Field(..., description="Конкретная дата")
     hour: int = Field(..., ge=0, le=23)
     minute: int = Field(..., ge=0, le=59)
@@ -935,13 +940,46 @@ class SubscriptionOut(BaseModel):
     price: float
     auto_renewal: bool
     payment_method: str = "card"  # Дефолтное значение
+    plan_id: Optional[int] = None
+    plan_name: Optional[str] = None
+    features: Optional[Dict[str, Any]] = {}  # Функции плана подписки
+    limits: Optional[Dict[str, Any]] = {}  # Лимиты плана подписки
 
     class Config:
         from_attributes = True
 
 
+class SubscriptionCalculationRequest(BaseModel):
+    """Запрос на расчет стоимости подписки"""
+    plan_id: int
+    duration_months: int  # 1, 3, 6, 12
+    upgrade_type: Optional[str] = "immediate"  # "immediate" или "after_expiry"
+
+
+class SubscriptionCalculationResponse(BaseModel):
+    """Ответ с расчетом стоимости подписки"""
+    calculation_id: int  # ID snapshot для фиксации цен
+    plan_id: int
+    plan_name: str
+    duration_months: int
+    total_price: float  # Общая стоимость подписки
+    monthly_price: float  # Стоимость за месяц
+    daily_price: float  # Стоимость за день (для отображения)
+    price_per_month_display: float  # "от X руб./мес" (минимальная месячная цена)
+    reserved_balance: float  # Зарезервированные деньги
+    final_price: float  # Итоговая цена к оплате (с учетом резерва)
+    savings_percent: Optional[float] = None  # Процент экономии
+    start_date: Optional[datetime] = None  # Дата начала (если after_expiry)
+    end_date: Optional[datetime] = None  # Дата окончания
+    upgrade_type: str
+    current_plan_display_order: Optional[int] = None
+    new_plan_display_order: int
+    requires_immediate_payment: bool  # Требуется ли немедленная оплата
+
+
 class SubscriptionUpgradeRequest(BaseModel):
     subscription_type: str
+    plan_id: Optional[int] = None  # ID плана подписки
     salon_branches: Optional[int] = None
     salon_employees: Optional[int] = None
     master_bookings: Optional[int] = None
@@ -1032,18 +1070,57 @@ class SubscriptionStatusOut(BaseModel):
     is_active: bool
     start_date: Optional[datetime] = None
     end_date: Optional[datetime] = None
-    days_remaining: int
+    days_remaining: Optional[int] = None  # None для Free плана (без ограничений по времени)
     daily_rate: float
     total_price: float
     balance: float
     can_continue: bool
+    is_frozen: Optional[bool] = False  # Флаг активной заморозки подписки
+    is_always_free: Optional[bool] = False  # Флаг always free пользователя
+    freeze_info: Optional[Dict[str, str]] = None  # Информация о заморозке {start_date, end_date}
     next_charge_date: Optional[datetime] = None
     max_branches: int = 1  # Максимальное количество филиалов
     max_employees: int = 0  # Максимальное количество работников
     reserved_days: Optional[int] = 0
+    is_unlimited: Optional[bool] = False  # Флаг для Free плана
+    plan_name: Optional[str] = None  # Название плана подписки
+    plan_display_name: Optional[str] = None  # Отображаемое название плана
+    plan_display_order: Optional[int] = None  # Порядок отображения плана
 
     class Config:
         from_attributes = True
+
+
+# Схемы для заморозки подписки
+class SubscriptionFreezeCreate(BaseModel):
+    subscription_id: int
+    start_date: datetime  # 00:00 первого дня
+    end_date: datetime     # 23:59 последнего дня
+
+
+class SubscriptionFreezeOut(BaseModel):
+    id: int
+    subscription_id: int
+    start_date: datetime
+    end_date: datetime
+    freeze_days: int
+    is_cancelled: bool
+    cancelled_at: Optional[datetime] = None
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class SubscriptionFreezeInfo(BaseModel):
+    """Информация о доступных днях заморозки и истории"""
+    available_freeze_days: int  # Доступно дней заморозки
+    used_freeze_days: int       # Использовано дней заморозки
+    total_freeze_days: int      # Всего дней заморозки (лимит)
+    active_freezes: List[SubscriptionFreezeOut]  # Активные заморозки
+    freeze_history: List[SubscriptionFreezeOut]  # История всех заморозок
+    can_freeze: bool           # Можно ли создать новую заморозку
 
 
 # Схемы для филиалов салона
@@ -1486,7 +1563,7 @@ class ClientMasterNoteBase(BaseModel):
 
 class ClientMasterNoteCreate(ClientMasterNoteBase):
     master_id: int
-    salon_id: int
+    salon_id: Optional[int] = None
 
 
 class ClientMasterNoteUpdate(BaseModel):
@@ -1510,6 +1587,7 @@ class ClientMasterNoteOut(BaseModel):
     master_id: int
     salon_id: int
     note: str
+    rating: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     
@@ -1609,6 +1687,93 @@ class ClientRestrictionList(BaseModel):
     blacklist: List[ClientRestrictionOut]
     advance_payment_only: List[ClientRestrictionOut]
     total_restrictions: int
+
+
+# Схемы для правил автоматических ограничений
+class ClientRestrictionRuleBase(BaseModel):
+    cancellation_reason: str = Field(..., pattern="^(client_requested|client_no_show|mutual_agreement|master_unavailable)$", description="Причина отмены")
+    cancel_count: int = Field(..., ge=1, description="Количество отмен для срабатывания правила")
+    period_days: Optional[int] = Field(None, description="Период проверки в днях (None = все время). Доступные значения: 30, 60, 90, 180, 365")
+    restriction_type: str = Field(..., pattern="^(blacklist|advance_payment_only)$", description="Тип ограничения")
+
+
+class ClientRestrictionRuleCreate(ClientRestrictionRuleBase):
+    pass
+
+
+class ClientRestrictionRuleUpdate(BaseModel):
+    cancellation_reason: Optional[str] = Field(None, pattern="^(client_requested|client_no_show|mutual_agreement|master_unavailable)$")
+    cancel_count: Optional[int] = Field(None, ge=1)
+    period_days: Optional[int] = Field(None)
+    restriction_type: Optional[str] = Field(None, pattern="^(blacklist|advance_payment_only)$")
+
+
+class ClientRestrictionRuleOut(ClientRestrictionRuleBase):
+    id: int
+    master_id: int
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+# Схемы для настроек оплаты мастера
+class MasterPaymentSettingsBase(BaseModel):
+    accepts_online_payment: bool = False
+
+
+class MasterPaymentSettingsCreate(MasterPaymentSettingsBase):
+    pass
+
+
+class MasterPaymentSettingsUpdate(MasterPaymentSettingsBase):
+    accepts_online_payment: Optional[bool] = None
+
+
+class MasterPaymentSettingsOut(MasterPaymentSettingsBase):
+    id: int
+    master_id: int
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+# Схемы для временных броней
+class TemporaryBookingCreate(BaseModel):
+    master_id: int
+    service_id: int
+    start_time: datetime
+    end_time: datetime
+    payment_amount: float = Field(..., gt=0)
+
+
+class TemporaryBookingOut(BaseModel):
+    id: int
+    master_id: int
+    client_id: int
+    service_id: int
+    start_time: datetime
+    end_time: datetime
+    payment_amount: float
+    expires_at: datetime
+    payment_session_id: Optional[str] = None
+    payment_link: Optional[str] = None
+    status: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+# Схема для проверки возможности бронирования
+class BookingCheckResponse(BaseModel):
+    is_blocked: bool
+    requires_advance_payment: bool
+    reason: Optional[str] = None
+    applied_rule_id: Optional[int] = None
 
 
 # Схемы для типов расходов
@@ -1884,8 +2049,6 @@ class MissedRevenueList(BaseModel):
 class ClientFavoriteBase(BaseModel):
     favorite_type: str
     favorite_name: str
-    favorite_description: Optional[str] = None
-    favorite_image: Optional[str] = None
 
 
 class ClientFavoriteCreate(ClientFavoriteBase):
@@ -1896,19 +2059,18 @@ class ClientFavoriteCreate(ClientFavoriteBase):
 
 
 class ClientFavorite(ClientFavoriteBase):
-    id: int
+    client_favorite_id: int
     client_id: int
     salon_id: Optional[int] = None
     master_id: Optional[int] = None
     indie_master_id: Optional[int] = None
     service_id: Optional[int] = None
-    created_at: datetime
     
-    # Дополнительные данные
-    salon: Optional[Salon] = None
-    master: Optional[Master] = None
-    indie_master: Optional[IndieMaster] = None
-    service: Optional[Service] = None
+    # Дополнительные данные - используем dict для избежания проблем с сериализацией
+    salon: Optional[dict] = None
+    master: Optional[dict] = None
+    indie_master: Optional[dict] = None
+    service: Optional[dict] = None
 
     class Config:
         from_attributes = True
@@ -2093,3 +2255,199 @@ class PromoCodeStats(BaseModel):
     total_activations: int
     total_revenue: float
     top_promo_codes: List[dict]
+
+
+# Схемы для планов подписки
+class SubscriptionPlanBase(BaseModel):
+    name: str
+    display_name: Optional[str] = None  # Отображаемое название для пользователей
+    subscription_type: str  # 'salon' или 'master'
+    price_1month: float  # Цена за 1 месяц в пакете на 1 месяц
+    price_3months: float  # Цена за 1 месяц в пакете на 3 месяца
+    price_6months: float  # Цена за 1 месяц в пакете на 6 месяцев
+    price_12months: float  # Цена за 1 месяц в пакете на 12 месяцев
+    features: Optional[dict] = {}
+    limits: Optional[dict] = {}
+    is_active: bool = True
+    display_order: int = 0
+
+
+class SubscriptionPlanCreate(SubscriptionPlanBase):
+    pass
+
+
+class SubscriptionPlanUpdate(BaseModel):
+    name: Optional[str] = None
+    display_name: Optional[str] = None
+    subscription_type: Optional[str] = None
+    price_1month: Optional[float] = None
+    price_3months: Optional[float] = None
+    price_6months: Optional[float] = None
+    price_12months: Optional[float] = None
+    features: Optional[dict] = None
+    limits: Optional[dict] = None
+    is_active: Optional[bool] = None
+    display_order: Optional[int] = None
+
+
+class SubscriptionPlanOut(SubscriptionPlanBase):
+    id: int
+    created_at: datetime
+    updated_at: datetime
+
+    @field_validator('subscription_type', mode='before')
+    @classmethod
+    def convert_enum_to_str(cls, v):
+        from models import SubscriptionType
+        if isinstance(v, SubscriptionType):
+            return v.value
+        return v
+
+    class Config:
+        from_attributes = True
+        use_enum_values = True
+
+
+
+
+# Схемы для функций сервиса
+class ServiceFunctionBase(BaseModel):
+    name: str
+    display_name: Optional[str] = None  # Отображаемое название для пользователей
+    description: Optional[str] = None
+    function_type: str  # 'free', 'subscription', 'volume_based'
+    is_active: bool = True
+    display_order: int = 0  # Порядок отображения
+
+
+class ServiceFunctionCreate(ServiceFunctionBase):
+    pass
+
+
+class ServiceFunctionUpdate(BaseModel):
+    name: Optional[str] = None
+    display_name: Optional[str] = None
+    description: Optional[str] = None
+    function_type: Optional[str] = None
+    is_active: Optional[bool] = None
+    display_order: Optional[int] = None
+
+
+class ServiceFunctionOut(ServiceFunctionBase):
+    id: int
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    @field_validator('function_type', mode='before')
+    @classmethod
+    def convert_enum_to_str(cls, v):
+        from models import ServiceType
+        if isinstance(v, ServiceType):
+            return v.value.lower()  # Конвертируем в нижний регистр для frontend
+        return v.lower() if isinstance(v, str) else v
+
+    class Config:
+        from_attributes = True
+        use_enum_values = True
+
+
+# Схемы для модулей страницы мастера
+class MasterPageModuleBase(BaseModel):
+    module_type: str  # text, image, video, booking_form, etc.
+    position: int = 0
+    config: Optional[dict] = {}
+    is_active: bool = True
+
+
+class MasterPageModuleCreate(MasterPageModuleBase):
+    pass
+
+
+class MasterPageModuleUpdate(BaseModel):
+    module_type: Optional[str] = None
+    position: Optional[int] = None
+    config: Optional[dict] = None
+    is_active: Optional[bool] = None
+
+
+class MasterPageModuleOut(MasterPageModuleBase):
+    id: int
+    master_id: int
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+# Схемы для лояльности
+class LoyaltySettingsBase(BaseModel):
+    is_enabled: bool = False
+    accrual_percent: Optional[int] = Field(None, ge=1, le=100)
+    max_payment_percent: Optional[int] = Field(None, ge=1, le=100)
+    points_lifetime_days: Optional[int] = Field(None, ge=14, le=365)  # 14, 30, 60, 90, 180, 365 или None (бесконечно)
+
+
+class LoyaltySettingsCreate(LoyaltySettingsBase):
+    pass
+
+
+class LoyaltySettingsUpdate(LoyaltySettingsBase):
+    is_enabled: Optional[bool] = None
+    accrual_percent: Optional[int] = Field(None, ge=1, le=100)
+    max_payment_percent: Optional[int] = Field(None, ge=1, le=100)
+    points_lifetime_days: Optional[int] = Field(None, ge=14, le=365)  # 14, 30, 60, 90, 180, 365 или None (бесконечно)
+
+
+class LoyaltySettingsOut(LoyaltySettingsBase):
+    id: int
+    master_id: int
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class LoyaltyTransactionOut(BaseModel):
+    id: int
+    master_id: int
+    client_id: int
+    booking_id: Optional[int] = None
+    transaction_type: str  # 'earned' или 'spent'
+    points: int
+    earned_at: datetime
+    expires_at: Optional[datetime] = None
+    service_id: Optional[int] = None
+    created_at: datetime
+    
+    # Дополнительные поля для удобства
+    client_name: Optional[str] = None
+    service_name: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class LoyaltyStatsOut(BaseModel):
+    total_earned: int  # Общее количество выданных баллов
+    total_spent: int  # Общее количество списанных баллов
+    current_balance: int  # Текущий баланс всех клиентов (начислено - списано)
+    active_clients_count: int  # Количество активных клиентов с баллами
+
+
+class ClientLoyaltyPointsOut(BaseModel):
+    master_id: int
+    master_name: str
+    balance: int  # Текущий баланс
+    transactions: List[LoyaltyTransactionOut] = []
+
+
+class ClientLoyaltyPointsSummaryOut(BaseModel):
+    masters: List[ClientLoyaltyPointsOut]
+    total_balance: int  # Общий баланс по всем мастерам
+
+
+class AvailableLoyaltyPointsOut(BaseModel):
+    available_points: int  # Количество доступных баллов
+    max_spendable: float  # Максимальная сумма, которую можно списать (с учетом лимита мастера)

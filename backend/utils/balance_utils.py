@@ -3,7 +3,7 @@ from typing import Optional, Dict, Any, Tuple
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
 
-from models import User, UserBalance, BalanceTransaction, Subscription, TransactionType, DailySubscriptionCharge, DailyChargeStatus, SubscriptionReservation, AdminOperation
+from models import User, UserBalance, BalanceTransaction, Subscription, TransactionType, DailySubscriptionCharge, DailyChargeStatus, SubscriptionReservation, AdminOperation, SubscriptionPlan, SubscriptionFreeze
 
 
 def rubles_to_kopecks(rubles: float) -> int:
@@ -379,8 +379,43 @@ def process_daily_charge(db: Session, subscription_id: int, charge_date: date = 
     if existing_charge:
         return {"success": False, "error": "Списание за эту дату уже произведено"}
     
-    # Рассчитываем дневную ставку
-    daily_rate = calculate_subscription_daily_rate(subscription)
+    # Проверяем, не находится ли дата в периоде заморозки
+    charge_datetime = datetime.combine(charge_date, time.min)  # 00:00 указанной даты
+    active_freeze = db.query(SubscriptionFreeze).filter(
+        and_(
+            SubscriptionFreeze.subscription_id == subscription_id,
+            SubscriptionFreeze.is_cancelled == False,
+            SubscriptionFreeze.start_date <= charge_datetime,
+            SubscriptionFreeze.end_date >= charge_datetime
+        )
+    ).first()
+    
+    if active_freeze:
+        # Получаем баланс пользователя для логирования
+        user_balance = get_or_create_user_balance(db, subscription.user_id)
+        balance_before = user_balance.balance
+        
+        # Создаем запись о пропущенном списании (для логирования)
+        charge_record = DailySubscriptionCharge(
+            subscription_id=subscription_id,
+            charge_date=charge_date,
+            amount=0,  # Не списываем
+            daily_rate=rubles_to_kopecks(subscription.daily_rate),
+            balance_before=balance_before,
+            balance_after=balance_before,
+            status=DailyChargeStatus.PENDING  # Помечаем как пропущенное
+        )
+        db.add(charge_record)
+        db.commit()
+        return {
+            "success": True,
+            "skipped": True,
+            "reason": "Подписка заморожена",
+            "freeze_id": active_freeze.id
+        }
+    
+    # Используем сохраненную дневную ставку (чтобы не зависеть от изменения цен в планах)
+    daily_rate = subscription.daily_rate
     daily_rate_kopecks = rubles_to_kopecks(daily_rate)
     
     # НЕ дозаполняем резерв при ежедневном списании - это должно происходить только при покупке подписки
@@ -479,6 +514,10 @@ def process_daily_charge(db: Session, subscription_id: int, charge_date: date = 
 def get_subscription_status(db: Session, user_id: int, subscription_type: str) -> Dict[str, Any]:
     """Получить статус подписки с обратным отсчетом"""
     
+    # Проверяем, является ли пользователь is_always_free
+    user = db.query(User).filter(User.id == user_id).first()
+    is_always_free = user.is_always_free if user else False
+    
     subscription = db.query(Subscription).filter(
         and_(
             Subscription.user_id == user_id,
@@ -486,6 +525,65 @@ def get_subscription_status(db: Session, user_id: int, subscription_type: str) -
             Subscription.is_active == True
         )
     ).first()
+    
+    # Для is_always_free пользователей без активной подписки создаем подписку на план AlwaysFree
+    if not subscription and is_always_free:
+        # Находим план AlwaysFree
+        always_free_plan = db.query(SubscriptionPlan).filter(
+            SubscriptionPlan.name == 'AlwaysFree',
+            SubscriptionPlan.subscription_type == subscription_type
+        ).first()
+        
+        if always_free_plan:
+            # Создаем подписку на план AlwaysFree
+            from datetime import datetime as dt
+            new_subscription = Subscription(
+                user_id=user_id,
+                subscription_type=subscription_type,
+                plan_id=always_free_plan.id,
+                status=SubscriptionStatus.ACTIVE,
+                start_date=dt.utcnow(),
+                end_date=dt(2099, 12, 31),
+                price=0.0,
+                daily_rate=0.0,
+                auto_renewal=False,
+                is_active=True,
+                salon_branches=1 if subscription_type == SubscriptionType.SALON.value or (isinstance(subscription_type, str) and subscription_type == "salon") else 0,
+                salon_employees=0,
+                master_bookings=0
+            )
+            db.add(new_subscription)
+            db.commit()
+            db.refresh(new_subscription)
+            subscription = new_subscription
+        
+        # Если план AlwaysFree не найден, возвращаем виртуальный статус
+        if not subscription:
+            return {
+                "has_subscription": True,
+                "subscription_id": None,
+                "status": "always_free",
+                "is_active": True,
+                "start_date": None,
+                "end_date": None,
+                "days_remaining": None,
+                "daily_rate": 0.0,
+                "total_price": 0.0,
+                "balance": 0.0,
+                "can_continue": True,
+                "is_frozen": False,
+                "is_always_free": True,
+                "next_charge_date": None,
+                "max_branches": 0,
+                "max_employees": 0,
+                "reserved_days": 0,
+                "is_unlimited": True,
+                "plan_name": "AlwaysFree",
+                "plan_display_name": "Always Free",
+                "plan_display_order": None,
+                "features": {},
+                "limits": {}
+            }
     
     if not subscription:
         return {
@@ -496,6 +594,45 @@ def get_subscription_status(db: Session, user_id: int, subscription_type: str) -
     # Получаем баланс пользователя
     user_balance = get_or_create_user_balance(db, user_id)
     
+    # Получаем план подписки для проверки типа
+    plan = None
+    is_free_plan = False
+    if subscription.plan_id:
+        plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.id == subscription.plan_id).first()
+        if plan and plan.name == "Free":
+            is_free_plan = True
+    
+    # Для Free плана не показываем дни и дату окончания
+    plan_name = plan.name if plan else None
+    plan_display_name = plan.display_name if plan else None
+    plan_features = plan.features if plan else {}
+    plan_limits = plan.limits if plan else {}
+    
+    if is_free_plan:
+        return {
+            "has_subscription": True,
+            "subscription_id": subscription.id,
+            "status": subscription.status.value,
+            "is_active": subscription.is_active,
+            "start_date": subscription.start_date,
+            "end_date": None,  # Не показываем дату окончания для Free
+            "days_remaining": None,  # Не показываем дни для Free
+            "daily_rate": 0.0,
+            "total_price": 0.0,
+            "balance": kopecks_to_rubles(user_balance.balance),
+            "can_continue": True,  # Free план всегда активен
+            "next_charge_date": None,
+            "max_branches": subscription.salon_branches,
+            "max_employees": subscription.salon_employees,
+            "reserved_days": 0,
+            "is_unlimited": True,  # Флаг для фронтенда
+            "plan_name": plan_name,  # Название плана
+            "plan_display_name": plan_display_name,  # Отображаемое название плана
+            "plan_display_order": plan.display_order if plan else None,
+            "features": plan_features,
+            "limits": plan_limits
+        }
+    
     # Рассчитываем оставшиеся дни
     current_date = datetime.utcnow()
     days_remaining = max(0, (subscription.end_date - current_date).days)
@@ -503,8 +640,24 @@ def get_subscription_status(db: Session, user_id: int, subscription_type: str) -
     # Рассчитываем дневную ставку
     daily_rate = calculate_subscription_daily_rate(subscription)
     
-    # Проверяем, может ли подписка продолжаться
-    can_continue = user_balance.balance >= rubles_to_kopecks(daily_rate)
+    # Проверяем наличие активной заморозки
+    current_datetime = datetime.utcnow()
+    active_freeze = db.query(SubscriptionFreeze).filter(
+        SubscriptionFreeze.subscription_id == subscription.id,
+        SubscriptionFreeze.is_cancelled == False,
+        SubscriptionFreeze.start_date <= current_datetime,
+        SubscriptionFreeze.end_date >= current_datetime
+    ).first()
+    
+    is_frozen = active_freeze is not None
+    
+    # Для is_always_free пользователей подписка всегда может продолжаться (кроме заморозки)
+    if is_always_free:
+        can_continue = not is_frozen
+    else:
+        # Проверяем, может ли подписка продолжаться
+        # Если есть активная заморозка, подписка не может продолжаться
+        can_continue = not is_frozen and user_balance.balance >= rubles_to_kopecks(daily_rate)
     
     # Следующая дата списания
     next_charge_date = None
@@ -523,6 +676,21 @@ def get_subscription_status(db: Session, user_id: int, subscription_type: str) -
     reserved_total = get_user_reserved_total(db, user_id)
     reserved_days = int(reserved_total // rubles_to_kopecks(daily_rate)) if daily_rate > 0 else 0
 
+    # Получаем название плана и display_order
+    plan_name = plan.name if plan else None
+    plan_display_name = plan.display_name if plan else None
+    plan_display_order = plan.display_order if plan else None
+    plan_features = plan.features if plan else {}
+    plan_limits = plan.limits if plan else {}
+    
+    # Формируем информацию о заморозке для is_frozen
+    freeze_info = None
+    if is_frozen and active_freeze:
+        freeze_info = {
+            "start_date": active_freeze.start_date.strftime("%d.%m.%Y") if active_freeze.start_date else None,
+            "end_date": active_freeze.end_date.strftime("%d.%m.%Y") if active_freeze.end_date else None
+        }
+    
     return {
         "has_subscription": True,
         "subscription_id": subscription.id,
@@ -535,10 +703,19 @@ def get_subscription_status(db: Session, user_id: int, subscription_type: str) -
         "total_price": subscription.price,
         "balance": kopecks_to_rubles(user_balance.balance),
         "can_continue": can_continue,
+        "is_frozen": is_frozen,  # Флаг заморозки
+        "is_always_free": is_always_free,  # Флаг always free
+        "freeze_info": freeze_info,  # Информация о заморозке (даты)
         "next_charge_date": next_charge_date,
         "max_branches": subscription.salon_branches,
         "max_employees": subscription.salon_employees,
-        "reserved_days": reserved_days
+        "reserved_days": reserved_days,
+        "is_unlimited": False,
+        "plan_name": plan_name,  # Название плана
+        "plan_display_name": plan_display_name,  # Отображаемое название плана
+        "plan_display_order": plan_display_order,
+        "features": plan_features,
+        "limits": plan_limits
     }
 
 

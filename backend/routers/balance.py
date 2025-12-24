@@ -165,14 +165,21 @@ async def get_subscription_status_endpoint(
         is_active=status_info["is_active"],
         start_date=status_info["start_date"],
         end_date=status_info["end_date"],
-        days_remaining=status_info["days_remaining"],
+        days_remaining=status_info.get("days_remaining"),
         daily_rate=status_info["daily_rate"],
         total_price=status_info["total_price"],
         balance=status_info["balance"],
         can_continue=status_info["can_continue"],
+        is_frozen=status_info.get("is_frozen", False),
+        is_always_free=status_info.get("is_always_free", False),
+        freeze_info=status_info.get("freeze_info"),
         next_charge_date=status_info["next_charge_date"],
         max_branches=status_info["max_branches"],
-        max_employees=status_info["max_employees"]
+        max_employees=status_info["max_employees"],
+        is_unlimited=status_info.get("is_unlimited", False),
+        plan_name=status_info.get("plan_name"),
+        plan_display_name=status_info.get("plan_display_name"),
+        plan_display_order=status_info.get("plan_display_order")
     )
 
 

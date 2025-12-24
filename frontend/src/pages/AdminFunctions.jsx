@@ -17,6 +17,7 @@ import {
   CheckIcon
 } from "@heroicons/react/24/outline"
 import { API_BASE_URL } from '../utils/config'
+import SubscriptionPlanForm from '../components/SubscriptionPlanForm'
 
 export default function AdminFunctions() {
   const [functions, setFunctions] = useState([])
@@ -34,7 +35,7 @@ export default function AdminFunctions() {
   const [showSubscriptionModal, setShowSubscriptionModal] = useState(false)
   
   // Состояние для управления подписками
-  const [activeTab, setActiveTab] = useState('functions') // 'functions', 'subscriptions', 'calculator', 'promo-codes'
+  const [activeTab, setActiveTab] = useState('functions') // 'functions', 'subscriptions', 'subscription-plans', 'calculator', 'promo-codes'
   const [subscriptions, setSubscriptions] = useState([])
   const [subscriptionStats, setSubscriptionStats] = useState({
     total: 0,
@@ -42,6 +43,13 @@ export default function AdminFunctions() {
     expired: 0,
     pending: 0
   })
+  
+  // Состояние для планов подписки
+  const [subscriptionPlans, setSubscriptionPlans] = useState([])
+  const [showPlanForm, setShowPlanForm] = useState(false)
+  const [selectedPlan, setSelectedPlan] = useState(null)
+  const [serviceFunctions, setServiceFunctions] = useState([]) // Для отображения функций в таблице
+  
 
   // Состояние для промо-кодов
   const [promoCodes, setPromoCodes] = useState([])
@@ -107,6 +115,9 @@ export default function AdminFunctions() {
       fetchFunctions()
     } else if (activeTab === 'subscriptions') {
       fetchSubscriptions()
+    } else if (activeTab === 'subscription-plans') {
+      fetchSubscriptionPlans()
+      fetchServiceFunctionsForPlans() // Загружаем функции для отображения в таблице
     } else if (activeTab === 'calculator') {
       loadCalculatorSettings()
     } else if (activeTab === 'promo-codes') {
@@ -115,13 +126,63 @@ export default function AdminFunctions() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters, activeTab, promoCodeFilters])
 
+  const fetchServiceFunctionsForPlans = async () => {
+    try {
+      const token = localStorage.getItem('access_token')
+      if (!token) return
+      
+      const response = await fetch(`${API_BASE_URL}/api/admin/service-functions?function_type=subscription&is_active=true`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      })
+      
+      if (response.ok) {
+        const data = await response.json()
+        setServiceFunctions(data)
+      }
+    } catch (error) {
+      console.error('Ошибка при загрузке service_functions для планов:', error)
+    }
+  }
+
   const fetchFunctions = async () => {
     try {
       setLoading(true)
       const token = localStorage.getItem('access_token')
       
-      // Пока что возвращаем пустой массив, так как функции сервиса еще не реализованы
-      setFunctions([])
+      if (!token) {
+        console.error('Токен авторизации не найден')
+        return
+      }
+      
+      const params = new URLSearchParams()
+      if (filters.functionType) {
+        params.append('function_type', filters.functionType)
+      }
+      if (filters.search) {
+        params.append('search', filters.search)
+      }
+      
+      const url = `${API_BASE_URL}/api/admin/service-functions${params.toString() ? '?' + params.toString() : ''}`
+      
+      const response = await fetch(url, {
+        headers: { 
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      })
+      
+      if (response.ok) {
+        const data = await response.json()
+        console.log('Загружено функций:', data.length)
+        setFunctions(data)
+      } else {
+        const errorData = await response.json().catch(() => ({ detail: response.statusText }))
+        console.error('Ошибка при загрузке функций:', response.status, errorData)
+        // Не показываем alert, так как функций может не быть
+      }
     } catch (error) {
       console.error('Ошибка при загрузке функций:', error)
     } finally {
@@ -134,7 +195,13 @@ export default function AdminFunctions() {
       setLoading(true)
       const token = localStorage.getItem('access_token')
       
-      // Заглушка для подписок (позже можно добавить API)
+      // TODO: Заменить на реальный API когда будет готов
+      // const response = await fetch(`${API_BASE_URL}/api/admin/subscriptions`, {
+      //   headers: { 'Authorization': `Bearer ${token}` }
+      // })
+      // const data = await response.json()
+      
+      // Заглушка для подписок
       const mockSubscriptions = [
         {
           id: 1,
@@ -145,7 +212,8 @@ export default function AdminFunctions() {
           salon_branches: 2,
           salon_employees: 5,
           end_date: "2024-12-31",
-          price: 15000
+          price: 15000,
+          plan_name: "Pro"
         },
         {
           id: 2,
@@ -155,7 +223,8 @@ export default function AdminFunctions() {
           status: "active",
           master_bookings: 50,
           end_date: "2024-12-31",
-          price: 5000
+          price: 5000,
+          plan_name: "Basic"
         }
       ]
       
@@ -174,6 +243,94 @@ export default function AdminFunctions() {
       setLoading(false)
     }
   }
+
+  const fetchSubscriptionPlans = async () => {
+    try {
+      setLoading(true)
+      const token = localStorage.getItem('access_token')
+      
+      if (!token) {
+        console.error('Токен авторизации не найден')
+        return
+      }
+      
+      const response = await fetch(`${API_BASE_URL}/api/admin/subscription-plans`, {
+        headers: { 
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      })
+      
+      if (response.ok) {
+        const data = await response.json()
+        console.log('Загружено планов:', data.length)
+        setSubscriptionPlans(data)
+      } else {
+        const errorData = await response.json().catch(() => ({ detail: response.statusText }))
+        console.error('Ошибка при загрузке планов:', response.status, errorData)
+        alert(`Ошибка загрузки планов: ${errorData.detail || response.statusText}`)
+      }
+    } catch (error) {
+      console.error('Ошибка при загрузке планов:', error)
+      alert(`Ошибка сети: ${error.message}`)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+
+  const handleSavePlan = async (planData) => {
+    try {
+      const token = localStorage.getItem('access_token')
+      const url = selectedPlan 
+        ? `${API_BASE_URL}/api/admin/subscription-plans/${selectedPlan.id}`
+        : `${API_BASE_URL}/api/admin/subscription-plans`
+      
+      const response = await fetch(url, {
+        method: selectedPlan ? 'PUT' : 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(planData)
+      })
+      
+      if (response.ok) {
+        setShowPlanForm(false)
+        setSelectedPlan(null)
+        await fetchSubscriptionPlans() // Обновляем список планов после сохранения
+      } else {
+        const error = await response.json()
+        alert(`Ошибка: ${error.detail || 'Не удалось сохранить план'}`)
+      }
+    } catch (error) {
+      console.error('Ошибка при сохранении плана:', error)
+      alert('Ошибка при сохранении плана')
+    }
+  }
+
+  const handleDeletePlan = async (planId) => {
+    if (!confirm('Вы уверены, что хотите удалить этот план?')) return
+    
+    try {
+      const token = localStorage.getItem('access_token')
+      const response = await fetch(`${API_BASE_URL}/api/admin/subscription-plans/${planId}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+      
+      if (response.ok) {
+        fetchSubscriptionPlans()
+      } else {
+        const error = await response.json()
+        alert(`Ошибка: ${error.detail || 'Не удалось удалить план'}`)
+      }
+    } catch (error) {
+      console.error('Ошибка при удалении плана:', error)
+      alert('Ошибка при удалении плана')
+    }
+  }
+
 
   const loadCalculatorSettings = async () => {
     try {
@@ -645,6 +802,17 @@ export default function AdminFunctions() {
           >
             <CreditCardIcon className="w-5 h-5 inline mr-2" />
             Управление подписками
+          </button>
+          <button
+            onClick={() => setActiveTab('subscription-plans')}
+            className={`py-2 px-1 border-b-2 font-medium text-sm ${
+              activeTab === 'subscription-plans'
+                ? 'border-blue-500 text-blue-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+            }`}
+          >
+            <CreditCardIcon className="w-5 h-5 inline mr-2" />
+            Планы подписки
           </button>
           <button
             onClick={() => setActiveTab('calculator')}
@@ -1817,6 +1985,160 @@ export default function AdminFunctions() {
           </div>
         </div>
       )}
+
+      {/* Вкладка: Планы подписки */}
+      {activeTab === 'subscription-plans' && (
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200">
+          <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+            <h2 className="text-lg font-semibold text-gray-900">Планы подписки</h2>
+            <button
+              onClick={() => {
+                setSelectedPlan(null)
+                setShowPlanForm(true)
+              }}
+              className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 flex items-center"
+            >
+              <PlusIcon className="w-5 h-5 mr-1" />
+              Создать план
+            </button>
+          </div>
+
+          {loading ? (
+            <div className="p-12 text-center">Загрузка...</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Название
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Тип
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Цена (мес/год)
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Функции
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Статус
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Действия
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {subscriptionPlans.length === 0 ? (
+                    <tr>
+                      <td colSpan="6" className="px-6 py-12 text-center">
+                        <CreditCardIcon className="mx-auto h-12 w-12 text-gray-400" />
+                        <h3 className="mt-2 text-sm font-medium text-gray-900">Планы не найдены</h3>
+                        <p className="mt-1 text-sm text-gray-500">
+                          Начните с создания первого плана.
+                        </p>
+                      </td>
+                    </tr>
+                  ) : (
+                    subscriptionPlans.map((plan) => (
+                      <tr key={plan.id} className="hover:bg-gray-50">
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="text-sm font-medium text-gray-900">{plan.name}</div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                            plan.subscription_type === 'salon' 
+                              ? 'bg-blue-100 text-blue-800' 
+                              : 'bg-green-100 text-green-800'
+                          }`}>
+                            {plan.subscription_type === 'salon' ? 'Салон' : 'Мастер'}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          <div className="space-y-1">
+                            <div>1м: {plan.price_1month?.toLocaleString() || 0}₽</div>
+                            <div>3м: {plan.price_3months?.toLocaleString() || 0}₽</div>
+                            <div>6м: {plan.price_6months?.toLocaleString() || 0}₽</div>
+                            <div>12м: {plan.price_12months?.toLocaleString() || 0}₽</div>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 text-sm text-gray-500">
+                          <div className="space-y-1">
+                            {(() => {
+                              // Получаем список ID функций из плана
+                              const planFunctionIds = plan.features?.service_functions || []
+                              
+                              // Фильтруем функции, которые есть в плане
+                              const includedFunctions = serviceFunctions.filter(f => planFunctionIds.includes(f.id))
+                              
+                              if (includedFunctions.length === 0) {
+                                return <div className="text-gray-400">Нет функций</div>
+                              }
+                              
+                              return includedFunctions.map(func => {
+                                // Для модулей страницы показываем количество
+                                if ((func.name.includes('Модули') || func.display_name?.includes('Модули')) && plan.features?.max_page_modules) {
+                                  return <div key={func.id}>✓ {func.display_name || func.name} ({plan.features.max_page_modules})</div>
+                                }
+                                return <div key={func.id}>✓ {func.display_name || func.name}</div>
+                              })
+                            })()}
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                            plan.is_active 
+                              ? 'bg-green-100 text-green-800' 
+                              : 'bg-gray-100 text-gray-800'
+                          }`}>
+                            {plan.is_active ? 'Активен' : 'Неактивен'}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                          <div className="flex space-x-2">
+                            <button 
+                              onClick={() => {
+                                setSelectedPlan(plan)
+                                setShowPlanForm(true)
+                              }}
+                              className="text-blue-600 hover:text-blue-900" 
+                              title="Редактировать"
+                            >
+                              <PencilIcon className="w-4 h-4" />
+                            </button>
+                            <button 
+                              onClick={() => handleDeletePlan(plan.id)}
+                              className="text-red-600 hover:text-red-900" 
+                              title="Удалить"
+                            >
+                              <TrashIcon className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Модальное окно формы плана */}
+      {showPlanForm && (
+        <SubscriptionPlanForm
+          plan={selectedPlan}
+          onSave={handleSavePlan}
+          onCancel={() => {
+            setShowPlanForm(false)
+            setSelectedPlan(null)
+          }}
+        />
+      )}
+
     </div>
   )
 }

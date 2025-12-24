@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import MasterSettings from '../components/MasterSettings'
 import Header from '../components/Header'
 import MasterScheduleCalendar from '../components/MasterScheduleCalendar'
@@ -12,10 +13,13 @@ import DepositModal from '../modals/DepositModal'
 import MasterDashboardStats from '../components/MasterDashboardStats'
 import MasterStats from '../components/MasterStats'
 import MasterAccounting from '../components/MasterAccounting'
+import MasterLoyalty from '../components/MasterLoyalty'
 import PastAppointments from '../components/PastAppointments'
 import { isSalonFeaturesEnabled } from '../config/features'
+import { useMasterSubscription } from '../hooks/useMasterSubscription'
+import SubscriptionModal from '../components/SubscriptionModal'
 
-function MasterSidebar({ activeTab, setActiveTab, refreshKey, masterSettings, scheduleConflicts }) {
+function MasterSidebar({ activeTab, setActiveTab, refreshKey, masterSettings, scheduleConflicts, hasFinanceAccess, hasExtendedStats, handleTabChange }) {
   const [pendingInvitations, setPendingInvitations] = useState(0)
   const [unconfirmedBookings, setUnconfirmedBookings] = useState(0)
 
@@ -81,7 +85,7 @@ function MasterSidebar({ activeTab, setActiveTab, refreshKey, masterSettings, sc
           </div>
         </div>
         <button
-          onClick={() => setActiveTab('dashboard')}
+          onClick={() => handleTabChange ? handleTabChange('dashboard') : setActiveTab('dashboard')}
           className={`w-full text-left px-4 py-2 rounded-lg transition-colors ${
             activeTab === 'dashboard'
               ? 'bg-blue-100 text-blue-700'
@@ -98,7 +102,7 @@ function MasterSidebar({ activeTab, setActiveTab, refreshKey, masterSettings, sc
         
         {/* Расписание - показываем всегда */}
         <button
-          onClick={() => setActiveTab('schedule')}
+          onClick={() => handleTabChange ? handleTabChange('schedule') : setActiveTab('schedule')}
           className={`w-full text-left px-4 py-2 rounded-lg transition-colors ${
             activeTab === 'schedule'
               ? 'bg-blue-100 text-blue-700'
@@ -115,7 +119,7 @@ function MasterSidebar({ activeTab, setActiveTab, refreshKey, masterSettings, sc
         
         {/* Услуги - показываем всегда */}
         <button
-          onClick={() => setActiveTab('services')}
+          onClick={() => handleTabChange ? handleTabChange('services') : setActiveTab('services')}
           className={`w-full text-left px-4 py-2 rounded-lg transition-colors ${
             activeTab === 'services'
               ? 'bg-blue-100 text-blue-700'
@@ -128,7 +132,7 @@ function MasterSidebar({ activeTab, setActiveTab, refreshKey, masterSettings, sc
         {/* Работа в салоне - показываем только если включены функции салона */}
         {isSalonFeaturesEnabled() && (
           <button
-            onClick={() => setActiveTab('salon-work')}
+            onClick={() => handleTabChange ? handleTabChange('salon-work') : setActiveTab('salon-work')}
             className={`w-full text-left px-4 py-2 rounded-lg transition-colors ${
               activeTab === 'salon-work'
                 ? 'bg-blue-100 text-blue-700'
@@ -146,7 +150,7 @@ function MasterSidebar({ activeTab, setActiveTab, refreshKey, masterSettings, sc
         
         {/* Статистика - показываем всегда */}
         <button
-          onClick={() => setActiveTab('stats')}
+          onClick={() => handleTabChange ? handleTabChange('stats') : setActiveTab('stats')}
           className={`w-full text-left px-4 py-2 rounded-lg transition-colors ${
             activeTab === 'stats'
               ? 'bg-blue-100 text-blue-700'
@@ -158,7 +162,7 @@ function MasterSidebar({ activeTab, setActiveTab, refreshKey, masterSettings, sc
         
         {/* Бухгалтерия - показываем всегда */}
         <button
-          onClick={() => setActiveTab('accounting')}
+          onClick={() => handleTabChange ? handleTabChange('accounting') : setActiveTab('accounting')}
           className={`w-full text-left px-4 py-2 rounded-lg transition-colors bg-red-200 border-2 border-red-500 ${
             activeTab === 'accounting'
               ? 'bg-blue-100 text-blue-700'
@@ -168,9 +172,30 @@ function MasterSidebar({ activeTab, setActiveTab, refreshKey, masterSettings, sc
           💰 Финансы
         </button>
         
+        {/* Лояльность - показываем только если доступна */}
+        {hasFinanceAccess ? (
+          <button
+            onClick={() => handleTabChange ? handleTabChange('loyalty') : setActiveTab('loyalty')}
+            className={`w-full text-left px-4 py-2 rounded-lg transition-colors ${
+              activeTab === 'loyalty'
+                ? 'bg-blue-100 text-blue-700'
+                : 'text-gray-700 hover:bg-gray-100'
+            }`}
+          >
+            🎁 Лояльность
+          </button>
+        ) : (
+          <div className="w-full text-left px-4 py-2 rounded-lg text-gray-400 cursor-not-allowed relative group">
+            🎁 Лояльность
+            <span className="absolute left-full ml-2 hidden group-hover:block bg-gray-800 text-white text-xs rounded px-2 py-1 whitespace-nowrap z-10">
+              Доступно на плане Pro и выше
+            </span>
+          </div>
+        )}
+        
         {/* Мой тариф - показываем всегда */}
         <button
-          onClick={() => setActiveTab('tariff')}
+          onClick={() => handleTabChange ? handleTabChange('tariff') : setActiveTab('tariff')}
           className={`w-full text-left px-4 py-2 rounded-lg transition-colors ${
             activeTab === 'tariff'
               ? 'bg-blue-100 text-blue-700'
@@ -181,7 +206,7 @@ function MasterSidebar({ activeTab, setActiveTab, refreshKey, masterSettings, sc
         </button>
         
         <button
-          onClick={() => setActiveTab('settings')}
+          onClick={() => handleTabChange ? handleTabChange('settings') : setActiveTab('settings')}
           className={`w-full text-left px-4 py-2 rounded-lg transition-colors ${
             activeTab === 'settings'
               ? 'bg-blue-100 text-blue-700'
@@ -992,7 +1017,33 @@ function SalonWorkSection({ onInvitationUpdate }) {
 }
 
 export default function MasterDashboard() {
-  const [activeTab, setActiveTab] = useState('dashboard')
+  const { hasFinanceAccess, hasExtendedStats } = useMasterSubscription()
+  const { search } = useLocation()
+  const navigate = useNavigate()
+  
+  // Читаем tab из query параметров
+  const getTabFromUrl = () => {
+    const params = new URLSearchParams(search)
+    const tab = params.get('tab')
+    return tab || 'dashboard'
+  }
+  
+  const [activeTab, setActiveTab] = useState(getTabFromUrl())
+  
+  // Синхронизируем activeTab с URL при изменении
+  useEffect(() => {
+    const tabFromUrl = getTabFromUrl()
+    if (tabFromUrl !== activeTab) {
+      setActiveTab(tabFromUrl)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search])
+  
+  // Обновляем URL при изменении activeTab
+  const handleTabChange = (tab) => {
+    setActiveTab(tab)
+    navigate(`/master?tab=${tab}`, { replace: true })
+  }
   const [schedule, setSchedule] = useState({})
   const [scheduleLoading, setScheduleLoading] = useState(false)
   const [scheduleError, setScheduleError] = useState('')
@@ -1005,9 +1056,12 @@ export default function MasterDashboard() {
   const [settingsLoading, setSettingsLoading] = useState(true)
   const [balance, setBalance] = useState(null)
   const [subscriptionStatus, setSubscriptionStatus] = useState(null)
+  const [bookingsLimit, setBookingsLimit] = useState(null)
   const [showDepositModal, setShowDepositModal] = useState(false)
+  const [showSubscriptionModal, setShowSubscriptionModal] = useState(false)
   const [isAuthorized, setIsAuthorized] = useState(false)
   const [scheduleView, setScheduleView] = useState('schedule') // 'schedule' или 'past'
+  const [profileWarnings, setProfileWarnings] = useState([])
 
   // Проверка авторизации
   const checkAuth = () => {
@@ -1020,7 +1074,7 @@ export default function MasterDashboard() {
   }
 
   // Компонент MasterSidebar
-  const MasterSidebar = ({ activeTab, setActiveTab, refreshKey, masterSettings, scheduleConflicts }) => {
+  const MasterSidebar = ({ activeTab, setActiveTab, refreshKey, masterSettings, scheduleConflicts, handleTabChange, hasFinanceAccess }) => {
     const [pendingInvitations, setPendingInvitations] = useState(0)
 
     useEffect(() => {
@@ -1052,7 +1106,7 @@ export default function MasterDashboard() {
         <div className="p-4 space-y-2">
           {/* Дашборд */}
           <button
-            onClick={() => setActiveTab('dashboard')}
+            onClick={() => handleTabChange ? handleTabChange('dashboard') : setActiveTab('dashboard')}
             className={`w-full text-left px-4 py-2 rounded-lg transition-colors ${
               activeTab === 'dashboard'
                 ? 'bg-blue-100 text-blue-700'
@@ -1064,7 +1118,7 @@ export default function MasterDashboard() {
           
           {/* Расписание */}
           <button
-            onClick={() => setActiveTab('schedule')}
+            onClick={() => handleTabChange ? handleTabChange('schedule') : setActiveTab('schedule')}
             className={`w-full text-left px-4 py-2 rounded-lg transition-colors ${
               activeTab === 'schedule'
                 ? 'bg-blue-100 text-blue-700'
@@ -1081,7 +1135,7 @@ export default function MasterDashboard() {
           
           {/* Услуги */}
           <button
-            onClick={() => setActiveTab('services')}
+            onClick={() => handleTabChange ? handleTabChange('services') : setActiveTab('services')}
             className={`w-full text-left px-4 py-2 rounded-lg transition-colors ${
               activeTab === 'services'
                 ? 'bg-blue-100 text-blue-700'
@@ -1093,7 +1147,7 @@ export default function MasterDashboard() {
           
           {/* Статистика */}
           <button
-            onClick={() => setActiveTab('stats')}
+            onClick={() => handleTabChange ? handleTabChange('stats') : setActiveTab('stats')}
             className={`w-full text-left px-4 py-2 rounded-lg transition-colors ${
               activeTab === 'stats'
                 ? 'bg-blue-100 text-blue-700'
@@ -1106,7 +1160,7 @@ export default function MasterDashboard() {
           {/* Работа в салоне - показываем только если включены функции салона */}
           {isSalonFeaturesEnabled() && (
             <button
-              onClick={() => setActiveTab('salon-work')}
+              onClick={() => handleTabChange ? handleTabChange('salon-work') : setActiveTab('salon-work')}
               className={`w-full text-left px-4 py-2 rounded-lg transition-colors ${
                 activeTab === 'salon-work'
                   ? 'bg-blue-100 text-blue-700'
@@ -1122,9 +1176,10 @@ export default function MasterDashboard() {
             </button>
           )}
           
-          {/* Бухгалтерия - показываем всегда */}
+        {/* Бухгалтерия - показываем только если доступна */}
+        {hasFinanceAccess ? (
           <button
-            onClick={() => setActiveTab('accounting')}
+            onClick={() => handleTabChange ? handleTabChange('accounting') : setActiveTab('accounting')}
             className={`w-full text-left px-4 py-2 rounded-lg transition-colors ${
               activeTab === 'accounting'
                 ? 'bg-blue-100 text-blue-700'
@@ -1133,10 +1188,39 @@ export default function MasterDashboard() {
           >
             💰 Финансы
           </button>
+        ) : (
+          <div className="w-full text-left px-4 py-2 rounded-lg text-gray-400 cursor-not-allowed relative group">
+            💰 Финансы
+            <span className="absolute left-full ml-2 hidden group-hover:block bg-gray-800 text-white text-xs rounded px-2 py-1 whitespace-nowrap z-10">
+              Доступно на плане Pro и выше
+            </span>
+          </div>
+        )}
+        
+        {/* Лояльность - показываем только если доступна */}
+        {hasFinanceAccess ? (
+          <button
+            onClick={() => handleTabChange ? handleTabChange('loyalty') : setActiveTab('loyalty')}
+            className={`w-full text-left px-4 py-2 rounded-lg transition-colors ${
+              activeTab === 'loyalty'
+                ? 'bg-blue-100 text-blue-700'
+                : 'text-gray-700 hover:bg-gray-100'
+            }`}
+          >
+            🎁 Лояльность
+          </button>
+        ) : (
+          <div className="w-full text-left px-4 py-2 rounded-lg text-gray-400 cursor-not-allowed relative group">
+            🎁 Лояльность
+            <span className="absolute left-full ml-2 hidden group-hover:block bg-gray-800 text-white text-xs rounded px-2 py-1 whitespace-nowrap z-10">
+              Доступно на плане Pro и выше
+            </span>
+          </div>
+        )}
           
           {/* Мой тариф - показываем всегда */}
           <button
-            onClick={() => setActiveTab('tariff')}
+            onClick={() => handleTabChange ? handleTabChange('tariff') : setActiveTab('tariff')}
             className={`w-full text-left px-4 py-2 rounded-lg transition-colors ${
               activeTab === 'tariff'
                 ? 'bg-blue-100 text-blue-700'
@@ -1148,7 +1232,7 @@ export default function MasterDashboard() {
           
           {/* Настройки */}
           <button
-            onClick={() => setActiveTab('settings')}
+            onClick={() => handleTabChange ? handleTabChange('settings') : setActiveTab('settings')}
             className={`w-full text-left px-4 py-2 rounded-lg transition-colors ${
               activeTab === 'settings'
                 ? 'bg-blue-100 text-blue-700'
@@ -1194,6 +1278,27 @@ export default function MasterDashboard() {
   }
 
   // Загрузка баланса и статуса подписки
+  const loadBookingsLimit = async () => {
+    try {
+      const token = localStorage.getItem('access_token');
+      if (!token) return;
+
+      const response = await fetch(`/api/master/bookings/limit`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setBookingsLimit(data);
+      }
+    } catch (err) {
+      console.error('Ошибка загрузки лимита записей:', err);
+    }
+  };
+
   const loadBalanceAndSubscription = async () => {
     if (!checkAuth()) return
     
@@ -1236,6 +1341,119 @@ export default function MasterDashboard() {
       
     } catch (error) {
       console.error('Ошибка при загрузке баланса и подписки:', error)
+    }
+  }
+
+  // Проверка заполненности профиля
+  const checkProfileCompleteness = async () => {
+    if (!checkAuth()) return
+    
+    const warnings = []
+    const token = localStorage.getItem('access_token')
+    
+    try {
+      // Загружаем настройки мастера
+      const settingsRes = await fetch(`${API_BASE_URL}/api/master/settings`, {
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        }
+      })
+      
+      if (settingsRes.ok) {
+        const settingsData = await settingsRes.json()
+        const { user, master } = settingsData
+        
+        // Проверка имени
+        if (!user.full_name || user.full_name.trim() === '') {
+          warnings.push({
+            type: 'name',
+            message: 'Не указано имя',
+            link: 'settings'
+          })
+        }
+        
+        // Проверка фото
+        if (!master.photo || master.photo.trim() === '') {
+          warnings.push({
+            type: 'photo',
+            message: 'Не загружено фото',
+            link: 'settings'
+          })
+        }
+        
+        // Проверка адреса и города
+        if (!master.address || master.address.trim() === '' || !master.city || master.city.trim() === '') {
+          warnings.push({
+            type: 'address',
+            message: 'Не указаны адрес и/или город',
+            link: 'settings'
+          })
+        }
+        
+        // Проверка телефона и email
+        if ((!user.phone || user.phone.trim() === '') && (!user.email || user.email.trim() === '')) {
+          warnings.push({
+            type: 'contact',
+            message: 'Не указаны телефон и/или e-mail',
+            link: 'settings'
+          })
+        }
+      }
+      
+      // Проверка наличия услуг
+      const servicesRes = await fetch(`${API_BASE_URL}/api/master/services`, {
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        }
+      })
+      
+      if (servicesRes.ok) {
+        const servicesData = await servicesRes.json()
+        if (!servicesData || servicesData.length === 0) {
+          warnings.push({
+            type: 'services',
+            message: 'Не добавлены услуги',
+            link: 'services'
+          })
+        }
+      }
+      
+      // Проверка наличия расписания и доступных слотов
+      const scheduleRes = await fetch(`${API_BASE_URL}/api/master/schedule/weekly?week_offset=0&weeks_ahead=4`, {
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        }
+      })
+      
+      if (scheduleRes.ok) {
+        const scheduleData = await scheduleRes.json()
+        const today = new Date()
+        today.setHours(0, 0, 0, 0)
+        
+        const availableSlots = scheduleData.slots?.filter(slot => {
+          const slotDate = new Date(slot.schedule_date)
+          slotDate.setHours(0, 0, 0, 0)
+          
+          return slot.is_working && 
+                 !slot.has_conflict &&
+                 slotDate >= today
+        }) || []
+        
+        if (availableSlots.length === 0) {
+          warnings.push({
+            type: 'schedule',
+            message: 'Нет доступных слотов для записи',
+            link: 'schedule'
+          })
+        }
+      }
+      
+      setProfileWarnings(warnings)
+    } catch (err) {
+      console.error('Ошибка проверки заполненности профиля:', err)
     }
   }
 
@@ -1289,7 +1507,9 @@ export default function MasterDashboard() {
     
     loadMasterSettings()
     loadBalanceAndSubscription()
+    loadBookingsLimit()
     loadScheduleConflicts() // Загружаем конфликты при входе
+    checkProfileCompleteness() // Проверяем заполненность профиля
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -1397,7 +1617,10 @@ export default function MasterDashboard() {
         body: JSON.stringify({ slots: allSlots })
       })
       
-      if (!res.ok) {
+      if (res.ok) {
+        // Обновляем проверку заполненности после успешного сохранения расписания
+        checkProfileCompleteness()
+      } else {
         console.error('Ошибка сохранения расписания:', res.status)
         // Откатываем изменения при ошибке
         setSchedule(prev => {
@@ -1434,6 +1657,7 @@ export default function MasterDashboard() {
   // Функция для обновления настроек после их изменения
   const refreshSettings = () => {
     loadMasterSettings()
+    checkProfileCompleteness()
   }
 
   // Обработка успешного пополнения баланса
@@ -1480,33 +1704,36 @@ export default function MasterDashboard() {
           refreshKey={refreshInvitations}
           masterSettings={masterSettings}
           scheduleConflicts={scheduleConflicts}
+          hasFinanceAccess={hasFinanceAccess}
+          hasExtendedStats={hasExtendedStats}
+          handleTabChange={handleTabChange}
         />
         <main className="flex-1 ml-64 pt-[140px] p-8">
           {activeTab === 'dashboard' && (
             <div>
               <h1 className="text-3xl font-bold mb-6">Дашборд мастера</h1>
               
-              {/* Баланс и подписка */}
-              {(balance || subscriptionStatus) && (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+              {/* Баланс, подписка и предупреждения */}
+              {(balance || subscriptionStatus || profileWarnings.length > 0) && (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
                   {balance && (
-                    <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
-                      <div className="flex items-center justify-between">
+                    <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
+                      <div className="flex items-center justify-between mb-3">
                         <div>
-                          <h3 className="text-lg font-semibold text-gray-900">Доступный бюджет</h3>
-                          <p className="text-3xl font-bold text-green-600">
+                          <h3 className="text-base font-semibold text-gray-900">Баланс</h3>
+                          <p className="text-2xl font-bold text-green-600 mt-1">
                             {balance.available_balance !== undefined ? balance.available_balance.toFixed(2) : balance.balance.toFixed(2)} ₽
                           </p>
                         </div>
-                        <div className="p-3 bg-green-100 rounded-lg">
-                          <svg className="w-8 h-8 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <div className="p-2 bg-green-100 rounded-lg">
+                          <svg className="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1" />
                           </svg>
                         </div>
                       </div>
                       <button 
                         onClick={() => setShowDepositModal(true)}
-                        className="mt-4 w-full bg-green-600 text-white py-2 px-4 rounded-lg hover:bg-green-700 transition-colors"
+                        className="w-full bg-green-600 text-white py-1.5 px-3 rounded-lg hover:bg-green-700 transition-colors text-sm"
                       >
                         Пополнить баланс
                       </button>
@@ -1514,61 +1741,71 @@ export default function MasterDashboard() {
                   )}
                   
                   {subscriptionStatus && (
-                    <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <h3 className="text-lg font-semibold text-gray-900">Подписка</h3>
-                          <p className={`text-lg font-medium ${subscriptionStatus.can_continue ? 'text-green-600' : 'text-red-600'}`}>
-                            {subscriptionStatus.can_continue ? 'Активна' : 'Приостановлена'}
+                    <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="flex-1">
+                          <h3 className="text-base font-semibold text-gray-900">Подписка</h3>
+                          {subscriptionStatus.plan_name && (
+                            <p className="text-lg font-semibold text-gray-900 mt-1">
+                              {subscriptionStatus.plan_display_name || subscriptionStatus.plan_name}
+                            </p>
+                          )}
+                          <p className={`text-sm font-medium mt-1 ${subscriptionStatus.can_continue && !subscriptionStatus.is_frozen ? 'text-green-600' : 'text-red-600'}`}>
+                            {subscriptionStatus.is_frozen 
+                              ? subscriptionStatus.freeze_info 
+                                ? `Приостановлена (${subscriptionStatus.freeze_info.start_date || ''} - ${subscriptionStatus.freeze_info.end_date || ''})`
+                                : 'Приостановлена'
+                              : subscriptionStatus.can_continue 
+                                ? 'Активна' 
+                                : 'Бесплатная'}
                           </p>
-                          <p className="text-sm text-gray-600">
-                            Осталось дней: {subscriptionStatus.days_remaining}
-                          </p>
-                          <p className="text-sm text-gray-600">
-                            {subscriptionStatus.daily_rate.toFixed(2)} ₽/день
-                          </p>
+                          {bookingsLimit && bookingsLimit.plan_name === "Free" && (
+                            <p className="text-xs text-gray-600 mt-1">
+                              Активные записи: {bookingsLimit.current_active_bookings}/{bookingsLimit.max_future_bookings}
+                            </p>
+                          )}
                         </div>
-                        <div className={`p-3 rounded-lg ${subscriptionStatus.can_continue ? 'bg-green-100' : 'bg-red-100'}`}>
-                          <svg className={`w-8 h-8 ${subscriptionStatus.can_continue ? 'text-green-600' : 'text-red-600'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <div className={`p-2 rounded-lg ${subscriptionStatus.can_continue ? 'bg-green-100' : 'bg-red-100'}`}>
+                          <svg className={`w-6 h-6 ${subscriptionStatus.can_continue ? 'text-green-600' : 'text-red-600'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                           </svg>
                         </div>
                       </div>
-                      {!subscriptionStatus.can_continue && (
-                        <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg">
-                          <p className="text-sm text-red-700">
-                            Недостаточно средств на балансе. Пополните счет для продолжения работы.
-                          </p>
-                        </div>
-                      )}
                     </div>
                   )}
                   
-                  {/* Карточка конфликтов расписания */}
-                  {scheduleConflicts > 0 && (
-                    <div className="bg-white p-6 rounded-lg shadow-sm border border-red-200">
-                      <div className="flex items-center justify-between">
+                  {/* Карточка предупреждений о нехватке информации */}
+                  {profileWarnings.length > 0 && (
+                    <div className="bg-white p-4 rounded-lg shadow-sm border border-yellow-200">
+                      <div className="flex items-center justify-between mb-3">
                         <div>
-                          <h3 className="text-lg font-semibold text-gray-900">Конфликты расписания</h3>
-                          <p className="text-3xl font-bold text-red-600">
-                            {scheduleConflicts} {scheduleConflicts === 1 ? 'день' : scheduleConflicts < 5 ? 'дня' : 'дней'}
-                          </p>
-                          <p className="text-sm text-gray-600 mt-1">
-                            Требуют внимания
+                          <h3 className="text-base font-semibold text-gray-900">Требуется внимание</h3>
+                          <p className="text-lg font-bold text-yellow-600 mt-1">
+                            {profileWarnings.length} {profileWarnings.length === 1 ? 'проблема' : profileWarnings.length < 5 ? 'проблемы' : 'проблем'}
                           </p>
                         </div>
-                        <div className="p-3 bg-red-100 rounded-lg">
-                          <svg className="w-8 h-8 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <div className="p-2 bg-yellow-100 rounded-lg">
+                          <svg className="w-6 h-6 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
                           </svg>
                         </div>
                       </div>
-                      <button 
-                        onClick={() => setActiveTab('schedule')}
-                        className="mt-4 w-full bg-red-600 text-white py-2 px-4 rounded-lg hover:bg-red-700 transition-colors"
-                      >
-                        Перейти к расписанию
-                      </button>
+                      <div className="space-y-1.5">
+                        {profileWarnings.slice(0, 2).map((warning, index) => (
+                          <button
+                            key={index}
+                            onClick={() => handleTabChange ? handleTabChange(warning.link) : setActiveTab(warning.link)}
+                            className="w-full text-left text-xs text-gray-700 hover:text-blue-600 transition-colors"
+                          >
+                            • {warning.message}
+                          </button>
+                        ))}
+                        {profileWarnings.length > 2 && (
+                          <p className="text-xs text-gray-500">
+                            +{profileWarnings.length - 2} еще
+                          </p>
+                        )}
+                      </div>
                     </div>
                   )}
                 </div>
@@ -1576,10 +1813,13 @@ export default function MasterDashboard() {
               
               {/* Статистика дашборда */}
               <MasterDashboardStats 
-                onNavigateToStats={() => setActiveTab('stats')} 
+                onNavigateToStats={() => handleTabChange('stats')} 
+                subscriptionStatus={subscriptionStatus}
+                hasExtendedStats={hasExtendedStats}
                 onConfirmSuccess={() => {
                   setRefreshKey(prev => prev + 1);
                 }}
+                onOpenSubscriptionModal={() => setShowSubscriptionModal(true)}
               />
             </div>
           )}
@@ -1644,17 +1884,51 @@ export default function MasterDashboard() {
           {activeTab === 'stats' && (
             <div>
               <h1 className="text-3xl font-bold mb-6">Статистика</h1>
-              <MasterStats />
+              <MasterStats 
+                hasExtendedStats={hasExtendedStats}
+                onOpenSubscriptionModal={() => setShowSubscriptionModal(true)}
+              />
             </div>
           )}
-          {activeTab === 'accounting' && (
+          {activeTab === 'accounting' && hasFinanceAccess && (
             <div>
               <h1 className="text-3xl font-bold mb-6">Финансы</h1>
               <MasterAccounting />
             </div>
           )}
+          {activeTab === 'accounting' && !hasFinanceAccess && (
+            <div>
+              <h1 className="text-3xl font-bold mb-6">Финансы</h1>
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-6">
+                <p className="text-yellow-800">
+                  Доступ к разделу "Финансы" доступен на плане Pro и выше.
+                </p>
+                <a href="/master/tariff" className="text-blue-600 underline mt-2 inline-block">
+                  Обновить план
+                </a>
+              </div>
+            </div>
+          )}
           {isSalonFeaturesEnabled() && activeTab === 'salon-work' && (
             <SalonWorkSection onInvitationUpdate={refreshInvitationsCount} />
+          )}
+          {activeTab === 'loyalty' && hasFinanceAccess && (
+            <div>
+              <MasterLoyalty />
+            </div>
+          )}
+          {activeTab === 'loyalty' && !hasFinanceAccess && (
+            <div>
+              <h1 className="text-3xl font-bold mb-6">Лояльность</h1>
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-6">
+                <p className="text-yellow-800">
+                  Доступ к разделу "Лояльность" доступен на плане Pro и выше.
+                </p>
+                <a href="/master?tab=tariff" className="text-blue-600 underline mt-2 inline-block">
+                  Обновить план
+                </a>
+              </div>
+            </div>
           )}
           {activeTab === 'settings' && <MasterSettings onSettingsUpdate={refreshSettings} />}
           {activeTab === 'tariff' && <MasterTariff />}
@@ -1669,6 +1943,16 @@ export default function MasterDashboard() {
         currentBalance={balance?.balance}
         availableBalance={balance?.available_balance}
       />
+      
+      {/* Модальное окно покупки подписки */}
+      {showSubscriptionModal && (
+        <SubscriptionModal
+          isOpen={showSubscriptionModal}
+          onClose={() => setShowSubscriptionModal(false)}
+          isFreePlan={subscriptionStatus?.plan_name === 'Free'}
+          currentPlanDisplayOrder={subscriptionStatus?.plan_display_order}
+        />
+      )}
     </div>
   )
 }
