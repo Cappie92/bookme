@@ -447,7 +447,7 @@ docker-compose exec frontend sh
 
 4. **Начните разработку:**
    - Создайте feature branch
-   - Следуйте [Development Workflow](development-workflow.md)
+   - Следуйте соглашениям команды и корневому `README.md` (workflow в репозитории не дублируется отдельным `guides/development-workflow.md`)
    - Пишите тесты
 
 ## Получение помощи
@@ -459,8 +459,7 @@ docker-compose exec frontend sh
 
 ## Связанные документы
 
-- [Development Workflow](development-workflow.md)
-- [Testing Guide](testing.md)
+- E2E и проверки: [E2E_RUNBOOK.md](../E2E_RUNBOOK.md)
 - [Architecture Overview](../architecture/overview.md)
 - [ADR-0001: Выбор технологического стека](../adr/0001-tech-stack.md)
 

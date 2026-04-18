@@ -23,7 +23,7 @@ sudo install -m 600 privkey.pem /etc/ssl/private/your-site.key
 
 ## 3. Nginx: минимальный каркас
 
-Используйте своё `server_name`, `listen`, upstream к приложению по [PROD_DEPLOY.md](../../PROD_DEPLOY.md) (порты backend/frontend за reverse proxy). Пример *без* боевого IP/домена:
+Используйте своё `server_name`, `listen`, upstream к приложению по корневому `PROD_DEPLOY.md` (порты backend/frontend за reverse proxy). Пример *без* боевого IP/домена:
 
 ```nginx
 server {
@@ -54,4 +54,4 @@ server {
 curl -I https://example.com
 ```
 
-Для **официального** сценария развёртывания смотрите [PROD_DEPLOY.md](../../PROD_DEPLOY.md) и, при необходимости, TLS-раздел / проксирование там, а не старые корневые «ручные» heredoc.
+Для **официального** сценария развёртывания смотрите корневой `PROD_DEPLOY.md` и, при необходимости, TLS-раздел / проксирование там, а не старые корневые «ручные» heredoc.

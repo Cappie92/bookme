@@ -91,7 +91,7 @@
 | **gitleaks** + `.gitleaks.toml` | Единые правила; allowlist: локальные `.env`, `mobile/ios/Pods/` (сгенерированное). |
 | **GitHub Actions** `gitleaks.yml` | **Инкрементально:** скан **диапазона коммитов** в PR / push (`--log-opts`), чтобы **не** требовать за один раз вычистку всех старых ложных/исторических срабатываний в доках; **новые** секреты в коммите — падают. |
 | **Полный scan рабочего дерева** | Вручную: `gitleaks detect --source . --no-git --config .gitleaks.toml` — для аудита и backlog по «примерам» в `.md` (не обязательно зелёный до отдельной зачистки). |
-| **Pre-commit** (опционально) | [`.pre-commit-config.yaml`](../../.pre-commit-config.yaml): `gitleaks protect` на staged. |
+| **Pre-commit** (опционально) | Корневой `.pre-commit-config.yaml`: `gitleaks protect` на staged. |
 | **Полный scan истории** | `gitleaks detect --source .` (git-режим) — для решения по `filter-repo` / отчёта; ожидаемо шумно, пока история не очищена. |
 
 ### Политика файлов

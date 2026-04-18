@@ -21,7 +21,7 @@
 - `deploy/prod/backend.env` (секреты).
 - Патчи `*.patch`, `*.log.jsonl`, `Thumbs.db`, `*.ics` (дампы календаря в dev).
 
-**Секреты (ключи, `BEGIN * PRIVATE KEY`, пароли, токены в явном виде):** не коммитить. CI: [`.github/workflows/gitleaks.yml`](../.github/workflows/gitleaks.yml) (скан рабочего дерева). Политика и history: [`docs/internal/POST_INCIDENT_REPO_HARDENING.md`](internal/POST_INCIDENT_REPO_HARDENING.md). Опционально локально: [`.pre-commit-config.yaml`](../.pre-commit-config.yaml).
+**Секреты (ключи, `BEGIN * PRIVATE KEY`, пароли, токены в явном виде):** не коммитить. CI: `.github/workflows/gitleaks.yml` (скан рабочего дерева). Политика и history: [`docs/internal/POST_INCIDENT_REPO_HARDENING.md`](internal/POST_INCIDENT_REPO_HARDENING.md). Опционально локально: `.pre-commit-config.yaml`.
 
 **Blanket-игнор всех `*.md` не используется** — в репозитории много **легитимных** doc-файлов. Разовые отчёты убираем через **перенос в `docs/archive/`** или **удаление** после review, а не маской в `.gitignore`.
 

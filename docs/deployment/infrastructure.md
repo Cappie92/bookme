@@ -487,8 +487,7 @@ volumes:
 
 ## Связанные документы
 
-- [Docker Setup](docker-setup.md)
-- [CI/CD Process](ci-cd.md)
+- Docker / compose / CI на проде: корневые `PROD_DEPLOY.md`, `docker-compose.prod.yml` (вне этого MkDocs-сайта).
 - [ADR-0002: Выбор базы данных](../adr/0002-database-choice.md)
 - [C4 Model: Container](../c4/02-container.md)
 

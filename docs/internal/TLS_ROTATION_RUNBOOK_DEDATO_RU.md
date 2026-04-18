@@ -2,7 +2,7 @@
 
 > **Предпосылка:** приватный ключ, попавший в VCS, **подтверждённо** соответствует **текущему** HTTPS (совпал SPKI→pubkey). Нужен **новый** private key + новый/перевыпущенный cert. **Очистка git history** — отдельно, после ротации на хосте.
 >
-> **Среда (канон [PROD_DEPLOY.md](../PROD_DEPLOY.md)):** стек DeDato в Docker, TLS обычно на **хост-nginx**; `ssl_certificate` / `ssl_certificate_key` указывают на файлы на **сервере** (часто Let’s Encrypt под `/etc/letsencrypt/`, либо `/etc/ssl/...`).
+> **Среда (канон — корневой `PROD_DEPLOY.md`):** стек DeDato в Docker, TLS обычно на **хост-nginx**; `ssl_certificate` / `ssl_certificate_key` указывают на файлы на **сервере** (часто Let’s Encrypt под `/etc/letsencrypt/`, либо `/etc/ssl/...`).
 
 **Запрещено:** копипаст private key, PEM, CSR с секретом в тикет/чат. Храните артефакты только на сервере/в secret store.
 

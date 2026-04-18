@@ -12,6 +12,9 @@ markdown_extensions:
   - toc
   - attr_list
 docs_dir: docs
+# Исторические отчёты не входят в сайт; иначе strict + markdown ломает сборку (TSX/`<>` в архивах).
+exclude_docs: |
+  archive/**
 strict: true
 nav:
   - Home: index.md

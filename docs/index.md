@@ -27,16 +27,12 @@
 ## 🚀 Развертывание и инфраструктура
 
 ### Инфраструктура
-- [Infrastructure](deployment/infrastructure.md) - Текущая инфраструктура и сервер
-- [Docker Setup](deployment/docker-setup.md) - Конфигурация контейнеров
-- [CI/CD Process](deployment/ci-cd.md) - Процесс развертывания и автоматизации
+- [Infrastructure](deployment/infrastructure.md) — текущая инфраструктура и сервер; Docker/CI и прод-runbook см. также корневые `PROD_DEPLOY.md`, `docker-compose.prod.yml` в репозитории.
 
 ## 👨‍💻 Руководства для разработчиков
 
 ### Начало работы
-- [Getting Started](guides/getting-started.md) - Быстрый старт для новых разработчиков
-- [Development Workflow](guides/development-workflow.md) - Процесс разработки и Git workflow
-- [Testing Guide](guides/testing.md) - Руководство по тестированию
+- [Getting Started](guides/getting-started.md) — быстрый старт для новых разработчиков (workflow и тесты — в этом репозитории дополняются корневым `README.md` и `docs/E2E_RUNBOOK.md`).
 
 ## 📊 C4 Model - Диаграммы архитектуры
 
