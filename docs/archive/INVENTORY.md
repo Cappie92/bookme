@@ -29,7 +29,7 @@
 
 - (Ранее в этом pass перенесены `DEPLOY*`, `QUICK_*` и т.д. — сверяйте с [by-topic/deploy-legacy/](by-topic/deploy-legacy/).)  
 - (Выполнено) `MIGRATION_GUIDE` → [../development/MIGRATION_GUIDE.md](../development/MIGRATION_GUIDE.md).  
-- (Выполнено) `SSL_SETUP_INSTRUCTIONS.md` удалён из корня: в нём был **реальный приватный RSA-ключ**; заменён на [../internal/SSL_TLS_SERVER_TEMPLATE.md](../internal/SSL_TLS_SERVER_TEMPLATE.md) (секреты не копируются; при утечке в git — **ротация ключа** на сервере).  
+- (Выполнено) `SSL_SETUP_INSTRUCTIONS.md` удалён из корня: в нём был **реальный приватный RSA-ключ**; заменён на [../internal/SSL_TLS_SERVER_TEMPLATE.md](../internal/SSL_TLS_SERVER_TEMPLATE.md) (секреты не копируются; при утечке в git — **ротация ключа** на сервере). **Ops follow-up:** [../internal/SECURITY_TLS_KEY_LEAK_FOLLOWUP.md](../internal/SECURITY_TLS_KEY_LEAK_FOLLOWUP.md).  
 - `dedato-landing-brief-for-cursor.md` — product/marketing → **REVIEW**
 - `AdminSettings — копия.jsx` — **мусор/битый** дубликат → **удалить или в archive** после факта, что в проекте нет ссылок
 - `DeDato logo card*.png`, `Logo Dedato.png`, `Dedato_404.mp4` → **REVIEW** (лучше `frontend/public/` / маркетинг, не `docs/archive`)

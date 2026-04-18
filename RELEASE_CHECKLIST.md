@@ -1,5 +1,7 @@
 ## DeDato — Release checklist (production)
 
+Порядок репо, сервера, игноров: **`docs/REPO_AND_DEPLOY_HYGIENE.md`**.
+
 ### Preflight (before deploy)
 
 - [ ] Все изменения закоммичены и запушены в GitHub (`main`)
