@@ -11,7 +11,7 @@ jobs:
     
     steps:
     - name: Checkout code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v5
       
     - name: Install sshpass
       run: |
@@ -44,6 +44,17 @@ jobs:
         sshpass -p '${{ secrets.SERVER_PASSWORD }}' ssh ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} << 'EOF'
           set -euo pipefail
           cd /opt/dedato
+          
+          # deploy/prod/backend.env не в git (.gitignore); на сервере должен существовать заранее
+          if [ ! -f deploy/prod/backend.env ]; then
+            echo "ERROR: missing deploy/prod/backend.env on server (copy from deploy/prod/backend.env.example)."
+            exit 1
+          fi
+          
+          if ! docker compose version >/dev/null 2>&1; then
+            echo "ERROR: Docker Compose v2 plugin required (docker compose). Install docker-compose-plugin."
+            exit 1
+          fi
           
           # Build and start containers
           docker compose -f docker-compose.prod.yml build
