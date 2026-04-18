@@ -1,0 +1,16 @@
+# Secret scanning — см. docs/internal/POST_INCIDENT_REPO_HARDENING.md
+# Запуск локально: gitleaks detect --source . --no-git  (только рабочее дерево)
+# Полная история: gitleaks detect --source .  (может находить старые коммиты)
+
+[extend]
+useDefault = true
+
+# Локальные .env не в индексе — не тащим в baseline/CI (см. .gitignore).
+# Добавляйте только проверенные ложные срабатывания (путь/правило), не «заглушки под всё».
+[allowlist]
+paths = [
+  '''^\.env$''',
+  '''^\.env\.''',
+  # CocoaPods — бинарные/сгенерированные артефакты; не секреты приложения
+  '''mobile/ios/Pods/''',
+]

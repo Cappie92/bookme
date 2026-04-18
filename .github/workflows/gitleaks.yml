@@ -1,0 +1,49 @@
+# Сканирует **диапазон коммитов** (PR или push), а не всё рабочее дерево:
+# блокирует новые утечки без требования немедленной зачистки исторических примеров в .md.
+# Полный аудит рабочего дерева: `gitleaks detect --source . --no-git` (см. docs/internal/POST_INCIDENT_REPO_HARDENING.md).
+name: Secret scan (gitleaks, incremental)
+
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+
+permissions:
+  contents: read
+
+jobs:
+  gitleaks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install gitleaks
+        env:
+          GITLEAKS_VERSION: "8.21.2"
+        run: |
+          wget -qO /tmp/gitleaks.tgz "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          tar -xzf /tmp/gitleaks.tgz -C /tmp
+          sudo install -m755 /tmp/gitleaks /usr/local/bin/gitleaks
+
+      - name: Detect secrets in commit range (PR)
+        if: github.event_name == 'pull_request'
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          gitleaks detect --source . --config .gitleaks.toml --log-opts="$BASE...$HEAD" --verbose
+
+      - name: Detect secrets in commit range (push)
+        if: github.event_name == 'push'
+        env:
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.event.after }}
+        run: |
+          if [ "$BEFORE" = "0000000000000000000000000000000000000000" ] || [ -z "$BEFORE" ]; then
+            echo "Initial push or unknown range — scan last commit only"
+            gitleaks detect --source . --config .gitleaks.toml --log-opts="-1" --verbose
+          else
+            gitleaks detect --source . --config .gitleaks.toml --log-opts="$BEFORE...$AFTER" --verbose
+          fi

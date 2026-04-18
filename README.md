@@ -2,6 +2,8 @@
 
 DeDato - это современная платформа для бронирования услуг красоты, которая соединяет клиентов с мастерами и салонами. Система построена на React + FastAPI с использованием современных технологий и лучших практик разработки.
 
+**Production (после первого деплоя):** операционные шаги — [PROD_DEPLOY.md](PROD_DEPLOY.md), [DATA_MIGRATION.md](DATA_MIGRATION.md), [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md). Порядок в репозитории и на сервере — [docs/REPO_AND_DEPLOY_HYGIENE.md](docs/REPO_AND_DEPLOY_HYGIENE.md). Индекс документации: [docs/DOC_INDEX.md](docs/DOC_INDEX.md).
+
 ## 🚀 Быстрый старт
 
 ```bash
@@ -82,6 +84,7 @@ make test-master-canon
 - [Getting Started](docs/guides/getting-started.md) - Быстрый старт для разработчиков
 - [Development Workflow](docs/guides/development-workflow.md) - Процесс разработки
 - [Testing Guide](docs/guides/testing.md) - Руководство по тестированию
+- [Миграции схемы БД (Alembic)](docs/development/MIGRATION_GUIDE.md) — не путать с [DATA_MIGRATION.md](DATA_MIGRATION.md) (набор/перенос данных)
 
 ## 🛠️ Технологический стек
 

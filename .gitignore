@@ -65,31 +65,51 @@ logs
 *.sln
 *.sw?
 
-# --- DeDato: production deploy / local runtime (do not commit) ---
+# --- DeDato: production deploy / local & server runtime (do not commit) ---
+# Secrets
 deploy/prod/backend.env
+
+# Dataset export/import, Playwright, local CI
 artifacts/
 test-results/
 
-# Local uploads (avatars, blog covers, etc.) — не коммитить; на проде в volume
-backend/uploads/
-backend/*.ics
+# Server/local backups produced by scripts/prod/backup_sqlite.sh (repo root relative)
+backups/
 
-# SQLite & local DB copies / backups
-backend/bookme.db
-backend/test.db
-test.db
+# User uploads (prod: docker volume; dev: local tree)
+/uploads/
+backend/uploads/
+
+# Calendar/email dumps
+backend/*.ics
+*.ics
+
+# SQLite (любой путь; при редком исключении — только git add -f)
+*.db
 *.db-journal
 *.db-wal
 *.db-shm
+
+# Именованные копии/бэкапы БД
 **/bookme_backup_*.db
 **/bookme.old*.db
 **/bookme*.backup*.db
-**/test.db
-# Large local archives
-*.tar.gz
 
-# Large local archives
+# Архивы бэкапов / датасетов
 *.tar.gz
+*.tgz
 
-# Local root sqlite
-bookme.db
+# Патчи и одноразовые артефакты
+*.patch
+*.orig
+*~
+
+# Windows / мусор ОС
+Thumbs.db
+Desktop.ini
+
+# Длинные machine-generated логи
+*.log.jsonl
+
+# Локальные отчёты secret scan (не коммитить)
+gitleaks-report.json
