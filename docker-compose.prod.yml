@@ -1,0 +1,51 @@
+version: "3.8"
+
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    networks:
+      - dedato-network
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    env_file:
+      # На сервере создайте файл из шаблона deploy/prod/backend.env.example
+      - ./deploy/prod/backend.env
+    environment:
+      # DB и артефакты — в volumes, не в директории репозитория.
+      - DATABASE_URL=sqlite:////data/bookme.db
+      # Redis нужен для OTP-хранилища (см. backend/sms.py). В контейнере localhost = сам backend.
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    volumes:
+      - dedato_data:/data
+      - dedato_uploads:/app/uploads
+      - dedato_logs:/app/logs
+    depends_on:
+      - redis
+    networks:
+      - dedato-network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+    restart: unless-stopped
+    ports:
+      # Единственный внешний вход (HTTP). TLS можно повесить сверху (host nginx / Cloudflare / LB).
+      - "80:80"
+    depends_on:
+      - backend
+    networks:
+      - dedato-network
+
+networks:
+  dedato-network:
+    driver: bridge
+
+volumes:
+  dedato_data:
+  dedato_uploads:
+  dedato_logs:

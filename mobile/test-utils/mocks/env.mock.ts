@@ -1,0 +1,11 @@
+export const API_URL = 'http://localhost:8001';
+export const API_URL_ANDROID = '';
+export const WEB_URL = 'http://localhost:5173';
+export const DEBUG_HTTP = '0';
+export const DEBUG_AUTH = '0';
+export const DEBUG_FEATURES = '0';
+export const DEBUG_MENU = '0';
+export const DEBUG_DASHBOARD = '0';
+export const DEBUG_LOGS = '0';
+export const DEBUG_MOBILE_ERRORS = '0';
+export const DEBUG_AUTH_TRACE = '0';

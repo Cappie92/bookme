@@ -1,0 +1,54 @@
+{
+  "exported_at": "2025-12-30T14:00:54.987636",
+  "source": "local_database",
+  "functions": [
+    {
+      "name": "booking_page",
+      "description": "Базовая функция страницы бронирования мастера",
+      "function_type": "FREE",
+      "is_active": true,
+      "display_name": "Страница бронирования мастера",
+      "display_order": 1
+    },
+    {
+      "name": "extended_statistics",
+      "description": "Расширенная статистика с детальной аналитикой",
+      "function_type": "SUBSCRIPTION",
+      "is_active": true,
+      "display_name": "Статистика",
+      "display_order": 3
+    },
+    {
+      "name": "loyalty_program",
+      "description": "Программа лояльности с баллами и скидками",
+      "function_type": "SUBSCRIPTION",
+      "is_active": true,
+      "display_name": "Лояльность",
+      "display_order": 4
+    },
+    {
+      "name": "finance_management",
+      "description": "Управление финансами и учет доходов",
+      "function_type": "SUBSCRIPTION",
+      "is_active": true,
+      "display_name": "Финансы",
+      "display_order": 5
+    },
+    {
+      "name": "client_restrictions",
+      "description": "Настройка стоп-листов клиентов и предоплаты",
+      "function_type": "SUBSCRIPTION",
+      "is_active": true,
+      "display_name": "Стоп-листы и предоплата",
+      "display_order": 6
+    },
+    {
+      "name": "custom_domain",
+      "description": "Возможность редактирования персонального домена",
+      "function_type": "SUBSCRIPTION",
+      "is_active": true,
+      "display_name": "Персональный домен",
+      "display_order": 7
+    }
+  ]
+}

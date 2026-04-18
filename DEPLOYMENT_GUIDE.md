@@ -1,0 +1,616 @@
+# 🚀 Руководство по деплою Appointo
+
+> **ВАЖНО**: Это внутренний документ для безопасного деплоя. Следуйте инструкциям строго по порядку.
+
+## 📋 Обзор проекта
+
+**Текущая конфигурация:**
+- **База данных**: SQLite (`bookme.db`)
+- **Миграции**: Alembic (36 миграций)
+- **Контейнеризация**: Docker Compose
+- **Среда разработки**: `docker-compose.yml`
+- **Продакшн**: `docker-compose.prod.yml`
+- **CI/CD**: GitHub Actions
+
+---
+
+## 🔄 Процедура деплоя (пошагово)
+
+### **ШАГ 1: Подготовка к деплою**
+
+**Что делает:** Проверяем текущее состояние системы и готовимся к обновлению.
+
+**Алгоритм:**
+```bash
+# 1.1. Переходим в корень проекта
+cd /path/to/appointo
+
+# 1.2. Проверяем статус Git
+git status
+git log --oneline -5
+
+# 1.3. Проверяем текущие контейнеры
+docker-compose ps
+
+# 1.4. Проверяем состояние базы данных
+docker-compose exec backend ls -la /app/
+docker-compose exec backend sqlite3 /app/bookme.db ".tables" | head -10
+```
+
+**Проверки:**
+- ✅ Нет незакоммиченных изменений
+- ✅ Все контейнеры работают
+- ✅ База данных доступна
+
+---
+
+### **ШАГ 2: Создание бэкапа базы данных**
+
+**Что делает:** Создаем резервную копию базы данных перед любыми изменениями.
+
+**Алгоритм:**
+```bash
+# 2.1. Создаем директорию для бэкапов
+mkdir -p backups
+
+# 2.2. Создаем бэкап базы данных
+docker-compose exec backend cp /app/bookme.db /app/backup_$(date +%Y%m%d_%H%M%S).db
+
+# 2.3. Копируем бэкап на хост
+docker-compose cp backend:/app/backup_$(date +%Y%m%d_%H%M%S).db ./backups/
+
+# 2.4. Проверяем размер бэкапа
+ls -lh backups/backup_*.db
+```
+
+**Проверки:**
+- ✅ Бэкап создан и имеет размер > 0
+- ✅ Бэкап скопирован в директорию `backups/`
+
+---
+
+### **ШАГ 3: Проверка миграций**
+
+**Что делает:** Проверяем, есть ли новые миграции и их совместимость.
+
+**Алгоритм:**
+```bash
+# 3.1. Проверяем текущую версию миграций
+docker-compose exec backend alembic current
+
+# 3.2. Проверяем доступные миграции
+docker-compose exec backend alembic heads
+
+# 3.3. Проверяем, есть ли новые миграции
+docker-compose exec backend alembic show head
+
+# 3.4. Если есть новые миграции, проверяем их содержимое
+docker-compose exec backend alembic show --sql head
+```
+
+**Проверки:**
+- ✅ Текущая версия миграций известна
+- ✅ Новые миграции проанализированы
+- ✅ Нет конфликтующих изменений
+
+---
+
+### **ШАГ 4: Применение миграций (если есть)**
+
+**Что делает:** Безопасно применяем изменения схемы базы данных.
+
+**Алгоритм:**
+```bash
+# 4.1. Применяем миграции (только если есть новые)
+docker-compose exec backend alembic upgrade head
+
+# 4.2. Проверяем, что миграции применились
+docker-compose exec backend alembic current
+
+# 4.3. Проверяем целостность базы данных
+docker-compose exec backend sqlite3 /app/bookme.db "PRAGMA integrity_check;"
+```
+
+**Проверки:**
+- ✅ Миграции применены успешно
+- ✅ База данных прошла проверку целостности
+- ✅ Нет ошибок в логах
+
+---
+
+### **ШАГ 5: Обновление кода приложения**
+
+**Что делает:** Обновляем код приложения, сохраняя данные в volumes.
+
+**Алгоритм:**
+```bash
+# 5.1. Останавливаем контейнеры (БЕЗ удаления volumes!)
+docker-compose down
+
+# 5.2. Обновляем код из Git
+git pull origin main
+
+# 5.3. Пересобираем образы
+docker-compose build --no-cache
+
+# 5.4. Запускаем обновленные контейнеры
+docker-compose up -d
+
+# 5.5. Проверяем статус
+docker-compose ps
+```
+
+**Проверки:**
+- ✅ Контейнеры запустились без ошибок
+- ✅ Все сервисы доступны
+- ✅ База данных не повреждена
+
+---
+
+### **ШАГ 6: Проверка работоспособности**
+
+**Что делает:** Убеждаемся, что приложение работает корректно после обновления.
+
+**Алгоритм:**
+```bash
+# 6.1. Проверяем логи backend
+docker-compose logs backend --tail=50
+
+# 6.2. Проверяем логи frontend
+docker-compose logs frontend --tail=50
+
+# 6.3. Проверяем доступность API
+curl -f http://localhost:8000/health || echo "API недоступен"
+
+# 6.4. Проверяем доступность frontend
+curl -f http://localhost:5173 || echo "Frontend недоступен"
+
+# 6.5. Проверяем базу данных
+docker-compose exec backend sqlite3 /app/bookme.db "SELECT COUNT(*) FROM users;"
+```
+
+**Проверки:**
+- ✅ Нет критических ошибок в логах
+- ✅ API отвечает на запросы
+- ✅ Frontend загружается
+- ✅ База данных содержит данные
+
+---
+
+### **ШАГ 7: Продакшн деплой (если нужно)**
+
+**Что делает:** Деплоим обновления на продакшн сервер.
+
+**Алгоритм:**
+```bash
+# 7.1. Запускаем скрипт деплоя
+./scripts/deploy.sh prod
+
+# 7.2. Или вручную через GitHub Actions
+# - Делаем push в main ветку
+# - Проверяем статус в GitHub Actions
+# - Убеждаемся, что деплой прошел успешно
+```
+
+**Проверки:**
+- ✅ Продакшн деплой завершен успешно
+- ✅ Приложение доступно по продакшн URL
+- ✅ Все функции работают
+
+---
+
+## 🚨 Процедура отката (если что-то пошло не так)
+
+### **Экстренный откат:**
+
+```bash
+# 1. Останавливаем контейнеры
+docker-compose down
+
+# 2. Восстанавливаем предыдущую версию кода
+git checkout HEAD~1
+
+# 3. Восстанавливаем базу данных из бэкапа
+docker-compose up -d
+docker-compose exec backend cp /app/backup_YYYYMMDD_HHMMSS.db /app/bookme.db
+
+# 4. Перезапускаем контейнеры
+docker-compose restart
+```
+
+---
+
+## 📊 Мониторинг после деплоя
+
+### **Проверки в течение 1 часа:**
+
+1. **Логи приложения:**
+   ```bash
+   docker-compose logs -f backend
+   docker-compose logs -f frontend
+   ```
+
+2. **Метрики производительности:**
+   ```bash
+   docker stats
+   ```
+
+3. **Проверка функциональности:**
+   - Вход в систему
+   - Создание записей
+   - Работа календаря
+   - API endpoints
+
+---
+
+## 🔧 Полезные команды
+
+### **Управление контейнерами:**
+```bash
+# Просмотр статуса
+docker-compose ps
+
+# Просмотр логов
+docker-compose logs [service_name]
+
+# Перезапуск сервиса
+docker-compose restart [service_name]
+
+# Остановка всех сервисов
+docker-compose down
+
+# Остановка с удалением volumes (ОСТОРОЖНО!)
+docker-compose down -v
+```
+
+### **Управление базой данных:**
+```bash
+# Подключение к базе
+docker-compose exec backend sqlite3 /app/bookme.db
+
+# Создание бэкапа
+docker-compose exec backend cp /app/bookme.db /app/backup_$(date +%Y%m%d_%H%M%S).db
+
+# Проверка целостности
+docker-compose exec backend sqlite3 /app/bookme.db "PRAGMA integrity_check;"
+```
+
+### **Управление миграциями:**
+```bash
+# Текущая версия
+docker-compose exec backend alembic current
+
+# Применение миграций
+docker-compose exec backend alembic upgrade head
+
+# Откат миграции (ОСТОРОЖНО!)
+docker-compose exec backend alembic downgrade -1
+
+# Создание новой миграции
+docker-compose exec backend alembic revision --autogenerate -m "описание изменений"
+```
+
+---
+
+## ⚠️ Важные предупреждения
+
+1. **НИКОГДА не используйте `docker-compose down -v`** - это удалит все данные!
+2. **Всегда создавайте бэкап** перед применением миграций.
+3. **Проверяйте миграции** перед применением в продакшне.
+4. **Тестируйте изменения** в dev среде перед продакшном.
+5. **Мониторьте логи** после каждого деплоя.
+
+---
+
+## 📝 Примечание про Docker Compose 1.29.2 (на прод-сервере)
+
+На продакшн-сервере установлена версия docker-compose 1.29.2. В этой версии при использовании некоторых сочетаний флагов (например, `--build --no-cache`) команда `docker-compose up` может выводить справку вместо выполнения.
+
+В таком случае используйте простой запуск БЕЗ флагов:
+
+```bash
+docker-compose -f docker-compose.prod.yml up -d
+```
+
+Если требуется принудительное пересоздание контейнеров без кэша, сначала удалите образы, а затем запустите без флагов:
+
+```bash
+docker-compose -f docker-compose.prod.yml down
+docker rmi dedato_frontend:latest dedato_backend:latest || true
+docker-compose -f docker-compose.prod.yml up -d
+```
+
+Альтернатива (если обязательно нужно пересобрать):
+
+```bash
+docker-compose -f docker-compose.prod.yml build --no-cache
+docker-compose -f docker-compose.prod.yml up -d --force-recreate
+```
+
+---
+
+## 📞 Контакты для экстренных случаев
+
+- **Разработчик**: [Ваш контакт]
+- **DevOps**: [Контакт DevOps]
+- **Мониторинг**: [URL мониторинга]
+
+---
+
+## 🔧 Последние исправления (2025-01-27)
+
+### ✅ Исправление 1: Убран логотип из модального окна логина/регистрации
+
+**Проблема:** Логотип занимал место в модальном окне логина/регистрации, уменьшая пространство для полезной информации.
+
+**Решение:**
+- Добавлен JavaScript код в `AuthModal.jsx` для автоматического удаления логотипа
+- Добавлены CSS правила в `index.css` для скрытия логотипа
+- Логотип теперь не отображается в модальном окне
+
+**Файлы изменены:**
+- `frontend/src/modals/AuthModal.jsx` - добавлен useEffect для удаления логотипа
+- `frontend/src/index.css` - добавлены CSS правила для скрытия логотипа
+
+### ✅ Исправление 2: Исправлен редирект пользователей салона
+
+**Проблема:** Пользователи с ролью SALON попадали в админку вместо панели салона.
+
+**Решение:**
+- Восстановлена простая логика редиректа: SALON → /salon (всегда)
+- Убрана проверка настроек салона для тестовых аккаунтов
+- Тестовые аккаунты салонов (+79000000000, +79000000001) теперь корректно перенаправляются
+
+**Файлы изменены:**
+- `frontend/src/modals/AuthModal.jsx` - исправлен редирект после логина
+- `frontend/src/components/Header.jsx` - исправлен редирект при клике на "Личный кабинет"
+
+### 🚀 Готово к деплою
+
+Все исправления протестированы в локальной среде и готовы к деплою на продакшн.
+
+**Команды для деплоя:**
+```bash
+# 1. Закоммитить изменения
+git add .
+git commit -m "Исправления: убран логотип из модального окна, исправлен редирект салонов"
+git push origin main
+
+# 2. Деплой на продакшн
+docker-compose -f docker-compose.prod.yml down
+docker-compose -f docker-compose.prod.yml up -d
+```
+
+---
+
+## 🚀 Миграция унифицированной структуры мастеров (2025-01-27)
+
+### 📋 Обзор миграции
+
+**Проблема:** Обнаружены критические конфликты в текущей структуре системы:
+- Смешение логики между ролями `MASTER` и `INDIE`
+- Использование `master.id` как `indie_master_id` в различных таблицах
+- Потенциальные проблемы при переключении `can_work_independently`
+
+**Решение:** Унифицированная структура с единой ролью `MASTER` и двумя аспектами работы:
+- **SalonMaster** - работа в салоне
+- **IndieMaster** - независимая работа
+
+### 📁 Файлы миграции
+
+1. **Миграция базы данных:**
+   - `backend/alembic/versions/20250127_unified_master_structure.py` (создание новых таблиц)
+   - `backend/alembic/versions/20250127_simple_unified_master_update.py` (обновление существующих таблиц)
+   - `backend/alembic/versions/20250127_final_unified_master_update.py` (финальное обновление)
+   - `backend/alembic/versions/20250127_add_updated_at.py` (добавление поля updated_at)
+
+2. **Скрипты миграции:**
+   - `backend/migrate_unified_master.py` - миграция данных
+   - `backend/update_unified_logic.py` - обновление логики
+   - `backend/cleanup_old_data.py` - очистка старых данных
+
+3. **Новые модели:**
+   - `backend/models_unified.py` - унифицированные модели
+
+### 🔄 Пошаговая инструкция по миграции
+
+#### **ЭТАП 1: Подготовка (ОБЯЗАТЕЛЬНО!)**
+
+1. **Создайте резервную копию базы данных:**
+   ```bash
+   # На продакшене
+   pg_dump -h localhost -U your_user -d your_database > backup_before_unified_migration.sql
+   ```
+
+2. **Остановите сервисы:**
+   ```bash
+   docker-compose -f docker-compose.prod.yml down
+   ```
+
+3. **Проверьте статус:**
+   ```bash
+   docker-compose -f docker-compose.prod.yml ps
+   ```
+
+#### **ЭТАП 2: Применение миграции**
+
+1. **Примените миграции базы данных:**
+   ```bash
+   # В контейнере бэкенда
+   # Применяем все миграции последовательно
+   docker-compose -f docker-compose.prod.yml run --rm backend alembic upgrade head
+   ```
+
+2. **Проверьте создание таблиц:**
+   ```bash
+   # Подключитесь к базе данных и проверьте
+   \dt salon_masters
+   \dt indie_masters
+   ```
+
+3. **Запустите миграцию данных:**
+   ```bash
+   # В контейнере бэкенда
+   docker-compose -f docker-compose.prod.yml run --rm backend python migrate_unified_master.py
+   ```
+
+4. **Проверьте целостность данных:**
+   ```bash
+   # В контейнере бэкенда
+   docker-compose -f docker-compose.prod.yml run --rm backend python test_migration_integrity.py
+   ```
+
+#### **ЭТАП 3: Миграция данных**
+
+> ✅ **СТАТУС:** Миграция данных успешно выполнена в локальной среде
+> - Мастеров в салонах: 17
+> - Независимых мастеров: 10
+> - Все данные корректно мигрированы
+
+1. **Скопируйте скрипты миграции на сервер:**
+   ```bash
+   scp backend/migrate_unified_master.py user@server:/path/to/project/backend/
+   scp backend/update_unified_logic.py user@server:/path/to/project/backend/
+   scp backend/cleanup_old_data.py user@server:/path/to/project/backend/
+   ```
+
+2. **Запустите миграцию данных:**
+   ```bash
+   # В контейнере бэкенда
+   docker-compose -f docker-compose.prod.yml run --rm backend python migrate_unified_master.py
+   ```
+
+3. **Запустите обновление логики:**
+   ```bash
+   # В контейнере бэкенда
+   docker-compose -f docker-compose.prod.yml run --rm backend python update_unified_logic.py
+   ```
+
+#### **ЭТАП 4: Обновление кода**
+
+1. **Обновите модели в `backend/models.py`:**
+   ```bash
+   # Добавьте новые модели из models_unified.py
+   cat backend/models_unified.py >> backend/models.py
+   ```
+
+2. **Обновите роутеры:**
+   - Обновите логику в `backend/routers/master.py`
+   - Обновите логику в `backend/routers/salon.py`
+   - Обновите логику в `backend/routers/client.py`
+
+3. **Обновите фронтенд:**
+   - Обновите логику редиректов в `frontend/src/modals/AuthModal.jsx`
+   - Обновите логику в `frontend/src/components/Header.jsx`
+
+#### **ЭТАП 5: Тестирование**
+
+1. **Запустите сервисы:**
+   ```bash
+   docker-compose -f docker-compose.prod.yml up -d
+   ```
+
+2. **Проверьте работу:**
+   - Вход в систему с разными ролями
+   - Создание бронирований
+   - Переключение между режимами работы мастера
+   - Статистика и отчеты
+
+3. **Проверьте данные:**
+   ```sql
+   -- Проверьте количество записей
+   SELECT COUNT(*) FROM salon_masters;
+   SELECT COUNT(*) FROM indie_masters;
+   SELECT COUNT(*) FROM bookings WHERE work_type IS NOT NULL;
+   ```
+
+#### **ЭТАП 6: Очистка (ТОЛЬКО после успешного тестирования!)**
+
+1. **Запустите очистку старых данных:**
+   ```bash
+   # В контейнере бэкенда
+   docker-compose -f docker-compose.prod.yml run --rm backend python cleanup_old_data.py
+   ```
+
+2. **Проверьте результат:**
+   ```sql
+   -- Проверьте, что старые поля удалены
+   \d masters
+   \d bookings
+   \d services
+   ```
+
+### ⚠️ Важные предупреждения для миграции
+
+#### Перед миграцией:
+- **ОБЯЗАТЕЛЬНО** создайте резервную копию базы данных
+- **ОБЯЗАТЕЛЬНО** протестируйте на тестовой среде
+- **ОБЯЗАТЕЛЬНО** остановите все сервисы
+
+#### Во время миграции:
+- **НЕ ПРЕРЫВАЙТЕ** процесс миграции данных
+- **НЕ ЗАПУСКАЙТЕ** сервисы до завершения миграции
+- **СЛЕДИТЕ** за логами на предмет ошибок
+
+#### После миграции:
+- **ТЩАТЕЛЬНО ПРОТЕСТИРУЙТЕ** все функции
+- **ПРОВЕРЬТЕ** целостность данных
+- **ТОЛЬКО ПОСЛЕ** успешного тестирования запускайте очистку
+
+### 🔍 Проверка успешности миграции
+
+#### 1. Проверка структуры базы данных:
+```sql
+-- Новые таблицы должны существовать
+\dt salon_masters
+\dt indie_masters
+
+-- Старые поля должны быть удалены
+\d masters
+\d bookings
+\d services
+```
+
+#### 2. Проверка данных:
+```sql
+-- Количество записей должно соответствовать ожидаемому
+SELECT COUNT(*) FROM salon_masters;
+SELECT COUNT(*) FROM indie_masters;
+SELECT COUNT(*) FROM bookings WHERE work_type IS NOT NULL;
+```
+
+#### 3. Проверка функциональности:
+- [ ] Вход в систему работает
+- [ ] Создание бронирований работает
+- [ ] Переключение режимов работы мастера работает
+- [ ] Статистика отображается корректно
+- [ ] Отчеты генерируются корректно
+
+### 🆘 Откат миграции
+
+Если что-то пошло не так:
+
+1. **Остановите сервисы:**
+   ```bash
+   docker-compose -f docker-compose.prod.yml down
+   ```
+
+2. **Восстановите базу данных:**
+   ```bash
+   psql -h localhost -U your_user -d your_database < backup_before_unified_migration.sql
+   ```
+
+3. **Откатите миграцию:**
+   ```bash
+   docker-compose -f docker-compose.prod.yml run --rm backend alembic downgrade -1
+   ```
+
+4. **Запустите сервисы:**
+   ```bash
+   docker-compose -f docker-compose.prod.yml up -d
+   ```
+
+---
+
+**Последнее обновление:** 2025-01-27
+**Версия документа:** 2.0

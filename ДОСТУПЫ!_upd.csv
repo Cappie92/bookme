@@ -1,0 +1,33 @@
+﻿email;phone;full_name;password;role;specialization
+client1@test.com;+79735906386;Клиент 1;test123;CLIENT;
+client2@test.com;+79507155911;Клиент 2;test123;CLIENT;
+client3@test.com;+79823843142;Клиент 3;test123;CLIENT;
+client4@test.com;+79910365858;Клиент 4;test123;CLIENT;
+client5@test.com;+79842805414;Клиент 5;test123;CLIENT;
+client6@test.com;+79291321548;Клиент 6;test123;CLIENT;
+client7@test.com;+79850245588;Клиент 7;test123;CLIENT;
+client8@test.com;+79474071403;Клиент 8;test123;CLIENT;
+client9@test.com;+79681533089;Клиент 9;test123;CLIENT;
+client10@test.com;+79209880393;Клиент 10;test123;CLIENT;
+client11@test.com;+79321116201;Клиент 11;test123;CLIENT;
+client12@test.com;+79491751908;Клиент 12;test123;CLIENT;
+client13@test.com;+79697595223;Клиент 13;test123;CLIENT;
+client14@test.com;+79412971988;Клиент 14;test123;CLIENT;
+client15@test.com;+79132214763;Клиент 15;test123;CLIENT;
+client16@test.com;+79592789237;Клиент 16;test123;CLIENT;
+client17@test.com;+79893581849;Клиент 17;test123;CLIENT;
+client18@test.com;+79925546719;Клиент 18;test123;CLIENT;
+client19@test.com;+79326250196;Клиент 19;test123;CLIENT;
+client20@test.com;+79481869343;Клиент 20;test123;CLIENT;
+indie_master1@test.com;+79435774916;Индивидуальный мастер 1;test123;MASTER;indie
+indie_master2@test.com;+79417916974;Индивидуальный мастер 2;test123;MASTER;indie
+indie_master3@test.com;+79413566076;Индивидуальный мастер 3;test123;MASTER;indie
+salon_master1@test.com;+79872824297;Салонный мастер 1;test123;MASTER;salon
+salon_master2@test.com;+79097988596;Салонный мастер 2;test123;MASTER;salon
+salon_master3@test.com;+79593950097;Салонный мастер 3;test123;MASTER;salon
+salon_master4@test.com;+79926408135;Салонный мастер 4;test123;MASTER;salon
+hybrid_master1@test.com;+79997977449;Гибридный мастер 1;test123;MASTER;both
+hybrid_master2@test.com;+79399305864;Гибридный мастер 2;test123;MASTER;both
+hybrid_master3@test.com;+79562411064;Гибридный мастер 3;test123;MASTER;both
+salon1@test.com;79000000000;Владелец салона №1;test123;SALON;
+salon2@test.com;+79000000001;Владелец салона №2;test123;SALON;

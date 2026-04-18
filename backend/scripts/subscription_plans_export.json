@@ -1,0 +1,145 @@
+{
+  "exported_at": "2025-12-30T13:54:22.769118",
+  "source": "local_database",
+  "plans": [
+    {
+      "name": "Free",
+      "display_name": "Бесплатный",
+      "subscription_type": "master",
+      "price_1month": 0.0,
+      "price_3months": 0.0,
+      "price_6months": 0.0,
+      "price_12months": 0.0,
+      "freeze_days_1month": 0,
+      "freeze_days_3months": 0,
+      "freeze_days_6months": 0,
+      "freeze_days_12months": 0,
+      "features": {
+        "max_page_modules": 0,
+        "stats_retention_days": 30,
+        "service_functions": [
+          1
+        ]
+      },
+      "limits": {
+        "bookings_per_month": 30,
+        "services_count": 0,
+        "max_future_bookings": 30
+      },
+      "is_active": true,
+      "display_order": 1
+    },
+    {
+      "name": "Basic",
+      "display_name": "Базовый",
+      "subscription_type": "master",
+      "price_1month": 500.0,
+      "price_3months": 470.0,
+      "price_6months": 430.0,
+      "price_12months": 400.0,
+      "freeze_days_1month": 0,
+      "freeze_days_3months": 0,
+      "freeze_days_6months": 0,
+      "freeze_days_12months": 0,
+      "features": {
+        "max_page_modules": 1,
+        "stats_retention_days": 30,
+        "service_functions": [
+          1,
+          6
+        ]
+      },
+      "limits": {
+        "bookings_per_month": 0,
+        "services_count": 0
+      },
+      "is_active": true,
+      "display_order": 2
+    },
+    {
+      "name": "Standart",
+      "display_name": "Стандартный",
+      "subscription_type": "master",
+      "price_1month": 800.0,
+      "price_3months": 760.0,
+      "price_6months": 720.0,
+      "price_12months": 680.0,
+      "freeze_days_1month": 0,
+      "freeze_days_3months": 0,
+      "freeze_days_6months": 0,
+      "freeze_days_12months": 0,
+      "features": {
+        "max_page_modules": 3,
+        "stats_retention_days": 0,
+        "service_functions": [
+          1,
+          6,
+          2,
+          5
+        ]
+      },
+      "limits": {
+        "bookings_per_month": 0,
+        "services_count": 0
+      },
+      "is_active": true,
+      "display_order": 3
+    },
+    {
+      "name": "Pro",
+      "display_name": "Профессиональный",
+      "subscription_type": "master",
+      "price_1month": 1000.0,
+      "price_3months": 950.0,
+      "price_6months": 900.0,
+      "price_12months": 850.0,
+      "freeze_days_1month": 0,
+      "freeze_days_3months": 0,
+      "freeze_days_6months": 0,
+      "freeze_days_12months": 0,
+      "features": {
+        "max_page_modules": 999999,
+        "stats_retention_days": 0,
+        "service_functions": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ]
+      },
+      "limits": {
+        "bookings_per_month": 0,
+        "services_count": 0
+      },
+      "is_active": true,
+      "display_order": 4
+    },
+    {
+      "name": "AlwaysFree",
+      "display_name": "Always Free",
+      "subscription_type": "master",
+      "price_1month": 3000.0,
+      "price_3months": 3000.0,
+      "price_6months": 3000.0,
+      "price_12months": 2500.0,
+      "freeze_days_1month": 0,
+      "freeze_days_3months": 0,
+      "freeze_days_6months": 0,
+      "freeze_days_12months": 0,
+      "features": {
+        "max_page_modules": 999999,
+        "stats_retention_days": 0,
+        "service_functions": []
+      },
+      "limits": {
+        "bookings_per_month": 0,
+        "services_count": 0
+      },
+      "is_active": false,
+      "display_order": 999
+    }
+  ]
+}

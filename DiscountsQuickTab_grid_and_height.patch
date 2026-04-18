@@ -1,0 +1,80 @@
+--- a/mobile/src/components/loyalty/DiscountsQuickTab.tsx
++++ b/mobile/src/components/loyalty/DiscountsQuickTab.tsx
+@@ -4,6 +4,8 @@
+ // Отступ страницы (ScreenContainer scrollContent padding) — для bleed только сетки
+ const SCREEN_PADDING = 16;
+ const GRID_GUTTER = 6; // меньше = шире карточки, но не в ноль
++/** paddingHorizontal у templatesContainer; используется для расчёта contentWidth и ITEM_WIDTH */
++const TEMPLATE_LIST_PADDING_H = 6;
+ import { Card } from '@src/components/Card';
+ import { PrimaryButton } from '@src/components/PrimaryButton';
+ import type { LoyaltyDiscount, QuickDiscountTemplate } from '@src/types/loyalty_discounts';
+@@ -66,7 +68,13 @@
+   // Константы для сетки
+   const COL_GAP = 8; // Расстояние между колонками
+   const ROW_GAP = 12; // Расстояние между рядами
+-  const ITEM_WIDTH = listWidth != null && listWidth > 0 ? Math.floor((listWidth - COL_GAP) / 2) : 0;
++  const contentWidth = listWidth != null && listWidth > 0 ? listWidth - 2 * TEMPLATE_LIST_PADDING_H : 0;
++  const ITEM_WIDTH = contentWidth > 0 ? Math.floor((contentWidth - COL_GAP) / 2) : 0;
++  if (__DEV__ && listWidth != null && listWidth > 0 && ITEM_WIDTH > 0) {
++    const check = 2 * ITEM_WIDTH + COL_GAP;
++    console.log('[QuickTab grid]', { listWidth, contentWidth, ITEM_WIDTH, check, ok: check <= contentWidth });
++  }
+ 
+   const handleCreateFromTemplate = async (template: QuickDiscountTemplate, customPercent?: number) => {
+     const isActive = isTemplateActive(template, discounts);
+@@ -148,12 +156,8 @@
+           onLayout={(e) => {
+             const w = e.nativeEvent.layout.width;
+-            if (__DEV__) {
+-              console.log('[DiscountsQuickTab] templates listWidth', w);
+-            }
+             if (w > 0 && w !== listWidth) {
+               setListWidth(w);
+             }
+           }}
+           style={[
+             styles.templatesContainer,
+             {
+               marginHorizontal: -SCREEN_PADDING,
+-              paddingHorizontal: GRID_GUTTER,
++              paddingHorizontal: TEMPLATE_LIST_PADDING_H,
+             },
+           ]}
+         >
+@@ -461,7 +465,7 @@
+     overflow: 'hidden',
+     backgroundColor: '#fff',
+-    minHeight: 180, // Контролируемая высота вместо aspectRatio
++    minHeight: 160,
+   },
+   templateCardWrapperActive: {
+     borderColor: '#4CAF50',
+@@ -487,9 +491,8 @@
+   templateCardInner: {
+     flex: 1,
+     padding: 10,
+-    paddingBottom: 12, // Уменьшен для плотной верстки
+-    // ❌ НЕ использовать justifyContent: 'space-between'
++    paddingBottom: 8,
+   },
+   templateHeader: {
+     marginBottom: 8,
+@@ -522,12 +525,11 @@
+   templateContent: {
+     marginBottom: 8,
+     minWidth: 0,
+-    flexGrow: 1, // Толкает футер вниз
+   },
+   templateName: {
+     fontSize: 13,
+     fontWeight: '600',
+@@ -541,7 +543,7 @@
+     flexShrink: 1,
+     minWidth: 0,
+   },
+   templateFooter: {
+-    marginTop: 8, // Небольшой отступ от контента
++    marginTop: 4,
+   },
+   templateFooterRow: {

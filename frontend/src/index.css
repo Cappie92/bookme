@@ -1,0 +1,383 @@
+/* Подключение шрифта Jost */
+@font-face {
+  font-family: 'Jost';
+  src: url('/fonts/Jost-Regular.woff2') format('woff2'),
+       url('/fonts/Jost-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Jost';
+  src: url('/fonts/Jost-Bold.woff2') format('woff2'),
+       url('/fonts/Jost-Bold.ttf') format('truetype');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Jost';
+  src: url('/fonts/Jost-Italic.woff2') format('woff2'),
+       url('/fonts/Jost-Italic.ttf') format('truetype');
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    font-family: 'Jost', system-ui, -apple-system, sans-serif;
+    overflow-x: hidden;
+  }
+  
+  body {
+    @apply bg-neutral-50 text-neutral-900;
+    font-family: 'Jost', system-ui, -apple-system, sans-serif;
+    font-weight: 400;
+    font-style: normal;
+    overflow-x: hidden;
+  }
+  
+  /* Заголовки - используют Bold начертание */
+  h1, h2, h3, h4, h5, h6 {
+    @apply text-neutral-900;
+    font-family: 'Jost', system-ui, -apple-system, sans-serif;
+    font-weight: 700; /* Bold */
+    font-style: normal;
+  }
+  
+  h1 {
+    @apply text-4xl;
+  }
+  
+  h2 {
+    @apply text-3xl;
+  }
+  
+  h3 {
+    @apply text-2xl;
+  }
+  
+  h4 {
+    @apply text-xl;
+  }
+  
+  h5 {
+    @apply text-lg;
+  }
+  
+  h6 {
+    @apply text-base;
+  }
+  
+  /* Обычный текст - использует Regular начертание */
+  p {
+    @apply text-base leading-relaxed;
+    font-family: 'Jost', system-ui, -apple-system, sans-serif;
+    font-weight: 400; /* Regular */
+    font-style: normal;
+  }
+  
+  /* Выделения и цитаты - используют Italic начертание */
+  em, cite, blockquote, q {
+    font-family: 'Jost', system-ui, -apple-system, sans-serif;
+    font-weight: 400; /* Regular */
+    font-style: italic; /* Italic */
+  }
+  
+  blockquote {
+    @apply border-l-4 border-neutral-300 pl-4 italic;
+  }
+  
+  a {
+    @apply text-primary-600 hover:text-primary-700 transition-colors duration-200;
+    font-family: 'Jost', system-ui, -apple-system, sans-serif;
+    font-weight: 400; /* Regular */
+  }
+}
+
+@layer components {
+  /* Контейнеры */
+  .container {
+    @apply max-w-7xl mx-auto px-4 sm:px-6 lg:px-8;
+  }
+  
+  .container-sm {
+    @apply max-w-3xl mx-auto px-4 sm:px-6 lg:px-8;
+  }
+  
+  .container-lg {
+    @apply max-w-7xl mx-auto px-4 sm:px-6 lg:px-8;
+  }
+  
+  /* Секции */
+  .section {
+    @apply py-12 lg:py-16;
+  }
+  
+  .section-sm {
+    @apply py-8 lg:py-12;
+  }
+  
+  .section-lg {
+    @apply py-16 lg:py-24;
+  }
+  
+  /* Сетки */
+  .grid-auto-fit {
+    @apply grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6;
+  }
+  
+  .grid-auto-fill {
+    @apply grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6;
+  }
+  
+  /* Анимации */
+  .animate-fade-in {
+    animation: fadeIn 0.5s ease-in-out;
+  }
+  
+  .animate-slide-up {
+    animation: slideUp 0.3s ease-out;
+  }
+  
+  .animate-slide-down {
+    animation: slideDown 0.3s ease-out;
+  }
+  
+  .animate-scale-in {
+    animation: scaleIn 0.2s ease-out;
+  }
+  
+  /* Утилиты для текста */
+  .text-gradient {
+    @apply bg-gradient-to-r from-primary-600 to-primary-800 bg-clip-text text-transparent;
+  }
+  
+  .text-balance {
+    text-wrap: balance;
+  }
+  
+  /* Утилиты для фокуса */
+  .focus-ring {
+    @apply focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2;
+  }
+  
+  /* Утилиты для интерактивности */
+  .interactive {
+    @apply transition-all duration-200 hover:scale-105 active:scale-95;
+  }
+  
+  .interactive-text {
+    @apply transition-colors duration-200 hover:text-primary-600;
+  }
+  
+  /* Утилиты для скролла */
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+  
+  /* Утилиты для модальных окон */
+  .modal-overlay {
+    @apply fixed inset-0 bg-black bg-opacity-50 z-modal flex items-center justify-center p-4;
+  }
+  
+  .modal-content {
+    @apply bg-white rounded-lg shadow-xl max-w-md w-full max-h-[90vh] overflow-y-auto;
+  }
+  
+  /* Утилиты для форм */
+  .form-group {
+    @apply space-y-2;
+  }
+  
+  .form-label {
+    @apply block text-sm font-medium text-neutral-700;
+  }
+  
+  .form-error {
+    @apply text-sm text-error-600;
+  }
+  
+  .form-help {
+    @apply text-sm text-neutral-500;
+  }
+  
+  /* Утилиты для навигации */
+  .nav-link {
+    @apply text-neutral-600 hover:text-primary-600 transition-colors duration-200;
+  }
+  
+  .nav-link-active {
+    @apply text-primary-600 font-medium;
+  }
+  
+  /* Утилиты для статусов */
+  .status-online {
+    @apply bg-success-500;
+  }
+  
+  .status-offline {
+    @apply bg-neutral-400;
+  }
+  
+  .status-busy {
+    @apply bg-warning-500;
+  }
+  
+  .status-away {
+    @apply bg-error-500;
+  }
+}
+
+@layer utilities {
+  /* Утилиты для шрифта Jost */
+  .font-jost-regular {
+    font-family: 'Jost', system-ui, -apple-system, sans-serif;
+    font-weight: 400;
+    font-style: normal;
+  }
+  
+  .font-jost-bold {
+    font-family: 'Jost', system-ui, -apple-system, sans-serif;
+    font-weight: 700;
+    font-style: normal;
+  }
+  
+  .font-jost-italic {
+    font-family: 'Jost', system-ui, -apple-system, sans-serif;
+    font-weight: 400;
+    font-style: italic;
+  }
+  
+  /* Утилиты для отступов */
+  .space-y-responsive > * + * {
+    @apply mt-4 sm:mt-6 lg:mt-8;
+  }
+  
+  .space-x-responsive > * + * {
+    @apply ml-4 sm:ml-6 lg:ml-8;
+  }
+  
+  /* Утилиты для градиентов */
+  .gradient-primary {
+    @apply bg-gradient-to-r from-primary-500 to-primary-700;
+  }
+  
+  .gradient-secondary {
+    @apply bg-gradient-to-r from-secondary-500 to-secondary-700;
+  }
+  
+  /* Утилиты для теней */
+  .shadow-soft {
+    box-shadow: 0 2px 15px -3px rgba(0, 0, 0, 0.07), 0 10px 20px -2px rgba(0, 0, 0, 0.04);
+  }
+  
+  .shadow-medium {
+    box-shadow: 0 4px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+  }
+  
+  .shadow-strong {
+    box-shadow: 0 10px 40px -10px rgba(0, 0, 0, 0.15), 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+  }
+  
+  /* Утилиты для анимаций */
+  .animate-bounce-slow {
+    animation: bounce 2s infinite;
+  }
+  
+  .animate-pulse-slow {
+    animation: pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+  
+  /* Утилиты для типографики */
+  .text-shadow {
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  }
+  
+  .text-shadow-lg {
+    text-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+  }
+  
+  /* Утилиты для изображений */
+  .image-cover {
+    @apply object-cover object-center;
+  }
+  
+  .image-contain {
+    @apply object-contain object-center;
+  }
+  
+  /* Утилиты для позиционирования */
+  .center-absolute {
+    @apply absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2;
+  }
+  
+  .center-fixed {
+    @apply fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2;
+  }
+  
+  /* Скрываем логотип в модальном окне */
+  .modal-logo-hide {
+    display: none !important;
+  }
+  
+  /* Скрываем логотип в модальном окне по классам */
+  [class*="absolute"][class*="left-0"][class*="right-0"][class*="top-6"] {
+    display: none !important;
+  }
+  
+  /* Более специфичное правило для логотипа в модальном окне */
+  .absolute.left-0.right-0.top-6.flex.justify-center.pointer-events-none.select-none {
+    display: none !important;
+  }
+  
+  /* Альтернативное правило для логотипа */
+  div[class*="absolute"][class*="left-0"][class*="right-0"][class*="top-6"][class*="flex"][class*="justify-center"] {
+    display: none !important;
+  }
+}
+
+@keyframes slideDown {
+  from {
+    transform: translateY(-100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+/* Утилиты для обрезки текста */
+.line-clamp-1 {
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+}
+
+.line-clamp-2 {
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.line-clamp-3 {
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}

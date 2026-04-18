@@ -1,0 +1,12 @@
+appId: host.exp.Exponent
+---
+# Диагностический тест - просто открывает приложение и делает скриншот
+- launchApp
+- waitForAnimationToEnd
+- waitForAnimationToEnd
+- takeScreenshot: "debug-screen.png"
+# Пытаемся найти любой текст на экране
+- assertVisible:
+    text: ".*"
+    optional: true
+

@@ -1,0 +1,2833 @@
+diff --git a/backend/routers/loyalty.py b/backend/routers/loyalty.py
+index d3b8d2f..f53fce6 100644
+--- a/backend/routers/loyalty.py
++++ b/backend/routers/loyalty.py
+@@ -1,13 +1,24 @@
+-from fastapi import APIRouter, Depends, HTTPException, Body
++from fastapi import APIRouter, Depends, HTTPException, Body, status
++import logging
++import os
++import re
+ from sqlalchemy.orm import Session
+-from typing import List, Any, Optional
++from sqlalchemy.exc import OperationalError, ProgrammingError, DatabaseError
++from typing import List, Any, Optional, Dict
+ from datetime import datetime, date, time
+ import json
+ 
+ from database import get_db
+ from models import (
+-    LoyaltyDiscount, PersonalDiscount, AppliedDiscount, Salon, User, Booking
++    LoyaltyDiscount, PersonalDiscount, AppliedDiscount, Salon, User, Booking, Master
+ )
++from utils.loyalty_discounts import SUPPORTED_CONDITION_TYPES
++from utils.loyalty_params import (
++    normalize_parameters,
++    validate_happy_hours_intervals,
++)
++from models import master_services as master_services_table
++from sqlalchemy import select, and_
+ from schemas import (
+     LoyaltyDiscount as LoyaltyDiscountSchema,
+     LoyaltyDiscountCreate,
+@@ -20,17 +31,165 @@ from schemas import (
+     ComplexDiscountCondition,
+     LoyaltySystemStatus,
+     LoyaltyDiscountType,
+-    LoyaltyConditionType
++    LoyaltyConditionType,
++    DiscountEvaluationRequest,
++    DiscountEvaluationResponse
+ )
+-from auth import require_salon, get_current_active_user
++from auth import require_master, get_current_active_user
++from routers.accounting import get_master_id_from_user
++from exceptions import SchemaOutdatedError
++from utils.loyalty_discounts import evaluate_discount_candidates
+ 
+ router = APIRouter(
+     prefix="/loyalty",
+     tags=["loyalty"],
+ )
+ 
++logger = logging.getLogger(__name__)
++
++
++def is_dev_mode() -> bool:
++    """
++    Режим разработки для debug в 409. Совпадает с main.py (ENVIRONMENT).
++    Debug в 409 отдаётся только в dev; в production никогда не утекает.
++    """
++    env = os.getenv("ENVIRONMENT", "development").strip().lower()
++    if env == "production":
++        return False
++    return env == "development"
++
++
++def extract_schema_error_info(error: Exception) -> Dict[str, Optional[str]]:
++    """
++    Извлекает информацию об ошибке схемы БД для debug информации.
++    Возвращает словарь с полями: missing, table, original_error
++    """
++    error_str = str(error)
++    error_type = type(error).__name__
++    
++    missing = None
++    table = None
++    original_error = error_str
++    
++    # Пытаемся извлечь название колонки из ошибки
++    # SQLite: "no such column: table_name.column_name"
++    # PostgreSQL: "column \"column_name\" does not exist"
++    # MySQL: "Unknown column 'column_name' in 'field list'"
++    
++    # SQLite pattern
++    sqlite_match = re.search(r"no such column: (\w+)\.(\w+)", error_str, re.IGNORECASE)
++    if sqlite_match:
++        table = sqlite_match.group(1)
++        missing = sqlite_match.group(2)
++    
++    # PostgreSQL pattern
++    if not missing:
++        pg_match = re.search(r'column "(\w+)" does not exist', error_str, re.IGNORECASE)
++        if pg_match:
++            missing = pg_match.group(1)
++        # Пытаемся найти таблицу в контексте
++        pg_table_match = re.search(r'relation "(\w+)"', error_str, re.IGNORECASE)
++        if pg_table_match:
++            table = pg_table_match.group(1)
++    
++    # MySQL pattern
++    if not missing:
++        mysql_match = re.search(r"Unknown column '(\w+)'", error_str, re.IGNORECASE)
++        if mysql_match:
++            missing = mysql_match.group(1)
++    
++    # Общий паттерн для таблицы (если не нашли выше)
++    if not table:
++        table_match = re.search(r"table ['\"]?(\w+)['\"]?", error_str, re.IGNORECASE)
++        if table_match:
++            table = table_match.group(1)
++    
++    return {
++        "missing": missing,
++        "table": table,
++        "original_error": f"{error_type}: {error_str}"
++    }
++
+ 
+-# Шаблоны быстрых скидок
++def get_loyalty_filter(master_id: int, model_class):
++    """
++    Фильтр для скидок мастера.
++    Runtime-логика использует только master_id (без salon_id).
++    """
++    return model_class.master_id == master_id
++
++
++def get_legacy_loyalty_filter(master_id: int, db: Session, model_class):
++    """
++    Legacy-режим для чтения старых правил (master_id IS NULL, salon_id в салонах мастера).
++    Используется только в read-only ручке.
++    """
++    from sqlalchemy import or_
++    master = db.query(Master).filter(Master.id == master_id).first()
++    salon_ids = [s.id for s in master.salons] if master and master.salons else []
++    if not salon_ids:
++        return model_class.master_id == master_id
++    return or_(
++        model_class.master_id == master_id,
++        (model_class.master_id.is_(None)) & (model_class.salon_id.in_(salon_ids))
++    )
++
++
++def _validate_quick_discount_conditions(
++    master_id: int,
++    conditions: Any,
++    db: Session,
++    rule_discount_percent: Optional[float] = None,
++) -> Optional[str]:
++    """
++    Валидация conditions для быстрой скидки.
++    Возвращает строку с ошибкой или None.
++    """
++    if not conditions or not isinstance(conditions, dict):
++        return None
++    ct = conditions.get("condition_type")
++    params = conditions.get("parameters") or {}
++    if not isinstance(params, dict):
++        params = {}
++
++    norm = normalize_parameters(ct or "", params, rule_discount_percent)
++
++    if ct == "happy_hours":
++        intervals = norm.get("intervals") or []
++        ok, err = validate_happy_hours_intervals(intervals)
++        if not ok and err:
++            return err
++
++    if ct == "service_discount":
++        items = norm.get("items") or []
++        ids = [x["service_id"] for x in items if isinstance(x, dict) and "service_id" in x]
++        if not ids:
++            return None
++        q = select(master_services_table.c.service_id).where(
++            and_(
++                master_services_table.c.master_id == master_id,
++                master_services_table.c.service_id.in_(ids),
++            )
++        )
++        rows = db.execute(q).fetchall()
++        found = {r[0] for r in rows}
++        invalid = [i for i in ids if i not in found]
++        if invalid:
++            return (
++                f"Услуги с id {invalid} не принадлежат мастеру или не найдены. "
++                "Укажите только услуги из списка услуг мастера."
++            )
++    return None
++
++
++# Дефолты (совпадают с utils.loyalty_params)
++DEFAULT_RETURNING_MIN_DAYS = 30
++DEFAULT_BIRTHDAY_DAYS_BEFORE = 7
++DEFAULT_BIRTHDAY_DAYS_AFTER = 7
++DEFAULT_REGULAR_VISITS_COUNT = 2
++DEFAULT_REGULAR_VISITS_PERIOD_DAYS = 60
++
++# Шаблоны быстрых скидок (единый формат parameters)
+ QUICK_DISCOUNT_TEMPLATES = [
+     {
+         "id": "first_visit",
+@@ -51,8 +210,8 @@ QUICK_DISCOUNT_TEMPLATES = [
+         "conditions": {
+             "condition_type": "regular_visits",
+             "parameters": {
+-                "visits_count": 5,
+-                "period": "month"
++                "visits_count": DEFAULT_REGULAR_VISITS_COUNT,
++                "period_days": DEFAULT_REGULAR_VISITS_PERIOD_DAYS
+             }
+         },
+         "default_discount": 15.0
+@@ -65,8 +224,8 @@ QUICK_DISCOUNT_TEMPLATES = [
+         "conditions": {
+             "condition_type": "returning_client",
+             "parameters": {
+-                "days_since_last_visit": 30,
+-                "period": "days"
++                "min_days_since_last_visit": DEFAULT_RETURNING_MIN_DAYS,
++                "max_days_since_last_visit": None
+             }
+         },
+         "default_discount": 20.0
+@@ -79,8 +238,8 @@ QUICK_DISCOUNT_TEMPLATES = [
+         "conditions": {
+             "condition_type": "birthday",
+             "parameters": {
+-                "days_before": 7,
+-                "days_after": 7
++                "days_before": DEFAULT_BIRTHDAY_DAYS_BEFORE,
++                "days_after": DEFAULT_BIRTHDAY_DAYS_AFTER
+             }
+         },
+         "default_discount": 25.0
+@@ -93,9 +252,8 @@ QUICK_DISCOUNT_TEMPLATES = [
+         "conditions": {
+             "condition_type": "happy_hours",
+             "parameters": {
+-                "start_time": "09:00",
+-                "end_time": "12:00",
+-                "days_of_week": [1, 2, 3, 4, 5]
++                "days": [1, 2, 3, 4, 5],
++                "intervals": [{"start": "09:00", "end": "12:00"}]
+             }
+         },
+         "default_discount": 15.0
+@@ -108,7 +266,7 @@ QUICK_DISCOUNT_TEMPLATES = [
+         "conditions": {
+             "condition_type": "service_discount",
+             "parameters": {
+-                "service_ids": [],
++                "items": [],
+                 "category_ids": []
+             }
+         },
+@@ -126,30 +284,141 @@ async def get_quick_discount_templates():
+ @router.get("/status", response_model=LoyaltySystemStatus)
+ async def get_loyalty_system_status(
+     db: Session = Depends(get_db),
+-    current_user: User = Depends(require_salon)
++    current_user: User = Depends(require_master)
+ ):
+-    """Получить статус системы лояльности салона"""
+-    salon = db.query(Salon).filter(Salon.user_id == current_user.id).first()
+-    if not salon:
+-        raise HTTPException(status_code=404, detail="Профиль салона не найден")
+-    
++    """Получить статус системы лояльности мастера"""
++    
++    try:
++        # Диагностическое логирование
++        logger.debug(
++            f"GET /api/loyalty/status: user_id={current_user.id}, role={current_user.role}"
++        )
++        
++        # Получаем master_id (может выбросить HTTPException 404, если мастер не найден)
++        # Это нормально - FastAPI обработает 404
++        try:
++            master_id = get_master_id_from_user(current_user.id, db)
++        except HTTPException as e:
++            # Если мастер не найден, возвращаем 404 (это ожидаемое поведение)
++            logger.warning(
++                f"GET /api/loyalty/status: Master profile not found for user_id={current_user.id}",
++                exc_info=True
++            )
++            raise
++        
++        logger.debug(f"GET /api/loyalty/status: master_id={master_id}")
++        
++        # Получаем скидки мастера с поддержкой обратной совместимости
++        # Обрабатываем SQL ошибки (например, если миграция не применена и колонка master_id отсутствует)
++        try:
++            quick_discounts = db.query(LoyaltyDiscount).filter(
++                get_loyalty_filter(master_id, LoyaltyDiscount),
++                LoyaltyDiscount.discount_type == "quick"
++            ).all()
++            
++            complex_discounts = db.query(LoyaltyDiscount).filter(
++                get_loyalty_filter(master_id, LoyaltyDiscount),
++                LoyaltyDiscount.discount_type == "complex"
++            ).all()
++            
++            personal_discounts = db.query(PersonalDiscount).filter(
++                get_loyalty_filter(master_id, PersonalDiscount)
++            ).all()
++        except (OperationalError, ProgrammingError, DatabaseError) as sql_error:
++            # SQL ошибка (например, колонка master_id не существует - миграция не применена)
++            logger.exception(
++                f"GET /api/loyalty/status: SQL error when querying discounts (schema outdated, migration not applied): {sql_error}"
++            )
++            
++            # Извлекаем информацию об ошибке для debug
++            error_info = extract_schema_error_info(sql_error)
++            debug = error_info if is_dev_mode() else None
++            
++            # 409 через HTTPException-путь: raise → exception_handler в main.py
++            # Плоский JSON (detail, code, hint, debug) + X-Error-Code: SCHEMA_OUTDATED
++            raise SchemaOutdatedError(
++                detail="Loyalty schema outdated, apply migrations",
++                hint="Run alembic upgrade head",
++                debug=debug,
++            )
++        except AttributeError as attr_error:
++            # Ошибка доступа к атрибуту (например, model_class.master_id не существует)
++            logger.exception(
++                f"GET /api/loyalty/status: Attribute error when querying discounts (schema outdated, migration not applied): {attr_error}"
++            )
++            
++            # Извлекаем информацию об ошибке для debug
++            error_info = extract_schema_error_info(attr_error)
++            debug = error_info if is_dev_mode() else None
++            
++            # 409 через HTTPException-путь: raise → exception_handler в main.py
++            # Плоский JSON (detail, code, hint, debug) + X-Error-Code: SCHEMA_OUTDATED
++            raise SchemaOutdatedError(
++                detail="Loyalty schema outdated, apply migrations",
++                hint="Run alembic upgrade head",
++                debug=debug,
++            )
++        
++        total_discounts = len(quick_discounts) + len(complex_discounts) + len(personal_discounts)
++        active_discounts = len([d for d in quick_discounts + complex_discounts + personal_discounts if d.is_active])
++        
++        # Диагностическое логирование результатов
++        logger.debug(
++            f"GET /api/loyalty/status: master_id={master_id}, "
++            f"quick={len(quick_discounts)}, complex={len(complex_discounts)}, "
++            f"personal={len(personal_discounts)}, total={total_discounts}, active={active_discounts}"
++        )
++        
++        return LoyaltySystemStatus(
++            quick_discounts=quick_discounts,
++            complex_discounts=complex_discounts,
++            personal_discounts=personal_discounts,
++            total_discounts=total_discounts,
++            active_discounts=active_discounts
++        )
++    
++    except HTTPException:
++        raise
++    except SchemaOutdatedError:
++        # 409 SCHEMA_OUTDATED → exception_handler в main.py (плоский JSON + X-Error-Code)
++        raise
++    except Exception as e:
++        # Непредвиденная ошибка - логируем и пробрасываем как 500
++        logger.exception(
++            f"GET /api/loyalty/status: Unexpected error for user_id={current_user.id}: {e}"
++        )
++        # Возвращаем 500 вместо маскировки ошибки пустыми массивами
++        raise HTTPException(
++            status_code=500,
++            detail=f"Internal server error: {str(e)}"
++        )
++
++
++@router.get("/rules", response_model=LoyaltySystemStatus)
++async def get_loyalty_rules(
++    db: Session = Depends(get_db),
++    current_user: User = Depends(require_master)
++):
++    """Агрегированный список правил скидок мастера (без salon_id в runtime)."""
++    master_id = get_master_id_from_user(current_user.id, db)
++
+     quick_discounts = db.query(LoyaltyDiscount).filter(
+-        LoyaltyDiscount.salon_id == salon.id,
++        get_loyalty_filter(master_id, LoyaltyDiscount),
+         LoyaltyDiscount.discount_type == "quick"
+     ).all()
+-    
++
+     complex_discounts = db.query(LoyaltyDiscount).filter(
+-        LoyaltyDiscount.salon_id == salon.id,
++        get_loyalty_filter(master_id, LoyaltyDiscount),
+         LoyaltyDiscount.discount_type == "complex"
+     ).all()
+-    
++
+     personal_discounts = db.query(PersonalDiscount).filter(
+-        PersonalDiscount.salon_id == salon.id
++        get_loyalty_filter(master_id, PersonalDiscount)
+     ).all()
+-    
++
+     total_discounts = len(quick_discounts) + len(complex_discounts) + len(personal_discounts)
+     active_discounts = len([d for d in quick_discounts + complex_discounts + personal_discounts if d.is_active])
+-    
++
+     return LoyaltySystemStatus(
+         quick_discounts=quick_discounts,
+         complex_discounts=complex_discounts,
+@@ -159,19 +428,92 @@ async def get_loyalty_system_status(
+     )
+ 
+ 
++@router.get("/legacy-rules", response_model=LoyaltySystemStatus)
++async def get_legacy_loyalty_rules(
++    db: Session = Depends(get_db),
++    current_user: User = Depends(require_master)
++):
++    """Read-only режим для legacy правил (master_id IS NULL, salon_id в салонах мастера)."""
++    master_id = get_master_id_from_user(current_user.id, db)
++
++    quick_discounts = db.query(LoyaltyDiscount).filter(
++        get_legacy_loyalty_filter(master_id, db, LoyaltyDiscount),
++        LoyaltyDiscount.discount_type == "quick"
++    ).all()
++
++    complex_discounts = db.query(LoyaltyDiscount).filter(
++        get_legacy_loyalty_filter(master_id, db, LoyaltyDiscount),
++        LoyaltyDiscount.discount_type == "complex"
++    ).all()
++
++    personal_discounts = db.query(PersonalDiscount).filter(
++        get_legacy_loyalty_filter(master_id, db, PersonalDiscount)
++    ).all()
++
++    total_discounts = len(quick_discounts) + len(complex_discounts) + len(personal_discounts)
++    active_discounts = len([d for d in quick_discounts + complex_discounts + personal_discounts if d.is_active])
++
++    return LoyaltySystemStatus(
++        quick_discounts=quick_discounts,
++        complex_discounts=complex_discounts,
++        personal_discounts=personal_discounts,
++        total_discounts=total_discounts,
++        active_discounts=active_discounts
++    )
++
++
++@router.post("/evaluate", response_model=DiscountEvaluationResponse)
++async def evaluate_loyalty_discounts(
++    payload: DiscountEvaluationRequest,
++    db: Session = Depends(get_db),
++    current_user: User = Depends(require_master)
++):
++    """Оценка применимости скидок для конкретного клиента/бронирования (master-only)."""
++    master_id = get_master_id_from_user(current_user.id, db)
++    booking_payload = payload.booking.dict()
++
++    candidates, best_candidate = evaluate_discount_candidates(
++        master_id=master_id,
++        client_id=payload.client_id,
++        client_phone=payload.client_phone,
++        booking_payload=booking_payload,
++        db=db
++    )
++
++    return {
++        "candidates": candidates,
++        "best_candidate": best_candidate
++    }
++
+ @router.post("/quick-discounts", response_model=LoyaltyDiscountSchema)
+ async def create_quick_discount(
+     discount: LoyaltyDiscountCreate,
+     db: Session = Depends(get_db),
+-    current_user: User = Depends(require_salon)
++    current_user: User = Depends(require_master)
+ ):
+     """Создать быструю скидку"""
+-    salon = db.query(Salon).filter(Salon.user_id == current_user.id).first()
+-    if not salon:
+-        raise HTTPException(status_code=404, detail="Профиль салона не найден")
+-    
++    import logging
++
++    logger = logging.getLogger(__name__)
++    logger.debug(
++        f"POST /api/loyalty/quick-discounts: user_id={current_user.id}, "
++        f"role={current_user.role}, discount={discount.dict()}"
++    )
++
++    master_id = get_master_id_from_user(current_user.id, db)
++    logger.debug(f"POST /api/loyalty/quick-discounts: master_id={master_id}")
++
++    cond = discount.conditions or {}
++    if isinstance(cond, dict):
++        err = _validate_quick_discount_conditions(
++            master_id, cond, db, getattr(discount, "discount_percent", None)
++        )
++        if err:
++            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=err)
++
+     db_discount = LoyaltyDiscount(
+-        salon_id=salon.id,
++        master_id=master_id,
++        salon_id=None,  # Не заполняем, так как это мастерский функционал
+         discount_type=discount.discount_type,
+         name=discount.name,
+         description=discount.description,
+@@ -192,15 +534,13 @@ async def create_quick_discount(
+ @router.get("/quick-discounts", response_model=List[LoyaltyDiscountSchema])
+ async def get_quick_discounts(
+     db: Session = Depends(get_db),
+-    current_user: User = Depends(require_salon)
++    current_user: User = Depends(require_master)
+ ):
+-    """Получить все быстрые скидки салона"""
+-    salon = db.query(Salon).filter(Salon.user_id == current_user.id).first()
+-    if not salon:
+-        raise HTTPException(status_code=404, detail="Профиль салона не найден")
++    """Получить все быстрые скидки мастера"""
++    master_id = get_master_id_from_user(current_user.id, db)
+     
+     discounts = db.query(LoyaltyDiscount).filter(
+-        LoyaltyDiscount.salon_id == salon.id,
++        get_loyalty_filter(master_id, LoyaltyDiscount),
+         LoyaltyDiscount.discount_type == "quick"
+     ).all()
+     
+@@ -212,29 +552,35 @@ async def update_quick_discount(
+     discount_id: int,
+     discount: LoyaltyDiscountUpdate,
+     db: Session = Depends(get_db),
+-    current_user: User = Depends(require_salon)
++    current_user: User = Depends(require_master)
+ ):
+     """Обновить быструю скидку"""
+-    salon = db.query(Salon).filter(Salon.user_id == current_user.id).first()
+-    if not salon:
+-        raise HTTPException(status_code=404, detail="Профиль салона не найден")
+-    
++    master_id = get_master_id_from_user(current_user.id, db)
++
+     db_discount = db.query(LoyaltyDiscount).filter(
+         LoyaltyDiscount.id == discount_id,
+-        LoyaltyDiscount.salon_id == salon.id,
++        get_loyalty_filter(master_id, LoyaltyDiscount),
+         LoyaltyDiscount.discount_type == "quick"
+     ).first()
+-    
++
+     if not db_discount:
+         raise HTTPException(status_code=404, detail="Скидка не найдена")
+-    
++
+     update_data = discount.dict(exclude_unset=True)
++    if "conditions" in update_data:
++        cond = update_data["conditions"]
++        if isinstance(cond, dict):
++            pct = update_data.get("discount_percent") or (db_discount.discount_percent if db_discount else None)
++            err = _validate_quick_discount_conditions(master_id, cond, db, pct)
++            if err:
++                raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=err)
++
+     for field, value in update_data.items():
+         setattr(db_discount, field, value)
+-    
++
+     db.commit()
+     db.refresh(db_discount)
+-    
++
+     return db_discount
+ 
+ 
+@@ -242,16 +588,14 @@ async def update_quick_discount(
+ async def delete_quick_discount(
+     discount_id: int,
+     db: Session = Depends(get_db),
+-    current_user: User = Depends(require_salon)
++    current_user: User = Depends(require_master)
+ ):
+     """Удалить быструю скидку"""
+-    salon = db.query(Salon).filter(Salon.user_id == current_user.id).first()
+-    if not salon:
+-        raise HTTPException(status_code=404, detail="Профиль салона не найден")
++    master_id = get_master_id_from_user(current_user.id, db)
+     
+     db_discount = db.query(LoyaltyDiscount).filter(
+         LoyaltyDiscount.id == discount_id,
+-        LoyaltyDiscount.salon_id == salon.id,
++        get_loyalty_filter(master_id, LoyaltyDiscount),
+         LoyaltyDiscount.discount_type == "quick"
+     ).first()
+     
+@@ -268,15 +612,40 @@ async def delete_quick_discount(
+ async def create_complex_discount(
+     discount: LoyaltyDiscountCreate,
+     db: Session = Depends(get_db),
+-    current_user: User = Depends(require_salon)
++    current_user: User = Depends(require_master)
+ ):
+     """Создать сложную скидку"""
+-    salon = db.query(Salon).filter(Salon.user_id == current_user.id).first()
+-    if not salon:
+-        raise HTTPException(status_code=404, detail="Профиль салона не найден")
++    import logging
++    logger = logging.getLogger(__name__)
++    
++    master_id = get_master_id_from_user(current_user.id, db)
++    
++    # Валидация: проверяем, что condition_type поддерживается
++    conditions = discount.conditions or {}
++    condition_type = conditions.get("condition_type") if isinstance(conditions, dict) else None
++    
++    # Логирование condition_type для отладки
++    logger.info(
++        f"POST /api/loyalty/complex-discounts: user_id={current_user.id}, "
++        f"master_id={master_id}, condition_type={condition_type}, "
++        f"discount_name={discount.name}"
++    )
++    
++    if condition_type and condition_type not in SUPPORTED_CONDITION_TYPES:
++        logger.warning(
++            f"POST /api/loyalty/complex-discounts: Unsupported condition_type={condition_type} "
++            f"for user_id={current_user.id}, master_id={master_id}. "
++            f"Supported types: {SUPPORTED_CONDITION_TYPES}"
++        )
++        raise HTTPException(
++            status_code=400,
++            detail=f"Неподдерживаемый тип условия: {condition_type}. "
++                   f"Поддерживаемые типы: {', '.join(SUPPORTED_CONDITION_TYPES)}"
++        )
+     
+     db_discount = LoyaltyDiscount(
+-        salon_id=salon.id,
++        master_id=master_id,
++        salon_id=None,  # Не заполняем, так как это мастерский функционал
+         discount_type=discount.discount_type,
+         name=discount.name,
+         description=discount.description,
+@@ -291,21 +660,24 @@ async def create_complex_discount(
+     db.commit()
+     db.refresh(db_discount)
+     
++    logger.debug(
++        f"POST /api/loyalty/complex-discounts: Created discount_id={db_discount.id}, "
++        f"condition_type={condition_type}"
++    )
++    
+     return db_discount
+ 
+ 
+ @router.get("/complex-discounts", response_model=List[LoyaltyDiscountSchema])
+ async def get_complex_discounts(
+     db: Session = Depends(get_db),
+-    current_user: User = Depends(require_salon)
++    current_user: User = Depends(require_master)
+ ):
+-    """Получить все сложные скидки салона"""
+-    salon = db.query(Salon).filter(Salon.user_id == current_user.id).first()
+-    if not salon:
+-        raise HTTPException(status_code=404, detail="Профиль салона не найден")
++    """Получить все сложные скидки мастера"""
++    master_id = get_master_id_from_user(current_user.id, db)
+     
+     discounts = db.query(LoyaltyDiscount).filter(
+-        LoyaltyDiscount.salon_id == salon.id,
++        get_loyalty_filter(master_id, LoyaltyDiscount),
+         LoyaltyDiscount.discount_type == "complex"
+     ).all()
+     
+@@ -317,16 +689,14 @@ async def update_complex_discount(
+     discount_id: int,
+     discount: LoyaltyDiscountUpdate,
+     db: Session = Depends(get_db),
+-    current_user: User = Depends(require_salon)
++    current_user: User = Depends(require_master)
+ ):
+     """Обновить сложную скидку"""
+-    salon = db.query(Salon).filter(Salon.user_id == current_user.id).first()
+-    if not salon:
+-        raise HTTPException(status_code=404, detail="Профиль салона не найден")
++    master_id = get_master_id_from_user(current_user.id, db)
+     
+     db_discount = db.query(LoyaltyDiscount).filter(
+         LoyaltyDiscount.id == discount_id,
+-        LoyaltyDiscount.salon_id == salon.id,
++        get_loyalty_filter(master_id, LoyaltyDiscount),
+         LoyaltyDiscount.discount_type == "complex"
+     ).first()
+     
+@@ -347,16 +717,14 @@ async def update_complex_discount(
+ async def delete_complex_discount(
+     discount_id: int,
+     db: Session = Depends(get_db),
+-    current_user: User = Depends(require_salon)
++    current_user: User = Depends(require_master)
+ ):
+     """Удалить сложную скидку"""
+-    salon = db.query(Salon).filter(Salon.user_id == current_user.id).first()
+-    if not salon:
+-        raise HTTPException(status_code=404, detail="Профиль салона не найден")
++    master_id = get_master_id_from_user(current_user.id, db)
+     
+     db_discount = db.query(LoyaltyDiscount).filter(
+         LoyaltyDiscount.id == discount_id,
+-        LoyaltyDiscount.salon_id == salon.id,
++        get_loyalty_filter(master_id, LoyaltyDiscount),
+         LoyaltyDiscount.discount_type == "complex"
+     ).first()
+     
+@@ -373,12 +741,10 @@ async def delete_complex_discount(
+ async def create_personal_discount(
+     discount: PersonalDiscountCreate,
+     db: Session = Depends(get_db),
+-    current_user: User = Depends(require_salon)
++    current_user: User = Depends(require_master)
+ ):
+     """Создать персональную скидку"""
+-    salon = db.query(Salon).filter(Salon.user_id == current_user.id).first()
+-    if not salon:
+-        raise HTTPException(status_code=404, detail="Профиль салона не найден")
++    master_id = get_master_id_from_user(current_user.id, db)
+     
+     # Проверяем, существует ли пользователь с таким номером телефона
+     user = db.query(User).filter(User.phone == discount.client_phone).first()
+@@ -387,7 +753,7 @@ async def create_personal_discount(
+     
+     # Проверяем, не существует ли уже персональная скидка для этого клиента
+     existing_discount = db.query(PersonalDiscount).filter(
+-        PersonalDiscount.salon_id == salon.id,
++        PersonalDiscount.master_id == master_id,
+         PersonalDiscount.client_phone == discount.client_phone
+     ).first()
+     
+@@ -395,7 +761,8 @@ async def create_personal_discount(
+         raise HTTPException(status_code=400, detail="Персональная скидка для этого клиента уже существует")
+     
+     db_discount = PersonalDiscount(
+-        salon_id=salon.id,
++        master_id=master_id,
++        salon_id=None,  # Не заполняем, так как это мастерский функционал
+         client_phone=discount.client_phone,
+         discount_percent=discount.discount_percent,
+         max_discount_amount=discount.max_discount_amount,
+@@ -413,15 +780,13 @@ async def create_personal_discount(
+ @router.get("/personal-discounts", response_model=List[PersonalDiscountSchema])
+ async def get_personal_discounts(
+     db: Session = Depends(get_db),
+-    current_user: User = Depends(require_salon)
++    current_user: User = Depends(require_master)
+ ):
+-    """Получить все персональные скидки салона"""
+-    salon = db.query(Salon).filter(Salon.user_id == current_user.id).first()
+-    if not salon:
+-        raise HTTPException(status_code=404, detail="Профиль салона не найден")
++    """Получить все персональные скидки мастера"""
++    master_id = get_master_id_from_user(current_user.id, db)
+     
+     discounts = db.query(PersonalDiscount).filter(
+-        PersonalDiscount.salon_id == salon.id
++        get_loyalty_filter(master_id, PersonalDiscount)
+     ).all()
+     
+     return discounts
+@@ -432,16 +797,14 @@ async def update_personal_discount(
+     discount_id: int,
+     discount: PersonalDiscountUpdate,
+     db: Session = Depends(get_db),
+-    current_user: User = Depends(require_salon)
++    current_user: User = Depends(require_master)
+ ):
+     """Обновить персональную скидку"""
+-    salon = db.query(Salon).filter(Salon.user_id == current_user.id).first()
+-    if not salon:
+-        raise HTTPException(status_code=404, detail="Профиль салона не найден")
++    master_id = get_master_id_from_user(current_user.id, db)
+     
+     db_discount = db.query(PersonalDiscount).filter(
+         PersonalDiscount.id == discount_id,
+-        PersonalDiscount.salon_id == salon.id
++        get_loyalty_filter(master_id, PersonalDiscount)
+     ).first()
+     
+     if not db_discount:
+@@ -461,16 +824,14 @@ async def update_personal_discount(
+ async def delete_personal_discount(
+     discount_id: int,
+     db: Session = Depends(get_db),
+-    current_user: User = Depends(require_salon)
++    current_user: User = Depends(require_master)
+ ):
+     """Удалить персональную скидку"""
+-    salon = db.query(Salon).filter(Salon.user_id == current_user.id).first()
+-    if not salon:
+-        raise HTTPException(status_code=404, detail="Профиль салона не найден")
++    master_id = get_master_id_from_user(current_user.id, db)
+     
+     db_discount = db.query(PersonalDiscount).filter(
+         PersonalDiscount.id == discount_id,
+-        PersonalDiscount.salon_id == salon.id
++        get_loyalty_filter(master_id, PersonalDiscount)
+     ).first()
+     
+     if not db_discount:
+@@ -488,16 +849,14 @@ async def check_client_discount(
+     service_id: Optional[int] = None,
+     booking_date: Optional[datetime] = None,
+     db: Session = Depends(get_db),
+-    current_user: User = Depends(require_salon)
++    current_user: User = Depends(require_master)
+ ):
+     """Проверить доступные скидки для клиента"""
+-    salon = db.query(Salon).filter(Salon.user_id == current_user.id).first()
+-    if not salon:
+-        raise HTTPException(status_code=404, detail="Профиль салона не найден")
++    master_id = get_master_id_from_user(current_user.id, db)
+     
+     # Проверяем персональную скидку
+     personal_discount = db.query(PersonalDiscount).filter(
+-        PersonalDiscount.salon_id == salon.id,
++        get_loyalty_filter(master_id, PersonalDiscount),
+         PersonalDiscount.client_phone == client_phone,
+         PersonalDiscount.is_active == True
+     ).first()
+diff --git a/backend/tests/test_loyalty_discounts.py b/backend/tests/test_loyalty_discounts.py
+new file mode 100644
+index 0000000..2bc53cc
+--- /dev/null
++++ b/backend/tests/test_loyalty_discounts.py
+@@ -0,0 +1,505 @@
++# -*- coding: utf-8 -*-
++"""Unit-тесты для loyalty_discounts и loyalty_params."""
++from datetime import date, datetime, timedelta
++
++import pytest
++from sqlalchemy import text
++
++from models import (
++    User,
++    UserRole,
++    Master,
++    Service,
++    Booking,
++    BookingStatus,
++    LoyaltyDiscount,
++    LoyaltyDiscountType,
++)
++from database import Base
++from tests.conftest import engine, TestingSessionLocal
++
++
++@pytest.fixture(scope="function")
++def db():
++    Base.metadata.create_all(bind=engine)
++    session = TestingSessionLocal()
++    try:
++        yield session
++    finally:
++        session.close()
++        Base.metadata.drop_all(bind=engine)
++
++
++@pytest.fixture
++def master_user(db):
++    u = User(
++        email="master_loyalty@test.com",
++        hashed_password="x",
++        phone="+79001111111",
++        full_name="Master",
++        role=UserRole.MASTER,
++        is_active=True,
++        is_verified=True,
++    )
++    db.add(u)
++    db.commit()
++    db.refresh(u)
++    return u
++
++
++@pytest.fixture
++def master(master_user, db):
++    m = Master(user_id=master_user.id, bio="", experience_years=1)
++    db.add(m)
++    db.commit()
++    db.refresh(m)
++    return m
++
++
++@pytest.fixture
++def client_user(db):
++    u = User(
++        email="client_loyalty@test.com",
++        hashed_password="x",
++        phone="+79002222222",
++        full_name="Client",
++        role=UserRole.CLIENT,
++        is_active=True,
++        is_verified=True,
++        birth_date=date(1990, 6, 15),
++    )
++    db.add(u)
++    db.commit()
++    db.refresh(u)
++    return u
++
++
++@pytest.fixture
++def service(master, db):
++    s = Service(name="S1", price=1000.0, duration=60, salon_id=None, indie_master_id=None)
++    db.add(s)
++    db.commit()
++    db.refresh(s)
++    db.execute(text("INSERT OR IGNORE INTO master_services (master_id, service_id) VALUES (:a, :b)"), {"a": master.id, "b": s.id})
++    db.commit()
++    return s
++
++
++def _insert_master_service(db, master_id: int, service_id: int):
++    db.execute(text("INSERT OR IGNORE INTO master_services (master_id, service_id) VALUES (:a, :b)"), {"a": master_id, "b": service_id})
++    db.commit()
++
++
++# --- loyalty_params ---
++
++
++def test_normalize_regular_visits_old_format():
++    from utils.loyalty_params import normalize_parameters
++    out = normalize_parameters("regular_visits", {"visits_count": 5, "period": "month"})
++    assert out["visits_count"] == 5
++    assert out["period_days"] == 30
++
++
++def test_normalize_regular_visits_period_days():
++    from utils.loyalty_params import normalize_parameters
++    out = normalize_parameters("regular_visits", {"visits_count": 2, "period_days": 60})
++    assert out["visits_count"] == 2
++    assert out["period_days"] == 60
++
++
++def test_normalize_returning_old_format():
++    from utils.loyalty_params import normalize_parameters
++    out = normalize_parameters("returning_client", {"days_since_last_visit": 30})
++    assert out["min_days_since_last_visit"] == 30
++    assert out["max_days_since_last_visit"] is None
++
++
++def test_normalize_returning_min_max():
++    from utils.loyalty_params import normalize_parameters
++    out = normalize_parameters("returning_client", {"min_days_since_last_visit": 14, "max_days_since_last_visit": 90})
++    assert out["min_days_since_last_visit"] == 14
++    assert out["max_days_since_last_visit"] == 90
++
++
++def test_normalize_happy_hours_old_format():
++    from utils.loyalty_params import normalize_parameters
++    out = normalize_parameters("happy_hours", {"start_time": "09:00", "end_time": "12:00", "days_of_week": [1, 2, 3, 4, 5]})
++    assert out["days"] == [1, 2, 3, 4, 5]
++    assert out["intervals"] == [{"start": "09:00", "end": "12:00"}]
++
++
++def test_validate_happy_hours_overlap():
++    from utils.loyalty_params import validate_happy_hours_intervals
++    ok, err = validate_happy_hours_intervals([
++        {"start": "09:00", "end": "12:00"},
++        {"start": "11:00", "end": "13:00"},
++    ])
++    assert ok is False
++    assert "пересекаются" in (err or "")
++
++
++def test_validate_happy_hours_two_ok():
++    from utils.loyalty_params import validate_happy_hours_intervals
++    ok, err = validate_happy_hours_intervals([
++        {"start": "09:00", "end": "12:00"},
++        {"start": "18:00", "end": "20:00"},
++    ])
++    assert ok is True
++    assert err is None
++
++
++def test_validate_happy_hours_start_ge_end():
++    from utils.loyalty_params import validate_happy_hours_intervals
++    ok, err = validate_happy_hours_intervals([{"start": "12:00", "end": "09:00"}])
++    assert ok is False
++    assert err
++
++
++# --- birthday ---
++
++
++def test_birthday_in_window(db, master, client_user, service):
++    from utils.loyalty_discounts import evaluate_discount_candidates
++
++    _insert_master_service(db, master.id, service.id)
++    rule = LoyaltyDiscount(
++        master_id=master.id,
++        discount_type=LoyaltyDiscountType.QUICK,
++        name="ДР",
++        discount_percent=25.0,
++        is_active=True,
++        priority=1,
++        conditions={"condition_type": "birthday", "parameters": {"days_before": 7, "days_after": 7}},
++    )
++    db.add(rule)
++    db.commit()
++
++    # Клиент рожден 1990-06-15. Бронирование 2025-06-20 — в окне (5 дней после)
++    booking_date = datetime(2025, 6, 20, 10, 0)
++    payload = {"start_time": booking_date, "service_id": service.id, "category_id": None}
++    candidates, best = evaluate_discount_candidates(master.id, client_user.id, None, payload, db)
++    assert best is not None
++    assert best["condition_type"] == "birthday"
++    assert best["match"] is True
++
++
++def test_birthday_out_of_window(db, master, client_user, service):
++    from utils.loyalty_discounts import evaluate_discount_candidates
++
++    _insert_master_service(db, master.id, service.id)
++    rule = LoyaltyDiscount(
++        master_id=master.id,
++        discount_type=LoyaltyDiscountType.QUICK,
++        name="ДР",
++        discount_percent=25.0,
++        is_active=True,
++        priority=1,
++        conditions={"condition_type": "birthday", "parameters": {"days_before": 7, "days_after": 7}},
++    )
++    db.add(rule)
++    db.commit()
++
++    # Бронирование 2025-07-01 — вне окна (после 22 июня)
++    booking_date = datetime(2025, 7, 1, 10, 0)
++    payload = {"start_time": booking_date, "service_id": service.id, "category_id": None}
++    candidates, best = evaluate_discount_candidates(master.id, client_user.id, None, payload, db)
++    birthday_cand = next((c for c in candidates if c.get("condition_type") == "birthday"), None)
++    assert birthday_cand is not None
++    assert birthday_cand["match"] is False
++    assert "outside_birthday" in (birthday_cand.get("reason") or "")
++
++
++def test_birthday_no_birth_date(db, master, service):
++    from utils.loyalty_discounts import evaluate_discount_candidates
++
++    no_bd = User(
++        email="nobd@test.com",
++        hashed_password="x",
++        phone="+79003333333",
++        full_name="No BD",
++        role=UserRole.CLIENT,
++        is_active=True,
++        is_verified=True,
++        birth_date=None,
++    )
++    db.add(no_bd)
++    db.commit()
++    db.refresh(no_bd)
++
++    _insert_master_service(db, master.id, service.id)
++    rule = LoyaltyDiscount(
++        master_id=master.id,
++        discount_type=LoyaltyDiscountType.QUICK,
++        name="ДР",
++        discount_percent=25.0,
++        is_active=True,
++        priority=1,
++        conditions={"condition_type": "birthday", "parameters": {"days_before": 7, "days_after": 7}},
++    )
++    db.add(rule)
++    db.commit()
++
++    booking_date = datetime(2025, 6, 15, 10, 0)
++    payload = {"start_time": booking_date, "service_id": service.id, "category_id": None}
++    candidates, best = evaluate_discount_candidates(master.id, no_bd.id, None, payload, db)
++    birthday_cand = next((c for c in candidates if c.get("condition_type") == "birthday"), None)
++    assert birthday_cand is not None
++    assert birthday_cand["match"] is False
++
++
++# --- happy_hours intervals ---
++
++
++def test_happy_hours_two_intervals(db, master, client_user, service):
++    from utils.loyalty_discounts import evaluate_discount_candidates
++
++    _insert_master_service(db, master.id, service.id)
++    rule = LoyaltyDiscount(
++        master_id=master.id,
++        discount_type=LoyaltyDiscountType.QUICK,
++        name="HH",
++        discount_percent=15.0,
++        is_active=True,
++        priority=1,
++        conditions={
++            "condition_type": "happy_hours",
++            "parameters": {
++                "days": [1, 2, 3, 4, 5],
++                "intervals": [{"start": "09:00", "end": "12:00"}, {"start": "18:00", "end": "20:00"}],
++            },
++        },
++    )
++    db.add(rule)
++    db.commit()
++
++    # Пн 19:00 — второй слот
++    mon_eve = datetime(2025, 6, 2, 19, 0)
++    payload = {"start_time": mon_eve, "service_id": service.id, "category_id": None}
++    candidates, best = evaluate_discount_candidates(master.id, client_user.id, None, payload, db)
++    assert best is not None
++    assert best["condition_type"] == "happy_hours"
++    assert best["match"] is True
++
++
++# --- regular_visits period_days ---
++
++
++def test_regular_visits_period_days(db, master, client_user, service):
++    from utils.loyalty_discounts import evaluate_discount_candidates
++
++    _insert_master_service(db, master.id, service.id)
++    rule = LoyaltyDiscount(
++        master_id=master.id,
++        discount_type=LoyaltyDiscountType.QUICK,
++        name="Регуляр",
++        discount_percent=15.0,
++        is_active=True,
++        priority=1,
++        conditions={"condition_type": "regular_visits", "parameters": {"visits_count": 2, "period_days": 60}},
++    )
++    db.add(rule)
++    db.commit()
++
++    now = datetime.utcnow()
++    # Два completed визита в последние 60 дней
++    for i in range(2):
++        b = Booking(
++            master_id=master.id,
++            client_id=client_user.id,
++            service_id=service.id,
++            start_time=now - timedelta(days=30 - i * 15),
++            end_time=now - timedelta(days=30 - i * 15) + timedelta(hours=1),
++            status=BookingStatus.COMPLETED.value,
++        )
++        db.add(b)
++    db.commit()
++
++    payload = {"start_time": now + timedelta(days=1), "service_id": service.id, "category_id": None}
++    candidates, best = evaluate_discount_candidates(master.id, client_user.id, None, payload, db)
++    reg = next((c for c in candidates if c.get("condition_type") == "regular_visits"), None)
++    assert reg is not None
++    assert reg["match"] is True
++
++
++def test_regular_visits_old_period(db, master, client_user, service):
++    from utils.loyalty_discounts import evaluate_discount_candidates
++
++    _insert_master_service(db, master.id, service.id)
++    rule = LoyaltyDiscount(
++        master_id=master.id,
++        discount_type=LoyaltyDiscountType.QUICK,
++        name="Регуляр",
++        discount_percent=15.0,
++        is_active=True,
++        priority=1,
++        conditions={"condition_type": "regular_visits", "parameters": {"visits_count": 1, "period": "month"}},
++    )
++    db.add(rule)
++    db.commit()
++
++    now = datetime.utcnow()
++    b = Booking(
++        master_id=master.id,
++        client_id=client_user.id,
++        service_id=service.id,
++        start_time=now - timedelta(days=7),
++        end_time=now - timedelta(days=7) + timedelta(hours=1),
++        status=BookingStatus.COMPLETED.value,
++    )
++    db.add(b)
++    db.commit()
++
++    payload = {"start_time": now + timedelta(days=1), "service_id": service.id, "category_id": None}
++    candidates, best = evaluate_discount_candidates(master.id, client_user.id, None, payload, db)
++    reg = next((c for c in candidates if c.get("condition_type") == "regular_visits"), None)
++    assert reg is not None
++    assert reg["match"] is True
++
++
++# --- returning_client min/max ---
++
++
++def test_returning_client_min_max(db, master, client_user, service):
++    from utils.loyalty_discounts import evaluate_discount_candidates
++
++    _insert_master_service(db, master.id, service.id)
++    rule = LoyaltyDiscount(
++        master_id=master.id,
++        discount_type=LoyaltyDiscountType.QUICK,
++        name="Возврат",
++        discount_percent=20.0,
++        is_active=True,
++        priority=1,
++        conditions={
++            "condition_type": "returning_client",
++            "parameters": {"min_days_since_last_visit": 14, "max_days_since_last_visit": 60},
++        },
++    )
++    db.add(rule)
++    db.commit()
++
++    now = datetime.utcnow()
++    last_visit = now - timedelta(days=30)
++    b = Booking(
++        master_id=master.id,
++        client_id=client_user.id,
++        service_id=service.id,
++        start_time=last_visit,
++        end_time=last_visit + timedelta(hours=1),
++        status=BookingStatus.COMPLETED.value,
++    )
++    db.add(b)
++    db.commit()
++
++    booking_start = now + timedelta(days=1)
++    payload = {"start_time": booking_start, "service_id": service.id, "category_id": None}
++    candidates, best = evaluate_discount_candidates(master.id, client_user.id, None, payload, db)
++    ret = next((c for c in candidates if c.get("condition_type") == "returning_client"), None)
++    assert ret is not None
++    assert ret["match"] is True
++
++
++def test_returning_client_too_old(db, master, client_user, service):
++    from utils.loyalty_discounts import evaluate_discount_candidates
++
++    _insert_master_service(db, master.id, service.id)
++    rule = LoyaltyDiscount(
++        master_id=master.id,
++        discount_type=LoyaltyDiscountType.QUICK,
++        name="Возврат",
++        discount_percent=20.0,
++        is_active=True,
++        priority=1,
++        conditions={
++            "condition_type": "returning_client",
++            "parameters": {"min_days_since_last_visit": 14, "max_days_since_last_visit": 60},
++        },
++    )
++    db.add(rule)
++    db.commit()
++
++    now = datetime.utcnow()
++    last_visit = now - timedelta(days=100)
++    b = Booking(
++        master_id=master.id,
++        client_id=client_user.id,
++        service_id=service.id,
++        start_time=last_visit,
++        end_time=last_visit + timedelta(hours=1),
++        status=BookingStatus.COMPLETED.value,
++    )
++    db.add(b)
++    db.commit()
++
++    booking_start = now + timedelta(days=1)
++    payload = {"start_time": booking_start, "service_id": service.id, "category_id": None}
++    candidates, best = evaluate_discount_candidates(master.id, client_user.id, None, payload, db)
++    ret = next((c for c in candidates if c.get("condition_type") == "returning_client"), None)
++    assert ret is not None
++    assert ret["match"] is False
++
++
++def test_returning_client_old_format(db, master, client_user, service):
++    from utils.loyalty_discounts import evaluate_discount_candidates
++
++    _insert_master_service(db, master.id, service.id)
++    rule = LoyaltyDiscount(
++        master_id=master.id,
++        discount_type=LoyaltyDiscountType.QUICK,
++        name="Возврат",
++        discount_percent=20.0,
++        is_active=True,
++        priority=1,
++        conditions={"condition_type": "returning_client", "parameters": {"days_since_last_visit": 30}},
++    )
++    db.add(rule)
++    db.commit()
++
++    now = datetime.utcnow()
++    last_visit = now - timedelta(days=35)
++    b = Booking(
++        master_id=master.id,
++        client_id=client_user.id,
++        service_id=service.id,
++        start_time=last_visit,
++        end_time=last_visit + timedelta(hours=1),
++        status=BookingStatus.COMPLETED.value,
++    )
++    db.add(b)
++    db.commit()
++
++    payload = {"start_time": now + timedelta(days=1), "service_id": service.id, "category_id": None}
++    candidates, best = evaluate_discount_candidates(master.id, client_user.id, None, payload, db)
++    ret = next((c for c in candidates if c.get("condition_type") == "returning_client"), None)
++    assert ret is not None
++    assert ret["match"] is True
++
++
++# --- service_discount items ---
++
++
++def test_service_discount_items_percent(db, master, client_user, service):
++    from utils.loyalty_discounts import evaluate_discount_candidates
++
++    _insert_master_service(db, master.id, service.id)
++    rule = LoyaltyDiscount(
++        master_id=master.id,
++        discount_type=LoyaltyDiscountType.QUICK,
++        name="Скидка на услугу",
++        discount_percent=10.0,
++        is_active=True,
++        priority=1,
++        conditions={
++            "condition_type": "service_discount",
++            "parameters": {"items": [{"service_id": service.id, "percent": 20}], "category_ids": []},
++        },
++    )
++    db.add(rule)
++    db.commit()
++
++    payload = {"start_time": datetime.utcnow() + timedelta(days=1), "service_id": service.id, "category_id": None}
++    candidates, best = evaluate_discount_candidates(master.id, client_user.id, None, payload, db)
++    assert best is not None
++    assert best["condition_type"] == "service_discount"
++    assert best["match"] is True
++    assert best["discount_percent"] == 20.0
+diff --git a/backend/utils/loyalty_discounts.py b/backend/utils/loyalty_discounts.py
+new file mode 100644
+index 0000000..6b5a692
+--- /dev/null
++++ b/backend/utils/loyalty_discounts.py
+@@ -0,0 +1,434 @@
++"""
++Runtime-логика для оценки скидок мастера (без изменения правил).
++"""
++from __future__ import annotations
++
++from datetime import date, datetime, timedelta, time
++from typing import Any, Dict, List, Optional, Tuple
++
++from sqlalchemy.orm import Session
++from sqlalchemy import desc
++
++from models import (
++    LoyaltyDiscount,
++    PersonalDiscount,
++    LoyaltyConditionType,
++    Booking,
++    BookingStatus,
++    User,
++    Service,
++    AppliedDiscount,
++)
++from utils.loyalty_params import normalize_parameters
++
++# Whitelist поддерживаемых condition_type (реально обрабатываются в evaluate_discount_candidates)
++SUPPORTED_CONDITION_TYPES = {
++    LoyaltyConditionType.FIRST_VISIT.value,
++    LoyaltyConditionType.RETURNING_CLIENT.value,
++    LoyaltyConditionType.REGULAR_VISITS.value,
++    LoyaltyConditionType.HAPPY_HOURS.value,
++    LoyaltyConditionType.SERVICE_DISCOUNT.value,
++    LoyaltyConditionType.BIRTHDAY.value,
++}
++
++
++def _parse_time(value: Optional[str]) -> Optional[time]:
++    if not value:
++        return None
++    try:
++        return datetime.strptime(value, "%H:%M").time()
++    except Exception:
++        return None
++
++
++def _get_client_data(db: Session, client_id: Optional[int], client_phone: Optional[str]) -> Tuple[Optional[int], Optional[str], Optional[datetime]]:
++    if client_id:
++        user = db.query(User).filter(User.id == client_id).first()
++        if user:
++            return user.id, user.phone, user.birth_date
++    return None, client_phone, None
++
++
++def _get_service_context(
++    db: Session,
++    service_id: Optional[int],
++    category_id: Optional[int],
++) -> Tuple[Optional[int], Optional[float], Optional[int]]:
++    if service_id:
++        service = db.query(Service).filter(Service.id == service_id).first()
++        if service:
++            return service.id, service.price, category_id or service.category_id
++    return service_id, None, category_id
++
++
++def _count_completed_visits(
++    db: Session,
++    master_id: int,
++    client_id: int,
++    start_dt: Optional[datetime],
++    end_dt: Optional[datetime],
++) -> int:
++    query = db.query(Booking).filter(
++        Booking.master_id == master_id,
++        Booking.client_id == client_id,
++        Booking.status == BookingStatus.COMPLETED,
++    )
++    if start_dt:
++        query = query.filter(Booking.start_time >= start_dt)
++    if end_dt:
++        query = query.filter(Booking.start_time <= end_dt)
++    return query.count()
++
++
++def _get_last_completed_visit(
++    db: Session,
++    master_id: int,
++    client_id: int,
++) -> Optional[datetime]:
++    last_booking = (
++        db.query(Booking)
++        .filter(
++            Booking.master_id == master_id,
++            Booking.client_id == client_id,
++            Booking.status == BookingStatus.COMPLETED,
++        )
++        .order_by(desc(Booking.start_time))
++        .first()
++    )
++    return last_booking.start_time if last_booking else None
++
++
++def _birthday_in_window(
++    birth_date: date,
++    booking_date: date,
++    days_before: int,
++    days_after: int,
++) -> Tuple[bool, Optional[str]]:
++    """Проверяет, попадает ли booking_date в окно [ДР - days_before, ДР + days_after].
++    Учитывает пересечение года (ДР в начале января, days_before > 0).
++    Таймзона: используем даты как есть (booking_start.date() уже в локальной логике бронирования).
++    """
++    try:
++        ref = date(booking_date.year, birth_date.month, birth_date.day)
++    except ValueError:
++        ref = date(booking_date.year, 2, 28)
++    low = ref - timedelta(days=days_before)
++    high = ref + timedelta(days=days_after)
++    return low <= booking_date <= high, None
++
++
++def calculate_discount_amount(
++    base_price: float,
++    discount_percent: float,
++    max_discount_amount: Optional[float],
++) -> float:
++    discount_amount = base_price * (discount_percent / 100.0)
++    if max_discount_amount is not None:
++        discount_amount = min(discount_amount, max_discount_amount)
++    return max(discount_amount, 0.0)
++
++
++def evaluate_and_prepare_applied_discount(
++    master_id: int,
++    client_id: Optional[int],
++    client_phone: Optional[str],
++    booking_start: Optional[datetime],
++    service_id: Optional[int],
++    db: Session,
++) -> Tuple[Optional[float], Optional[Dict[str, Any]]]:
++    """
++    Общая логика расчёта скидки для бронирования.
++    Источник цены — Service.price.
++    """
++    if not master_id or not service_id or not booking_start:
++        return None, None
++
++    service = db.query(Service).filter(Service.id == service_id).first()
++    if not service or not service.price or service.price <= 0:
++        return None, None
++
++    booking_payload = {
++        "start_time": booking_start,
++        "service_id": service_id,
++        "service_price": service.price,
++        "category_id": service.category_id,
++    }
++
++    candidates, best_candidate = evaluate_discount_candidates(
++        master_id=master_id,
++        client_id=client_id,
++        client_phone=client_phone,
++        booking_payload=booking_payload,
++        db=db,
++    )
++
++    if not best_candidate:
++        return None, None
++
++    discount_amount = calculate_discount_amount(
++        base_price=float(service.price),
++        discount_percent=float(best_candidate["discount_percent"]),
++        max_discount_amount=best_candidate.get("max_discount_amount"),
++    )
++    if discount_amount <= 0:
++        return None, None
++
++    discounted_payment_amount = max(float(service.price) - discount_amount, 0.0)
++    applied_discount_data = {
++        "rule_type": best_candidate["rule_type"],
++        "rule_id": best_candidate["rule_id"],
++        "discount_percent": float(best_candidate["discount_percent"]),
++        "discount_amount": float(discount_amount),
++    }
++
++    return discounted_payment_amount, applied_discount_data
++
++
++def create_applied_discount(
++    booking_id: int,
++    applied_discount_data: Dict[str, Any],
++) -> AppliedDiscount:
++    return AppliedDiscount(
++        booking_id=booking_id,
++        discount_id=applied_discount_data["rule_id"] if applied_discount_data["rule_type"] != "personal" else None,
++        personal_discount_id=applied_discount_data["rule_id"] if applied_discount_data["rule_type"] == "personal" else None,
++        discount_percent=applied_discount_data["discount_percent"],
++        discount_amount=applied_discount_data["discount_amount"],
++    )
++
++
++def build_applied_discount_info(applied_discount: AppliedDiscount) -> Optional[Dict[str, Any]]:
++    if not applied_discount:
++        return None
++    rule_type = "unknown"
++    name = "Скидка"
++    if applied_discount.personal_discount_id:
++        rule_type = "personal"
++        personal = applied_discount.personal_discount
++        if personal and personal.description:
++            name = personal.description
++        else:
++            name = "Персональная скидка"
++    elif applied_discount.discount_id:
++        loyalty_rule = applied_discount.loyalty_discount
++        if loyalty_rule:
++            rule_type = loyalty_rule.discount_type
++            name = loyalty_rule.name
++
++    return {
++        "id": applied_discount.id,
++        "rule_type": rule_type,
++        "name": name,
++        "discount_percent": applied_discount.discount_percent,
++        "discount_amount": applied_discount.discount_amount,
++    }
++
++
++def evaluate_discount_candidates(
++    master_id: int,
++    client_id: Optional[int],
++    client_phone: Optional[str],
++    booking_payload: Dict[str, Any],
++    db: Session,
++) -> Tuple[List[Dict[str, Any]], Optional[Dict[str, Any]]]:
++    """
++    Возвращает список кандидатов + лучший кандидат (deterministic).
++    Не использует salon_id, только master_id.
++    """
++    booking_start: Optional[datetime] = booking_payload.get("start_time")
++    service_id: Optional[int] = booking_payload.get("service_id")
++    category_id: Optional[int] = booking_payload.get("category_id")
++
++    _, resolved_phone, birth_date = _get_client_data(db, client_id, client_phone)
++    _, resolved_price, resolved_category_id = _get_service_context(
++        db, service_id, category_id
++    )
++
++    candidates: List[Dict[str, Any]] = []
++
++    loyalty_rules = (
++        db.query(LoyaltyDiscount)
++        .filter(LoyaltyDiscount.master_id == master_id)
++        .all()
++    )
++    personal_rules = (
++        db.query(PersonalDiscount)
++        .filter(PersonalDiscount.master_id == master_id)
++        .all()
++    )
++
++    for rule in loyalty_rules:
++        condition = rule.conditions or {}
++        condition_type = condition.get("condition_type")
++        raw_params = condition.get("parameters", {}) if isinstance(condition, dict) else {}
++        parameters = normalize_parameters(
++            condition_type or "",
++            raw_params,
++            rule_discount_percent=float(rule.discount_percent) if rule.discount_percent is not None else None,
++        )
++
++        candidate = {
++            "rule_id": rule.id,
++            "rule_type": rule.discount_type,
++            "name": rule.name,
++            "condition_type": condition_type,
++            "parameters": parameters,
++            "priority": rule.priority,
++            "is_active": rule.is_active,
++            "match": False,
++            "reason": "inactive" if not rule.is_active else "unknown_condition",
++            "discount_percent": rule.discount_percent,
++            "max_discount_amount": rule.max_discount_amount,
++        }
++
++        if not rule.is_active:
++            candidates.append(candidate)
++            continue
++
++        if not condition_type:
++            candidate["reason"] = "insufficient_data"
++            candidates.append(candidate)
++            continue
++
++        # Personal is handled separately
++        if condition_type == LoyaltyConditionType.FIRST_VISIT.value:
++            if not client_id:
++                candidate["reason"] = "insufficient_data"
++            else:
++                visits = _count_completed_visits(db, master_id, client_id, None, None)
++                candidate["match"] = visits == 0
++                candidate["reason"] = "matched" if candidate["match"] else "has_previous_visit"
++
++        elif condition_type == LoyaltyConditionType.RETURNING_CLIENT.value:
++            if not client_id or not booking_start:
++                candidate["reason"] = "insufficient_data"
++            else:
++                min_days = parameters.get("min_days_since_last_visit")
++                max_days = parameters.get("max_days_since_last_visit")
++                last_visit = _get_last_completed_visit(db, master_id, client_id)
++                if not last_visit or not isinstance(min_days, (int, float)):
++                    candidate["reason"] = "insufficient_data"
++                else:
++                    delta_days = (booking_start - last_visit).days
++                    min_ok = delta_days >= int(min_days)
++                    max_ok = True
++                    if max_days is not None:
++                        max_ok = delta_days <= int(max_days)
++                    candidate["match"] = min_ok and max_ok
++                    candidate["reason"] = "matched" if candidate["match"] else "too_recent" if not min_ok else "too_old"
++
++        elif condition_type == LoyaltyConditionType.REGULAR_VISITS.value:
++            if not client_id or not booking_start:
++                candidate["reason"] = "insufficient_data"
++            else:
++                visits_count = parameters.get("visits_count")
++                period_days = parameters.get("period_days")
++                if not isinstance(visits_count, (int, float)) or not isinstance(period_days, (int, float)):
++                    candidate["reason"] = "insufficient_data"
++                else:
++                    window_start = booking_start - timedelta(days=int(period_days))
++                    visits = _count_completed_visits(db, master_id, client_id, window_start, booking_start)
++                    candidate["match"] = visits >= int(visits_count)
++                    candidate["reason"] = "matched" if candidate["match"] else "not_enough_visits"
++
++        elif condition_type == LoyaltyConditionType.BIRTHDAY.value:
++            if not birth_date or not booking_start:
++                candidate["reason"] = "insufficient_data"
++            else:
++                days_before = int(parameters.get("days_before") or 0)
++                days_after = int(parameters.get("days_after") or 0)
++                in_window, _ = _birthday_in_window(
++                    birth_date=birth_date,
++                    booking_date=booking_start.date() if hasattr(booking_start, "date") else booking_start,
++                    days_before=days_before,
++                    days_after=days_after,
++                )
++                candidate["match"] = in_window
++                candidate["reason"] = "matched" if in_window else "outside_birthday_window"
++
++        elif condition_type == LoyaltyConditionType.HAPPY_HOURS.value:
++            if not booking_start:
++                candidate["reason"] = "insufficient_data"
++            else:
++                days_list = parameters.get("days") or []
++                intervals = parameters.get("intervals") or []
++                if not isinstance(days_list, list) or not isinstance(intervals, list) or len(intervals) == 0:
++                    candidate["reason"] = "insufficient_data"
++                else:
++                    booking_time = booking_start.time()
++                    booking_day = booking_start.isoweekday()
++                    in_day = booking_day in days_list
++                    in_any = False
++                    for iv in intervals:
++                        st = _parse_time(iv.get("start"))
++                        et = _parse_time(iv.get("end"))
++                        if st and et and st <= booking_time <= et:
++                            in_any = True
++                            break
++                    candidate["match"] = in_day and in_any
++                    candidate["reason"] = "matched" if candidate["match"] else "outside_happy_hours"
++
++        elif condition_type == LoyaltyConditionType.SERVICE_DISCOUNT.value:
++            if not service_id and not resolved_category_id:
++                candidate["reason"] = "insufficient_data"
++            else:
++                items = parameters.get("items") or []
++                category_ids = parameters.get("category_ids") or []
++                matched = False
++                use_percent: Optional[float] = None
++                if service_id and isinstance(items, list):
++                    for it in items:
++                        if not isinstance(it, dict):
++                            continue
++                        if it.get("service_id") == service_id:
++                            matched = True
++                            pct = it.get("percent")
++                            if pct is not None and isinstance(pct, (int, float)):
++                                use_percent = float(pct)
++                            break
++                if not matched and resolved_category_id and isinstance(category_ids, list) and resolved_category_id in category_ids:
++                    matched = True
++                    use_percent = None
++                if matched and use_percent is not None:
++                    candidate["discount_percent"] = use_percent
++                candidate["match"] = matched
++                candidate["reason"] = "matched" if matched else "service_not_matched"
++
++        else:
++            candidate["match"] = False
++            candidate["reason"] = "unknown_condition"
++
++        candidates.append(candidate)
++
++    for rule in personal_rules:
++        candidate = {
++            "rule_id": rule.id,
++            "rule_type": "personal",
++            "name": "Персональная скидка",
++            "condition_type": None,
++            "parameters": {},
++            "priority": 1,
++            "is_active": rule.is_active,
++            "match": False,
++            "reason": "inactive" if not rule.is_active else "insufficient_data",
++            "discount_percent": rule.discount_percent,
++            "max_discount_amount": rule.max_discount_amount,
++        }
++
++        if not rule.is_active:
++            candidates.append(candidate)
++            continue
++
++        if not resolved_phone:
++            candidate["reason"] = "insufficient_data"
++        else:
++            candidate["match"] = rule.client_phone == resolved_phone
++            candidate["reason"] = "matched" if candidate["match"] else "phone_mismatch"
++
++        candidates.append(candidate)
++
++    applicable = [c for c in candidates if c["is_active"] and c["match"]]
++    applicable.sort(key=lambda c: (-int(c["priority"]), int(c["rule_id"])))
++    best_candidate = applicable[0] if applicable else None
++
++    return candidates, best_candidate
+diff --git a/backend/utils/loyalty_params.py b/backend/utils/loyalty_params.py
+new file mode 100644
+index 0000000..2d2b456
+--- /dev/null
++++ b/backend/utils/loyalty_params.py
+@@ -0,0 +1,261 @@
++"""
++Нормализация parameters условий скидок. Единый формат + backward compatibility.
++Используется в evaluate_discount_candidates и при валидации create/update.
++"""
++from __future__ import annotations
++
++import re
++from typing import Any, Dict, List, Optional, Tuple
++
++# Дефолты (должны совпадать с QUICK_DISCOUNT_TEMPLATES и shared-типами)
++DEFAULT_RETURNING_MIN_DAYS = 30
++DEFAULT_RETURNING_MAX_DAYS: Optional[int] = None
++DEFAULT_BIRTHDAY_DAYS_BEFORE = 7
++DEFAULT_BIRTHDAY_DAYS_AFTER = 7
++DEFAULT_REGULAR_VISITS_COUNT = 2
++DEFAULT_REGULAR_VISITS_PERIOD_DAYS = 60
++PERIOD_TO_DAYS = {"week": 7, "month": 30, "year": 365}
++
++_TIME_HHMM = re.compile(r"^\d{1,2}:\d{2}$")
++
++
++def _to_hhmm(s: Any) -> Optional[str]:
++    if not s:
++        return None
++    t = str(s).strip()
++    if not _TIME_HHMM.match(t):
++        return None
++    parts = t.split(":")
++    h, m = int(parts[0]), int(parts[1])
++    if h < 0 or h > 23 or m < 0 or m > 59:
++        return None
++    return f"{h:02d}:{m:02d}"
++
++
++def _sort_list(items: List[Any]) -> List[Any]:
++    try:
++        return sorted(items, key=lambda x: (str(type(x).__name__), x))
++    except Exception:
++        return list(items)
++
++
++def normalize_first_visit(params: Dict[str, Any]) -> Dict[str, Any]:
++    return {}
++
++
++def normalize_regular_visits(params: Dict[str, Any]) -> Dict[str, Any]:
++    p = dict(params)
++    visits_count = p.get("visits_count")
++    period_days = p.get("period_days")
++    period = p.get("period")
++
++    if period_days is not None and isinstance(period_days, (int, float)):
++        period_days = int(period_days)
++    elif period and isinstance(period, str) and period in PERIOD_TO_DAYS:
++        period_days = PERIOD_TO_DAYS[period]
++    else:
++        period_days = DEFAULT_REGULAR_VISITS_PERIOD_DAYS
++
++    if visits_count is not None and isinstance(visits_count, (int, float)):
++        visits_count = int(visits_count)
++    else:
++        visits_count = DEFAULT_REGULAR_VISITS_COUNT
++
++    return {"visits_count": max(1, visits_count), "period_days": max(1, period_days)}
++
++
++def normalize_returning_client(params: Dict[str, Any]) -> Dict[str, Any]:
++    p = dict(params)
++    min_days = p.get("min_days_since_last_visit")
++    max_days = p.get("max_days_since_last_visit")
++    legacy = p.get("days_since_last_visit")
++
++    if min_days is not None and isinstance(min_days, (int, float)):
++        min_days = int(min_days)
++    elif legacy is not None and isinstance(legacy, (int, float)):
++        min_days = int(legacy)
++    else:
++        min_days = DEFAULT_RETURNING_MIN_DAYS
++
++    if max_days is not None and isinstance(max_days, (int, float)):
++        max_days = int(max_days)
++    else:
++        max_days = DEFAULT_RETURNING_MAX_DAYS
++
++    out: Dict[str, Any] = {"min_days_since_last_visit": max(0, min_days)}
++    if max_days is not None:
++        out["max_days_since_last_visit"] = max(0, max_days)
++    else:
++        out["max_days_since_last_visit"] = None
++    return out
++
++
++def normalize_birthday(params: Dict[str, Any]) -> Dict[str, Any]:
++    p = dict(params)
++    before = p.get("days_before")
++    after = p.get("days_after")
++    if before is not None and isinstance(before, (int, float)):
++        before = int(before)
++    else:
++        before = DEFAULT_BIRTHDAY_DAYS_BEFORE
++    if after is not None and isinstance(after, (int, float)):
++        after = int(after)
++    else:
++        after = DEFAULT_BIRTHDAY_DAYS_AFTER
++    return {"days_before": max(0, before), "days_after": max(0, after)}
++
++
++def _intervals_overlap(a_start: str, a_end: str, b_start: str, b_end: str) -> bool:
++    """Проверка пересечения двух интервалов (HH:MM)."""
++    def to_minutes(hhmm: str) -> int:
++        parts = hhmm.split(":")
++        return int(parts[0]) * 60 + int(parts[1])
++
++    a0, a1 = to_minutes(a_start), to_minutes(a_end)
++    b0, b1 = to_minutes(b_start), to_minutes(b_end)
++    return not (a1 <= b0 or b1 <= a0)
++
++
++def normalize_happy_hours(params: Dict[str, Any]) -> Dict[str, Any]:
++    p = dict(params)
++    days = p.get("days")
++    intervals = p.get("intervals")
++    # Legacy: start_time, end_time, days_of_week
++    start_time = p.get("start_time")
++    end_time = p.get("end_time")
++    days_of_week = p.get("days_of_week")
++
++    if days is not None and isinstance(days, list):
++        days = _sort_list([int(x) for x in days if isinstance(x, (int, float))])
++        days = [d for d in days if 1 <= d <= 7]
++        days = sorted(set(days))
++    elif days_of_week is not None and isinstance(days_of_week, list):
++        days = _sort_list([int(x) for x in days_of_week if isinstance(x, (int, float))])
++        days = [d for d in days if 1 <= d <= 7]
++        days = sorted(set(days))
++    else:
++        days = [1, 2, 3, 4, 5]
++
++    if intervals is not None and isinstance(intervals, list) and len(intervals) > 0:
++        out_intervals: List[Dict[str, str]] = []
++        for iv in intervals:
++            if not isinstance(iv, dict):
++                continue
++            s = _to_hhmm(iv.get("start"))
++            e = _to_hhmm(iv.get("end"))
++            if s and e and s < e:
++                out_intervals.append({"start": s, "end": e})
++        out_intervals.sort(key=lambda x: (x["start"], x["end"]))
++    elif start_time and end_time:
++        s = _to_hhmm(start_time)
++        e = _to_hhmm(end_time)
++        if s and e and s < e:
++            out_intervals = [{"start": s, "end": e}]
++        else:
++            out_intervals = [{"start": "09:00", "end": "12:00"}]
++    else:
++        out_intervals = [{"start": "09:00", "end": "12:00"}]
++
++    return {"days": days, "intervals": out_intervals}
++
++
++def normalize_service_discount(
++    params: Dict[str, Any],
++    rule_discount_percent: Optional[float] = None,
++) -> Dict[str, Any]:
++    p = dict(params)
++    items = p.get("items")
++    category_ids = p.get("category_ids")
++    service_ids = p.get("service_ids")
++
++    if items is not None and isinstance(items, list) and len(items) > 0:
++        out_items: List[Dict[str, Any]] = []
++        seen: set[int] = set()
++        percent = rule_discount_percent if rule_discount_percent is not None else 10.0
++        for it in items:
++            if not isinstance(it, dict):
++                continue
++            sid = it.get("service_id")
++            pct = it.get("percent")
++            if sid is None:
++                continue
++            try:
++                sid = int(sid)
++            except (TypeError, ValueError):
++                continue
++            if sid in seen:
++                continue
++            seen.add(sid)
++            if pct is not None and isinstance(pct, (int, float)):
++                pct = max(0, min(100, float(pct)))
++            else:
++                pct = percent
++            out_items.append({"service_id": sid, "percent": pct})
++        out_items.sort(key=lambda x: (x["service_id"], x["percent"]))
++    elif service_ids is not None and isinstance(service_ids, list):
++        percent = rule_discount_percent if rule_discount_percent is not None else 10.0
++        out_items = [{"service_id": int(s), "percent": percent} for s in service_ids if isinstance(s, (int, float))]
++        out_items = list({x["service_id"]: x for x in out_items}.values())
++        out_items.sort(key=lambda x: (x["service_id"], x["percent"]))
++    else:
++        out_items = []
++
++    if category_ids is not None and isinstance(category_ids, list):
++        cat_ids = _sort_list([int(c) for c in category_ids if isinstance(c, (int, float))])
++        cat_ids = sorted(set(cat_ids))
++    else:
++        cat_ids = []
++
++    return {"items": out_items, "category_ids": cat_ids}
++
++
++def normalize_parameters(
++    condition_type: str,
++    parameters: Dict[str, Any],
++    rule_discount_percent: Optional[float] = None,
++) -> Dict[str, Any]:
++    """Нормализует parameters для заданного condition_type. Обратная совместимость."""
++    if not isinstance(parameters, dict):
++        parameters = {}
++
++    if condition_type == "first_visit":
++        return normalize_first_visit(parameters)
++    if condition_type == "regular_visits":
++        return normalize_regular_visits(parameters)
++    if condition_type == "returning_client":
++        return normalize_returning_client(parameters)
++    if condition_type == "birthday":
++        return normalize_birthday(parameters)
++    if condition_type == "happy_hours":
++        return normalize_happy_hours(parameters)
++    if condition_type == "service_discount":
++        return normalize_service_discount(parameters, rule_discount_percent)
++
++    return dict(parameters)
++
++
++def validate_happy_hours_intervals(intervals: List[Dict[str, str]]) -> Tuple[bool, Optional[str]]:
++    """Проверка: start < end, интервалы не пересекаются. Возврат (ok, error_message)."""
++    for iv in intervals:
++        s = iv.get("start") or ""
++        e = iv.get("end") or ""
++        if not s or not e:
++            return False, "Каждый интервал должен содержать start и end (HH:MM)."
++        if s >= e:
++            return False, f"start должен быть строго меньше end: {s} — {e}."
++
++    for i in range(len(intervals)):
++        for j in range(i + 1, len(intervals)):
++            a, b = intervals[i], intervals[j]
++            if _intervals_overlap(a["start"], a["end"], b["start"], b["end"]):
++                return False, (
++                    f"Интервалы пересекаются: [{a['start']}, {a['end']}] и "
++                    f"[{b['start']}, {b['end']}]. Задайте непересекающиеся слоты."
++                )
++    return True, None
++
++
++def stable_stringify_params(params: Dict[str, Any]) -> str:
++    """Каноническая сериализация для сравнения (ключи отсортированы, массивы стабильны)."""
++    import json
++    return json.dumps(params, sort_keys=True, ensure_ascii=False)
+diff --git a/frontend/src/components/LoyaltySystem.jsx b/frontend/src/components/LoyaltySystem.jsx
+index f599800..4bb0c8a 100644
+--- a/frontend/src/components/LoyaltySystem.jsx
++++ b/frontend/src/components/LoyaltySystem.jsx
+@@ -1,9 +1,16 @@
+ import React, { useState, useEffect } from 'react'
+ import { PlusIcon, TrashIcon, PencilIcon } from '@heroicons/react/24/outline'
+-import { getApiUrl } from '../utils/config'
++import { apiGet, apiPost, apiPut, apiDelete } from '../utils/api'
+ import { Button, Tabs } from './ui'
++import { useAuth } from '../contexts/AuthContext'
++import { normalizeConditionsForApi, isConditionTypeSupported, templateMatchesDiscount } from '../utils/loyaltyConditions'
++import MasterLoyalty from './MasterLoyalty'
+ 
+-export default function LoyaltySystem({ getAuthHeaders }) {
++export default function LoyaltySystem({ hasLoyaltyAccess = false }) {
++  const { isAuthenticated, loading: authLoading } = useAuth()
++  // Верхние табы: Скидки / Баллы
++  const [mainTab, setMainTab] = useState('discounts') // 'discounts' | 'points'
++  // Подтабы для Скидок
+   const [activeTab, setActiveTab] = useState('quick')
+   const [templates, setTemplates] = useState([])
+   const [quickDiscounts, setQuickDiscounts] = useState([])
+@@ -11,6 +18,8 @@ export default function LoyaltySystem({ getAuthHeaders }) {
+   const [personalDiscounts, setPersonalDiscounts] = useState([])
+   const [loading, setLoading] = useState(true)
+   const [error, setError] = useState('')
++  const [errorType, setErrorType] = useState('error') // 'error' | 'warning' | 'info'
++  const [subscriptionRequired, setSubscriptionRequired] = useState(false) // 403 + X-Error-Code: SUBSCRIPTION_REQUIRED
+   const [editingDiscount, setEditingDiscount] = useState(null)
+   const [editDiscountValue, setEditDiscountValue] = useState('')
+   const [editingTemplate, setEditingTemplate] = useState(null)
+@@ -24,43 +33,174 @@ export default function LoyaltySystem({ getAuthHeaders }) {
+   })
+ 
+   useEffect(() => {
++    // Auth gating: не делаем запросы до готовности auth
++    if (authLoading) {
++      return
++    }
++
++    // Не делаем запросы, если нет доступа к лояльности
++    if (hasLoyaltyAccess === false) {
++      setLoading(false)
++      setTemplates([])
++      setQuickDiscounts([])
++      setComplexDiscounts([])
++      setPersonalDiscounts([])
++      return
++    }
++
++    // Проверяем токен и авторизацию
++    const token = localStorage.getItem('access_token')
++    if (!token || !isAuthenticated) {
++      setLoading(false)
++      setTemplates([])
++      setQuickDiscounts([])
++      setComplexDiscounts([])
++      setPersonalDiscounts([])
++      return
++    }
++
+     loadData()
+     // eslint-disable-next-line react-hooks/exhaustive-deps
+-  }, [])
++  }, [hasLoyaltyAccess, authLoading, isAuthenticated])
+ 
+   const loadData = async () => {
++    const token = localStorage.getItem('access_token')
++    if (!token || !isAuthenticated) {
++      setLoading(false)
++      return
++    }
++
+     setLoading(true)
+     setError('')
++    setErrorType('error')
++    setSubscriptionRequired(false)
+     
+     try {
+       // Загружаем шаблоны быстрых скидок
+-      const templatesResponse = await fetch(getApiUrl('/loyalty/templates'), {
+-        headers: getAuthHeaders()
+-      })
+-      if (templatesResponse.ok) {
+-        const templatesData = await templatesResponse.json()
++      try {
++        const templatesData = await apiGet('/api/loyalty/templates')
+         setTemplates(templatesData)
++      } catch (err) {
++        // Игнорируем ошибки загрузки шаблонов (эндпоинт может не существовать)
++        // Эндпоинт может не существовать - это нормально
++        const status = err.response?.status
++        if (status === 404 || status === 403) {
++          setTemplates([])
++        } else if (status === 401) {
++          // 401 обрабатывается ниже в основном блоке
++          throw err
++        } else {
++          if (__DEV__) {
++            console.warn('Эндпоинт /api/loyalty/templates недоступен (может быть не реализован):', err)
++          }
++          setTemplates([])
++        }
+       }
+ 
+       // Загружаем статус системы лояльности
+-      const statusResponse = await fetch(getApiUrl('/loyalty/status'), {
+-        headers: getAuthHeaders()
+-      })
+-      if (statusResponse.ok) {
+-        const statusData = await statusResponse.json()
+-        setQuickDiscounts(statusData.quick_discounts)
+-        setComplexDiscounts(statusData.complex_discounts)
+-        setPersonalDiscounts(statusData.personal_discounts)
++      try {
++        const statusData = await apiGet('/api/loyalty/status')
++        setQuickDiscounts(statusData.quick_discounts || [])
++        setComplexDiscounts(statusData.complex_discounts || [])
++        setPersonalDiscounts(statusData.personal_discounts || [])
++        setError('')
++        setErrorType('error')
++        setSubscriptionRequired(false)
++      } catch (err) {
++        const status = err.response?.status
++        const errorCode = err.response?.headers?.get?.('x-error-code') || err.response?.headers?.['x-error-code']
++        const errorData = err.response?.data || {}
++        
++        if (status === 409) {
++          // Обработка ошибки схемы БД (SCHEMA_OUTDATED)
++          if (errorCode === 'SCHEMA_OUTDATED') {
++            // Плоский JSON: errorData.detail, errorData.hint напрямую
++            const errorMessage = errorData.detail || 'Схема базы данных устарела'
++            const hint = errorData.hint || 'Run alembic upgrade head'
++            setError(`${errorMessage}. ${hint}`)
++            setErrorType('warning')
++            setSubscriptionRequired(false)
++          } else {
++            // Другая 409 ошибка
++            const errorMessage = typeof errorData.detail === 'string' 
++              ? errorData.detail 
++              : errorData.detail?.detail || JSON.stringify(errorData.detail) || 'Ошибка конфликта'
++            setError(errorMessage)
++            setErrorType('error')
++            setSubscriptionRequired(false)
++          }
++        } else if (status === 404) {
++          // Профиль мастера не найден - показываем явное сообщение
++          const errorMessage = errorData.detail || 'Профиль мастера не найден'
++          setError(`${errorMessage}. Пожалуйста, перелогиньтесь или создайте профиль мастера. Если проблема сохраняется, обратитесь в поддержку.`)
++          setErrorType('error')
++          setSubscriptionRequired(false)
++          setQuickDiscounts([])
++          setComplexDiscounts([])
++          setPersonalDiscounts([])
++        } else if (status === 401) {
++          // 401 при наличии токена - очищаем токен и редиректим
++          const token = localStorage.getItem('access_token')
++          if (token) {
++            localStorage.removeItem('access_token')
++            localStorage.removeItem('refresh_token')
++            localStorage.removeItem('user_role')
++            setError('Сессия истекла. Пожалуйста, войдите снова.')
++            setErrorType('error')
++            setSubscriptionRequired(false)
++            setQuickDiscounts([])
++            setComplexDiscounts([])
++            setPersonalDiscounts([])
++            setTimeout(() => {
++              window.location.href = '/login'
++            }, 2000)
++          }
++        } else if (status === 403) {
++          const detail = typeof errorData.detail === 'string' ? errorData.detail : errorData.detail?.detail || ''
++
++          setQuickDiscounts([])
++          setComplexDiscounts([])
++          setPersonalDiscounts([])
++
++          if (errorCode === 'SUBSCRIPTION_REQUIRED') {
++            setSubscriptionRequired(true)
++            setError('')
++            setErrorType('error')
++          } else {
++            setSubscriptionRequired(false)
++            setError(detail || 'Доступ запрещён. Проверьте права доступа.')
++            setErrorType('error')
++          }
++        } else {
++          // Сетевая ошибка или другая непредвиденная ошибка
++          setSubscriptionRequired(false)
++          const errorMessage = typeof errorData.detail === 'string'
++            ? errorData.detail
++            : errorData.detail?.detail || JSON.stringify(errorData.detail) || 'Ошибка загрузки данных'
++          setError(errorMessage || 'Ошибка подключения к серверу')
++          setErrorType('error')
++          setQuickDiscounts([])
++          setComplexDiscounts([])
++          setPersonalDiscounts([])
++        }
+       }
+     } catch (err) {
+       console.error('Ошибка загрузки данных лояльности:', err)
+       setError('Ошибка загрузки данных')
++      setErrorType('error')
++      setSubscriptionRequired(false)
+     } finally {
+       setLoading(false)
+     }
+   }
+ 
+   const handleCreateQuickDiscount = async (template, customDiscountPercent = null) => {
++    const token = localStorage.getItem('access_token')
++    if (!token || !isAuthenticated || authLoading) {
++      setError('Необходима авторизация')
++      return
++    }
++
+     try {
+       const discountData = {
+         discount_type: 'quick',
+@@ -73,167 +213,227 @@ export default function LoyaltySystem({ getAuthHeaders }) {
+         priority: 1
+       }
+ 
+-      const response = await fetch(getApiUrl('/loyalty/quick-discounts'), {
+-        method: 'POST',
+-        headers: {
+-          ...getAuthHeaders(),
+-          'Content-Type': 'application/json'
+-        },
+-        body: JSON.stringify(discountData)
+-      })
+-
+-      if (response.ok) {
+-        await loadData()
+-        setEditingTemplate(null)
+-        setEditTemplateValue('')
++      await apiPost('/api/loyalty/quick-discounts', discountData)
++      await loadData()
++      setEditingTemplate(null)
++      setEditTemplateValue('')
++    } catch (err) {
++      const status = err.response?.status
++      if (status === 401) {
++        // 401 - очищаем токен и редиректим
++        localStorage.removeItem('access_token')
++        localStorage.removeItem('refresh_token')
++        localStorage.removeItem('user_role')
++        setError('Сессия истекла. Пожалуйста, войдите снова.')
++        setTimeout(() => {
++          window.location.href = '/login'
++        }, 2000)
+       } else {
+-        const errorData = await response.json()
++        const errorData = err.response?.data || {}
+         setError(errorData.detail || 'Ошибка создания скидки')
+       }
+-    } catch (err) {
+-      console.error('Ошибка создания скидки:', err)
+-      setError('Ошибка создания скидки')
+     }
+   }
+ 
+   const handleDeleteQuickDiscount = async (discountId) => {
+     if (!confirm('Вы уверены, что хотите удалить эту скидку?')) return
+ 
+-    try {
+-      const response = await fetch(getApiUrl(`/loyalty/quick-discounts/${discountId}`), {
+-        method: 'DELETE',
+-        headers: getAuthHeaders()
+-      })
++    const token = localStorage.getItem('access_token')
++    if (!token || !isAuthenticated || authLoading) {
++      setError('Необходима авторизация')
++      return
++    }
+ 
+-      if (response.ok) {
+-        await loadData()
++    try {
++      await apiDelete(`/api/loyalty/quick-discounts/${discountId}`)
++      await loadData()
++    } catch (err) {
++      const status = err.response?.status
++      if (status === 401) {
++        // 401 - очищаем токен и редиректим
++        localStorage.removeItem('access_token')
++        localStorage.removeItem('refresh_token')
++        localStorage.removeItem('user_role')
++        setError('Сессия истекла. Пожалуйста, войдите снова.')
++        setTimeout(() => {
++          window.location.href = '/login'
++        }, 2000)
+       } else {
+-        const errorData = await response.json()
++        const errorData = err.response?.data || {}
+         setError(errorData.detail || 'Ошибка удаления скидки')
+       }
+-    } catch (err) {
+-      console.error('Ошибка удаления скидки:', err)
+-      setError('Ошибка удаления скидки')
+     }
+   }
+ 
+   const handleCreatePersonalDiscount = async (formData) => {
+-    try {
+-      const response = await fetch(getApiUrl('/loyalty/personal-discounts'), {
+-        method: 'POST',
+-        headers: {
+-          ...getAuthHeaders(),
+-          'Content-Type': 'application/json'
+-        },
+-        body: JSON.stringify(formData)
+-      })
++    const token = localStorage.getItem('access_token')
++    if (!token || !isAuthenticated || authLoading) {
++      setError('Необходима авторизация')
++      return false
++    }
+ 
+-      if (response.ok) {
+-        await loadData()
+-        return true
++    try {
++      await apiPost('/api/loyalty/personal-discounts', formData)
++      await loadData()
++      return true
++    } catch (err) {
++      const status = err.response?.status
++      if (status === 401) {
++        // 401 - очищаем токен и редиректим
++        localStorage.removeItem('access_token')
++        localStorage.removeItem('refresh_token')
++        localStorage.removeItem('user_role')
++        setError('Сессия истекла. Пожалуйста, войдите снова.')
++        setTimeout(() => {
++          window.location.href = '/login'
++        }, 2000)
++        return false
+       } else {
+-        const errorData = await response.json()
++        const errorData = err.response?.data || {}
+         setError(errorData.detail || 'Ошибка создания персональной скидки')
+         return false
+       }
+-    } catch (err) {
+-      console.error('Ошибка создания персональной скидки:', err)
+-      setError('Ошибка создания персональной скидки')
+-      return false
+     }
+   }
+ 
+   const handleUpdateQuickDiscount = async (discountId, newDiscountPercent) => {
++    const token = localStorage.getItem('access_token')
++    if (!token || !isAuthenticated || authLoading) {
++      setError('Необходима авторизация')
++      return
++    }
++
+     try {
+-      const response = await fetch(getApiUrl(`/loyalty/quick-discounts/${discountId}`), {
+-        method: 'PUT',
+-        headers: {
+-          ...getAuthHeaders(),
+-          'Content-Type': 'application/json'
+-        },
+-        body: JSON.stringify({
+-          discount_percent: parseFloat(newDiscountPercent)
+-        })
++      await apiPut(`/api/loyalty/quick-discounts/${discountId}`, {
++        discount_percent: parseFloat(newDiscountPercent)
+       })
+-
+-      if (response.ok) {
+-        await loadData()
+-        setEditingDiscount(null)
+-        setEditDiscountValue('')
++      await loadData()
++      setEditingDiscount(null)
++      setEditDiscountValue('')
++    } catch (err) {
++      const status = err.response?.status
++      if (status === 401) {
++        // 401 - очищаем токен и редиректим
++        localStorage.removeItem('access_token')
++        localStorage.removeItem('refresh_token')
++        localStorage.removeItem('user_role')
++        setError('Сессия истекла. Пожалуйста, войдите снова.')
++        setTimeout(() => {
++          window.location.href = '/login'
++        }, 2000)
+       } else {
+-        const errorData = await response.json()
++        const errorData = err.response?.data || {}
+         setError(errorData.detail || 'Ошибка обновления скидки')
+       }
+-    } catch (err) {
+-      console.error('Ошибка обновления скидки:', err)
+-      setError('Ошибка обновления скидки')
+     }
+   }
+ 
+   const handleCreateComplexDiscount = async (formData) => {
+-    try {
+-      const response = await fetch(getApiUrl('/loyalty/complex-discounts'), {
+-        method: 'POST',
+-        headers: {
+-          ...getAuthHeaders(),
+-          'Content-Type': 'application/json'
+-        },
+-        body: JSON.stringify({
+-          discount_type: 'complex',
+-          name: formData.name,
+-          description: formData.description,
+-          discount_percent: parseFloat(formData.discount_percent),
+-          max_discount_amount: null,
+-          conditions: formData.conditions,
+-          is_active: true,
+-          priority: 1
+-        })
++    const token = localStorage.getItem('access_token')
++    if (!token || !isAuthenticated || authLoading) {
++      setError('Необходима авторизация')
++      return false
++    }
++
++    // Нормализуем conditions перед отправкой
++    const normalizedConditions = normalizeConditionsForApi(formData.conditions)
++    
++    // Проверяем, что после нормализации есть condition_type
++    if (!normalizedConditions.condition_type || Object.keys(normalizedConditions.parameters || {}).length === 0) {
++      setError('Необходимо добавить хотя бы одно условие для сложной скидки')
++      return false
++    }
++
++    // Валидация: проверяем, что condition_type поддерживается
++    if (!isConditionTypeSupported(normalizedConditions.condition_type)) {
++      setError(
++        `Неподдерживаемый тип условия: ${normalizedConditions.condition_type}. ` +
++        `Поддерживаемые типы: первая запись, возвращение клиента, регулярные визиты, счастливые часы, скидка на услуги`
++      )
++      return false
++    }
++
++    // Логирование для отладки
++    if (__DEV__) {
++      console.log('[LoyaltySystem] Creating complex discount:', {
++        condition_type: normalizedConditions.condition_type,
++        parameters: normalizedConditions.parameters,
++        discount_name: formData.name,
+       })
++    }
+ 
+-      if (response.ok) {
+-        await loadData()
+-        setShowComplexForm(false)
+-        setComplexForm({
+-          name: '',
+-          description: '',
+-          discount_percent: '',
+-          conditions: []
+-        })
+-        return true
++    try {
++      await apiPost('/api/loyalty/complex-discounts', {
++        discount_type: 'complex',
++        name: formData.name,
++        description: formData.description,
++        discount_percent: parseFloat(formData.discount_percent),
++        max_discount_amount: null,
++        conditions: normalizedConditions,
++        is_active: true,
++        priority: 1
++      })
++      await loadData()
++      setShowComplexForm(false)
++      setComplexForm({
++        name: '',
++        description: '',
++        discount_percent: '',
++        conditions: []
++      })
++      return true
++    } catch (err) {
++      const status = err.response?.status
++      if (status === 401) {
++        // 401 - очищаем токен и редиректим
++        localStorage.removeItem('access_token')
++        localStorage.removeItem('refresh_token')
++        localStorage.removeItem('user_role')
++        setError('Сессия истекла. Пожалуйста, войдите снова.')
++        setTimeout(() => {
++          window.location.href = '/login'
++        }, 2000)
++        return false
+       } else {
+-        const errorData = await response.json()
++        const errorData = err.response?.data || {}
+         setError(errorData.detail || 'Ошибка создания сложной скидки')
+         return false
+       }
+-    } catch (err) {
+-      console.error('Ошибка создания сложной скидки:', err)
+-      setError('Ошибка создания сложной скидки')
+-      return false
+     }
+   }
+ 
+   const handleDeleteComplexDiscount = async (discountId) => {
+     if (!confirm('Вы уверены, что хотите удалить эту скидку?')) return
+ 
+-    try {
+-      const response = await fetch(getApiUrl(`/loyalty/complex-discounts/${discountId}`), {
+-        method: 'DELETE',
+-        headers: getAuthHeaders()
+-      })
++    const token = localStorage.getItem('access_token')
++    if (!token || !isAuthenticated || authLoading) {
++      setError('Необходима авторизация')
++      return
++    }
+ 
+-      if (response.ok) {
+-        await loadData()
++    try {
++      await apiDelete(`/api/loyalty/complex-discounts/${discountId}`)
++      await loadData()
++    } catch (err) {
++      const status = err.response?.status
++      if (status === 401) {
++        // 401 - очищаем токен и редиректим
++        localStorage.removeItem('access_token')
++        localStorage.removeItem('refresh_token')
++        localStorage.removeItem('user_role')
++        setError('Сессия истекла. Пожалуйста, войдите снова.')
++        setTimeout(() => {
++          window.location.href = '/login'
++        }, 2000)
+       } else {
+-        const errorData = await response.json()
++        const errorData = err.response?.data || {}
+         setError(errorData.detail || 'Ошибка удаления скидки')
+       }
+-    } catch (err) {
+-      console.error('Ошибка удаления скидки:', err)
+-      setError('Ошибка удаления скидки')
+     }
+   }
+ 
+-  if (loading) {
++  // Показываем loading только для таба "Скидки"
++  if (loading && mainTab === 'discounts') {
+     return (
+       <div className="flex justify-center items-center h-64">
+         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+@@ -245,67 +445,120 @@ export default function LoyaltySystem({ getAuthHeaders }) {
+     <div className="space-y-6">
+       <div className="flex justify-between items-center">
+         <h1 className="text-3xl font-bold">Система лояльности</h1>
+-        <Button
+-          onClick={loadData}
+-        >
+-          Обновить
+-        </Button>
++        {mainTab === 'discounts' && (
++          <Button
++            onClick={loadData}
++          >
++            Обновить
++          </Button>
++        )}
+       </div>
+ 
+-      {error && (
+-        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
+-          {error}
+-        </div>
+-      )}
++      {/* Верхние табы: Скидки / Баллы */}
++      <div className="border-b border-gray-200">
++        <nav className="-mb-px flex space-x-8">
++          <button
++            onClick={() => setMainTab('discounts')}
++            className={`py-2 px-1 border-b-2 font-medium text-sm ${
++              mainTab === 'discounts'
++                ? 'border-[#4CAF50] text-[#4CAF50]'
++                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
++            }`}
++          >
++            Скидки
++          </button>
++          <button
++            onClick={() => setMainTab('points')}
++            className={`py-2 px-1 border-b-2 font-medium text-sm ${
++              mainTab === 'points'
++                ? 'border-[#4CAF50] text-[#4CAF50]'
++                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
++            }`}
++          >
++            Баллы
++          </button>
++        </nav>
++      </div>
+ 
+-      {/* Вкладки */}
+-      <Tabs
+-        tabs={[
+-          { value: 'quick', label: 'Быстрые скидки' },
+-          { value: 'complex', label: 'Сложные скидки' },
+-          { value: 'personal', label: 'Персональные скидки' }
+-        ]}
+-        activeTab={activeTab}
+-        onTabChange={setActiveTab}
+-      />
+-
+-      {/* Контент вкладок */}
+-              {activeTab === 'quick' && (
+-          <QuickDiscountsTab
+-            templates={templates}
+-            discounts={quickDiscounts}
+-            onCreateDiscount={handleCreateQuickDiscount}
+-            onDeleteDiscount={handleDeleteQuickDiscount}
+-            onUpdateDiscount={handleUpdateQuickDiscount}
+-            editingDiscount={editingDiscount}
+-            setEditingDiscount={setEditingDiscount}
+-            editDiscountValue={editDiscountValue}
+-            setEditDiscountValue={setEditDiscountValue}
+-            editingTemplate={editingTemplate}
+-            setEditingTemplate={setEditingTemplate}
+-            editTemplateValue={editTemplateValue}
+-            setEditTemplateValue={setEditTemplateValue}
+-          />
+-        )}
++      {/* Контент для таба "Скидки" */}
++      {mainTab === 'discounts' && (
++        <>
++          {subscriptionRequired && (
++            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-6">
++              <p className="text-yellow-800 mb-2">
++                Доступ к разделу «Лояльность» доступен в подписке. Обновите тариф, чтобы пользоваться скидками.
++              </p>
++              <a href="/master?tab=tariff" className="text-blue-600 underline font-medium">
++                Обновить подписку
++              </a>
++            </div>
++          )}
++
++          {error && (
++            <div className={
++              errorType === 'warning'
++                ? "bg-yellow-100 border border-yellow-400 text-yellow-800 px-4 py-3 rounded"
++                : "bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded"
++            }>
++              {error}
++            </div>
++          )}
+ 
+-              {activeTab === 'complex' && (
+-          <ComplexDiscountsTab
+-            discounts={complexDiscounts}
+-            onDeleteDiscount={handleDeleteComplexDiscount}
+-            onCreateDiscount={handleCreateComplexDiscount}
+-            showForm={showComplexForm}
+-            setShowForm={setShowComplexForm}
+-            form={complexForm}
+-            setForm={setComplexForm}
++          {/* Подтабы для скидок */}
++          <Tabs
++            tabs={[
++              { value: 'quick', label: 'Быстрые скидки' },
++              { value: 'complex', label: 'Сложные скидки' },
++              { value: 'personal', label: 'Персональные скидки' }
++            ]}
++            activeTab={activeTab}
++            onTabChange={setActiveTab}
+           />
+-        )}
+ 
+-      {activeTab === 'personal' && (
+-        <PersonalDiscountsTab
+-          discounts={personalDiscounts}
+-          onCreateDiscount={handleCreatePersonalDiscount}
+-          onDeleteDiscount={handleDeleteQuickDiscount}
+-        />
++          {/* Контент подтабов */}
++          {activeTab === 'quick' && (
++            <QuickDiscountsTab
++              templates={templates}
++              discounts={quickDiscounts}
++              onCreateDiscount={handleCreateQuickDiscount}
++              onDeleteDiscount={handleDeleteQuickDiscount}
++              onUpdateDiscount={handleUpdateQuickDiscount}
++              editingDiscount={editingDiscount}
++              setEditingDiscount={setEditingDiscount}
++              editDiscountValue={editDiscountValue}
++              setEditDiscountValue={setEditDiscountValue}
++              editingTemplate={editingTemplate}
++              setEditingTemplate={setEditingTemplate}
++              editTemplateValue={editTemplateValue}
++              setEditTemplateValue={setEditTemplateValue}
++            />
++          )}
++
++          {activeTab === 'complex' && (
++            <ComplexDiscountsTab
++              discounts={complexDiscounts}
++              onDeleteDiscount={handleDeleteComplexDiscount}
++              onCreateDiscount={handleCreateComplexDiscount}
++              showForm={showComplexForm}
++              setShowForm={setShowComplexForm}
++              form={complexForm}
++              setForm={setComplexForm}
++            />
++          )}
++
++          {activeTab === 'personal' && (
++            <PersonalDiscountsTab
++              discounts={personalDiscounts}
++              onCreateDiscount={handleCreatePersonalDiscount}
++              onDeleteDiscount={handleDeleteQuickDiscount}
++            />
++          )}
++        </>
++      )}
++
++      {/* Контент для таба "Баллы" */}
++      {mainTab === 'points' && (
++        <MasterLoyalty />
+       )}
+     </div>
+   )
+@@ -336,17 +589,15 @@ function QuickDiscountsTab({
+         </p>
+       </div>
+ 
+-      {/* Сетка шаблонов */}
+-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
++      {/* Сетка шаблонов - 2 колонки */}
++      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+         {templates.map((template) => {
+-          const isActive = discounts.some(d => 
+-            d.conditions?.condition_type === template.conditions.condition_type
+-          )
+-          
++          const isActive = discounts.some((d) => templateMatchesDiscount(template, d))
++
+           return (
+             <div
+               key={template.id}
+-              className={`border rounded-lg p-6 transition-colors ${
++              className={`border rounded-lg p-6 transition-colors min-h-[200px] flex flex-col ${
+                 isActive
+                   ? 'border-green-500 bg-green-50'
+                   : 'border-gray-200 bg-white hover:border-gray-300'
+@@ -362,7 +613,7 @@ function QuickDiscountsTab({
+               </div>
+               
+               <h3 className="text-lg font-semibold mb-2">{template.name}</h3>
+-              <p className="text-gray-600 text-sm mb-4">{template.description}</p>
++              <p className="text-gray-600 text-sm mb-4 line-clamp-3">{template.description}</p>
+               
+               <div className="flex items-center justify-between">
+                 {editingTemplate === template.id ? (
+@@ -527,7 +778,7 @@ function ComplexDiscountsTab({
+   setForm 
+ }) {
+   const [newCondition, setNewCondition] = useState({
+-    type: 'visits_count',
++    type: 'first_visit',  // Первый поддерживаемый тип по умолчанию
+     operator: '>=',
+     value: '',
+     description: ''
+@@ -660,10 +911,11 @@ function ComplexDiscountsTab({
+                     onChange={(e) => setNewCondition({ ...newCondition, type: e.target.value })}
+                     className="px-2 py-1 border border-gray-300 rounded text-sm"
+                   >
+-                    <option value="visits_count">Количество визитов</option>
+-                    <option value="total_spent">Общая сумма</option>
+-                    <option value="days_since_last">Дней с последнего визита</option>
+-                    <option value="service_category">Категория услуг</option>
++                    <option value="first_visit">Первая запись</option>
++                    <option value="returning_client">Возвращение клиента</option>
++                    <option value="regular_visits">Регулярные визиты</option>
++                    <option value="happy_hours">Счастливые часы</option>
++                    <option value="service_discount">Скидка на услуги</option>
+                   </select>
+                   
+                   <select

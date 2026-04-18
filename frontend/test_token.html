@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Тест токена</title>
+</head>
+<body>
+    <h1>Тест токена и API</h1>
+    
+    <div>
+        <h2>Текущий токен в localStorage:</h2>
+        <pre id="currentToken"></pre>
+    </div>
+    
+    <div>
+        <h2>Тест API /salon/profile:</h2>
+        <button onclick="testSalonProfile()">Тестировать API</button>
+        <pre id="apiResult"></pre>
+    </div>
+    
+    <div>
+        <h2>Тест декодирования токена:</h2>
+        <button onclick="decodeToken()">Декодировать токен</button>
+        <pre id="decodedToken"></pre>
+    </div>
+
+    <script>
+        function showCurrentToken() {
+            const token = localStorage.getItem('access_token');
+            document.getElementById('currentToken').textContent = token || 'Токен не найден';
+        }
+
+        async function testSalonProfile() {
+            const token = localStorage.getItem('access_token');
+            if (!token) {
+                document.getElementById('apiResult').textContent = 'Токен не найден в localStorage';
+                return;
+            }
+
+            try {
+                const response = await fetch('/salon/profile', {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+
+                const result = await response.json();
+                document.getElementById('apiResult').textContent = JSON.stringify(result, null, 2);
+            } catch (error) {
+                document.getElementById('apiResult').textContent = `Ошибка: ${error.message}`;
+            }
+        }
+
+        function decodeToken() {
+            const token = localStorage.getItem('access_token');
+            if (!token) {
+                document.getElementById('decodedToken').textContent = 'Токен не найден';
+                return;
+            }
+
+            try {
+                const payload = JSON.parse(atob(token.split('.')[1]));
+                document.getElementById('decodedToken').textContent = JSON.stringify(payload, null, 2);
+            } catch (error) {
+                document.getElementById('decodedToken').textContent = `Ошибка декодирования: ${error.message}`;
+            }
+        }
+
+        // Показываем токен при загрузке
+        showCurrentToken();
+    </script>
+</body>
+</html> 

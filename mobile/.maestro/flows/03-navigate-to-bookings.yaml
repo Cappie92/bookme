@@ -1,0 +1,21 @@
+appId: host.exp.Exponent
+---
+# Тест перехода в бронирования
+# Использование: maestro test .maestro/flows/03-navigate-to-bookings.yaml
+- launchApp
+# Сначала логинимся (используем успешный логин)
+- runFlow: "01-login-success.yaml"
+# Переходим в бронирования
+- tapOn:
+    id: "all-bookings-button"
+    optional: true
+- tapOn:
+    id: "my-bookings-button"
+    optional: true
+# Проверяем, что открылся экран бронирований
+- waitForAnimationToEnd
+- assertVisible:
+    id: "bookings-screen"
+- assertVisible:
+    id: "bookings-list"
+

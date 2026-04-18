@@ -1,0 +1,26 @@
+appId: host.exp.Exponent
+---
+# Тест открытия деталей бронирования
+# Использование: maestro test .maestro/flows/04-open-booking-details.yaml
+- launchApp
+# Логинимся
+- runFlow: "01-login-success.yaml"
+# Переходим в бронирования
+- runFlow: "03-navigate-to-bookings.yaml"
+# Ждем загрузки списка бронирований
+- waitForAnimationToEnd
+- assertVisible:
+    id: "bookings-list"
+# Тапаем на первое бронирование (если есть)
+- tapOn:
+    id: "booking-item-*"
+    index: 0
+    optional: true
+# Проверяем, что открылся экран деталей
+- waitForAnimationToEnd
+- assertVisible:
+    id: "booking-detail-screen"
+# Проверяем наличие информации о бронировании
+- assertVisible:
+    text: "Основная информация"
+

@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Тест входа</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; }
+        input { padding: 8px; width: 300px; }
+        button { padding: 10px 20px; background: #007bff; color: white; border: none; cursor: pointer; }
+        button:hover { background: #0056b3; }
+        .result { margin-top: 20px; padding: 10px; border: 1px solid #ccc; background: #f9f9f9; }
+    </style>
+</head>
+<body>
+    <h1>Тест входа в систему</h1>
+    
+    <form id="loginForm">
+        <div class="form-group">
+            <label for="phone">Телефон:</label>
+            <input type="tel" id="phone" name="phone" value="+73333333333" required>
+        </div>
+        
+        <div class="form-group">
+            <label for="password">Пароль:</label>
+            <input type="password" id="password" name="password" value="test123" required>
+        </div>
+        
+        <button type="submit">Войти</button>
+    </form>
+    
+    <div id="result" class="result" style="display: none;"></div>
+    
+    <div>
+        <h2>Текущий токен в localStorage:</h2>
+        <pre id="currentToken"></pre>
+    </div>
+    
+    <div>
+        <h2>Тест API профиля салона:</h2>
+        <button onclick="testSalonProfile()">Тестировать API</button>
+        <pre id="apiResult"></pre>
+    </div>
+
+    <script>
+        function showCurrentToken() {
+            const token = localStorage.getItem('access_token');
+            document.getElementById('currentToken').textContent = token || 'Токен не найден';
+        }
+
+        document.getElementById('loginForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const formData = {
+                phone: document.getElementById('phone').value,
+                password: document.getElementById('password').value
+            };
+            
+            try {
+                const response = await fetch('/auth/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(formData)
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok) {
+                    // Сохраняем токены
+                    localStorage.setItem('access_token', result.access_token);
+                    localStorage.setItem('refresh_token', result.refresh_token);
+                    
+                    document.getElementById('result').innerHTML = `
+                        <h3>Успешный вход!</h3>
+                        <p>Токен сохранен в localStorage</p>
+                        <pre>${JSON.stringify(result, null, 2)}</pre>
+                    `;
+                    document.getElementById('result').style.display = 'block';
+                    
+                    // Обновляем отображение токена
+                    showCurrentToken();
+                } else {
+                    document.getElementById('result').innerHTML = `
+                        <h3>Ошибка входа</h3>
+                        <p>${result.detail || 'Неизвестная ошибка'}</p>
+                        <pre>${JSON.stringify(result, null, 2)}</pre>
+                    `;
+                    document.getElementById('result').style.display = 'block';
+                }
+            } catch (error) {
+                document.getElementById('result').innerHTML = `
+                    <h3>Ошибка сети</h3>
+                    <p>${error.message}</p>
+                `;
+                document.getElementById('result').style.display = 'block';
+            }
+        });
+
+        async function testSalonProfile() {
+            const token = localStorage.getItem('access_token');
+            if (!token) {
+                document.getElementById('apiResult').textContent = 'Токен не найден в localStorage';
+                return;
+            }
+
+            try {
+                const response = await fetch('/salon/profile', {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+
+                const result = await response.json();
+                document.getElementById('apiResult').textContent = JSON.stringify(result, null, 2);
+            } catch (error) {
+                document.getElementById('apiResult').textContent = `Ошибка: ${error.message}`;
+            }
+        }
+
+        // Показываем токен при загрузке
+        showCurrentToken();
+    </script>
+</body>
+</html> 

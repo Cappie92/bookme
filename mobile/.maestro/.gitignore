@@ -1,0 +1,5 @@
+# Maestro временные файлы
+*.log
+.videos/
+.screenshots/
+

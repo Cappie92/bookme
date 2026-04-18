@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Тест API извлечения адреса</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .test-section {
+            margin-bottom: 30px;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        .success { color: green; }
+        .error { color: red; }
+        .loading { color: blue; }
+        input[type="text"] {
+            width: 100%;
+            padding: 10px;
+            margin: 10px 0;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        .result {
+            margin-top: 10px;
+            padding: 10px;
+            border-radius: 5px;
+            background: #f8f9fa;
+        }
+        .example-links {
+            margin-top: 15px;
+        }
+        .example-link {
+            cursor: pointer;
+            color: #007bff;
+            text-decoration: underline;
+            margin: 5px 0;
+            padding: 5px;
+            border-radius: 3px;
+        }
+        .example-link:hover {
+            background: #e3f2fd;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Тест API извлечения адреса</h1>
+        
+        <div class="test-section">
+            <h2>Статус API</h2>
+            <div id="apiStatus">Проверяем статус API...</div>
+        </div>
+
+        <div class="test-section">
+            <h2>Тест извлечения адреса</h2>
+            <input type="text" id="yandexLink" placeholder="https://yandex.ru/maps/...">
+            <button onclick="extractAddress()">Извлечь адрес</button>
+            <button onclick="clearResults()">Очистить</button>
+            <div id="extractionResult"></div>
+        </div>
+
+        <div class="test-section">
+            <h2>Примеры ссылок для тестирования</h2>
+            <div class="example-links">
+                <p><strong>Кликните на ссылку для автоматического тестирования:</strong></p>
+                
+                <div class="example-link" onclick="testLink(this.textContent)">
+                    https://yandex.ru/maps/213/moscow/?ll=37.617635%2C55.755814&z=16&text=улица%20Тверская%2C%201
+                </div>
+                
+                <div class="example-link" onclick="testLink(this.textContent)">
+                    https://yandex.ru/maps/213/moscow/?ll=37.617635%2C55.755814&z=16
+                </div>
+                
+                <div class="example-link" onclick="testLink(this.textContent)">
+                    https://yandex.ru/maps/-/CHXXEC87
+                </div>
+                
+                <div class="example-link" onclick="testLink(this.textContent)">
+                    https://yandex.ru/maps/-/CCUu8XeB
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Проверяем статус API при загрузке страницы
+        window.addEventListener('load', checkApiStatus);
+
+        async function checkApiStatus() {
+            const statusDiv = document.getElementById('apiStatus');
+            try {
+                const response = await fetch('/api/extract-address?url=https://yandex.ru/maps/213/moscow/?text=test');
+                if (response.status === 400) {
+                    statusDiv.innerHTML = '<span class="success">✅ API работает! (получен ожидаемый ответ 400 для тестового запроса)</span>';
+                } else if (response.ok) {
+                    statusDiv.innerHTML = '<span class="success">✅ API работает!</span>';
+                } else {
+                    statusDiv.innerHTML = '<span class="error">❌ API недоступен (статус: ' + response.status + ')</span>';
+                }
+            } catch (error) {
+                statusDiv.innerHTML = '<span class="error">❌ Ошибка подключения к API: ' + error.message + '</span>';
+            }
+        }
+
+        async function extractAddressFromServer(url) {
+            try {
+                const response = await fetch(`/api/extract-address?url=${encodeURIComponent(url)}`);
+                const data = await response.json();
+                
+                if (response.ok) {
+                    return { success: true, data: data };
+                } else {
+                    return { success: false, error: data.detail || 'Неизвестная ошибка' };
+                }
+            } catch (error) {
+                return { success: false, error: 'Ошибка сети: ' + error.message };
+            }
+        }
+
+        async function extractAddress() {
+            const url = document.getElementById('yandexLink').value.trim();
+            const resultDiv = document.getElementById('extractionResult');
+            
+            if (!url) {
+                resultDiv.innerHTML = '<div class="error">Введите ссылку на Яндекс.Карты</div>';
+                return;
+            }
+
+            resultDiv.innerHTML = '<div class="loading">Извлекаем адрес...</div>';
+            
+            const result = await extractAddressFromServer(url);
+            
+            if (result.success) {
+                resultDiv.innerHTML = `
+                    <div class="result">
+                        <div class="success">✅ Адрес успешно извлечен!</div>
+                        <div><strong>Адрес:</strong> ${result.data.address}</div>
+                    </div>
+                `;
+            } else {
+                resultDiv.innerHTML = `
+                    <div class="result">
+                        <div class="error">❌ Ошибка: ${result.error}</div>
+                    </div>
+                `;
+            }
+        }
+
+        function testLink(link) {
+            document.getElementById('yandexLink').value = link;
+            extractAddress();
+        }
+
+        function clearResults() {
+            document.getElementById('yandexLink').value = '';
+            document.getElementById('extractionResult').innerHTML = '';
+        }
+
+        // Автоматическое извлечение при вставке ссылки
+        document.getElementById('yandexLink').addEventListener('input', function(e) {
+            const url = e.target.value;
+            if (url.includes('yandex.ru/maps') || url.includes('maps.yandex.ru')) {
+                // Небольшая задержка, чтобы пользователь мог закончить вставку
+                setTimeout(() => {
+                    if (e.target.value === url) {
+                        extractAddress();
+                    }
+                }, 1000);
+            }
+        });
+    </script>
+</body>
+</html> 

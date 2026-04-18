@@ -1,0 +1,64 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+      
+    - name: Install sshpass
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y sshpass
+        
+    - name: Add known hosts
+      run: |
+        mkdir -p ~/.ssh
+        ssh-keyscan -H ${{ secrets.SERVER_HOST }} >> ~/.ssh/known_hosts
+        
+    - name: Deploy to server
+      run: |
+        sshpass -p '${{ secrets.SERVER_PASSWORD }}' ssh ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} << 'EOF'
+          # Create project directory
+          mkdir -p /opt/dedato
+          cd /opt/dedato
+          
+          # Stop existing containers
+          docker compose -f docker-compose.prod.yml down || true
+          
+          # Clean up old images (do NOT prune volumes: prod data lives in volumes)
+          docker image prune -f || true
+        EOF
+        
+        # Copy files to server
+        sshpass -p '${{ secrets.SERVER_PASSWORD }}' scp -r . ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:/opt/dedato/
+        
+        # Deploy on server
+        sshpass -p '${{ secrets.SERVER_PASSWORD }}' ssh ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} << 'EOF'
+          set -euo pipefail
+          cd /opt/dedato
+          
+          # Build and start containers
+          docker compose -f docker-compose.prod.yml build
+          docker compose -f docker-compose.prod.yml up -d
+          
+          # Alembic → тот же SQLite volume, что у backend (см. scripts/prod/migrate.sh)
+          bash ./scripts/prod/migrate.sh
+          
+          # Clean up
+          docker image prune -f
+          
+          echo "Deployment completed!"
+        EOF
+        
+    - name: Health check
+      run: |
+        sleep 30
+        curl -f http://${{ secrets.SERVER_HOST }}/health || exit 1 

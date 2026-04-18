@@ -1,0 +1,27 @@
+appId: host.exp.Exponent
+---
+# Тест выхода из аккаунта
+# Использование: maestro test .maestro/flows/05-logout.yaml
+- launchApp
+# Логинимся
+- runFlow: "01-login-success.yaml"
+# Переходим в настройки через нижнюю навигацию
+- tapOn:
+    id: "bottom-nav-settings"
+- waitForAnimationToEnd
+- assertVisible:
+    text: "Настройки"
+# Нажимаем кнопку выхода
+- tapOn:
+    id: "logout-button"
+# Подтверждаем выход в Alert
+- tapOn:
+    text: "Выйти"
+    optional: true
+# Проверяем, что вернулись на экран входа
+- waitForAnimationToEnd
+- assertVisible:
+    id: "login-tab"
+- assertVisible:
+    id: "login-screen-title"
+

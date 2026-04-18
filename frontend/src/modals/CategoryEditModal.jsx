@@ -1,0 +1,93 @@
+import { useState, useEffect } from "react"
+import { useModal } from '../hooks/useModal'
+
+export default function CategoryEditModal({ open = false, onClose = () => {}, onSave = () => {}, category = null }) {
+  const [name, setName] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    if (category) {
+      setName(category.name)
+    } else {
+      setName('')
+    }
+    setError('') // Очищаем ошибку при изменении категории
+  }, [category])
+
+  if (!open) return null;
+
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+    if (!name.trim()) return
+
+    setLoading(true)
+    setError('')
+    try {
+      await onSave({ name: name.trim() })
+    } catch (err) {
+      console.error('Ошибка сохранения категории:', err)
+      setError(err.message || 'Ошибка сохранения категории')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const { handleBackdropClick, handleMouseDown } = useModal(onClose)
+
+  const handleCloseClick = () => {
+    onClose()
+  }
+
+  return (
+    <div 
+      className="fixed inset-0 bg-black/60 backdrop-blur-[1px] flex items-center justify-center z-[120]"
+      onClick={handleBackdropClick}
+      onMouseDown={handleMouseDown}
+    >
+      <div className="bg-white rounded-lg p-6 w-full max-w-md">
+        <h2 className="text-xl font-semibold mb-4">
+          {category ? 'Изменить категорию' : 'Создать категорию'}
+        </h2>
+        
+        <form onSubmit={handleSubmit}>
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Название категории
+            </label>
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#4CAF50]"
+              placeholder="Введите название категории"
+              required
+            />
+          </div>
+          
+          {error && (
+            <div className="mb-4 text-red-500 text-sm">{error}</div>
+          )}
+          
+          <div className="flex gap-3 justify-end">
+            <button
+              type="button"
+              onClick={handleCloseClick}
+              className="px-4 py-2 text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
+              disabled={loading}
+            >
+              Отмена
+            </button>
+            <button
+              type="submit"
+              className="px-4 py-2 text-white rounded-md transition-colors disabled:opacity-50 bg-[#4CAF50] hover:bg-[#43a047]"
+              disabled={loading || !name.trim()}
+            >
+              {loading ? 'Сохранение...' : (category ? 'Сохранить' : 'Создать')}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+} 

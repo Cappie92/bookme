@@ -1,0 +1,95 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+venv/
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Build
+dist/
+build/
+dist-ssr
+*.local
+
+# Docs
+.venv/
+site/
+
+# Logs
+logs
+*.log
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+**/.DS_Store
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# --- DeDato: production deploy / local runtime (do not commit) ---
+deploy/prod/backend.env
+artifacts/
+test-results/
+
+# Local uploads (avatars, blog covers, etc.) — не коммитить; на проде в volume
+backend/uploads/
+backend/*.ics
+
+# SQLite & local DB copies / backups
+backend/bookme.db
+backend/test.db
+test.db
+*.db-journal
+*.db-wal
+*.db-shm
+**/bookme_backup_*.db
+**/bookme.old*.db
+**/bookme*.backup*.db
+**/test.db
+# Large local archives
+*.tar.gz
+
+# Large local archives
+*.tar.gz
+
+# Local root sqlite
+bookme.db

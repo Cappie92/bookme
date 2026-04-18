@@ -1,0 +1,11 @@
+email,phone,full_name,password,role,specialization
+admin@dedato.ru,+79031078685,Администратор,1JaK999ddd9,ADMIN,
+salon1@example.com,+79123456789,Салон Красоты №1,password123,SALON,
+salon2@example.com,+79123456790,Салон Красоты №2,password123,SALON,
+master1@example.com,+79123456791,Иван Универсал,password123,MASTER,both
+master2@example.com,+79123456792,Петр Салона,password123,MASTER,salon
+master3@example.com,+79123456793,Анна Инди,password123,MASTER,indie
+master4@example.com,+79123456794,Мария Универсал,password123,MASTER,both
+client1@example.com,+79123456795,Анна Клиент,password123,CLIENT,
+client2@example.com,+79123456796,Петр Клиент,password123,CLIENT,
+

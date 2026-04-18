@@ -1,0 +1,68 @@
+appId: host.exp.Exponent
+---
+# Тест успешного входа
+# ВАЖНО: Перед запуском теста убедитесь, что приложение DeDato уже открыто в Expo Go!
+# НЕ используйте launchApp - он перезапустит Expo Go и закроет приложение!
+# Использование: maestro test .maestro/flows/01-login-success.yaml
+
+# Ждем, если приложение только что открылось
+- waitForAnimationToEnd
+- waitForAnimationToEnd
+
+# Тапаем на поле ввода телефона (используем testID для надежности)
+- tapOn:
+    id: "phone-input"
+# Длинное нажатие для выделения всего текста
+- longPressOn:
+    id: "phone-input"
+# Выбираем "Select All" из меню (если появилось)
+- tapOn:
+    text: "Select All"
+    optional: true
+# Или просто удаляем все символы по одному (если Select All не работает)
+# Вводим телефон полностью (заменит существующий текст, если поле выделено)
+- inputText: "+79991234567"
+# Ждем немного, чтобы текст ввелся
+- waitForAnimationToEnd
+
+# Тапаем на поле ввода пароля
+- tapOn:
+    id: "password-input"
+# Длинное нажатие для выделения всего текста
+- longPressOn:
+    id: "password-input"
+# Выбираем "Select All" из меню (если появилось)
+- tapOn:
+    text: "Select All"
+    optional: true
+# Вводим пароль полностью
+- inputText: "password123"
+# Ждем немного
+- waitForAnimationToEnd
+# Нажимаем кнопку входа
+- tapOn:
+    text: "Войти"
+    optional: true
+- tapOn:
+    id: "login-button"
+    optional: true
+# Ждем завершения входа (увеличиваем время ожидания)
+- waitForAnimationToEnd
+- waitForAnimationToEnd
+- waitForAnimationToEnd
+- waitForAnimationToEnd
+# Проверяем, что мы на главном экране (несколько способов проверки)
+- assertVisible:
+    id: "home-screen"
+    optional: true
+# Альтернативные проверки успешного входа
+- assertVisible:
+    text: "Привет"
+    optional: true
+- assertVisible:
+    text: "Ближайшая запись"
+    optional: true
+# Если хотя бы одна проверка прошла, считаем вход успешным
+- assertVisible:
+    id: "home-screen"
+

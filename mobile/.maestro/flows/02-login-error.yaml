@@ -1,0 +1,25 @@
+appId: host.exp.Exponent
+---
+# Тест ошибки входа
+# Использование: maestro test .maestro/flows/02-login-error.yaml
+- launchApp
+- assertVisible:
+    id: "login-screen-title"
+- tapOn: 
+    id: "login-tab"
+- tapOn:
+    id: "phone-input"
+- inputText: "+79999999999"
+- tapOn:
+    id: "password-input"
+- inputText: "wrongpassword"
+- tapOn:
+    id: "login-button"
+# Ждем появления ошибки (Alert или сообщение)
+- waitForAnimationToEnd
+- assertVisible:
+    text: "Ошибка"
+# Проверяем, что остались на экране входа
+- assertVisible:
+    id: "login-tab"
+

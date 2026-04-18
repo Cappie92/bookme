@@ -1,0 +1,18 @@
+appId: host.exp.Exponent
+---
+# Вспомогательный flow для выхода из аккаунта перед тестами
+# Использование: maestro test .maestro/flows/00-logout-first.yaml
+- launchApp
+# Пытаемся выйти, если пользователь залогинен
+- tapOn:
+    id: "bottom-nav-settings"
+    optional: true
+- waitForAnimationToEnd
+- tapOn:
+    id: "logout-button"
+    optional: true
+- tapOn:
+    text: "Выйти"
+    optional: true
+- waitForAnimationToEnd
+

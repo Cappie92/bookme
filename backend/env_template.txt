@@ -1,0 +1,25 @@
+# Скопируйте в .env: cp env_template.txt .env
+# Единый источник правды: backend/settings.py (get_settings())
+
+# --- Минимальный набор для локального старта ---
+JWT_SECRET_KEY=your-super-secret-key
+DATABASE_URL=sqlite:///./bookme.db
+
+# Режим (development | production). В production JWT_SECRET_KEY не должен быть дефолтным
+ENVIRONMENT=development
+
+# Платежи: локально обычно stub
+ROBOKASSA_MODE=stub
+# ROBOKASSA_MERCHANT_LOGIN=
+# ROBOKASSA_PASSWORD_1=
+# ROBOKASSA_PASSWORD_2=
+# ROBOKASSA_IS_TEST=true
+# ROBOKASSA_RESULT_URL=
+# ROBOKASSA_SUCCESS_URL=
+# ROBOKASSA_FAIL_URL=
+
+# Feature: доступ к фичам салонов (fallback если нет в БД)
+# SALONS_ENABLED=true
+
+# Бизнес-режим: 0 = master-only, 1 = legacy indie
+# LEGACY_INDIE_MODE=0

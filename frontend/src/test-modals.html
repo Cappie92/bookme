@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Тест модальных окон</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .animate-fade-in {
+            animation: fadeIn 0.3s ease-in-out;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: scale(0.95); }
+            to { opacity: 1; transform: scale(1); }
+        }
+    </style>
+</head>
+<body class="bg-gray-100 p-8">
+    <div class="max-w-4xl mx-auto">
+        <h1 class="text-3xl font-bold mb-8">Тест модальных окон с подтверждением закрытия</h1>
+        
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <button onclick="openModal('auth')" class="bg-blue-600 text-white p-4 rounded-lg hover:bg-blue-700">
+                Открыть AuthModal
+            </button>
+            <button onclick="openModal('service')" class="bg-green-600 text-white p-4 rounded-lg hover:bg-green-700">
+                Открыть ServiceModal
+            </button>
+            <button onclick="openModal('category')" class="bg-purple-600 text-white p-4 rounded-lg hover:bg-purple-700">
+                Открыть CategoryEditModal
+            </button>
+            <button onclick="openModal('delete')" class="bg-red-600 text-white p-4 rounded-lg hover:bg-red-700">
+                Открыть DeleteConfirmModal
+            </button>
+            <button onclick="openModal('blog')" class="bg-orange-600 text-white p-4 rounded-lg hover:bg-orange-700">
+                Открыть BlogModal (AdminBlog)
+            </button>
+        </div>
+    </div>
+
+    <!-- ConfirmCloseModal -->
+    <div id="confirmModal" class="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 hidden">
+        <div class="bg-white rounded-xl shadow-xl w-full max-w-md p-6 relative animate-fade-in">
+            <h3 class="text-lg font-semibold mb-4 text-center" id="confirmTitle">
+                Вы уверены что хотите закрыть модальное окно?
+            </h3>
+            <div class="flex gap-3">
+                <button 
+                    onclick="cancelClose()"
+                    class="flex-1 bg-gray-200 text-gray-700 rounded py-2 font-semibold hover:bg-gray-300 transition-colors"
+                >
+                    Нет
+                </button>
+                <button 
+                    onclick="confirmClose()"
+                    class="flex-1 bg-red-600 text-white rounded py-2 font-semibold hover:bg-red-700 transition-colors"
+                >
+                    Да
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Test Modal -->
+    <div id="testModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 hidden">
+        <div class="bg-white rounded-xl shadow-xl w-full max-w-lg p-8 relative animate-fade-in">
+            <button 
+                onclick="showConfirmClose()" 
+                class="absolute top-4 right-4 text-gray-400 hover:text-gray-700 text-lg"
+            >
+                ✕
+            </button>
+            <h2 class="text-2xl font-bold mb-6 text-center" id="modalTitle">Тестовое модальное окно</h2>
+            <p class="text-gray-600 mb-6">
+                Это тестовое модальное окно для проверки функциональности подтверждения закрытия.
+                Попробуйте нажать на крестик или кликнуть за пределами окна.
+            </p>
+            <div class="flex gap-3 justify-end">
+                <button 
+                    onclick="showConfirmClose()"
+                    class="px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 transition-colors"
+                >
+                    Отмена
+                </button>
+                <button 
+                    class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+                >
+                    Сохранить
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentModalType = '';
+        
+        function openModal(type) {
+            currentModalType = type;
+            const modal = document.getElementById('testModal');
+            const title = document.getElementById('modalTitle');
+            
+            const titles = {
+                'auth': 'Модальное окно авторизации',
+                'service': 'Модальное окно создания услуги',
+                'category': 'Модальное окно редактирования категории',
+                'delete': 'Модальное окно подтверждения удаления',
+                'blog': 'Модальное окно создания статьи'
+            };
+            
+            title.textContent = titles[type] || 'Тестовое модальное окно';
+            modal.classList.remove('hidden');
+            
+            // Добавляем обработчик клика по фону
+            modal.addEventListener('click', handleBackdropClick);
+        }
+        
+        function handleBackdropClick(e) {
+            if (e.target === e.currentTarget) {
+                showConfirmClose();
+            }
+        }
+        
+        function showConfirmClose() {
+            const confirmModal = document.getElementById('confirmModal');
+            const confirmTitle = document.getElementById('confirmTitle');
+            
+            const titles = {
+                'auth': 'авторизация',
+                'service': 'создание услуги',
+                'category': 'редактирование категории',
+                'delete': 'подтверждение удаления',
+                'blog': 'создание статьи'
+            };
+            
+            confirmTitle.textContent = `Вы уверены что хотите закрыть "${titles[currentModalType] || 'модальное окно'}"?`;
+            confirmModal.classList.remove('hidden');
+        }
+        
+        function confirmClose() {
+            document.getElementById('confirmModal').classList.add('hidden');
+            document.getElementById('testModal').classList.add('hidden');
+        }
+        
+        function cancelClose() {
+            document.getElementById('confirmModal').classList.add('hidden');
+        }
+    </script>
+</body>
+</html> 

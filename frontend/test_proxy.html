@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Тест прокси</title>
+</head>
+<body>
+    <h1>Тест прокси Vite</h1>
+    
+    <div>
+        <h2>Тест 1: /client/bookings/</h2>
+        <button onclick="testClientBookings()">Тест /client/bookings/</button>
+        <div id="result1"></div>
+    </div>
+    
+    <div>
+        <h2>Тест 2: /client/dashboard/stats</h2>
+        <button onclick="testDashboardStats()">Тест /client/dashboard/stats</button>
+        <div id="result2"></div>
+    </div>
+    
+    <div>
+        <h2>Тест 3: /salon/my-manager-invitations</h2>
+        <button onclick="testManagerInvitations()">Тест /salon/my-manager-invitations</button>
+        <div id="result3"></div>
+    </div>
+
+    <script>
+        async function testClientBookings() {
+            const resultDiv = document.getElementById('result1');
+            resultDiv.innerHTML = 'Тестирую...';
+            
+            try {
+                const response = await fetch('/client/bookings/', {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer test'
+                    }
+                });
+                
+                const text = await response.text();
+                resultDiv.innerHTML = `
+                    <p><strong>Статус:</strong> ${response.status}</p>
+                    <p><strong>Ответ:</strong> ${text}</p>
+                `;
+            } catch (error) {
+                resultDiv.innerHTML = `<p><strong>Ошибка:</strong> ${error.message}</p>`;
+            }
+        }
+        
+        async function testDashboardStats() {
+            const resultDiv = document.getElementById('result2');
+            resultDiv.innerHTML = 'Тестирую...';
+            
+            try {
+                const response = await fetch('/client/dashboard/stats', {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer test'
+                    }
+                });
+                
+                const text = await response.text();
+                resultDiv.innerHTML = `
+                    <p><strong>Статус:</strong> ${response.status}</p>
+                    <p><strong>Ответ:</strong> ${text}</p>
+                `;
+            } catch (error) {
+                resultDiv.innerHTML = `<p><strong>Ошибка:</strong> ${error.message}</strong></p>`;
+            }
+        }
+        
+        async function testManagerInvitations() {
+            const resultDiv = document.getElementById('result3');
+            resultDiv.innerHTML = 'Тестирую...';
+            
+            try {
+                const response = await fetch('/salon/my-manager-invitations', {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer test'
+                    }
+                });
+                
+                const text = await response.text();
+                resultDiv.innerHTML = `
+                    <p><strong>Статус:</strong> ${response.status}</p>
+                    <p><strong>Ответ:</strong> ${text}</p>
+                `;
+            } catch (error) {
+                resultDiv.innerHTML = `<p><strong>Ошибка:</strong> ${error.message}</p>`;
+            }
+        }
+    </script>
+</body>
+</html>
+

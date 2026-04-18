@@ -1,0 +1,45 @@
+Скопируйте этот текст в ваш файл backend/.env
+
+============================================
+ФИНАЛЬНЫЙ ТЕКСТ ДЛЯ ФАЙЛА .env
+============================================
+
+JWT_SECRET_KEY=your-super-secret-key-123
+REDIS_HOST=localhost
+REDIS_PORT=6379
+DATABASE_URL=sqlite:///./bookme.db
+
+# ============================================
+# ROBOKASSA CONFIGURATION
+# ============================================
+# Логин магазина в Robokassa
+# ВАЖНО: Замените на ваш реальный MerchantLogin из личного кабинета
+ROBOKASSA_MERCHANT_LOGIN=your_merchant_login_here
+
+# Пароль #1 для генерации подписи запроса
+ROBOKASSA_PASSWORD_1=SMOsboVJA0919uMwBC4N
+
+# Пароль #2 для проверки подписи уведомлений
+ROBOKASSA_PASSWORD_2=WX67emZei987hdTxiUZw
+
+# Режим работы: true = тестовый режим, false = боевой режим
+ROBOKASSA_IS_TEST=true
+
+# URL для уведомлений от Robokassa (ResultURL)
+# Для локальной разработки:
+ROBOKASSA_RESULT_URL=http://localhost:8000/api/payments/robokassa/result
+# Для боевого режима (после деплоя):
+# ROBOKASSA_RESULT_URL=https://api.dedato.ru/api/payments/robokassa/result
+
+# URL для успешной оплаты (SuccessURL)
+# Для локальной разработки:
+ROBOKASSA_SUCCESS_URL=http://localhost:5173/payment/success
+# Для боевого режима (после деплоя):
+# ROBOKASSA_SUCCESS_URL=https://app.dedato.ru/payment/success
+
+# URL для неуспешной оплаты (FailURL)
+# Для локальной разработки:
+ROBOKASSA_FAIL_URL=http://localhost:5173/payment/failed
+# Для боевого режима (после деплоя):
+# ROBOKASSA_FAIL_URL=https://app.dedato.ru/payment/failed
+
