@@ -20,6 +20,9 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     bind = op.get_bind()
+    # Прерванный прогон мог оставить blog_posts_new после create_table без swap/drop — иначе повторный create падает.
+    op.execute(sa.text("DROP TABLE IF EXISTS blog_posts_new"))
+
     insp = sa.inspect(bind)
     existing_cols = {c["name"] for c in insp.get_columns("blog_posts")}
 
