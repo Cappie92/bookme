@@ -17,10 +17,16 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # Добавляем поле address в таблицу masters
-    op.add_column('masters', sa.Column('address', sa.String(), nullable=True))
+    bind = op.get_bind()
+    insp = sa.inspect(bind)
+    cols = {c['name'] for c in insp.get_columns('masters')}
+    if 'address' not in cols:
+        op.add_column('masters', sa.Column('address', sa.String(), nullable=True))
 
 
 def downgrade() -> None:
-    # Удаляем поле address из таблицы masters
-    op.drop_column('masters', 'address') 
+    bind = op.get_bind()
+    insp = sa.inspect(bind)
+    cols = {c['name'] for c in insp.get_columns('masters')}
+    if 'address' in cols:
+        op.drop_column('masters', 'address')

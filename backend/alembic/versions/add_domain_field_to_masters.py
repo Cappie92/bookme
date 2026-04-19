@@ -19,12 +19,28 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # Добавляем поле domain в таблицу masters
-    op.add_column('masters', sa.Column('domain', sa.String(), nullable=True))
-    op.create_unique_constraint('uq_masters_domain', 'masters', ['domain'])
+    bind = op.get_bind()
+    insp = sa.inspect(bind)
+    cols = {c['name'] for c in insp.get_columns('masters')}
+    if 'domain' not in cols:
+        op.add_column('masters', sa.Column('domain', sa.String(), nullable=True))
+
+    insp = sa.inspect(bind)
+    uq_names = {u['name'] for u in insp.get_unique_constraints('masters')}
+    has_domain_uq = any(
+        tuple(u.get('column_names') or ()) == ('domain',)
+        for u in insp.get_unique_constraints('masters')
+    )
+    if 'uq_masters_domain' not in uq_names and not has_domain_uq:
+        op.create_unique_constraint('uq_masters_domain', 'masters', ['domain'])
 
 
 def downgrade() -> None:
-    # Удаляем поле domain из таблицы masters
-    op.drop_constraint('uq_masters_domain', 'masters', type_='unique')
-    op.drop_column('masters', 'domain') 
+    bind = op.get_bind()
+    insp = sa.inspect(bind)
+    uq_names = {u['name'] for u in insp.get_unique_constraints('masters')}
+    if 'uq_masters_domain' in uq_names:
+        op.drop_constraint('uq_masters_domain', 'masters', type_='unique')
+    cols = {c['name'] for c in insp.get_columns('masters')}
+    if 'domain' in cols:
+        op.drop_column('masters', 'domain')

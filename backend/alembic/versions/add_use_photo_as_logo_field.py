@@ -17,10 +17,16 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # Добавляем поле use_photo_as_logo в таблицу masters
-    op.add_column('masters', sa.Column('use_photo_as_logo', sa.Boolean(), nullable=True, default=False))
+    bind = op.get_bind()
+    insp = sa.inspect(bind)
+    cols = {c['name'] for c in insp.get_columns('masters')}
+    if 'use_photo_as_logo' not in cols:
+        op.add_column('masters', sa.Column('use_photo_as_logo', sa.Boolean(), nullable=True, default=False))
 
 
 def downgrade() -> None:
-    # Удаляем поле use_photo_as_logo из таблицы masters
-    op.drop_column('masters', 'use_photo_as_logo') 
+    bind = op.get_bind()
+    insp = sa.inspect(bind)
+    cols = {c['name'] for c in insp.get_columns('masters')}
+    if 'use_photo_as_logo' in cols:
+        op.drop_column('masters', 'use_photo_as_logo')
