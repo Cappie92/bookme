@@ -26,12 +26,23 @@ jobs:
     - name: Deploy to server
       run: |
         sshpass -p '${{ secrets.SERVER_PASSWORD }}' ssh ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} << 'EOF'
+          # Same logic as scripts/prod/compose.sh (not sourced here: scp has not run yet)
+          compose_run() {
+            if docker compose version >/dev/null 2>&1; then
+              docker compose "$@"
+            elif docker-compose version >/dev/null 2>&1; then
+              docker-compose "$@"
+            else
+              echo "ERROR: need 'docker compose' (Compose v2 plugin) or 'docker-compose' (v1) in PATH." >&2
+              return 1
+            fi
+          }
           # Create project directory
           mkdir -p /opt/dedato
           cd /opt/dedato
           
           # Stop existing containers
-          docker compose -f docker-compose.prod.yml down || true
+          compose_run -f docker-compose.prod.yml down || true
           
           # Clean up old images (do NOT prune volumes: prod data lives in volumes)
           docker image prune -f || true
@@ -51,14 +62,15 @@ jobs:
             exit 1
           fi
           
-          if ! docker compose version >/dev/null 2>&1; then
-            echo "ERROR: Docker Compose v2 plugin required (docker compose). Install docker-compose-plugin."
+          source ./scripts/prod/compose.sh
+          if ! compose_run version >/dev/null 2>&1; then
+            echo "ERROR: need 'docker compose' (Compose v2 plugin) or 'docker-compose' (v1) in PATH."
             exit 1
           fi
           
           # Build and start containers
-          docker compose -f docker-compose.prod.yml build
-          docker compose -f docker-compose.prod.yml up -d
+          compose_run -f docker-compose.prod.yml build
+          compose_run -f docker-compose.prod.yml up -d
           
           # Alembic → тот же SQLite volume, что у backend (см. scripts/prod/migrate.sh)
           bash ./scripts/prod/migrate.sh

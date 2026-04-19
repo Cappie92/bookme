@@ -8,8 +8,11 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
-echo "Running: docker compose exec backend python -m alembic upgrade head"
-docker compose -f "${ROOT_DIR}/docker-compose.prod.yml" exec -T backend \
+# shellcheck source=compose.sh
+source "${ROOT_DIR}/scripts/prod/compose.sh"
+
+echo "Running: compose exec backend python -m alembic upgrade head"
+compose_run -f "${ROOT_DIR}/docker-compose.prod.yml" exec -T backend \
   python -m alembic upgrade head
 
 echo "OK."
