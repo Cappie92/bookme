@@ -30,8 +30,9 @@ services:
 
   frontend:
     build:
-      context: ./frontend
-      dockerfile: Dockerfile.prod
+      # Repo root: vite/tailwind resolve `shared` to ../shared → need shared/ in image (see frontend/Dockerfile.prod)
+      context: .
+      dockerfile: frontend/Dockerfile.prod
     restart: unless-stopped
     ports:
       # Единственный внешний вход (HTTP). TLS можно повесить сверху (host nginx / Cloudflare / LB).

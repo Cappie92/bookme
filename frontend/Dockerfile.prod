@@ -1,28 +1,25 @@
-# Build stage
+# Build stage (compose build context = repo root; WORKDIR /app mirrors local frontend/)
 FROM node:20-alpine as build
 
 WORKDIR /app
 
-# Copy package files
-COPY package*.json ./
+COPY frontend/package*.json ./
 
-# Install all dependencies (including dev dependencies for build)
 RUN npm ci
 
-# Copy source code
-COPY . .
+COPY frontend/ ./
 
-# Build the app
+# Vite alias `shared` → ../shared; tailwind.config.js imports ../shared/theme/semanticColors.js → /shared/...
+COPY shared/ /shared/
+
 RUN npm run build
 
 # Production stage
 FROM nginx:alpine
 
-# Copy built app to nginx
 COPY --from=build /app/dist /usr/share/nginx/html
 
-# Copy nginx configuration
-COPY nginx.conf /etc/nginx/nginx.conf
+COPY frontend/nginx.conf /etc/nginx/nginx.conf
 
 # Expose port 80
 EXPOSE 80
