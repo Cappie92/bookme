@@ -19,14 +19,47 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # Добавляем поле branch_id в таблицу bookings
-    with op.batch_alter_table('bookings') as batch_op:
-        batch_op.add_column(sa.Column('branch_id', sa.Integer(), nullable=True))
-        batch_op.create_foreign_key('fk_bookings_branch_id', 'salon_branches', ['branch_id'], ['id'])
+    bind = op.get_bind()
+    insp = sa.inspect(bind)
+    cols = {c['name'] for c in insp.get_columns('bookings')}
+    if 'branch_id' not in cols:
+        op.add_column('bookings', sa.Column('branch_id', sa.Integer(), nullable=True))
+
+    insp = sa.inspect(bind)
+    fks = insp.get_foreign_keys('bookings')
+    has_branch_fk = any(
+        fk.get('referred_table') == 'salon_branches'
+        and tuple(fk.get('constrained_columns') or ()) == ('branch_id',)
+        for fk in fks
+    ) or any(fk.get('name') == 'fk_bookings_branch_id' for fk in fks)
+
+    if has_branch_fk:
+        return
+
+    # SQLite: batch_alter_table + create_foreign_key пересоздаёт bookings и даёт
+    # CircularDependencyError при топологической сортировке колонок. ADD COLUMN без rebuild — безопасно.
+    if bind.dialect.name == 'sqlite':
+        return
+
+    op.create_foreign_key(
+        'fk_bookings_branch_id',
+        'bookings',
+        'salon_branches',
+        ['branch_id'],
+        ['id'],
+    )
 
 
 def downgrade() -> None:
-    # Удаляем поле branch_id из таблицы bookings
-    with op.batch_alter_table('bookings') as batch_op:
-        batch_op.drop_constraint('fk_bookings_branch_id', type_='foreignkey')
-        batch_op.drop_column('branch_id')
+    bind = op.get_bind()
+    insp = sa.inspect(bind)
+    cols = {c['name'] for c in insp.get_columns('bookings')}
+    if 'branch_id' not in cols:
+        return
+
+    if bind.dialect.name != 'sqlite':
+        fks = {fk.get('name') for fk in insp.get_foreign_keys('bookings')}
+        if 'fk_bookings_branch_id' in fks:
+            op.drop_constraint('fk_bookings_branch_id', 'bookings', type_='foreignkey')
+
+    op.drop_column('bookings', 'branch_id')
