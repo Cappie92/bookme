@@ -35,8 +35,8 @@ services:
       dockerfile: frontend/Dockerfile.prod
     restart: unless-stopped
     ports:
-      # Единственный внешний вход (HTTP). TLS можно повесить сверху (host nginx / Cloudflare / LB).
-      - "80:80"
+      # Только loopback: хостовый nginx уже слушает :80/:443 и проксирует сюда (например 127.0.0.1:8080 → контейнер :80).
+      - "127.0.0.1:8080:80"
     depends_on:
       - backend
     networks:
