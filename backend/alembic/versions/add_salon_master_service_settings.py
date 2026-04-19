@@ -19,27 +19,35 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # Создаем таблицу salon_master_service_settings
-    op.create_table('salon_master_service_settings',
-        sa.Column('id', sa.Integer(), nullable=False),
-        sa.Column('master_id', sa.Integer(), nullable=True),
-        sa.Column('salon_id', sa.Integer(), nullable=True),
-        sa.Column('service_id', sa.Integer(), nullable=True),
-        sa.Column('is_active', sa.Boolean(), nullable=True),
-        sa.Column('master_payment_type', sa.String(), nullable=True),
-        sa.Column('master_payment_value', sa.Float(), nullable=True),
-        sa.Column('created_at', sa.DateTime(), nullable=True),
-        sa.Column('updated_at', sa.DateTime(), nullable=True),
-        sa.ForeignKeyConstraint(['master_id'], ['masters.id'], ),
-        sa.ForeignKeyConstraint(['salon_id'], ['salons.id'], ),
-        sa.ForeignKeyConstraint(['service_id'], ['services.id'], ),
-        sa.PrimaryKeyConstraint('id'),
-        sa.UniqueConstraint('master_id', 'salon_id', 'service_id', name='unique_master_salon_service')
-    )
-    op.create_index(op.f('ix_salon_master_service_settings_id'), 'salon_master_service_settings', ['id'], unique=False)
+    bind = op.get_bind()
+    insp = sa.inspect(bind)
+    if 'salon_master_service_settings' not in insp.get_table_names():
+        op.create_table(
+            'salon_master_service_settings',
+            sa.Column('id', sa.Integer(), nullable=False),
+            sa.Column('master_id', sa.Integer(), nullable=True),
+            sa.Column('salon_id', sa.Integer(), nullable=True),
+            sa.Column('service_id', sa.Integer(), nullable=True),
+            sa.Column('is_active', sa.Boolean(), nullable=True),
+            sa.Column('master_payment_type', sa.String(), nullable=True),
+            sa.Column('master_payment_value', sa.Float(), nullable=True),
+            sa.Column('created_at', sa.DateTime(), nullable=True),
+            sa.Column('updated_at', sa.DateTime(), nullable=True),
+            sa.ForeignKeyConstraint(['master_id'], ['masters.id'], ),
+            sa.ForeignKeyConstraint(['salon_id'], ['salons.id'], ),
+            sa.ForeignKeyConstraint(['service_id'], ['services.id'], ),
+            sa.PrimaryKeyConstraint('id'),
+            sa.UniqueConstraint('master_id', 'salon_id', 'service_id', name='unique_master_salon_service')
+        )
+
+    insp = sa.inspect(bind)
+    ix_name = op.f('ix_salon_master_service_settings_id')
+    idx_names = {ix['name'] for ix in insp.get_indexes('salon_master_service_settings')}
+    if ix_name not in idx_names:
+        op.create_index(ix_name, 'salon_master_service_settings', ['id'], unique=False)
 
 
 def downgrade() -> None:
     # Удаляем таблицу salon_master_service_settings
     op.drop_index(op.f('ix_salon_master_service_settings_id'), table_name='salon_master_service_settings')
-    op.drop_table('salon_master_service_settings') 
+    op.drop_table('salon_master_service_settings')
