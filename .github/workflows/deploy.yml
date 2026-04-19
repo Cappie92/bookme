@@ -8,7 +8,12 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    
+    # Один активный деплой на ref: иначе второй run в начале делает `compose down` и сносит
+    # стек, который только что поднял первый (миграции уже 0, health получает 502).
+    concurrency:
+      group: deploy-${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: false
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v5
