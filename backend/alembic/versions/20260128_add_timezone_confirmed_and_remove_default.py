@@ -21,10 +21,13 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.add_column(
-        "masters",
-        sa.Column("timezone_confirmed", sa.Boolean(), nullable=False, server_default="0"),
-    )
+    bind = op.get_bind()
+    cols = {c["name"] for c in sa.inspect(bind).get_columns("masters")}
+    if "timezone_confirmed" not in cols:
+        op.add_column(
+            "masters",
+            sa.Column("timezone_confirmed", sa.Boolean(), nullable=False, server_default="0"),
+        )
     # Существующие мастера с заданными city и timezone считаем подтвердившими выбор
     op.execute(
         "UPDATE masters SET timezone_confirmed = 1 "
@@ -34,4 +37,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_column("masters", "timezone_confirmed")
+    bind = op.get_bind()
+    cols = {c["name"] for c in sa.inspect(bind).get_columns("masters")}
+    if "timezone_confirmed" in cols:
+        op.drop_column("masters", "timezone_confirmed")

@@ -21,18 +21,29 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.add_column(
-        "indie_masters",
-        sa.Column("master_id", sa.Integer(), nullable=True),
-    )
-    op.create_index(
-        "ix_indie_masters_master_id",
-        "indie_masters",
-        ["master_id"],
-        unique=False,
-    )
+    bind = op.get_bind()
+    cols = {c["name"] for c in sa.inspect(bind).get_columns("indie_masters")}
+    if "master_id" not in cols:
+        op.add_column(
+            "indie_masters",
+            sa.Column("master_id", sa.Integer(), nullable=True),
+        )
+    bind = op.get_bind()
+    idx_names = {ix["name"] for ix in sa.inspect(bind).get_indexes("indie_masters")}
+    if "ix_indie_masters_master_id" not in idx_names:
+        op.create_index(
+            "ix_indie_masters_master_id",
+            "indie_masters",
+            ["master_id"],
+            unique=False,
+        )
 
 
 def downgrade() -> None:
-    op.drop_index("ix_indie_masters_master_id", table_name="indie_masters")
-    op.drop_column("indie_masters", "master_id")
+    bind = op.get_bind()
+    idx_names = {ix["name"] for ix in sa.inspect(bind).get_indexes("indie_masters")}
+    if "ix_indie_masters_master_id" in idx_names:
+        op.drop_index("ix_indie_masters_master_id", table_name="indie_masters")
+    cols = {c["name"] for c in sa.inspect(bind).get_columns("indie_masters")}
+    if "master_id" in cols:
+        op.drop_column("indie_masters", "master_id")

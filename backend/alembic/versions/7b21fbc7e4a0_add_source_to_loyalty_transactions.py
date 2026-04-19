@@ -19,10 +19,14 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # Добавляем колонку source для маркировки источника транзакции
-    op.add_column('loyalty_transactions', sa.Column('source', sa.String(), nullable=True))
+    bind = op.get_bind()
+    cols = {c['name'] for c in sa.inspect(bind).get_columns('loyalty_transactions')}
+    if 'source' not in cols:
+        op.add_column('loyalty_transactions', sa.Column('source', sa.String(), nullable=True))
 
 
 def downgrade() -> None:
-    # Удаляем колонку source
-    op.drop_column('loyalty_transactions', 'source')
+    bind = op.get_bind()
+    cols = {c['name'] for c in sa.inspect(bind).get_columns('loyalty_transactions')}
+    if 'source' in cols:
+        op.drop_column('loyalty_transactions', 'source')

@@ -20,26 +20,21 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.add_column(
-        "temporary_bookings",
-        sa.Column("fixed_discount_rule_type", sa.String(), nullable=True),
-    )
-    op.add_column(
-        "temporary_bookings",
-        sa.Column("fixed_discount_rule_id", sa.Integer(), nullable=True),
-    )
-    op.add_column(
-        "temporary_bookings",
-        sa.Column("fixed_discount_percent", sa.Float(), nullable=True),
-    )
-    op.add_column(
-        "temporary_bookings",
-        sa.Column("fixed_discount_amount", sa.Float(), nullable=True),
-    )
+    bind = op.get_bind()
+    cols = {c["name"] for c in sa.inspect(bind).get_columns("temporary_bookings")}
+    for name, col in (
+        ("fixed_discount_rule_type", sa.Column("fixed_discount_rule_type", sa.String(), nullable=True)),
+        ("fixed_discount_rule_id", sa.Column("fixed_discount_rule_id", sa.Integer(), nullable=True)),
+        ("fixed_discount_percent", sa.Column("fixed_discount_percent", sa.Float(), nullable=True)),
+        ("fixed_discount_amount", sa.Column("fixed_discount_amount", sa.Float(), nullable=True)),
+    ):
+        if name not in cols:
+            op.add_column("temporary_bookings", col)
 
 
 def downgrade() -> None:
-    op.drop_column("temporary_bookings", "fixed_discount_amount")
-    op.drop_column("temporary_bookings", "fixed_discount_percent")
-    op.drop_column("temporary_bookings", "fixed_discount_rule_id")
-    op.drop_column("temporary_bookings", "fixed_discount_rule_type")
+    bind = op.get_bind()
+    cols = {c["name"] for c in sa.inspect(bind).get_columns("temporary_bookings")}
+    for name in ("fixed_discount_amount", "fixed_discount_percent", "fixed_discount_rule_id", "fixed_discount_rule_type"):
+        if name in cols:
+            op.drop_column("temporary_bookings", name)

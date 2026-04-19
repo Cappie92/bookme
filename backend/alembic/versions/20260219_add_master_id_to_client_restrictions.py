@@ -6,6 +6,8 @@ Create Date: 2026-02-19
 
 Master-only: restrictions belong to master_id (masters.id).
 Legacy: indie_master_id (indie_masters.id) remains for LEGACY_INDIE_MODE=1.
+
+На SQLite batch_alter_table даёт CircularDependency — используем ADD COLUMN и без FK.
 """
 from typing import Sequence, Union
 
@@ -19,27 +21,49 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
+def _idx_names(bind, table: str) -> set:
+    return {ix['name'] for ix in sa.inspect(bind).get_indexes(table)}
+
+
 def upgrade() -> None:
-    with op.batch_alter_table('client_restrictions', schema=None) as batch_op:
-        batch_op.add_column(sa.Column('master_id', sa.Integer(), nullable=True))
-        batch_op.create_foreign_key(
+    bind = op.get_bind()
+    is_sqlite = bind.dialect.name == 'sqlite'
+    cols = {c['name'] for c in sa.inspect(bind).get_columns('client_restrictions')}
+    if 'master_id' not in cols:
+        op.add_column('client_restrictions', sa.Column('master_id', sa.Integer(), nullable=True))
+
+    if not is_sqlite:
+        op.create_foreign_key(
             'fk_client_restrictions_master_id',
+            'client_restrictions',
             'masters',
             ['master_id'],
-            ['id']
+            ['id'],
         )
-        batch_op.create_index('idx_client_restriction_master', ['master_id'], unique=False)
-    # Partial unique index (SQLite 3.8+)
+
+    bind = op.get_bind()
+    if 'idx_client_restriction_master' not in _idx_names(bind, 'client_restrictions'):
+        op.create_index('idx_client_restriction_master', 'client_restrictions', ['master_id'], unique=False)
+
     op.execute("""
-        CREATE UNIQUE INDEX idx_client_restriction_unique_master
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_client_restriction_unique_master
         ON client_restrictions (master_id, client_phone, restriction_type)
         WHERE master_id IS NOT NULL
     """)
 
 
 def downgrade() -> None:
-    op.execute("DROP INDEX IF EXISTS idx_client_restriction_unique_master")
-    with op.batch_alter_table('client_restrictions', schema=None) as batch_op:
-        batch_op.drop_index('idx_client_restriction_master', if_exists=True)
-        batch_op.drop_constraint('fk_client_restrictions_master_id', type_='foreignkey')
-        batch_op.drop_column('master_id')
+    op.execute('DROP INDEX IF EXISTS idx_client_restriction_unique_master')
+
+    bind = op.get_bind()
+    is_sqlite = bind.dialect.name == 'sqlite'
+
+    if 'idx_client_restriction_master' in _idx_names(bind, 'client_restrictions'):
+        op.drop_index('idx_client_restriction_master', table_name='client_restrictions')
+
+    if not is_sqlite:
+        op.drop_constraint('fk_client_restrictions_master_id', 'client_restrictions', type_='foreignkey')
+
+    cols = {c['name'] for c in sa.inspect(bind).get_columns('client_restrictions')}
+    if 'master_id' in cols:
+        op.drop_column('client_restrictions', 'master_id')

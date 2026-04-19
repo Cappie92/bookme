@@ -17,8 +17,14 @@ depends_on = None
 
 
 def upgrade():
-    op.add_column('masters', sa.Column('manual_confirm_enabled_at', sa.DateTime(), nullable=True))
+    bind = op.get_bind()
+    cols = {c['name'] for c in sa.inspect(bind).get_columns('masters')}
+    if 'manual_confirm_enabled_at' not in cols:
+        op.add_column('masters', sa.Column('manual_confirm_enabled_at', sa.DateTime(), nullable=True))
 
 
 def downgrade():
-    op.drop_column('masters', 'manual_confirm_enabled_at')
+    bind = op.get_bind()
+    cols = {c['name'] for c in sa.inspect(bind).get_columns('masters')}
+    if 'manual_confirm_enabled_at' in cols:
+        op.drop_column('masters', 'manual_confirm_enabled_at')

@@ -17,8 +17,14 @@ depends_on = None
 
 
 def upgrade():
-    op.add_column('daily_subscription_charges', sa.Column('reason', sa.Text(), nullable=True))
+    bind = op.get_bind()
+    cols = {c['name'] for c in sa.inspect(bind).get_columns('daily_subscription_charges')}
+    if 'reason' not in cols:
+        op.add_column('daily_subscription_charges', sa.Column('reason', sa.Text(), nullable=True))
 
 
 def downgrade():
-    op.drop_column('daily_subscription_charges', 'reason')
+    bind = op.get_bind()
+    cols = {c['name'] for c in sa.inspect(bind).get_columns('daily_subscription_charges')}
+    if 'reason' in cols:
+        op.drop_column('daily_subscription_charges', 'reason')

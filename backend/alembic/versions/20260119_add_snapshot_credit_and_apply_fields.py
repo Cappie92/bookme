@@ -17,40 +17,49 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # SubscriptionPriceSnapshot: credit fields + idempotency marker
-    op.add_column(
-        "subscription_price_snapshots",
-        sa.Column("credit_amount", sa.Float(), nullable=False, server_default="0"),
-    )
-    op.add_column(
-        "subscription_price_snapshots",
-        sa.Column("is_downgrade", sa.Boolean(), nullable=False, server_default=sa.text("0")),
-    )
-    op.add_column(
-        "subscription_price_snapshots",
-        sa.Column("forced_upgrade_type", sa.String(), nullable=True),
-    )
-    op.add_column(
-        "subscription_price_snapshots",
-        sa.Column("applied_subscription_id", sa.Integer(), nullable=True),
-    )
-    op.add_column(
-        "subscription_price_snapshots",
-        sa.Column("applied_at", sa.DateTime(), nullable=True),
-    )
+    bind = op.get_bind()
+    insp = sa.inspect(bind)
+    if "subscription_price_snapshots" not in insp.get_table_names():
+        return
+    cols = {c["name"] for c in insp.get_columns("subscription_price_snapshots")}
 
-    # remove defaults where appropriate
+    if "credit_amount" not in cols:
+        op.add_column(
+            "subscription_price_snapshots",
+            sa.Column("credit_amount", sa.Float(), nullable=False, server_default="0"),
+        )
+    if "is_downgrade" not in cols:
+        op.add_column(
+            "subscription_price_snapshots",
+            sa.Column("is_downgrade", sa.Boolean(), nullable=False, server_default=sa.text("0")),
+        )
+    if "forced_upgrade_type" not in cols:
+        op.add_column(
+            "subscription_price_snapshots",
+            sa.Column("forced_upgrade_type", sa.String(), nullable=True),
+        )
+    if "applied_subscription_id" not in cols:
+        op.add_column(
+            "subscription_price_snapshots",
+            sa.Column("applied_subscription_id", sa.Integer(), nullable=True),
+        )
+    if "applied_at" not in cols:
+        op.add_column(
+            "subscription_price_snapshots",
+            sa.Column("applied_at", sa.DateTime(), nullable=True),
+        )
+
     conn = op.get_bind()
-    # SQLite doesn't support ALTER COLUMN DROP DEFAULT
     if conn.dialect.name != "sqlite":
         op.alter_column("subscription_price_snapshots", "credit_amount", server_default=None)
         op.alter_column("subscription_price_snapshots", "is_downgrade", server_default=None)
 
 
 def downgrade() -> None:
-    op.drop_column("subscription_price_snapshots", "applied_at")
-    op.drop_column("subscription_price_snapshots", "applied_subscription_id")
-    op.drop_column("subscription_price_snapshots", "forced_upgrade_type")
-    op.drop_column("subscription_price_snapshots", "is_downgrade")
-    op.drop_column("subscription_price_snapshots", "credit_amount")
-
+    bind = op.get_bind()
+    if "subscription_price_snapshots" not in sa.inspect(bind).get_table_names():
+        return
+    cols = {c["name"] for c in sa.inspect(bind).get_columns("subscription_price_snapshots")}
+    for col in ("applied_at", "applied_subscription_id", "forced_upgrade_type", "is_downgrade", "credit_amount"):
+        if col in cols:
+            op.drop_column("subscription_price_snapshots", col)

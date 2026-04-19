@@ -16,18 +16,16 @@ depends_on = None
 
 
 def upgrade():
-    """Добавляем поле updated_at в indie_masters"""
-    
-    # Добавляем поле updated_at в indie_masters
-    op.add_column('indie_masters', sa.Column('updated_at', sa.DateTime(), nullable=True))
-    
-    # Заполняем значения по умолчанию
+    bind = op.get_bind()
+    cols = {c['name'] for c in sa.inspect(bind).get_columns('indie_masters')}
+    if 'updated_at' not in cols:
+        op.add_column('indie_masters', sa.Column('updated_at', sa.DateTime(), nullable=True))
+
     op.execute("UPDATE indie_masters SET updated_at = datetime('now')")
-    
-    print("Поле updated_at добавлено в indie_masters")
 
 
 def downgrade():
-    """Откат миграции"""
-    op.drop_column('indie_masters', 'updated_at')
-
+    bind = op.get_bind()
+    cols = {c['name'] for c in sa.inspect(bind).get_columns('indie_masters')}
+    if 'updated_at' in cols:
+        op.drop_column('indie_masters', 'updated_at')

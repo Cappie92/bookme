@@ -19,16 +19,28 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # Добавляем поле site_description в таблицу masters
-    op.add_column('masters', sa.Column('site_description', sa.Text(), nullable=True))
-    
-    # Добавляем поле rating в таблицу client_master_notes
-    op.add_column('client_master_notes', sa.Column('rating', sa.String(), nullable=True))
+    bind = op.get_bind()
+    insp = sa.inspect(bind)
+    m = {c['name'] for c in insp.get_columns('masters')}
+    if 'site_description' not in m:
+        op.add_column('masters', sa.Column('site_description', sa.Text(), nullable=True))
+
+    bind = op.get_bind()
+    insp = sa.inspect(bind)
+    cmn = {c['name'] for c in insp.get_columns('client_master_notes')}
+    if 'rating' not in cmn:
+        op.add_column('client_master_notes', sa.Column('rating', sa.String(), nullable=True))
 
 
 def downgrade() -> None:
-    # Удаляем поле rating из таблицы client_master_notes
-    op.drop_column('client_master_notes', 'rating')
-    
-    # Удаляем поле site_description из таблицы masters
-    op.drop_column('masters', 'site_description')
+    bind = op.get_bind()
+    insp = sa.inspect(bind)
+    cmn = {c['name'] for c in insp.get_columns('client_master_notes')}
+    if 'rating' in cmn:
+        op.drop_column('client_master_notes', 'rating')
+
+    bind = op.get_bind()
+    insp = sa.inspect(bind)
+    m = {c['name'] for c in insp.get_columns('masters')}
+    if 'site_description' in m:
+        op.drop_column('masters', 'site_description')

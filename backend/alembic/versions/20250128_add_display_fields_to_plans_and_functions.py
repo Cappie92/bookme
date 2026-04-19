@@ -17,11 +17,11 @@ depends_on = None
 
 
 def upgrade():
-    # Добавляем display_name в subscription_plans
-    try:
+    bind = op.get_bind()
+    insp = sa.inspect(bind)
+    sp = {c['name'] for c in insp.get_columns('subscription_plans')}
+    if 'display_name' not in sp:
         op.add_column('subscription_plans', sa.Column('display_name', sa.String(), nullable=True))
-    except Exception as e:
-        print(f"Колонка display_name уже существует в subscription_plans: {e}")
     
     # Заполняем display_name = name для существующих планов
     try:
@@ -30,17 +30,13 @@ def upgrade():
     except Exception as e:
         print(f"Ошибка при заполнении display_name в subscription_plans: {e}")
     
-    # Добавляем display_name в service_functions
-    try:
+    bind = op.get_bind()
+    insp = sa.inspect(bind)
+    sf = {c['name'] for c in insp.get_columns('service_functions')}
+    if 'display_name' not in sf:
         op.add_column('service_functions', sa.Column('display_name', sa.String(), nullable=True))
-    except Exception as e:
-        print(f"Колонка display_name уже существует в service_functions: {e}")
-    
-    # Добавляем display_order в service_functions
-    try:
+    if 'display_order' not in sf:
         op.add_column('service_functions', sa.Column('display_order', sa.Integer(), nullable=True, server_default='0'))
-    except Exception as e:
-        print(f"Колонка display_order уже существует в service_functions: {e}")
     
     # Заполняем display_name = name и display_order = id для существующих service_functions
     try:
