@@ -9,7 +9,6 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
-from sqlalchemy.dialects import sqlite
 
 
 # revision identifiers, used by Alembic.
@@ -20,6 +19,23 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    bind = op.get_bind()
+    insp = sa.inspect(bind)
+    existing_cols = {c["name"] for c in insp.get_columns("blog_posts")}
+
+    # legacy: is_published; ORM/create_all drift: status без is_published
+    if "status" in existing_cols:
+        status_sql = "COALESCE(CAST(status AS TEXT), 'draft')"
+    elif "is_published" in existing_cols:
+        status_sql = "CASE WHEN is_published = 1 THEN 'published' ELSE 'draft' END"
+    else:
+        status_sql = "'draft'"
+
+    if "slug" in existing_cols:
+        slug_sql = "slug"
+    else:
+        slug_sql = "('post-' || CAST(id AS TEXT))"
+
     # Создаем новую таблицу с расширенной структурой
     op.create_table(
         'blog_posts_new',
@@ -59,12 +75,14 @@ def upgrade() -> None:
     )
     
     # Копируем данные из старой таблицы
-    op.execute("""
-        INSERT INTO blog_posts_new (id, title, content, author_id, created_at, updated_at, status)
-        SELECT id, title, content, author_id, created_at, updated_at, 
-               CASE WHEN is_published = 1 THEN 'published' ELSE 'draft' END
+    op.execute(
+        f"""
+        INSERT INTO blog_posts_new (id, title, slug, content, author_id, created_at, updated_at, status)
+        SELECT id, title, {slug_sql}, content, author_id, created_at, updated_at,
+               {status_sql}
         FROM blog_posts
-    """)
+        """
+    )
     
     # Удаляем старую таблицу
     op.drop_table('blog_posts')
