@@ -17,14 +17,47 @@ depends_on = None
 
 
 def upgrade():
-    # Добавляем поле branch_id в таблицу masters
-    with op.batch_alter_table('masters', schema=None) as batch_op:
-        batch_op.add_column(sa.Column('branch_id', sa.Integer(), nullable=True))
-        batch_op.create_foreign_key('fk_masters_branch_id', 'salon_branches', ['branch_id'], ['id'])
+    bind = op.get_bind()
+    insp = sa.inspect(bind)
+    cols = {c['name'] for c in insp.get_columns('masters')}
+    if 'branch_id' not in cols:
+        op.add_column('masters', sa.Column('branch_id', sa.Integer(), nullable=True))
+
+    insp = sa.inspect(bind)
+    fks = insp.get_foreign_keys('masters')
+    has_branch_fk = any(
+        fk.get('referred_table') == 'salon_branches'
+        and tuple(fk.get('constrained_columns') or ()) == ('branch_id',)
+        for fk in fks
+    ) or any(fk.get('name') == 'fk_masters_branch_id' for fk in fks)
+
+    if has_branch_fk:
+        return
+
+    # SQLite: batch_alter_table + create_foreign_key пересоздаёт masters и даёт
+    # CircularDependencyError при топологической сортировке колонок (аналогично bookings.branch_id).
+    if bind.dialect.name == 'sqlite':
+        return
+
+    op.create_foreign_key(
+        'fk_masters_branch_id',
+        'masters',
+        'salon_branches',
+        ['branch_id'],
+        ['id'],
+    )
 
 
 def downgrade():
-    # Удаляем поле branch_id из таблицы masters
-    with op.batch_alter_table('masters', schema=None) as batch_op:
-        batch_op.drop_constraint('fk_masters_branch_id', type_='foreignkey')
-        batch_op.drop_column('branch_id') 
+    bind = op.get_bind()
+    insp = sa.inspect(bind)
+    cols = {c['name'] for c in insp.get_columns('masters')}
+    if 'branch_id' not in cols:
+        return
+
+    if bind.dialect.name != 'sqlite':
+        fks = {fk.get('name') for fk in insp.get_foreign_keys('masters')}
+        if 'fk_masters_branch_id' in fks:
+            op.drop_constraint('fk_masters_branch_id', 'masters', type_='foreignkey')
+
+    op.drop_column('masters', 'branch_id')
