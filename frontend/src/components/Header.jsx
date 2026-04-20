@@ -72,7 +72,7 @@ export default function Header({ compactPublicBooking = false }) {
   }
 
   return (
-    <header className="bg-[#F5F5F5] shadow-sm border-b border-neutral-200 fixed top-0 left-0 right-0 z-50">
+    <header className="bg-white/80 supports-[backdrop-filter]:bg-white/70 backdrop-blur-md border-b border-neutral-200 fixed top-0 left-0 right-0 z-50">
       <div className="container">
         {/* Десктоп версия */}
         <div className="hidden md:flex items-center justify-between h-24">
@@ -83,11 +83,42 @@ export default function Header({ compactPublicBooking = false }) {
             </div>
           </Link>
 
-          {/* Навигация для десктопа */}
-          <nav className="flex items-center space-x-8">
-            <Link to="/pricing" className="nav-link">Тарифы</Link>
-            <Link to="/blog" className="nav-link">Блог</Link>
-            <Link to="/about" className="nav-link">О нас</Link>
+          {/* Навигация для десктопа — якоря главной как в dedato-landing-v2 */}
+          <nav className="flex items-center gap-4 lg:gap-6 xl:gap-8 flex-wrap justify-end">
+            {pathname === '/' ? (
+              <>
+                <a href="#features" className="nav-link">
+                  Возможности
+                </a>
+                <a href="#how" className="nav-link">
+                  Как начать
+                </a>
+                <a href="#devices" className="nav-link">
+                  Приложения
+                </a>
+              </>
+            ) : (
+              <>
+                <Link to="/#features" className="nav-link">
+                  Возможности
+                </Link>
+                <Link to="/#how" className="nav-link">
+                  Как начать
+                </Link>
+                <Link to="/#devices" className="nav-link">
+                  Приложения
+                </Link>
+              </>
+            )}
+            <Link to="/pricing" className="nav-link">
+              Тарифы
+            </Link>
+            <Link to="/blog" className="nav-link">
+              Блог
+            </Link>
+            <Link to="/about" className="nav-link">
+              О нас
+            </Link>
           </nav>
 
           {/* Кнопки для десктопа */}
@@ -159,14 +190,24 @@ export default function Header({ compactPublicBooking = false }) {
 
           <div className="flex min-w-0 items-center justify-end justify-self-end min-h-[44px]">
             {!isAuthenticated && (
-              <button
-                type="button"
-                onClick={handleLoginClick}
-                className="text-neutral-600 hover:text-neutral-900 transition-colors text-sm font-medium px-2 py-1.5"
-                data-testid="header-login"
-              >
-                Войти
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleLoginClick}
+                  className="text-neutral-600 hover:text-neutral-900 transition-colors text-sm font-medium px-2 py-1.5"
+                  data-testid="header-login"
+                >
+                  Войти
+                </button>
+                <button
+                  type="button"
+                  onClick={handleRegisterClick}
+                  className="bg-[#4CAF50] text-white hover:bg-[#45A049] transition-colors text-xs font-semibold px-2.5 py-1.5 rounded-lg shadow-sm active:scale-[0.98]"
+                  data-testid="header-register"
+                >
+                  Регистрация
+                </button>
+              </div>
             )}
             {isAuthenticated && (
               <div className="flex items-center gap-1.5">
@@ -194,6 +235,55 @@ export default function Header({ compactPublicBooking = false }) {
         {isMenuOpen && (
           <div className="md:hidden border-t border-neutral-200 py-4 animate-slide-down" style={{zIndex: 999}}>
             <nav className="flex flex-col space-y-4">
+              {pathname === '/' ? (
+                <>
+                  <a
+                    href="#features"
+                    className="nav-link px-4 py-2 rounded-lg hover:bg-neutral-100"
+                    onClick={() => setIsMenuOpen(false)}
+                  >
+                    Возможности
+                  </a>
+                  <a
+                    href="#how"
+                    className="nav-link px-4 py-2 rounded-lg hover:bg-neutral-100"
+                    onClick={() => setIsMenuOpen(false)}
+                  >
+                    Как начать
+                  </a>
+                  <a
+                    href="#devices"
+                    className="nav-link px-4 py-2 rounded-lg hover:bg-neutral-100"
+                    onClick={() => setIsMenuOpen(false)}
+                  >
+                    Приложения
+                  </a>
+                </>
+              ) : (
+                <>
+                  <Link
+                    to="/#features"
+                    className="nav-link px-4 py-2 rounded-lg hover:bg-neutral-100"
+                    onClick={() => setIsMenuOpen(false)}
+                  >
+                    Возможности
+                  </Link>
+                  <Link
+                    to="/#how"
+                    className="nav-link px-4 py-2 rounded-lg hover:bg-neutral-100"
+                    onClick={() => setIsMenuOpen(false)}
+                  >
+                    Как начать
+                  </Link>
+                  <Link
+                    to="/#devices"
+                    className="nav-link px-4 py-2 rounded-lg hover:bg-neutral-100"
+                    onClick={() => setIsMenuOpen(false)}
+                  >
+                    Приложения
+                  </Link>
+                </>
+              )}
               <Link 
                 to="/pricing" 
                 className="nav-link px-4 py-2 rounded-lg hover:bg-neutral-100"
