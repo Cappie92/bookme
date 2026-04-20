@@ -68,8 +68,7 @@ jobs:
             exit 1
           fi
 
-          export DOCKER_BUILDKIT=1
-          export COMPOSE_DOCKER_CLI_BUILD=1
+          # BuildKit disabled: prod host may lack working docker buildx; classic builder is reliable.
 
           # Build app images (redis is pull-only)
           compose_run -f docker-compose.prod.yml build backend frontend
