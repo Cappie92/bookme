@@ -1,0 +1,48 @@
+# Build context for frontend service only (docker-compose.prod.yml: context: .)
+# Keeps COPY targets: frontend/, shared/
+
+# --- SCM / CI / IDE ---
+.git
+.github
+.cursor
+.vscode
+.idea
+
+# --- Docs (not copied into frontend image) ---
+docs
+**/*.md
+
+# --- Other app trees (not used by frontend/Dockerfile.prod) ---
+backend
+mobile
+
+# --- Python / tests ---
+**/__pycache__
+**/*.py[cod]
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+
+# --- Node: fresh install via npm ci in image ---
+**/node_modules
+**/dist
+**/.vite
+
+# --- Local data / artifacts ---
+*.db
+*.sqlite
+*.log
+backups
+artifacts
+test-results
+coverage
+tmp
+temp
+
+# --- Archives ---
+*.tar.gz
+*.tgz
+*.zip
+
+**/playwright-report
+**/playwright/.cache

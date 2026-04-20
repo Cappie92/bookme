@@ -8,8 +8,8 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    # Один активный деплой на ref: иначе второй run в начале делает `compose down` и сносит
-    # стек, который только что поднял первый (миграции уже 0, health получает 502).
+    # Один активный деплой на ref: параллельные push не должны перезаписывать друг друга
+    # (миграции, health).
     concurrency:
       group: deploy-${{ github.workflow }}-${{ github.ref }}
       cancel-in-progress: false
@@ -45,12 +45,7 @@ jobs:
           # Create project directory
           mkdir -p /opt/dedato
           cd /opt/dedato
-          
-          # Stop existing containers
-          compose_run -f docker-compose.prod.yml down || true
-          
-          # Clean up old images (do NOT prune volumes: prod data lives in volumes)
-          docker image prune -f || true
+          # Intentionally no "compose down" here: keep stack running during artifact upload.
         EOF
         
         # Copy files to server
@@ -72,16 +67,16 @@ jobs:
             echo "ERROR: need 'docker compose' (Compose v2 plugin) or 'docker-compose' (v1) in PATH."
             exit 1
           fi
-          
-          # Build and start containers
-          compose_run -f docker-compose.prod.yml build
-          compose_run -f docker-compose.prod.yml up -d
+
+          export DOCKER_BUILDKIT=1
+          export COMPOSE_DOCKER_CLI_BUILD=1
+
+          # Build app images (redis is pull-only)
+          compose_run -f docker-compose.prod.yml build backend frontend
+          compose_run -f docker-compose.prod.yml up -d --remove-orphans
           
           # Alembic → тот же SQLite volume, что у backend (см. scripts/prod/migrate.sh)
           bash ./scripts/prod/migrate.sh
-          
-          # Clean up
-          docker image prune -f
           
           echo "Deployment completed!"
         EOF

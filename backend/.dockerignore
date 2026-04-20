@@ -1,0 +1,13 @@
+# Build context: ./backend only
+
+__pycache__
+*.py[cod]
+.pytest_cache
+.mypy_cache
+.venv
+venv
+*.db
+uploads
+logs
+.git
+tests
