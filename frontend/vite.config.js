@@ -51,7 +51,7 @@ export default defineConfig({
       protocol: 'ws',
       clientPort: 5173
     },
-    strictPort: false,
+    strictPort: true,
     allowedHosts: [
       'dedato.ru',
       'www.dedato.ru',
