@@ -22,6 +22,8 @@
 | [internal/SECURITY_TLS_KEY_LEAK_FOLLOWUP.md](internal/SECURITY_TLS_KEY_LEAK_FOLLOWUP.md) | Internal: утечка TLS key в git — проверки, порядок действий, history |
 | [internal/TLS_ROTATION_RUNBOOK_DEDATO_RU.md](internal/TLS_ROTATION_RUNBOOK_DEDATO_RU.md) | Internal: ротация TLS на хосте после MATCH (срочно) |
 | [internal/POST_INCIDENT_REPO_HARDENING.md](internal/POST_INCIDENT_REPO_HARDENING.md) | Internal: после ротации — history, gitleaks, политика репо |
+| [internal/GIT_HISTORY_REWRITE_TLS_PLAN.md](internal/GIT_HISTORY_REWRITE_TLS_PLAN.md) | Internal: план git filter-repo (TLS secret в истории), без auto-run |
+| [internal/GIT_HISTORY_REWRITE_INVENTORY_FINAL.md](internal/GIT_HISTORY_REWRITE_INVENTORY_FINAL.md) | Internal: финальный scope путей перед rewrite |
 
 ## Архив (история, не runbook)
 

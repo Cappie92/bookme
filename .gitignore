@@ -113,3 +113,21 @@ Desktop.ini
 
 # Локальные отчёты secret scan (не коммитить)
 gitleaks-report.json
+
+# Local/server cleanup artifacts
+db-backups/
+db-snapshots/
+dedato/
+docker-compose.prod.yml.before_volume_switch_*
+quarantine_dedato_sensitive_*/
+
+# Virtual envs
+.venv/
+backend/venv/
+
+# Node modules
+frontend/node_modules/
+mobile/node_modules/
+
+# Generated docs site
+site/

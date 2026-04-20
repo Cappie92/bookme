@@ -67,7 +67,8 @@
 
 ## 4. Если rewrite **делаете** — учесть
 
-- Инструмент: **`git filter-repo`** (предпочтительно) или BFG; удалить путь `SSL_SETUP_INSTRUCTIONS.md` (и любые копии) из **всех** коммитов.
+- Пошаговый план (scope, команды, валидация, sync): [GIT_HISTORY_REWRITE_TLS_PLAN.md](GIT_HISTORY_REWRITE_TLS_PLAN.md).  
+- Инструмент: **`git filter-repo`** (предпочтительно) или BFG; минимум пути `SSL_SETUP_INSTRUCTIONS.md` и `setup_ssl.sh` (см. план).
 - **Force-push** `main` и защищённые ветки; уведомить всех: `git fetch --all`, `reset` или **fresh clone**.
 - **Forks:** владельцы должны **rebase** или пересоздать fork (или оставить мёртвый секрет у себя — риск).
 - **CI:** очистить кэши, **не** кэшировать `.git` с секретом.
