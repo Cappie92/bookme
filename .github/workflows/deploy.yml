@@ -72,6 +72,11 @@ jobs:
 
           # Build app images (redis is pull-only)
           compose_run -f docker-compose.prod.yml build backend frontend
+
+          # docker-compose v1.x (e.g. 1.29.2) can throw ContainerConfig on "recreate"; stop+rm only
+          # backend/frontend so `up` creates fresh containers. Redis/network/volumes unchanged; no full down.
+          compose_run -f docker-compose.prod.yml rm -sf backend frontend || true
+
           compose_run -f docker-compose.prod.yml up -d --remove-orphans
           
           # Alembic → тот же SQLite volume, что у backend (см. scripts/prod/migrate.sh)
