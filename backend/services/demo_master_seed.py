@@ -30,15 +30,19 @@ from models import (
 )
 from settings import get_settings
 
-# Услуги для MasterService (каталог) и зеркальные Service для бронирований/статистики
-_DEMO_SERVICES_SPEC: list[tuple[str, str, int, float]] = [
-    # (category_name, service_name, duration_min, price_rub)
-    ("Стрижки", "Стрижка женская", 60, 1800.0),
-    ("Стрижки", "Стрижка мужская", 45, 1200.0),
-    ("Стрижки", "Укладка", 45, 1400.0),
-    ("Окрашивание", "Окрашивание корней", 120, 4200.0),
-    ("Окрашивание", "Окрашивание полное", 180, 7500.0),
-]
+
+def _canonical_demo_domain(user_id: int) -> str:
+    return f"demo-master-{user_id}"
+
+
+def _pick_unique_demo_domain(db: Session, user_id: int) -> str:
+    """Детерминированно подобрать уникальный домен для demo master (без INSERT)."""
+    for n in range(0, 64):
+        candidate = _canonical_demo_domain(user_id) if n == 0 else f"demo-master-{user_id}-{n}"
+        taken = db.query(Master.id).filter(Master.domain == candidate).first()
+        if not taken:
+            return candidate
+    raise RuntimeError("Could not allocate a unique demo master domain")
 
 
 def _ensure_demo_master_user(db: Session) -> tuple[User, Master]:
@@ -71,20 +75,49 @@ def _ensure_demo_master_user(db: Session) -> tuple[User, Master]:
 
     master = db.query(Master).filter(Master.user_id == user.id).first()
     if not master:
-        master = Master(
-            user_id=user.id,
-            bio="Демо-кабинет DeDato для ознакомления с возможностями сервиса.",
-            experience_years=5,
-            can_work_independently=True,
-            can_work_in_salon=True,
-            city="Москва",
-            timezone="Europe/Moscow",
-            timezone_confirmed=True,
-            domain=f"demo-master-{user.id}",
-            site_description="Демо мастер",
-        )
-        db.add(master)
-        db.flush()
+        want = _canonical_demo_domain(user.id)
+        by_domain = db.query(Master).filter(Master.domain == want).first()
+        if by_domain:
+            prev_uid = by_domain.user_id
+            prev_user = db.get(User, prev_uid) if prev_uid is not None else None
+            if prev_user is None:
+                # «Сирота»: запись masters без users — привязываем к текущему demo user
+                by_domain.user_id = user.id
+                master = by_domain
+            elif prev_user.id == user.id:
+                master = by_domain
+            else:
+                # Домен занят другим живым пользователем — не перетираем чужой профиль
+                alt = _pick_unique_demo_domain(db, user.id)
+                master = Master(
+                    user_id=user.id,
+                    bio="Демо-кабинет DeDato для ознакомления с возможностями сервиса.",
+                    experience_years=5,
+                    can_work_independently=True,
+                    can_work_in_salon=True,
+                    city="Москва",
+                    timezone="Europe/Moscow",
+                    timezone_confirmed=True,
+                    domain=alt,
+                    site_description="Демо мастер",
+                )
+                db.add(master)
+                db.flush()
+        else:
+            master = Master(
+                user_id=user.id,
+                bio="Демо-кабинет DeDato для ознакомления с возможностями сервиса.",
+                experience_years=5,
+                can_work_independently=True,
+                can_work_in_salon=True,
+                city="Москва",
+                timezone="Europe/Moscow",
+                timezone_confirmed=True,
+                domain=want,
+                site_description="Демо мастер",
+            )
+            db.add(master)
+            db.flush()
     else:
         master.bio = "Демо-кабинет DeDato для ознакомления с возможностями сервиса."
         master.experience_years = 5
@@ -93,9 +126,20 @@ def _ensure_demo_master_user(db: Session) -> tuple[User, Master]:
         master.timezone = master.timezone or "Europe/Moscow"
         master.timezone_confirmed = True
         if not master.domain:
-            master.domain = f"demo-master-{user.id}"
+            master.domain = _pick_unique_demo_domain(db, user.id)
 
     return user, master
+
+
+# Услуги для MasterService (каталог) и зеркальные Service для бронирований/статистики
+_DEMO_SERVICES_SPEC: list[tuple[str, str, int, float]] = [
+    # (category_name, service_name, duration_min, price_rub)
+    ("Стрижки", "Стрижка женская", 60, 1800.0),
+    ("Стрижки", "Стрижка мужская", 45, 1200.0),
+    ("Стрижки", "Укладка", 45, 1400.0),
+    ("Окрашивание", "Окрашивание корней", 120, 4200.0),
+    ("Окрашивание", "Окрашивание полное", 180, 7500.0),
+]
 
 
 def _ensure_client(db: Session, phone: str, name: str) -> User:
@@ -559,9 +603,11 @@ def reseed_demo_master(db: Session) -> dict[str, Any]:
 
 
 def ensure_demo_master_exists(db: Session) -> dict[str, Any]:
-    user = db.query(User).filter(User.phone == get_settings().DEMO_MASTER_PHONE).first()
-    if user and user.master_profile:
-        return {"demo_user_id": user.id, "demo_master_id": user.master_profile.id, "created": False}
+    s = get_settings()
+    user = db.query(User).filter(User.phone == s.DEMO_MASTER_PHONE).first()
+    master = db.query(Master).filter(Master.user_id == user.id).first() if user else None
+    if user and master:
+        return {"demo_user_id": user.id, "demo_master_id": master.id, "created": False}
     data = reseed_demo_master(db)
     data["created"] = True
     return data
