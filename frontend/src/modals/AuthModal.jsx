@@ -6,6 +6,7 @@ import { useAuth } from '../contexts/AuthContext'
 import { isSalonFeaturesEnabled } from '../config/features'
 import { useModal } from '../hooks/useModal'
 import { cities, getTimezoneByCity } from '../utils/cities'
+import { normalizeRussianPhoneForApi } from '../utils/normalizeRussianPhoneForApi'
 
 const REGISTER_FIELDS = {
   client: [
@@ -44,8 +45,13 @@ function validatePhone(phone) {
   return /^\+7\d{10}$/.test(phone)
 }
 function formatPhone(input) {
-  // Оставляем только цифры
   let digits = input.replace(/\D/g, '')
+  if (digits.startsWith('8') && digits.length === 11) {
+    return '+7' + digits.slice(1)
+  }
+  if (digits.startsWith('7') && digits.length === 11) {
+    return '+7' + digits.slice(1)
+  }
   if (digits.startsWith('7')) digits = digits.slice(1)
   if (digits.length > 10) digits = digits.slice(0, 10)
   return '+7' + digits
@@ -324,7 +330,7 @@ export default function AuthModal() {
     if (regType === 'master' || regType === 'salon') full_name = form.fio || ''
     const payload = {
       email: form.email || '',
-      phone: form.phone || '',
+      phone: normalizeRussianPhoneForApi(form.phone || ''),
       full_name,
       role: ROLE_MAP[regType],
       password: form.password || '',
@@ -388,7 +394,7 @@ export default function AuthModal() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          phone: loginForm.phone,
+          phone: normalizeRussianPhoneForApi(loginForm.phone),
           password: loginForm.password,
         }),
       })
@@ -465,7 +471,7 @@ export default function AuthModal() {
     setForgotPasswordLoading(true)
     try {
       const payload = forgotPasswordMethod === 'phone' 
-        ? { phone: forgotPasswordForm.phone }
+        ? { phone: normalizeRussianPhoneForApi(forgotPasswordForm.phone) }
         : { email: forgotPasswordForm.email }
       
       const res = await fetch('/api/auth/forgot-password', {
@@ -515,7 +521,7 @@ export default function AuthModal() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          phone: forgotPasswordForm.phone,
+          phone: normalizeRussianPhoneForApi(forgotPasswordForm.phone),
           call_id: forgotPasswordCallId,
           phone_digits: forgotPasswordDigits,
         }),
@@ -551,7 +557,7 @@ export default function AuthModal() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          phone: forgotPasswordForm.phone,
+          phone: normalizeRussianPhoneForApi(forgotPasswordForm.phone),
           call_id: forgotPasswordCallId,
           phone_digits: forgotPasswordDigits,
           new_password: p1,
@@ -617,7 +623,8 @@ export default function AuthModal() {
   }
 
   const initiatePhoneVerification = async (phone) => {
-    console.log('🔔 Инициируем верификацию телефона:', phone)
+    const canonicalPhone = normalizeRussianPhoneForApi(phone)
+    console.log('🔔 Инициируем верификацию телефона:', canonicalPhone)
     setPhoneVerificationLoading(true)
     setPhoneVerificationError('')
     setPhoneVerificationStep('calling')
@@ -629,7 +636,7 @@ export default function AuthModal() {
         headers: {
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ phone })
+        body: JSON.stringify({ phone: canonicalPhone })
       })
       
       console.log('📨 Получен ответ:', response.status, response.statusText)
@@ -640,7 +647,7 @@ export default function AuthModal() {
         console.log('✅ Звонок успешно инициирован, call_id:', result.call_id)
         setPhoneVerificationData({
           call_id: result.call_id,
-          phone: phone
+          phone: canonicalPhone
         })
         setPhoneVerificationStep('enter_digits')
       } else {
