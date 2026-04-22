@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react'
 import {
   BanknotesIcon,
   BuildingOffice2Icon,
+  CalendarDaysIcon,
   CheckCircleIcon,
   ChevronDownIcon,
   ChevronRightIcon,
@@ -11,6 +12,7 @@ import {
   InboxIcon,
   MapPinIcon,
   PhoneIcon,
+  PlusIcon,
 } from '@heroicons/react/24/outline'
 import { useLocation, useNavigate } from 'react-router-dom'
 import MasterSettings from '../components/MasterSettings'
@@ -1012,66 +1014,112 @@ export default function MasterDashboard() {
       pendingInvitations,
     })
 
+    const navItemBase =
+      'group flex w-full items-center gap-2.5 rounded-[10px] px-3 py-[9px] text-left text-[13px] font-medium leading-snug tracking-tight transition-[background-color,color,box-shadow] duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4CAF50]/30 focus-visible:ring-offset-2 focus-visible:ring-offset-white'
+
     const navButtonClass = (tab) =>
-      `w-full text-left px-4 py-2 rounded-lg transition-colors flex items-center gap-2.5 ${
-        activeTab === tab ? 'bg-[#4CAF50]/20 text-[#81C784]' : 'text-gray-700 hover:bg-gray-100'
+      `${navItemBase} ${
+        activeTab === tab
+          ? 'bg-[#DFF5EC] font-semibold text-[#3D8B42] shadow-[inset_0_0_0_1px_rgba(76,175,80,0.14)]'
+          : 'text-[#6B6B6B] hover:bg-[#F4F1EF] hover:text-[#2D2D2D]'
       }`
+
+    const iconClass = 'h-[18px] w-[18px] shrink-0 text-current opacity-[0.92] group-hover:opacity-100'
 
     const onNav = (tab) => (handleTabChange ? handleTabChange(tab) : setActiveTab(tab))
 
+    const sidebarUserName =
+      (masterSettingsPayload?.user?.full_name || masterSettings?.full_name || masterSettings?.name || '').trim() || 'Мастер'
+    const sidebarUserEmail = (masterSettingsPayload?.user?.email || masterSettings?.email || '').trim() || 'Кабинет'
+    const sidebarInitials = (() => {
+      const parts = sidebarUserName.split(/\s+/).filter(Boolean)
+      const a = parts[0]?.[0] || 'M'
+      const b = parts[1]?.[0] || ''
+      return `${a}${b}`.toUpperCase()
+    })()
+
     return (
-      <div className="hidden lg:block w-64 shrink-0 bg-white shadow-lg h-screen fixed left-0 top-0 pt-[140px] z-10">
-        <div className="p-4 space-y-2">
+      <aside
+        className="fixed left-0 top-0 z-10 hidden h-screen w-64 shrink-0 flex-col border-r border-[#E7E2DF] bg-white pt-[140px] shadow-[1px_0_0_rgba(45,45,45,0.03)] lg:flex"
+        aria-label="Навигация кабинета"
+      >
+        <div className="shrink-0 px-[14px] pt-5">
+          <div className="rounded-[14px] border border-[#E7E2DF] bg-[linear-gradient(180deg,#FFFFFF_0%,#FAF8F6_100%)] px-3 py-3 shadow-[0_1px_2px_rgba(45,45,45,0.06)]">
+            <div className="flex items-center gap-2.5">
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#DFF5EC] text-[#3D8B42] ring-1 ring-[#4CAF50]/15">
+                <span className="text-[13px] font-extrabold tracking-tight">{sidebarInitials}</span>
+              </div>
+              <div className="min-w-0">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#3D8B42]">Кабинет</p>
+                <p className="mt-0.5 truncate text-[13.5px] font-semibold leading-tight text-[#2D2D2D]">
+                  {sidebarUserName}
+                </p>
+                <p className="mt-0.5 truncate text-[11px] leading-tight text-[#A0A0A0]">{sidebarUserEmail}</p>
+              </div>
+            </div>
+          </div>
+          <div className="mt-4 h-px bg-[#E7E2DF]" />
+        </div>
+
+        <nav className="flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden px-[14px] pb-3 pt-4 [scrollbar-gutter:stable]">
+          <div className="space-y-1">
             <button
-            data-testid={MASTER_NAV_SIDEBAR_LEAD.navTestId}
-            onClick={() => onNav(MASTER_NAV_SIDEBAR_LEAD.tab)}
-            className={navButtonClass(MASTER_NAV_SIDEBAR_LEAD.tab)}
-          >
-            <MasterNavTabIcon tab={MASTER_NAV_SIDEBAR_LEAD.tab} className="h-5 w-5 shrink-0" />
-            <span>{MASTER_NAV_SIDEBAR_LEAD.label}</span>
+              type="button"
+              data-testid={MASTER_NAV_SIDEBAR_LEAD.navTestId}
+              onClick={() => onNav(MASTER_NAV_SIDEBAR_LEAD.tab)}
+              className={navButtonClass(MASTER_NAV_SIDEBAR_LEAD.tab)}
+            >
+              <MasterNavTabIcon tab={MASTER_NAV_SIDEBAR_LEAD.tab} className={iconClass} />
+              <span className="min-w-0">{MASTER_NAV_SIDEBAR_LEAD.label}</span>
             </button>
 
-          {catalogRows.map((row) =>
-            row.unlocked ? (
-            <button
-                key={row.tab}
-                type="button"
-                data-testid={row.navTestId}
-                onClick={() => onNav(row.tab)}
-                className={navButtonClass(row.tab)}
-              >
-                <MasterNavTabIcon tab={row.tab} className="h-5 w-5 shrink-0" />
-                <span className="min-w-0 flex-1 text-left">{row.label}</span>
-                {row.badge != null ? (
-                  <span className="shrink-0 bg-red-500 text-white text-xs px-2 py-1 rounded-full">{row.badge}</span>
-                ) : null}
-          </button>
-        ) : (
-          <LockedNavItem
-                key={row.tab}
-                dataTestId={row.lockedNavTestId || `locked-${row.tab}`}
-                navTab={row.tab}
-                label={row.label}
-            hasAccess={false}
-                serviceFunctionId={row.lockedServiceFunctionId}
-                tab={row.tab}
-            activeTab={activeTab}
-            handleTabChange={handleTabChange}
-            subscriptionPlans={subscriptionPlans}
-          />
-            )
-        )}
-        
+            {catalogRows.map((row) =>
+              row.unlocked ? (
+                <button
+                  key={row.tab}
+                  type="button"
+                  data-testid={row.navTestId}
+                  onClick={() => onNav(row.tab)}
+                  className={navButtonClass(row.tab)}
+                >
+                  <MasterNavTabIcon tab={row.tab} className={iconClass} />
+                  <span className="min-w-0 flex-1 text-left">{row.label}</span>
+                  {row.badge != null ? (
+                    <span className="ml-auto shrink-0 rounded-full bg-red-500 px-2 py-0.5 text-center text-[10px] font-semibold leading-none text-white tabular-nums shadow-sm ring-1 ring-red-600/20">
+                      {row.badge}
+                    </span>
+                  ) : null}
+                </button>
+              ) : (
+                <LockedNavItem
+                  key={row.tab}
+                  dataTestId={row.lockedNavTestId || `locked-${row.tab}`}
+                  navTab={row.tab}
+                  label={row.label}
+                  hasAccess={false}
+                  serviceFunctionId={row.lockedServiceFunctionId}
+                  tab={row.tab}
+                  activeTab={activeTab}
+                  handleTabChange={handleTabChange}
+                  subscriptionPlans={subscriptionPlans}
+                />
+              )
+            )}
+          </div>
+        </nav>
+
+        <div className="shrink-0 border-t border-[#E7E2DF] bg-[linear-gradient(180deg,#FAFAF9_0%,#FFFFFF_100%)] px-[14px] py-3">
           <button
+            type="button"
             data-testid={MASTER_NAV_SIDEBAR_TAIL.navTestId}
             onClick={() => onNav(MASTER_NAV_SIDEBAR_TAIL.tab)}
             className={navButtonClass(MASTER_NAV_SIDEBAR_TAIL.tab)}
           >
-            <MasterNavTabIcon tab={MASTER_NAV_SIDEBAR_TAIL.tab} className="h-5 w-5 shrink-0" />
-            <span>{MASTER_NAV_SIDEBAR_TAIL.label}</span>
+            <MasterNavTabIcon tab={MASTER_NAV_SIDEBAR_TAIL.tab} className={iconClass} />
+            <span className="min-w-0">{MASTER_NAV_SIDEBAR_TAIL.label}</span>
           </button>
         </div>
-      </div>
+      </aside>
     )
   }
 
@@ -1475,7 +1523,7 @@ export default function MasterDashboard() {
   }
 
   return (
-    <div className="min-h-screen bg-white overflow-x-hidden">
+    <div className="min-h-screen overflow-x-hidden bg-white lg:bg-[#F9F7F6]">
       <Header />
       {/* Mobile (<lg): sidebar скрыт, main на всю ширину. Навигация — Phase 2. Desktop: без изменений. */}
       <div className="flex min-w-0">
@@ -1505,172 +1553,206 @@ export default function MasterDashboard() {
             </div>
           )}
           {activeTab === 'dashboard' && (
-            <div className="min-w-0 overflow-x-hidden">
-              <h1 className="text-2xl font-bold text-gray-900 tracking-tight mb-4 lg:text-3xl lg:mb-6">Дашборд мастера</h1>
+            <div className="flex min-w-0 flex-col gap-5 overflow-x-hidden rounded-2xl bg-[#F9F7F6] py-4 -mx-4 px-4 sm:px-5 max-lg:gap-6 max-lg:bg-[linear-gradient(165deg,#FDFCFB_0%,#EFE9E4_48%,#E8E2DD_100%)] lg:mx-0 lg:gap-0 lg:space-y-0 lg:rounded-2xl lg:bg-[linear-gradient(180deg,#FDFCFB_0%,#F9F7F6_28%,#F9F7F6_100%)] lg:px-8 lg:py-7">
+              {/* Mobile: отдельная «карточка-экран»; desktop: без оболочки (contents) */}
+              <div className="max-lg:rounded-[22px] max-lg:border max-lg:border-white/60 max-lg:bg-gradient-to-br max-lg:from-white max-lg:to-[#F5F1EE] max-lg:p-4 max-lg:shadow-[0_20px_50px_-28px_rgba(25,20,18,0.45)] max-lg:ring-1 max-lg:ring-[#4CAF50]/25 lg:contents">
+              {/* Desktop: единая «entry» сцена — приветствие + CTA; mobile: компактный hero как в reference */}
+              <div className="mb-0 flex flex-col gap-3 sm:mb-5 sm:flex-row sm:items-end sm:justify-between lg:mb-4 lg:items-center lg:gap-5">
+                <div className="min-w-0">
+                  <p className="mb-0 block text-[11px] font-semibold uppercase tracking-[0.14em] text-[#3D8B42]/90 lg:mb-1.5 lg:block">
+                    Рабочий стол
+                  </p>
+                  <h1 className="text-[20px] font-extrabold leading-tight tracking-[-0.02em] text-[#1C1917] max-lg:text-[22px] lg:text-[26px] lg:font-bold lg:leading-tight">
+                    {(() => {
+                      const full = (masterSettingsPayload?.user?.full_name || '').trim()
+                      if (!full) return 'Дашборд мастера'
+                      const first = full.split(/\s+/)[0]
+                      return `Здравствуйте, ${first}`
+                    })()}
+                  </h1>
+                  <p className="mt-1.5 text-[13px] capitalize leading-snug text-[#78716C] max-lg:font-medium lg:mt-2 lg:text-[13px] lg:text-[#6B6B6B]">
+                    {new Date().toLocaleDateString('ru-RU', {
+                      weekday: 'long',
+                      day: 'numeric',
+                      month: 'long',
+                      year: 'numeric',
+                    })}
+                  </p>
+                </div>
+                <div className="grid w-full shrink-0 grid-cols-2 gap-2.5 sm:w-auto lg:flex lg:w-auto lg:gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => handleTabChange('schedule')}
+                    className="inline-flex h-11 min-h-[48px] items-center justify-center gap-2 rounded-[12px] border-2 border-[#E7E2DF] bg-white px-2 text-[13px] font-bold text-[#292524] shadow-[0_2px_8px_rgba(45,45,45,0.06)] transition-colors hover:bg-[#F4F1EF] lg:h-11 lg:min-w-[10rem] lg:border lg:px-5 lg:text-[13px] lg:font-semibold lg:shadow-sm"
+                  >
+                    <CalendarDaysIcon className="h-4 w-4 shrink-0" strokeWidth={2} aria-hidden />
+                    Расписание
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleTabChange('schedule')}
+                    className="inline-flex h-11 min-h-[48px] items-center justify-center gap-2 rounded-[12px] border border-transparent bg-[#4CAF50] px-2 text-[13px] font-bold text-white shadow-[0_4px_16px_-4px_rgba(46,125,50,0.55)] transition-colors hover:bg-[#45A049] lg:h-11 lg:min-w-[10rem] lg:px-5 lg:font-semibold lg:shadow-[0_1px_0_#3D8B42,0_4px_12px_-2px_rgba(76,175,80,0.35)]"
+                  >
+                    <PlusIcon className="h-4 w-4 shrink-0" strokeWidth={2} aria-hidden />
+                    Новая запись
+                  </button>
+                </div>
+              </div>
+              </div>
 
-              {/* Phase 3: mobile — колонка с порядком «алерты → баланс → подписка»; lg+ — сетка 3 колонки как раньше */}
-              {(balance ||
-                subscriptionStatus ||
-                (profileWarnings.length > 0 && !dashboardAttentionDismissed)) && (
-                <div className="flex flex-col gap-3 mb-5 lg:mb-8 lg:grid lg:grid-cols-3 lg:gap-4">
-                  {balance && (
-                    <div className="order-2 bg-white p-3.5 lg:p-4 rounded-xl lg:rounded-lg shadow-sm border border-gray-200/90 lg:order-1">
-                      <div className="flex items-center justify-between mb-3">
-                        <div className="min-w-0">
-                          <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide lg:text-base lg:normal-case lg:tracking-normal lg:text-gray-900">Баланс</h3>
-                          <p className="text-xl lg:text-2xl font-bold text-green-600 mt-0.5 lg:mt-1 tabular-nums">
-                            {formatMoney(balance.available_balance !== undefined ? balance.available_balance : balance.balance)}
-                          </p>
-                          {subscriptionStatus && typeof subscriptionStatus.days_remaining === 'number' && (
-                            <div className="mt-1">
-                              <p className={`text-sm ${subscriptionStatus.days_remaining === 0 && (subscriptionStatus.daily_rate ?? 0) > 0 && (subscriptionStatus.plan_name ?? '').toLowerCase() !== 'free' && subscriptionStatus.status !== 'no_subscription' ? 'text-orange-600 font-medium' : 'text-gray-600'}`}>
-                                Дней осталось: {subscriptionStatus.days_remaining}
+              {/* Баланс / Подписка / Внимание — единый блок (rollback late layout experiments) */}
+              <div>
+                {(balance ||
+                  subscriptionStatus ||
+                  (profileWarnings.length > 0 && !dashboardAttentionDismissed)) && (
+                  <div className="mb-0 flex flex-col gap-3">
+                    <div className="flex flex-col gap-3 max-lg:rounded-[22px] max-lg:border-2 max-lg:border-[#E7E2DF] max-lg:bg-white max-lg:p-4 max-lg:shadow-[0_18px_44px_-26px_rgba(28,25,23,0.35)] max-lg:ring-1 max-lg:ring-[#2E7D32]/10">
+                      {balance && (
+                        <div className="order-2 relative overflow-hidden rounded-[14px] border border-[#4CAF50]/25 bg-gradient-to-br from-[#4CAF50] to-[#45A049] p-4 text-white shadow-[0_6px_20px_-6px_rgba(45,45,45,0.12)] after:pointer-events-none after:absolute after:-right-8 after:-top-8 after:h-32 after:w-32 after:rounded-full after:bg-white/10 after:content-[''] before:pointer-events-none before:absolute before:-bottom-12 before:-right-6 before:h-36 before:w-36 before:rounded-full before:bg-white/5 before:content-[''] max-lg:order-1 lg:hidden">
+                          <div className="relative z-[1] mb-3 flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <h3 className="text-xs font-semibold uppercase tracking-wide text-white/90">Баланс</h3>
+                              <p className="mt-1 text-xl font-bold tabular-nums tracking-[-0.02em] text-white">
+                                {formatMoney(balance.available_balance !== undefined ? balance.available_balance : balance.balance)}
                               </p>
-                              {subscriptionStatus.days_remaining === 0 && (subscriptionStatus.daily_rate ?? 0) > 0 && (subscriptionStatus.plan_name ?? '').toLowerCase() !== 'free' && subscriptionStatus.status !== 'no_subscription' && (
-                                <p className="text-xs text-orange-600 mt-0.5">
-                                  Пополните баланс, чтобы подписка не отключилась
-                                </p>
+                              {subscriptionStatus && typeof subscriptionStatus.days_remaining === 'number' && (
+                                <div className="mt-1">
+                                  <p
+                                    className={`text-sm ${
+                                      subscriptionStatus.days_remaining === 0 &&
+                                      (subscriptionStatus.daily_rate ?? 0) > 0 &&
+                                      (subscriptionStatus.plan_name ?? '').toLowerCase() !== 'free' &&
+                                      subscriptionStatus.status !== 'no_subscription'
+                                        ? 'font-medium text-amber-200'
+                                        : 'text-white/90'
+                                    }`}
+                                  >
+                                    Дней осталось: {subscriptionStatus.days_remaining}
+                                  </p>
+                                  {subscriptionStatus.days_remaining === 0 &&
+                                    (subscriptionStatus.daily_rate ?? 0) > 0 &&
+                                    (subscriptionStatus.plan_name ?? '').toLowerCase() !== 'free' &&
+                                    subscriptionStatus.status !== 'no_subscription' && (
+                                      <p className="mt-0.5 text-xs text-amber-200">
+                                        Пополните баланс, чтобы подписка не отключилась
+                                      </p>
+                                    )}
+                                </div>
                               )}
                             </div>
-                          )}
+                            <div className="shrink-0 rounded-[10px] bg-white/20 p-2">
+                              <BanknotesIcon className="h-6 w-6 text-white" strokeWidth={2} aria-hidden />
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setShowSubscriptionModal(true)}
+                            className="relative z-[1] w-full rounded-lg bg-white py-2.5 text-sm font-semibold text-[#2D2D2D] shadow-sm transition-colors hover:bg-white/95"
+                          >
+                            Продлить / Апгрейд
+                          </button>
                         </div>
-                        <div className="p-2 bg-green-100 rounded-lg shrink-0">
-                          <BanknotesIcon className="h-6 w-6 text-green-600" strokeWidth={2} aria-hidden />
+                      )}
+
+                      {subscriptionStatus && (
+                        <div className="order-3 relative flex min-h-0 flex-col overflow-hidden rounded-[14px] border border-white/10 bg-gradient-to-br from-[#1B1B1B] to-[#2D2D2D] p-4 text-white shadow-[0_6px_20px_-6px_rgba(45,45,45,0.12)] before:pointer-events-none before:absolute before:-right-10 before:-top-10 before:h-40 before:w-40 before:rounded-full before:bg-[radial-gradient(circle,rgba(76,175,80,0.28),transparent_70%)] before:content-[''] after:pointer-events-none after:absolute after:bottom-0 after:right-0 after:h-28 after:w-28 after:rounded-full after:bg-[radial-gradient(circle,rgba(255,255,255,0.06),transparent_65%)] after:content-[''] max-lg:order-2 lg:hidden">
+                          <div className="relative z-[1] flex flex-1 flex-col justify-between gap-3">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0 flex-1">
+                                <h3 className="text-xs font-medium text-white/65">Подписка</h3>
+                                {subscriptionStatus.plan_name && (
+                                  <p className="mt-1 truncate text-base font-bold leading-tight text-white">
+                                    {subscriptionStatus.plan_display_name || subscriptionStatus.plan_name}
+                                  </p>
+                                )}
+                                <p
+                                  className={`mt-2 text-sm font-medium leading-snug ${
+                                    subscriptionStatus.can_continue && !subscriptionStatus.is_frozen ? 'text-[#A5D6A7]' : 'text-red-300'
+                                  }`}
+                                >
+                                  {subscriptionStatus.is_frozen
+                                    ? subscriptionStatus.freeze_info
+                                      ? `Приостановлена (${subscriptionStatus.freeze_info.start_date || ''} - ${subscriptionStatus.freeze_info.end_date || ''})`
+                                      : 'Приостановлена'
+                                    : subscriptionStatus.can_continue
+                                      ? 'Активна'
+                                      : 'Бесплатная'}
+                                </p>
+                                {bookingsLimit && bookingsLimit.plan_name === 'Free' && (
+                                  <p className="mt-2 text-xs leading-snug text-white/70">
+                                    Активные записи: {bookingsLimit.current_active_bookings}/{bookingsLimit.max_future_bookings}
+                                  </p>
+                                )}
+                              </div>
+                              <div
+                                className={`shrink-0 rounded-[10px] p-2 ${
+                                  subscriptionStatus.can_continue ? 'bg-white/15' : 'bg-red-500/20'
+                                }`}
+                              >
+                                <CheckCircleIcon
+                                  className={`h-6 w-6 ${subscriptionStatus.can_continue ? 'text-white' : 'text-red-300'}`}
+                                  strokeWidth={2}
+                                  aria-hidden
+                                />
+                              </div>
+                            </div>
+                          </div>
                         </div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setShowSubscriptionModal(true)}
-                        className="w-full bg-green-600 text-white py-2.5 lg:py-1.5 px-3 rounded-lg hover:bg-green-700 transition-colors text-sm font-medium"
-                      >
-                        Продлить / Апгрейд
-                      </button>
-                    </div>
-                  )}
-                  
-                  {subscriptionStatus && (
-                    <div className="order-3 bg-white p-3.5 lg:p-4 rounded-xl lg:rounded-lg shadow-sm border border-gray-200/90 lg:order-2">
-                      <div className="flex items-center justify-between mb-1 lg:mb-3">
-                        <div className="flex-1 min-w-0">
-                          <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide lg:text-base lg:normal-case lg:tracking-normal lg:text-gray-900">Подписка</h3>
-                          {subscriptionStatus.plan_name && (
-                            <p className="text-base lg:text-lg font-semibold text-gray-900 mt-0.5 lg:mt-1 truncate">
-                              {subscriptionStatus.plan_display_name || subscriptionStatus.plan_name}
-                            </p>
-                          )}
-                          <p className={`text-sm font-medium mt-1 ${subscriptionStatus.can_continue && !subscriptionStatus.is_frozen ? 'text-green-600' : 'text-red-600'}`}>
-                            {subscriptionStatus.is_frozen 
-                              ? subscriptionStatus.freeze_info 
-                                ? `Приостановлена (${subscriptionStatus.freeze_info.start_date || ''} - ${subscriptionStatus.freeze_info.end_date || ''})`
-                                : 'Приостановлена'
-                              : subscriptionStatus.can_continue 
-                                ? 'Активна' 
-                                : 'Бесплатная'}
-                          </p>
-                          {bookingsLimit && bookingsLimit.plan_name === 'Free' && (
-                            <p className="text-xs text-gray-600 mt-1">
-                              Активные записи: {bookingsLimit.current_active_bookings}/{bookingsLimit.max_future_bookings}
-                            </p>
-                          )}
-                        </div>
-                        <div className={`p-2 rounded-lg shrink-0 ${subscriptionStatus.can_continue ? 'bg-green-100' : 'bg-red-100'}`}>
-                          <CheckCircleIcon
-                            className={`h-6 w-6 ${subscriptionStatus.can_continue ? 'text-green-600' : 'text-red-600'}`}
-                            strokeWidth={2}
-                            aria-hidden
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                  
-                  {profileWarnings.length > 0 && !dashboardAttentionDismissed && (
-                    <div className="order-1 rounded border border-amber-300/80 bg-amber-50/95 px-1.5 py-0.5 shadow-sm lg:order-3 lg:rounded-lg lg:border-yellow-200 lg:bg-white lg:p-4 lg:shadow-sm">
-                      {/* Mobile: одна полоса — иконка + заголовок/счёт в одной строке со «Скрыть», без отдельного helper-блока */}
-                      <div className="flex items-start gap-1 lg:mb-3 lg:gap-3">
-                        <ExclamationTriangleIcon
-                          className="mt-0.5 h-3 w-3 shrink-0 text-amber-600 lg:hidden"
-                          strokeWidth={2}
-                          aria-hidden
-                        />
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center justify-between gap-1.5">
-                            <p className="min-w-0 text-[11px] leading-tight text-amber-900 lg:hidden">
-                              <span className="font-semibold">Требуется внимание</span>
-                              <span className="font-bold tabular-nums text-amber-800">
-                                {' '}
-                                · {profileWarnings.length}{' '}
-                                {profileWarnings.length === 1
-                                  ? 'проблема'
-                                  : profileWarnings.length < 5
-                                    ? 'проблемы'
-                                    : 'проблем'}
-                              </span>
-                            </p>
-                            <div className="hidden min-w-0 flex-1 lg:block">
-                              <div className="flex items-center justify-between gap-2">
-                          <h3 className="text-base font-semibold text-gray-900">Требуется внимание</h3>
+                      )}
+
+                      {profileWarnings.length > 0 && !dashboardAttentionDismissed && (
+                        <div className="order-1 overflow-hidden rounded-[14px] border border-[#F5D99C] bg-[#FFF7E6] shadow-[0_1px_2px_rgba(45,45,45,0.06)] max-lg:order-3 max-lg:rounded-2xl max-lg:border-2 max-lg:border-amber-200 max-lg:border-l-8 max-lg:border-l-amber-500 max-lg:bg-gradient-to-r max-lg:from-[#FFFBEB] max-lg:to-[#FFF7E6] max-lg:shadow-[0_14px_36px_-20px_rgba(180,83,9,0.3)]">
+                          <div className="flex items-start gap-3 px-3 py-3.5">
+                            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#FEF1CC] text-[#B45309] shadow-sm ring-2 ring-[#FBBF24]/30">
+                              <ExclamationTriangleIcon className="h-5 w-5" strokeWidth={2} aria-hidden />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-start justify-between gap-2">
+                                <div>
+                                  <p className="text-[14px] font-bold leading-tight text-[#78350F]">Требуется внимание</p>
+                                  <p className="mt-1 text-[13px] leading-snug text-[#78716C]">
+                                    {profileWarnings.length}{' '}
+                                    {profileWarnings.length === 1
+                                      ? 'проблема'
+                                      : profileWarnings.length < 5
+                                        ? 'проблемы'
+                                        : 'проблем'}
+                                  </p>
+                                </div>
                                 <button
                                   type="button"
                                   onClick={() => setDashboardAttentionDismissed(true)}
-                                  className="shrink-0 rounded px-2 py-1 text-sm font-medium text-gray-600 hover:bg-gray-100"
+                                  className="shrink-0 rounded-lg px-2 py-1 text-[11px] font-semibold text-[#92400E]/90 hover:bg-amber-100/90"
                                 >
                                   Скрыть
                                 </button>
                               </div>
-                              <p className="mt-1 text-lg font-bold tabular-nums text-yellow-600">
-                                {profileWarnings.length}{' '}
-                                {profileWarnings.length === 1
-                                  ? 'проблема'
-                                  : profileWarnings.length < 5
-                                    ? 'проблемы'
-                                    : 'проблем'}
-                          </p>
+                            </div>
+                          </div>
+                          <div className="mt-0 space-y-0 border-t border-[#F5D99C]/40 px-2 pb-2 pt-1.5 max-lg:px-3 max-lg:pb-3">
+                            {profileWarnings.slice(0, 2).map((warning, index) => (
+                              <button
+                                key={index}
+                                type="button"
+                                onClick={() => (handleTabChange ? handleTabChange(warning.link) : setActiveTab(warning.link))}
+                                className="flex w-full items-start gap-2 rounded-lg px-1.5 py-2 text-left text-[12px] leading-snug text-[#44403C] transition-colors hover:bg-amber-100/80 hover:text-[#2e7d32]"
+                              >
+                                <ChevronRightIcon className="mt-px h-3 w-3 shrink-0 text-amber-600" strokeWidth={2} aria-hidden />
+                                <span className="min-w-0">{warning.message}</span>
+                              </button>
+                            ))}
+                          </div>
+                          {profileWarnings.length > 2 ? (
+                            <p className="mt-1 px-2 pb-0.5 text-[10px] leading-tight text-amber-900/65 max-lg:px-3">
+                              +{profileWarnings.length - 2} в «Меню»
+                            </p>
+                          ) : null}
                         </div>
-                            <button
-                              type="button"
-                              onClick={() => setDashboardAttentionDismissed(true)}
-                              className="shrink-0 rounded px-1 py-0.5 text-[11px] font-medium text-amber-900/90 hover:bg-amber-100/90 lg:hidden"
-                            >
-                              Скрыть
-                            </button>
-                        </div>
-                          <p className="mt-2 hidden text-xs leading-snug text-gray-500 lg:block">
-                            {profileWarnings.length > 2
-                              ? 'Первые два пункта ниже; остальное — в «Меню».'
-                              : 'Нажмите строку — откроется раздел.'}
-                          </p>
-                      </div>
-                        <div className="hidden shrink-0 rounded-lg bg-yellow-100 p-2 lg:flex">
-                          <ExclamationTriangleIcon className="h-6 w-6 text-yellow-600" strokeWidth={2} aria-hidden />
-                        </div>
-                      </div>
-                      <div className="mt-0 space-y-0 lg:mt-2 lg:space-y-1">
-                        {profileWarnings.slice(0, 2).map((warning, index) => (
-                          <button
-                            key={index}
-                            type="button"
-                            onClick={() => (handleTabChange ? handleTabChange(warning.link) : setActiveTab(warning.link))}
-                            className="flex w-full items-start gap-0.5 rounded-sm py-px pl-0 pr-0.5 text-left text-[11px] leading-[1.25] text-gray-900 transition-colors hover:bg-amber-100/70 hover:text-[#2e7d32] lg:gap-1 lg:rounded-md lg:py-1.5 lg:pl-1 lg:pr-1 lg:text-xs lg:text-gray-700 lg:hover:bg-transparent"
-                          >
-                            <ChevronRightIcon
-                              className="mt-px h-3 w-3 shrink-0 text-amber-600 lg:h-4 lg:w-4 lg:text-gray-400"
-                              strokeWidth={2}
-                              aria-hidden
-                            />
-                            <span className="min-w-0">{warning.message}</span>
-                          </button>
-                        ))}
-                      </div>
-                      {profileWarnings.length > 2 ? (
-                        <p className="mt-px text-[9px] leading-tight text-amber-900/65 lg:mt-2 lg:border-t lg:border-gray-100 lg:pt-2 lg:text-xs lg:leading-snug lg:text-gray-500">
-                          +{profileWarnings.length - 2} в «Меню»
-                        </p>
-                      ) : null}
+                      )}
                     </div>
-                  )}
-                </div>
-              )}
+                  </div>
+                )}
+              </div>
               
               <MasterDashboardStats 
                 refreshTrigger={clientsUpdateTrigger}
@@ -1678,12 +1760,16 @@ export default function MasterDashboard() {
                 settingsPayload={masterSettingsPayload}
                 onNavigateToStats={() => handleTabChange('stats')} 
                 subscriptionStatus={subscriptionStatus}
+                balance={balance}
                 hasExtendedStats={canUseExtendedStats}
                 onConfirmSuccess={() => {
                   setRefreshKey((prev) => prev + 1);
                   setClientsUpdateTrigger((t) => t + 1);
                 }}
                 onOpenSubscriptionModal={() => setShowSubscriptionModal(true)}
+                onOpenSchedule={() => handleTabChange('schedule')}
+                onOpenTariff={() => handleTabChange('tariff')}
+                onOpenSettings={() => handleTabChange('settings')}
               />
             </div>
           )}
