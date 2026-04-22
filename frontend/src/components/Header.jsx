@@ -83,7 +83,7 @@ export default function Header({ compactPublicBooking = false }) {
             </div>
           </Link>
 
-          {/* Навигация для десктопа — якоря главной как в dedato-landing-v2 */}
+          {/* Навигация для десктопа — якоря главной (см. design ref в docs/archive/design-references/) */}
           <nav className="flex items-center gap-4 lg:gap-6 xl:gap-8 flex-wrap justify-end">
             {pathname === '/' ? (
               <>

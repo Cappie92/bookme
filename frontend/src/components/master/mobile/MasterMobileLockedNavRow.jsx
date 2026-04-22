@@ -21,11 +21,11 @@ export default function MasterMobileLockedNavRow({
   const planText = planName ? `Раздел доступен с тарифа ${planName}` : 'Раздел доступен с тарифа Standard'
 
   return (
-    <div className="border-b border-gray-100 last:border-b-0" data-testid={dataTestId || undefined}>
+    <div className="border-b border-[#E7E2DF]/55 last:border-b-0" data-testid={dataTestId || undefined}>
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
-        className="flex w-full min-h-[44px] items-center justify-between gap-2 px-3 py-2.5 text-left text-sm leading-snug text-gray-500"
+        className="flex w-full min-h-[48px] items-center justify-between gap-2 px-3 py-2.5 text-left text-[14px] leading-snug text-[#A8A29E]"
       >
         <span className="flex min-w-0 items-center gap-2.5">
           <LockClosedIcon className="h-5 w-5 shrink-0 text-gray-400" strokeWidth={1.5} aria-hidden />
@@ -38,7 +38,7 @@ export default function MasterMobileLockedNavRow({
         />
       </button>
       {expanded && (
-        <div className="space-y-2 border-t border-gray-100 bg-gray-50/80 px-3 py-2.5">
+        <div className="space-y-2 border-t border-[#E7E2DF]/55 bg-[#F9F7F6]/95 px-3 py-2.5">
           <p className="text-sm font-medium text-gray-900">Тестовый доступ</p>
           <p className="text-xs leading-relaxed text-gray-600">{planText}</p>
           <button

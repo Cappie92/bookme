@@ -1554,15 +1554,15 @@ export default function MasterDashboard() {
           )}
           {activeTab === 'dashboard' && (
             <div className="flex min-w-0 flex-col gap-5 overflow-x-hidden rounded-2xl bg-[#F9F7F6] py-4 -mx-4 px-4 sm:px-5 max-lg:gap-6 max-lg:bg-[linear-gradient(165deg,#FDFCFB_0%,#EFE9E4_48%,#E8E2DD_100%)] lg:mx-0 lg:gap-0 lg:space-y-0 lg:rounded-2xl lg:bg-[linear-gradient(180deg,#FDFCFB_0%,#F9F7F6_28%,#F9F7F6_100%)] lg:px-8 lg:py-7">
-              {/* Mobile: отдельная «карточка-экран»; desktop: без оболочки (contents) */}
-              <div className="max-lg:rounded-[22px] max-lg:border max-lg:border-white/60 max-lg:bg-gradient-to-br max-lg:from-white max-lg:to-[#F5F1EE] max-lg:p-4 max-lg:shadow-[0_20px_50px_-28px_rgba(25,20,18,0.45)] max-lg:ring-1 max-lg:ring-[#4CAF50]/25 lg:contents">
+              {/* Mobile: compact hero без тяжёлой «карточки-экран»; desktop: без оболочки (contents) */}
+              <div className="lg:contents">
               {/* Desktop: единая «entry» сцена — приветствие + CTA; mobile: компактный hero как в reference */}
               <div className="mb-0 flex flex-col gap-3 sm:mb-5 sm:flex-row sm:items-end sm:justify-between lg:mb-4 lg:items-center lg:gap-5">
                 <div className="min-w-0">
-                  <p className="mb-0 block text-[11px] font-semibold uppercase tracking-[0.14em] text-[#3D8B42]/90 lg:mb-1.5 lg:block">
+                  <p className="mb-0 hidden text-[11px] font-semibold uppercase tracking-[0.14em] text-[#3D8B42]/90 lg:mb-1.5 lg:block">
                     Рабочий стол
                   </p>
-                  <h1 className="text-[20px] font-extrabold leading-tight tracking-[-0.02em] text-[#1C1917] max-lg:text-[22px] lg:text-[26px] lg:font-bold lg:leading-tight">
+                  <h1 className="text-[18px] font-extrabold leading-tight tracking-[-0.02em] text-[#1C1917] lg:text-[26px] lg:font-bold lg:leading-tight">
                     {(() => {
                       const full = (masterSettingsPayload?.user?.full_name || '').trim()
                       if (!full) return 'Дашборд мастера'
@@ -1570,7 +1570,7 @@ export default function MasterDashboard() {
                       return `Здравствуйте, ${first}`
                     })()}
                   </h1>
-                  <p className="mt-1.5 text-[13px] capitalize leading-snug text-[#78716C] max-lg:font-medium lg:mt-2 lg:text-[13px] lg:text-[#6B6B6B]">
+                  <p className="mt-0.5 text-[12px] capitalize leading-snug text-[#78716C] lg:mt-2 lg:text-[13px] lg:text-[#6B6B6B]">
                     {new Date().toLocaleDateString('ru-RU', {
                       weekday: 'long',
                       day: 'numeric',
@@ -1579,7 +1579,7 @@ export default function MasterDashboard() {
                     })}
                   </p>
                 </div>
-                <div className="grid w-full shrink-0 grid-cols-2 gap-2.5 sm:w-auto lg:flex lg:w-auto lg:gap-2.5">
+                <div className="hidden shrink-0 w-full grid-cols-2 gap-2.5 sm:grid sm:w-auto lg:flex lg:w-auto lg:gap-2.5">
                   <button
                     type="button"
                     onClick={() => handleTabChange('schedule')}
@@ -1606,9 +1606,9 @@ export default function MasterDashboard() {
                   subscriptionStatus ||
                   (profileWarnings.length > 0 && !dashboardAttentionDismissed)) && (
                   <div className="mb-0 flex flex-col gap-3">
-                    <div className="flex flex-col gap-3 max-lg:rounded-[22px] max-lg:border-2 max-lg:border-[#E7E2DF] max-lg:bg-white max-lg:p-4 max-lg:shadow-[0_18px_44px_-26px_rgba(28,25,23,0.35)] max-lg:ring-1 max-lg:ring-[#2E7D32]/10">
+                    <div className="flex flex-col gap-3">
                       {balance && (
-                        <div className="order-2 relative overflow-hidden rounded-[14px] border border-[#4CAF50]/25 bg-gradient-to-br from-[#4CAF50] to-[#45A049] p-4 text-white shadow-[0_6px_20px_-6px_rgba(45,45,45,0.12)] after:pointer-events-none after:absolute after:-right-8 after:-top-8 after:h-32 after:w-32 after:rounded-full after:bg-white/10 after:content-[''] before:pointer-events-none before:absolute before:-bottom-12 before:-right-6 before:h-36 before:w-36 before:rounded-full before:bg-white/5 before:content-[''] max-lg:order-1 lg:hidden">
+                        <div className="order-2 relative overflow-hidden rounded-[14px] border border-[#4CAF50]/25 bg-gradient-to-br from-[#4CAF50] to-[#45A049] p-4 text-white shadow-[0_6px_20px_-6px_rgba(45,45,45,0.12)] after:pointer-events-none after:absolute after:-right-8 after:-top-8 after:h-32 after:w-32 after:rounded-full after:bg-white/10 after:content-[''] before:pointer-events-none before:absolute before:-bottom-12 before:-right-6 before:h-36 before:w-36 before:rounded-full before:bg-white/5 before:content-[''] max-lg:order-1 hidden">
                           <div className="relative z-[1] mb-3 flex items-start justify-between gap-3">
                             <div className="min-w-0">
                               <h3 className="text-xs font-semibold uppercase tracking-wide text-white/90">Баланс</h3>
@@ -1655,7 +1655,7 @@ export default function MasterDashboard() {
                       )}
 
                       {subscriptionStatus && (
-                        <div className="order-3 relative flex min-h-0 flex-col overflow-hidden rounded-[14px] border border-white/10 bg-gradient-to-br from-[#1B1B1B] to-[#2D2D2D] p-4 text-white shadow-[0_6px_20px_-6px_rgba(45,45,45,0.12)] before:pointer-events-none before:absolute before:-right-10 before:-top-10 before:h-40 before:w-40 before:rounded-full before:bg-[radial-gradient(circle,rgba(76,175,80,0.28),transparent_70%)] before:content-[''] after:pointer-events-none after:absolute after:bottom-0 after:right-0 after:h-28 after:w-28 after:rounded-full after:bg-[radial-gradient(circle,rgba(255,255,255,0.06),transparent_65%)] after:content-[''] max-lg:order-2 lg:hidden">
+                        <div className="order-3 relative flex min-h-0 flex-col overflow-hidden rounded-[14px] border border-white/10 bg-gradient-to-br from-[#1B1B1B] to-[#2D2D2D] p-4 text-white shadow-[0_6px_20px_-6px_rgba(45,45,45,0.12)] before:pointer-events-none before:absolute before:-right-10 before:-top-10 before:h-40 before:w-40 before:rounded-full before:bg-[radial-gradient(circle,rgba(76,175,80,0.28),transparent_70%)] before:content-[''] after:pointer-events-none after:absolute after:bottom-0 after:right-0 after:h-28 after:w-28 after:rounded-full after:bg-[radial-gradient(circle,rgba(255,255,255,0.06),transparent_65%)] after:content-[''] max-lg:order-2 hidden">
                           <div className="relative z-[1] flex flex-1 flex-col justify-between gap-3">
                             <div className="flex items-start justify-between gap-3">
                               <div className="min-w-0 flex-1">
@@ -1701,16 +1701,26 @@ export default function MasterDashboard() {
                       )}
 
                       {profileWarnings.length > 0 && !dashboardAttentionDismissed && (
-                        <div className="order-1 overflow-hidden rounded-[14px] border border-[#F5D99C] bg-[#FFF7E6] shadow-[0_1px_2px_rgba(45,45,45,0.06)] max-lg:order-3 max-lg:rounded-2xl max-lg:border-2 max-lg:border-amber-200 max-lg:border-l-8 max-lg:border-l-amber-500 max-lg:bg-gradient-to-r max-lg:from-[#FFFBEB] max-lg:to-[#FFF7E6] max-lg:shadow-[0_14px_36px_-20px_rgba(180,83,9,0.3)]">
-                          <div className="flex items-start gap-3 px-3 py-3.5">
-                            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#FEF1CC] text-[#B45309] shadow-sm ring-2 ring-[#FBBF24]/30">
-                              <ExclamationTriangleIcon className="h-5 w-5" strokeWidth={2} aria-hidden />
+                        <div className="order-1 overflow-hidden rounded-[14px] border border-[#F5D99C] bg-[#FFF7E6] shadow-[0_1px_2px_rgba(45,45,45,0.06)] max-lg:order-3 max-lg:rounded-[10px]">
+                          <div className="flex items-start gap-2 max-lg:px-2.5 max-lg:py-1.5 lg:gap-3 lg:px-3 lg:py-3.5">
+                            <div className="flex shrink-0 items-center justify-center rounded-md bg-[#FEF1CC] text-[#B45309] max-lg:h-5 max-lg:w-5 max-lg:rounded-md max-lg:shadow-none max-lg:ring-0 lg:h-9 lg:w-9 lg:rounded-xl lg:shadow-sm lg:ring-2 lg:ring-[#FBBF24]/30">
+                              <ExclamationTriangleIcon className="max-lg:h-3 max-lg:w-3 lg:h-5 lg:w-5" strokeWidth={2} aria-hidden />
                             </div>
                             <div className="min-w-0 flex-1">
                               <div className="flex items-start justify-between gap-2">
-                                <div>
-                                  <p className="text-[14px] font-bold leading-tight text-[#78350F]">Требуется внимание</p>
-                                  <p className="mt-1 text-[13px] leading-snug text-[#78716C]">
+                                <div className="min-w-0">
+                                  <p className="text-[12px] font-semibold leading-tight text-[#78350F] lg:text-[14px] lg:font-bold">
+                                    Требуется внимание
+                                    <span className="ml-1.5 text-[11px] font-medium text-[#78716C] lg:hidden">
+                                      · {profileWarnings.length}{' '}
+                                      {profileWarnings.length === 1
+                                        ? 'проблема'
+                                        : profileWarnings.length < 5
+                                          ? 'проблемы'
+                                          : 'проблем'}
+                                    </span>
+                                  </p>
+                                  <p className="mt-1 hidden text-[13px] leading-snug text-[#78716C] lg:block">
                                     {profileWarnings.length}{' '}
                                     {profileWarnings.length === 1
                                       ? 'проблема'
@@ -1722,20 +1732,20 @@ export default function MasterDashboard() {
                                 <button
                                   type="button"
                                   onClick={() => setDashboardAttentionDismissed(true)}
-                                  className="shrink-0 rounded-lg px-2 py-1 text-[11px] font-semibold text-[#92400E]/90 hover:bg-amber-100/90"
+                                  className="shrink-0 rounded-md text-[11px] font-semibold text-[#92400E]/90 hover:bg-amber-100/90 max-lg:px-1 max-lg:py-0 lg:rounded-lg lg:px-2 lg:py-1"
                                 >
                                   Скрыть
                                 </button>
                               </div>
                             </div>
                           </div>
-                          <div className="mt-0 space-y-0 border-t border-[#F5D99C]/40 px-2 pb-2 pt-1.5 max-lg:px-3 max-lg:pb-3">
+                          <div className="border-t border-[#F5D99C]/40 max-lg:px-1.5 max-lg:pb-1.5 max-lg:pt-0.5 lg:px-2 lg:pb-2 lg:pt-1.5">
                             {profileWarnings.slice(0, 2).map((warning, index) => (
                               <button
                                 key={index}
                                 type="button"
                                 onClick={() => (handleTabChange ? handleTabChange(warning.link) : setActiveTab(warning.link))}
-                                className="flex w-full items-start gap-2 rounded-lg px-1.5 py-2 text-left text-[12px] leading-snug text-[#44403C] transition-colors hover:bg-amber-100/80 hover:text-[#2e7d32]"
+                                className="flex w-full items-start gap-1.5 rounded-md text-left leading-tight text-[#44403C] transition-colors hover:bg-amber-100/80 hover:text-[#2e7d32] max-lg:px-1 max-lg:py-1 max-lg:text-[11.5px] lg:gap-2 lg:rounded-lg lg:px-1.5 lg:py-2 lg:text-[12px] lg:leading-snug"
                               >
                                 <ChevronRightIcon className="mt-px h-3 w-3 shrink-0 text-amber-600" strokeWidth={2} aria-hidden />
                                 <span className="min-w-0">{warning.message}</span>
@@ -1743,7 +1753,7 @@ export default function MasterDashboard() {
                             ))}
                           </div>
                           {profileWarnings.length > 2 ? (
-                            <p className="mt-1 px-2 pb-0.5 text-[10px] leading-tight text-amber-900/65 max-lg:px-3">
+                            <p className="px-2 pb-1 text-[10px] leading-tight text-amber-900/65">
                               +{profileWarnings.length - 2} в «Меню»
                             </p>
                           ) : null}
@@ -1768,6 +1778,7 @@ export default function MasterDashboard() {
                 }}
                 onOpenSubscriptionModal={() => setShowSubscriptionModal(true)}
                 onOpenSchedule={() => handleTabChange('schedule')}
+                onOpenServices={() => handleTabChange('services')}
                 onOpenTariff={() => handleTabChange('tariff')}
                 onOpenSettings={() => handleTabChange('settings')}
               />

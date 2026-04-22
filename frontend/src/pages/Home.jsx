@@ -78,7 +78,7 @@ export default function Home() {
   return (
     <div className="pt-[104px] bg-[#F9F7F6] overflow-x-hidden">
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-12 md:pb-16">
-        {/* Hero — фон как в dedato-landing-v2 (radial), без preview-shell */}
+        {/* Hero — фон как в design ref: docs/archive/design-references/dedato-landing-v2.html (radial), без preview-shell */}
         <section
           className="rounded-2xl md:rounded-3xl py-8 md:py-12 lg:py-14 px-3 sm:px-6 md:px-8 grid lg:grid-cols-12 gap-8 lg:gap-10 items-center"
           style={{

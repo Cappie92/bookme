@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom';
 import {
   BanknotesIcon,
+  BriefcaseIcon,
   CalendarDaysIcon,
   ChartBarIcon,
   CheckIcon,
@@ -114,6 +115,7 @@ export default function MasterDashboardStats({
   hasExtendedStats = false,
   onOpenSubscriptionModal,
   onOpenSchedule,
+  onOpenServices,
   onOpenTariff,
   onOpenSettings,
 }) {
@@ -147,7 +149,25 @@ export default function MasterDashboardStats({
   const chartsAnchorRef = useRef(null);
   /** Только desktop: единая панель «Активность за неделю» (график + список по табам) */
   const [activityChartKind, setActivityChartKind] = useState('bookings');
-  const [activityListTab, setActivityListTab] = useState('today');
+  const [activityListTab, setActivityListTab] = useState('future');
+  /** Отслеживаем lg-брейкпоинт чтобы не монтировать Recharts в display:none контейнерах (иначе warnings про width(0)/height(0)). */
+  const [isLg, setIsLg] = useState(() =>
+    typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+      ? window.matchMedia('(min-width: 1024px)').matches
+      : false
+  );
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return undefined;
+    const mq = window.matchMedia('(min-width: 1024px)');
+    const handler = (e) => setIsLg(e.matches);
+    setIsLg(mq.matches);
+    if (mq.addEventListener) mq.addEventListener('change', handler);
+    else mq.addListener(handler);
+    return () => {
+      if (mq.removeEventListener) mq.removeEventListener('change', handler);
+      else mq.removeListener(handler);
+    };
+  }, []);
   /** Desktop booking hub: отдельные табы, mobile не трогаем */
   const [desktopBookingTab, setDesktopBookingTab] = useState('future');
 
@@ -483,17 +503,6 @@ export default function MasterDashboardStats({
     [desktopPendingPastAll, desktopPendingFutureAll]
   );
   const desktopPendingTop3 = useMemo(() => desktopPendingAll.slice(0, 3), [desktopPendingAll]);
-  const todayFutureList = useMemo(
-    () => eligibleFutureForDashboard.filter((b) => isBookingStartTodayLocal(b.start_time)),
-    [eligibleFutureForDashboard]
-  );
-  const pendingFutureList = useMemo(
-    () => eligibleFutureForDashboard.filter((b) => isFuturePending(b.status)),
-    [eligibleFutureForDashboard]
-  );
-  const todayTabCount = todayFutureList.length;
-  const pastTabCount = pastBookings.length;
-  const pendingTabCount = pendingFutureList.length;
 
   /** Desktop badge totals: считаем полный total, а не top-3. */
   const desktopFutureCount = desktopFutureTotal;
@@ -801,73 +810,99 @@ export default function MasterDashboardStats({
     stats.weeks_data?.find((w) => w.is_current) ?? stats.weeks_data?.[0] ?? null;
 
   const topServicesSectionMobile = (
-    <div className="rounded-2xl border border-[#E7E2DF]/90 bg-white p-4 shadow-[0_8px_32px_-20px_rgba(45,45,45,0.1)] ring-1 ring-[#2D2D2D]/[0.03] lg:rounded-[14px] lg:p-5 lg:shadow-[0_1px_2px_rgba(45,45,45,0.06)] lg:ring-0">
-      <div className="mb-3 flex flex-col gap-3 lg:mb-4 lg:flex-row lg:items-center lg:justify-between">
-        <h3 className="text-base font-semibold leading-snug text-[#2D2D2D] lg:text-[15px]">
-          Топ услуг {stats.top_period_range ? <span className="font-normal text-[#6B6B6B]">({stats.top_period_range})</span> : null}
-        </h3>
-        <div className="flex w-full gap-0.5 rounded-[10px] bg-[#F4F1EF] p-0.5 lg:w-auto lg:shrink-0">
+    <div className="rounded-[10px] border border-[#E7E2DF] bg-white p-3.5 shadow-[0_1px_2px_rgba(45,45,45,0.06)]">
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <h4 className="text-[13px] font-semibold leading-tight text-[#2D2D2D]">
+          Топ услуг{stats.top_period_range ? <span className="ml-1 font-normal text-[#6B6B6B]">· {stats.top_period_range}</span> : null}
+        </h4>
+        <div className="flex shrink-0 gap-0.5 rounded-md bg-[#F4F1EF] p-0.5">
           <button
             type="button"
             onClick={() => setServicesStatsTab('bookings')}
-            className={`flex-1 rounded-md px-3 py-2 text-sm font-medium transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4CAF50] focus-visible:ring-offset-1 lg:flex-none lg:py-1.5 ${
+            className={`rounded-[5px] px-2 py-0.5 text-[10.5px] font-medium transition-all focus:outline-none focus-visible:ring-1 focus-visible:ring-[#4CAF50] focus-visible:ring-offset-1 ${
               servicesStatsTab === 'bookings'
                 ? 'bg-white text-[#2D2D2D] shadow-sm'
                 : 'text-[#6B6B6B] hover:text-[#2D2D2D]'
             }`}
           >
-            По записям
+            Записи
           </button>
           <button
             type="button"
             onClick={() => setServicesStatsTab('earnings')}
-            className={`flex-1 rounded-md px-3 py-2 text-sm font-medium transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4CAF50] focus-visible:ring-offset-1 lg:flex-none lg:py-1.5 ${
+            className={`rounded-[5px] px-2 py-0.5 text-[10.5px] font-medium transition-all focus:outline-none focus-visible:ring-1 focus-visible:ring-[#4CAF50] focus-visible:ring-offset-1 ${
               servicesStatsTab === 'earnings'
                 ? 'bg-white text-[#2D2D2D] shadow-sm'
                 : 'text-[#6B6B6B] hover:text-[#2D2D2D]'
             }`}
           >
-            По доходу
+            Доход
           </button>
         </div>
       </div>
-      <div className="space-y-1.5 lg:space-y-2">
-        {servicesStatsTab === 'bookings' ? (
-          stats.top_services_by_bookings && stats.top_services_by_bookings.length > 0 ? (
-            stats.top_services_by_bookings.slice(0, 5).map((service, index) => (
-              <div
-                key={service.service_id}
-                className="flex items-center justify-between gap-2 rounded-lg border border-[#E7E2DF]/60 bg-white px-2.5 py-2.5 lg:rounded-[10px]"
-              >
-                <div className="flex min-w-0 items-center">
-                  <span className="mr-2 w-7 shrink-0 text-base font-bold text-[#4CAF50] lg:text-lg">#{index + 1}</span>
-                  <span className="truncate text-sm font-medium text-[#2D2D2D]">{stripIndiePrefix(service.service_name)}</span>
-                </div>
-                <span className="shrink-0 text-xs tabular-nums text-[#6B6B6B] lg:text-sm">{service.booking_count} записей</span>
+      {servicesStatsTab === 'bookings' ? (
+        stats.top_services_by_bookings && stats.top_services_by_bookings.length > 0 ? (
+          (() => {
+            const list = stats.top_services_by_bookings.slice(0, 3);
+            const maxV = Math.max(1, ...list.map((s) => Number(s.booking_count) || 0));
+            return (
+              <div className="space-y-2.5">
+                {list.map((service) => {
+                  const count = Number(service.booking_count) || 0;
+                  const share = Math.min(100, Math.round((count / maxV) * 100));
+                  return (
+                    <div key={service.service_id}>
+                      <div className="mb-1 flex items-baseline justify-between gap-2 text-[12px]">
+                        <span className="min-w-0 truncate text-[#2D2D2D]">{stripIndiePrefix(service.service_name)}</span>
+                        <strong className="shrink-0 tabular-nums font-semibold text-[#2D2D2D]">{count} зап.</strong>
+                      </div>
+                      <div className="h-1 overflow-hidden rounded-full bg-[#F4F1EF]">
+                        <div
+                          className="h-full rounded-full bg-[#4CAF50] transition-[width] duration-300"
+                          style={{ width: `${share}%` }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
-            ))
-          ) : (
-            <p className="py-4 text-center text-sm text-gray-500">Нет данных за период</p>
-          )
-        ) : stats.top_services_by_earnings && stats.top_services_by_earnings.length > 0 ? (
-          stats.top_services_by_earnings.slice(0, 5).map((service, index) => (
-            <div
-              key={service.service_id}
-              className="flex items-center justify-between gap-2 rounded-lg border border-[#E7E2DF]/60 bg-white px-2.5 py-2.5 lg:rounded-[10px]"
-            >
-              <div className="flex min-w-0 items-center">
-                <span className="mr-2 w-7 shrink-0 text-base font-bold text-[#4CAF50] lg:text-lg">#{index + 1}</span>
-                <span className="truncate text-sm font-medium text-[#2D2D2D]">{stripIndiePrefix(service.service_name)}</span>
-              </div>
-              <span className="shrink-0 text-xs tabular-nums text-[#6B6B6B] lg:text-sm">
-                {Math.round(service.total_earnings).toLocaleString('ru-RU')} ₽
-              </span>
-            </div>
-          ))
+            );
+          })()
         ) : (
-          <p className="py-4 text-center text-sm text-gray-500">Нет данных за период</p>
-        )}
-      </div>
+          <p className="py-3 text-center text-[12px] text-gray-500">Нет данных за период</p>
+        )
+      ) : stats.top_services_by_earnings && stats.top_services_by_earnings.length > 0 ? (
+        (() => {
+          const list = stats.top_services_by_earnings.slice(0, 3);
+          const maxE = Math.max(1, ...list.map((s) => Math.round(Number(s.total_earnings) || 0)));
+          return (
+            <div className="space-y-2.5">
+              {list.map((service) => {
+                const amount = Math.round(Number(service.total_earnings) || 0);
+                const share = Math.min(100, Math.round((amount / maxE) * 100));
+                return (
+                  <div key={service.service_id}>
+                    <div className="mb-1 flex items-baseline justify-between gap-2 text-[12px]">
+                      <span className="min-w-0 truncate text-[#2D2D2D]">{stripIndiePrefix(service.service_name)}</span>
+                      <strong className="shrink-0 tabular-nums font-semibold text-[#2D2D2D]">
+                        {amount.toLocaleString('ru-RU')} ₽
+                      </strong>
+                    </div>
+                    <div className="h-1 overflow-hidden rounded-full bg-[#F4F1EF]">
+                      <div
+                        className="h-full rounded-full bg-[#4CAF50] transition-[width] duration-300"
+                        style={{ width: `${share}%` }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })()
+      ) : (
+        <p className="py-3 text-center text-[12px] text-gray-500">Нет данных за период</p>
+      )}
     </div>
   );
 
@@ -1176,9 +1211,40 @@ export default function MasterDashboardStats({
   return (
     <div className="space-y-4 lg:space-y-5">
       {currentStatsBucket && (
-        <div className="max-lg:rounded-[22px] max-lg:border-2 max-lg:border-[#D6D3D1] max-lg:bg-gradient-to-b max-lg:from-white max-lg:to-[#F0EBE7] max-lg:p-4 max-lg:shadow-[0_20px_48px_-30px_rgba(28,25,23,0.38)] max-lg:ring-1 max-lg:ring-[#4CAF50]/20 lg:contents">
-          <p className="mb-0 text-[10px] font-extrabold uppercase tracking-[0.22em] text-[#2E7D32] lg:hidden">Показатели периода</p>
-        <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3 sm:gap-3.5 max-lg:mt-3 max-lg:gap-3.5 lg:mt-0 lg:gap-4 lg:border-t lg:border-[#E7E2DF]/45 lg:pt-6">
+        <div className="lg:contents">
+          {/* Mobile KPI mini row — 2 compact cards; hidden on desktop */}
+          <div className="grid grid-cols-2 gap-2 lg:hidden">
+            <div className="relative overflow-hidden rounded-[10px] bg-gradient-to-br from-[#4CAF50] to-[#45A049] p-3 text-white shadow-[0_1px_2px_rgba(45,45,45,0.06)] after:pointer-events-none after:absolute after:-right-5 after:-top-5 after:h-20 after:w-20 after:rounded-full after:bg-white/10 after:content-['']">
+              <p className="relative z-[1] text-[10px] font-semibold uppercase tracking-[0.03em] text-white/80">
+                Выручка{stats.top_period_range ? ` · ${stats.top_period_range}` : ''}
+              </p>
+              <p className="relative z-[1] mt-1 text-[18px] font-bold tabular-nums tracking-[-0.03em] leading-[1.1] text-white">
+                {formatMoney(Math.round(Number(currentStatsBucket.income_total_rub ?? currentStatsBucket.income ?? 0)))}
+              </p>
+              {typeof currentStatsBucket.income_change === 'number' && (
+                <span className="relative z-[1] mt-1.5 inline-flex items-center gap-0.5 rounded-full bg-white/22 px-1.5 py-[1px] text-[10px] font-semibold text-white">
+                  {currentStatsBucket.income_change > 0 ? '↑' : currentStatsBucket.income_change < 0 ? '↓' : ''}{' '}
+                  {currentStatsBucket.income_change > 0 ? '+' : ''}
+                  {currentStatsBucket.income_change}%
+                </span>
+              )}
+            </div>
+            <div className="rounded-[10px] border border-[#E7E2DF] bg-white p-3 shadow-[0_1px_2px_rgba(45,45,45,0.06)]">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.03em] text-[#A0A0A0]">
+                Записей{stats.top_period_range ? ` · ${stats.top_period_range}` : ''}
+              </p>
+              <p className="mt-1 text-[18px] font-bold tabular-nums tracking-[-0.03em] leading-[1.1] text-[#2D2D2D]">
+                {Number(currentStatsBucket.bookings_total ?? currentStatsBucket.bookings ?? 0)}
+              </p>
+              <p className="mt-1 text-[10px] text-[#A0A0A0]">
+                <span className="font-semibold text-[#3D8B42]">{Number(currentStatsBucket.bookings_confirmed ?? 0)}</span>
+                <span className="mx-1">·</span>
+                <span className="font-semibold text-amber-700">{Number(currentStatsBucket.bookings_pending ?? 0)}</span> ожидают
+              </p>
+            </div>
+          </div>
+          {/* Desktop KPI 3-card grid — unchanged; hidden on mobile */}
+          <div className="hidden lg:mt-0 lg:grid lg:grid-cols-3 lg:gap-4 lg:border-t lg:border-[#E7E2DF]/45 lg:pt-6">
           <div className="relative overflow-hidden rounded-[16px] border border-transparent bg-gradient-to-br from-[#4CAF50] to-[#2E7D32] p-4 text-white shadow-[0_10px_28px_-8px_rgba(46,125,50,0.55)] after:pointer-events-none after:absolute after:-right-8 after:-top-8 after:h-32 after:w-32 after:rounded-full after:bg-white/10 after:content-[''] max-lg:rounded-2xl max-lg:p-4 lg:rounded-2xl lg:from-[#4CAF50] lg:to-[#45A049] lg:p-[18px] lg:shadow-[0_8px_28px_-12px_rgba(76,175,80,0.45)]">
             <div className="relative z-[1] flex items-start justify-between gap-3">
               <div className="min-w-0">
@@ -1247,21 +1313,74 @@ export default function MasterDashboardStats({
         </div>
       )}
 
+      {/* Mobile quick-nav pills — practical short row (mobile-only) */}
+      {(onOpenSchedule || onOpenServices || onOpenTariff || onOpenSettings) && (
+        <nav
+          className="flex gap-2 overflow-x-auto px-0.5 pb-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden lg:hidden"
+          aria-label="Быстрая навигация"
+        >
+          {onOpenSchedule && (
+            <button
+              type="button"
+              onClick={onOpenSchedule}
+              className="flex shrink-0 flex-col items-center gap-1.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4CAF50] focus-visible:ring-offset-2 rounded-xl"
+            >
+              <span className="relative flex h-[46px] w-[46px] items-center justify-center rounded-[14px] border border-[#C8E8D8] bg-[#DFF5EC] text-[#45A049]">
+                <CalendarDaysIcon className="h-[18px] w-[18px]" strokeWidth={2} aria-hidden />
+              </span>
+              <span className="text-[10.5px] font-medium leading-tight text-[#6B6B6B]">Расписание</span>
+            </button>
+          )}
+          {onOpenServices && (
+            <button
+              type="button"
+              onClick={onOpenServices}
+              className="flex shrink-0 flex-col items-center gap-1.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4CAF50] focus-visible:ring-offset-2 rounded-xl"
+            >
+              <span className="flex h-[46px] w-[46px] items-center justify-center rounded-[14px] border border-[#E7E2DF] bg-white text-[#6B6B6B]">
+                <BriefcaseIcon className="h-[18px] w-[18px]" strokeWidth={2} aria-hidden />
+              </span>
+              <span className="text-[10.5px] font-medium leading-tight text-[#6B6B6B]">Услуги</span>
+            </button>
+          )}
+          {onOpenTariff && (
+            <button
+              type="button"
+              onClick={onOpenTariff}
+              className="flex shrink-0 flex-col items-center gap-1.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4CAF50] focus-visible:ring-offset-2 rounded-xl"
+            >
+              <span className="flex h-[46px] w-[46px] items-center justify-center rounded-[14px] border border-[#E7E2DF] bg-white text-[#6B6B6B]">
+                <BanknotesIcon className="h-[18px] w-[18px]" strokeWidth={2} aria-hidden />
+              </span>
+              <span className="text-[10.5px] font-medium leading-tight text-[#6B6B6B]">Тарифы</span>
+            </button>
+          )}
+          {onOpenSettings && (
+            <button
+              type="button"
+              onClick={onOpenSettings}
+              className="flex shrink-0 flex-col items-center gap-1.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4CAF50] focus-visible:ring-offset-2 rounded-xl"
+            >
+              <span className="flex h-[46px] w-[46px] items-center justify-center rounded-[14px] border border-[#E7E2DF] bg-white text-[#6B6B6B]">
+                <Cog6ToothIcon className="h-[18px] w-[18px]" strokeWidth={2} aria-hidden />
+              </span>
+              <span className="text-[10.5px] font-medium leading-tight text-[#6B6B6B]">Настройки</span>
+            </button>
+          )}
+        </nav>
+      )}
+
       <div className="flex flex-col gap-5 lg:grid lg:grid-cols-12 lg:items-start lg:gap-5">
-        <div className="min-w-0 space-y-4 max-lg:order-2 lg:col-span-8 lg:space-y-5">
+        <div className="min-w-0 space-y-4 max-lg:order-1 lg:col-span-8 lg:space-y-5">
       {/* Desktop: единая панель «Активность за неделю» (v3) */}
       <section className="mb-0 hidden min-w-0 flex-col overflow-hidden rounded-[20px] border border-[#E7E2DF] bg-white shadow-[0_24px_60px_-20px_rgba(45,45,45,0.18)] ring-1 ring-[#2D2D2D]/[0.04] lg:mb-0 lg:flex">
         {/* Head */}
         <div className="border-b border-[#E7E2DF] bg-[linear-gradient(180deg,#FFFFFF_0%,#FAF8F6_100%)] px-6 py-4">
           <div className="flex items-end justify-between gap-5">
             <div className="min-w-0 flex-1">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#3D8B42]">Рабочее пространство</p>
-              <h2 className="mt-1 text-[18px] font-semibold leading-tight tracking-tight text-[#2D2D2D]">
+              <h2 className="text-[18px] font-semibold leading-tight tracking-tight text-[#2D2D2D]">
                 Активность за неделю
               </h2>
-              <p className="mt-1 text-[13px] leading-snug text-[#6B6B6B]">
-                График и записи в одном блоке — без ощущения «график отдельно, список отдельно»
-              </p>
             </div>
             <div className="flex shrink-0 items-end gap-3">
               <div className="flex w-[17rem] gap-0.5 rounded-[10px] border border-[#E7E2DF] bg-[#F4F1EF] p-[3px] shadow-[inset_0_1px_0_rgba(255,255,255,0.55)]" role="group" aria-label="Показатель на графике">
@@ -1322,6 +1441,7 @@ export default function MasterDashboardStats({
           )}
           {stats.weeks_data && stats.weeks_data.length > 0 ? (
             <div className="relative h-[min(17.5rem,44vw)] w-full min-h-[13.25rem] lg:max-h-[18rem] lg:min-w-0" data-master-activity-chart="1">
+              {isLg ? (
               <ResponsiveContainer width="100%" height="100%" minWidth={0}>
                 {activityChartKind === 'bookings' ? (
                   <ComposedChart
@@ -1383,6 +1503,7 @@ export default function MasterDashboardStats({
                   </ComposedChart>
                 )}
               </ResponsiveContainer>
+              ) : null}
             </div>
           ) : (
             <div className="flex min-h-[14rem] flex-col items-center justify-center rounded-[14px] border border-dashed border-[#E7E2DF] bg-[#F9F7F5] px-6 py-8 text-center">
@@ -1406,76 +1527,49 @@ export default function MasterDashboardStats({
       </section>
       {/* Desktop: booking hub сразу под Активностью — возвращено в col-span-8 */}
       {desktopBookingHub}
-      {/* Mobile booking hub: только narrow; desktop — блок выше */}
+      {/* Mobile booking hub: светлая карточка, согласованная с desktop */}
       <section
-        className="lg:hidden overflow-hidden rounded-[28px] border-[3px] border-[#1C1917] bg-[#0c0a09] shadow-[0_32px_64px_-28px_rgba(0,0,0,0.75),0_0_0_1px_rgba(74,222,128,0.35)]"
-        aria-label="Записи на сегодня и очередь"
+        className="lg:hidden overflow-hidden rounded-[16px] border border-[#E7E2DF] bg-white shadow-[0_1px_2px_rgba(45,45,45,0.06)]"
+        aria-label="Записи: будущие, прошедшие, ожидают"
       >
-        <div className="relative px-4 pb-10 pt-6">
-          <div
-            className="pointer-events-none absolute inset-0 opacity-[0.35]"
-            style={{
-              backgroundImage: `repeating-linear-gradient(-12deg, transparent, transparent 12px, rgba(255,255,255,0.04) 12px, rgba(255,255,255,0.04) 13px)`,
+        <div className="flex items-center justify-between gap-3 border-b border-[#E7E2DF] px-4 py-3">
+          <h2 className="text-[15px] font-semibold leading-tight text-[#2D2D2D]">Записи</h2>
+          <button
+            type="button"
+            onClick={() => {
+              setAllBookingsModalMode(activityListTab === 'past' ? 'past' : 'future');
+              setShowAllBookingsModal(true);
             }}
-            aria-hidden
-          />
-          <div className="pointer-events-none absolute -right-16 top-0 h-56 w-56 rounded-full bg-[#22c55e]/25 blur-3xl" aria-hidden />
-          <div className="pointer-events-none absolute bottom-0 left-0 h-32 w-full bg-gradient-to-t from-black/40 to-transparent" aria-hidden />
-          <div className="relative z-[1] flex flex-col gap-5">
-            <div className="inline-flex w-fit items-center gap-2 rounded-full border border-white/20 bg-white/10 px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-[0.2em] text-[#BBF7D0]">
-              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#4ADE80] shadow-[0_0_10px_#4ADE80]" aria-hidden />
-              Главный сценарий
-            </div>
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-              <div className="min-w-0">
-                <h2 className="text-[26px] font-black leading-[1.1] tracking-tight text-white drop-shadow-sm">
-                  Записи
-                </h2>
-                <p className="mt-2 max-w-[20rem] text-[15px] font-medium leading-snug text-[#E7E5E4]">
-                  Сегодня, история и очередь на подтверждение — в одном блоке
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setAllBookingsModalMode(activityListTab === 'past' ? 'past' : 'future');
-                  setShowAllBookingsModal(true);
-                }}
-                className="inline-flex min-h-[52px] w-full shrink-0 items-center justify-center rounded-2xl bg-white px-5 text-[15px] font-extrabold text-[#14532D] shadow-[0_12px_32px_-12px_rgba(0,0,0,0.5)] ring-2 ring-white/40 transition hover:bg-[#F0FDF4] active:scale-[0.98] sm:w-auto"
-              >
-                Все записи
-              </button>
-            </div>
-          </div>
+            className="inline-flex shrink-0 items-center justify-center rounded-[10px] border border-[#E7E2DF] bg-white px-3 py-1.5 text-[12px] font-medium text-[#2D2D2D] shadow-[0_1px_2px_rgba(45,45,45,0.06)] transition hover:bg-[#F4F1EF]"
+          >
+            Все записи
+          </button>
         </div>
 
-        <div className="relative z-[2] -mt-7 px-3">
+        <div className="border-b border-[#E7E2DF] bg-white px-3 py-2.5">
           <div
-            className="flex w-full gap-1 rounded-[18px] border-2 border-[#292524] bg-[#1c1917] p-1.5 shadow-[0_20px_40px_-18px_rgba(0,0,0,0.8)]"
+            className="flex w-full min-w-0 items-center gap-0.5 rounded-[10px] border border-[#E7E2DF] bg-[#F4F1EF] p-[3px]"
             role="tablist"
             aria-label="Записи по статусу"
           >
             <button
               type="button"
               role="tab"
-              aria-selected={activityListTab === 'today'}
-              onClick={() => setActivityListTab('today')}
-              className={`flex min-h-[52px] min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-[14px] px-1.5 py-2 text-[13px] font-extrabold transition ${
-                activityListTab === 'today'
-                  ? 'bg-white text-[#14532D] shadow-[0_8px_24px_-8px_rgba(0,0,0,0.45)] ring-2 ring-[#4CAF50]/35'
-                  : 'text-[#A8A29E] hover:bg-white/5 hover:text-white'
+              aria-selected={activityListTab === 'future'}
+              onClick={() => setActivityListTab('future')}
+              className={`min-h-[36px] min-w-0 flex-1 rounded-[8px] px-2 py-1.5 text-[12px] font-semibold transition ${
+                activityListTab === 'future'
+                  ? 'bg-white text-[#2D2D2D] shadow-[0_1px_2px_rgba(45,45,45,0.10)]'
+                  : 'text-[#6B6B6B] hover:text-[#2D2D2D] hover:bg-white/30'
               }`}
             >
-              <span className="flex items-center gap-1">
-                <CalendarDaysIcon className="h-4 w-4 opacity-90" strokeWidth={2} aria-hidden />
-                Сегодня
-              </span>
+              <span className="whitespace-nowrap">Будущие</span>
               <span
-                className={`inline-flex min-h-[1.25rem] min-w-[1.5rem] items-center justify-center rounded-full px-2 text-[11px] font-black tabular-nums ${
-                  activityListTab === 'today' ? 'bg-[#DCFCE7] text-[#166534]' : 'bg-white/10 text-[#D6D3D1]'
+                className={`ml-1 inline-flex h-4 min-w-[1rem] items-center justify-center rounded-full px-1 text-[10px] font-semibold tabular-nums ${
+                  activityListTab === 'future' ? 'bg-[#DFF5EC] text-[#3D8B42]' : 'bg-white/50 text-[#6B6B6B]'
                 }`}
               >
-                {todayTabCount}
+                {desktopFutureCount}
               </span>
             </button>
             <button
@@ -1483,22 +1577,19 @@ export default function MasterDashboardStats({
               role="tab"
               aria-selected={activityListTab === 'past'}
               onClick={() => setActivityListTab('past')}
-              className={`flex min-h-[52px] min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-[14px] px-1.5 py-2 text-[13px] font-extrabold transition ${
+              className={`min-h-[36px] min-w-0 flex-1 rounded-[8px] px-2 py-1.5 text-[12px] font-semibold transition ${
                 activityListTab === 'past'
-                  ? 'bg-white text-[#14532D] shadow-[0_8px_24px_-8px_rgba(0,0,0,0.45)] ring-2 ring-[#4CAF50]/35'
-                  : 'text-[#A8A29E] hover:bg-white/5 hover:text-white'
+                  ? 'bg-white text-[#2D2D2D] shadow-[0_1px_2px_rgba(45,45,45,0.10)]'
+                  : 'text-[#6B6B6B] hover:text-[#2D2D2D] hover:bg-white/30'
               }`}
             >
-              <span className="flex items-center gap-1">
-                <ClockIcon className="h-4 w-4 opacity-90" strokeWidth={2} aria-hidden />
-                Прошедшие
-              </span>
+              <span className="whitespace-nowrap">Прошедшие</span>
               <span
-                className={`inline-flex min-h-[1.25rem] min-w-[1.5rem] items-center justify-center rounded-full px-2 text-[11px] font-black tabular-nums ${
-                  activityListTab === 'past' ? 'bg-[#E7E5E4] text-[#1C1917]' : 'bg-white/10 text-[#D6D3D1]'
+                className={`ml-1 inline-flex h-4 min-w-[1rem] items-center justify-center rounded-full px-1 text-[10px] font-semibold tabular-nums ${
+                  activityListTab === 'past' ? 'bg-[#E8E0DA]/80 text-[#4A3F38]' : 'bg-white/50 text-[#6B6B6B]'
                 }`}
               >
-                {pastTabCount}
+                {desktopPastCount}
               </span>
             </button>
             <button
@@ -1506,38 +1597,35 @@ export default function MasterDashboardStats({
               role="tab"
               aria-selected={activityListTab === 'pending'}
               onClick={() => setActivityListTab('pending')}
-              className={`flex min-h-[52px] min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-[14px] px-1.5 py-2 text-[13px] font-extrabold transition ${
+              className={`min-h-[36px] min-w-0 flex-1 rounded-[8px] px-2 py-1.5 text-[12px] font-semibold transition ${
                 activityListTab === 'pending'
-                  ? 'bg-white text-[#92400E] shadow-[0_8px_24px_-8px_rgba(0,0,0,0.45)] ring-2 ring-amber-400/50'
-                  : 'text-[#A8A29E] hover:bg-white/5 hover:text-white'
+                  ? 'bg-white text-[#2D2D2D] shadow-[0_1px_2px_rgba(45,45,45,0.10)]'
+                  : 'text-[#6B6B6B] hover:text-[#2D2D2D] hover:bg-white/30'
               }`}
             >
-              <span className="flex items-center gap-1">
-                <CheckIcon className="h-4 w-4 opacity-90" strokeWidth={2.5} aria-hidden />
-                Ожидают
-              </span>
+              <span className="whitespace-nowrap">Ожидают</span>
               <span
-                className={`inline-flex min-h-[1.25rem] min-w-[1.5rem] items-center justify-center rounded-full px-2 text-[11px] font-black tabular-nums ${
-                  activityListTab === 'pending' ? 'bg-amber-400 text-amber-950' : 'bg-white/10 text-[#D6D3D1]'
+                className={`ml-1 inline-flex h-4 min-w-[1rem] items-center justify-center rounded-full px-1 text-[10px] font-semibold tabular-nums ${
+                  activityListTab === 'pending' ? 'bg-[#FEF7E6] text-[#B45309]' : 'bg-white/50 text-[#6B6B6B]'
                 }`}
               >
-                {pendingTabCount}
+                {desktopPendingCount}
               </span>
             </button>
           </div>
         </div>
 
-        <div className="relative z-[1] bg-gradient-to-b from-[#fafaf9] via-white to-[#f5f5f4] px-3 pb-6 pt-5">
-          {activityListTab === 'today' ? (
-            todayFutureList.length > 0 ? (
-              <ul className="m-0 list-none space-y-4 p-0">
-                {todayFutureList.map((b, i) => {
+        <div className="bg-[#FBF9F7] px-3 pb-4 pt-3">
+          {activityListTab === 'future' ? (
+            desktopFutureAll.length > 0 ? (
+              <ul className="m-0 list-none space-y-3 p-0">
+                {desktopFutureAll.slice(0, 3).map((b, i) => {
                   const normalized = {
                     ...b,
                     start_time: b.start_time || (b.date && b.time ? `${b.date}T${b.time}:00` : ''),
                   };
                   return (
-                    <li key={b.id || `t-${i}`} className="m-0 p-0">
+                    <li key={b.id || `f-${i}`} className="m-0 p-0">
                       <MasterBookingCardMobile
                         variant="hub"
                         booking={normalized}
@@ -1554,35 +1642,33 @@ export default function MasterDashboardStats({
                 })}
               </ul>
             ) : (
-              <div className="flex flex-col items-center rounded-[22px] border-2 border-dashed border-[#D6D3D1] bg-gradient-to-b from-[#FFFBEB] to-white px-5 py-12 text-center shadow-inner">
-                <div className="flex h-20 w-20 items-center justify-center rounded-3xl bg-gradient-to-br from-[#DCFCE7] to-[#BBF7D0] shadow-[0_12px_28px_-12px_rgba(22,101,52,0.35)] ring-4 ring-[#4CAF50]/15">
-                  <CalendarDaysIcon className="h-10 w-10 text-[#166534]" strokeWidth={1.75} aria-hidden />
-                </div>
-                <p className="mt-5 text-[18px] font-black leading-tight text-[#1C1917]">Сегодня визитов нет</p>
-                <p className="mt-2 max-w-[17rem] text-[14px] font-medium leading-relaxed text-[#57534E]">
-                  Загляните в «Ожидают» или откройте полный список через «Все записи»
-                </p>
+              <div className="rounded-[12px] border border-dashed border-[#E7E2DF] bg-white px-5 py-8 text-center">
+                <p className="text-[13px] font-semibold text-[#2D2D2D]">Будущих визитов нет</p>
+                <p className="mt-1 text-[12px] text-[#6B6B6B]">Проверьте «Ожидают» или откройте все записи</p>
               </div>
             )
           ) : null}
           {activityListTab === 'pending' ? (
-            pendingFutureList.length > 0 ? (
-              <ul className="m-0 list-none space-y-4 p-0">
-                {pendingFutureList.map((b, i) => {
-                  const normalized = {
-                    ...b,
-                    start_time: b.start_time || (b.date && b.time ? `${b.date}T${b.time}:00` : ''),
+            desktopPendingAll.length > 0 ? (
+              <ul className="m-0 list-none space-y-3 p-0">
+                {desktopPendingAll.slice(0, 3).map((item, i) => {
+                  const b = {
+                    ...item.b,
+                    start_time:
+                      item.b.start_time ||
+                      (item.b.date && item.b.time ? `${item.b.date}T${item.b.time}:00` : ''),
                   };
+                  const sectionType = item.kind === 'past' ? 'past' : 'future';
                   return (
-                    <li key={b.id || `p-${i}`} className="m-0 p-0">
+                    <li key={b.id || `p-${item.kind}-${i}`} className="m-0 p-0">
                       <MasterBookingCardMobile
                         variant="hub"
-                        booking={normalized}
-                        sectionType="future"
+                        booking={b}
+                        sectionType={sectionType}
                         master={masterSettings?.master ?? null}
                         hasExtendedStats={hasExtendedStats}
                         actionBookingId={actionBookingId}
-                        onOpenDetail={(book) => setMobileBookingDetail({ booking: book, sectionType: 'future' })}
+                        onOpenDetail={(book) => setMobileBookingDetail({ booking: book, sectionType })}
                         onConfirm={handleConfirmUnified}
                         onCancelClick={(id) => setCancelBookingId(id)}
                       />
@@ -1591,26 +1677,20 @@ export default function MasterDashboardStats({
                 })}
               </ul>
             ) : (
-              <div className="flex flex-col items-center rounded-[22px] border-2 border-dashed border-amber-200/80 bg-gradient-to-b from-amber-50 to-white px-5 py-12 text-center shadow-inner">
-                <div className="flex h-20 w-20 items-center justify-center rounded-3xl bg-gradient-to-br from-amber-200 to-amber-100 shadow-[0_12px_28px_-12px_rgba(180,83,9,0.35)] ring-4 ring-amber-300/40">
-                  <CheckIcon className="h-10 w-10 text-amber-900" strokeWidth={2} aria-hidden />
-                </div>
-                <p className="mt-5 text-[18px] font-black leading-tight text-[#1C1917]">Очередь пуста</p>
-                <p className="mt-2 max-w-[17rem] text-[14px] font-medium leading-relaxed text-[#57534E]">
-                  Новые заявки на подтверждение появятся здесь автоматически
-                </p>
+              <div className="rounded-[12px] border border-dashed border-[#E7E2DF] bg-white px-5 py-8 text-center">
+                <p className="text-[13px] font-semibold text-[#2D2D2D]">Нет записей, требующих подтверждения</p>
+                <p className="mt-1 text-[12px] text-[#6B6B6B]">Здесь появятся визиты, которые нужно подтвердить</p>
               </div>
             )
           ) : null}
           {activityListTab === 'past' ? (
             pastBookingsLoading ? (
-              <div className="flex flex-col items-center justify-center rounded-[22px] border-2 border-[#E7E2DF] bg-white py-14">
-                <div className="h-10 w-10 animate-spin rounded-full border-[3px] border-[#E7E2DF] border-t-[#166534]" aria-hidden />
-                <p className="mt-4 text-[15px] font-bold text-[#44403C]">Загрузка истории…</p>
+              <div className="rounded-[12px] border border-[#E7E2DF] bg-white px-5 py-8 text-center">
+                <p className="text-[13px] font-semibold text-[#6B6B6B]">Загрузка…</p>
               </div>
             ) : pastBookings.length > 0 ? (
-              <ul className="m-0 list-none space-y-4 p-0">
-                {pastBookings.map((booking) => {
+              <ul className="m-0 list-none space-y-3 p-0">
+                {pastBookings.slice(0, 3).map((booking) => {
                   const b = {
                     ...booking,
                     start_time: booking.start_time || (booking.date && booking.time ? `${booking.date}T${booking.time}:00` : ''),
@@ -1633,14 +1713,9 @@ export default function MasterDashboardStats({
                 })}
               </ul>
             ) : (
-              <div className="flex flex-col items-center rounded-[22px] border-2 border-dashed border-[#D6D3D1] bg-gradient-to-b from-[#F5F5F4] to-white px-5 py-12 text-center shadow-inner">
-                <div className="flex h-20 w-20 items-center justify-center rounded-3xl bg-gradient-to-br from-[#E7E5E4] to-[#D6D3D1] shadow-[0_12px_28px_-12px_rgba(28,25,23,0.25)] ring-4 ring-stone-300/40">
-                  <ClockIcon className="h-10 w-10 text-stone-700" strokeWidth={1.75} aria-hidden />
-                </div>
-                <p className="mt-5 text-[18px] font-black leading-tight text-[#1C1917]">Истории пока нет</p>
-                <p className="mt-2 max-w-[17rem] text-[14px] font-medium leading-relaxed text-[#57534E]">
-                  После завершённых визитов записи появятся в этом списке
-                </p>
+              <div className="rounded-[12px] border border-dashed border-[#E7E2DF] bg-white px-5 py-8 text-center">
+                <p className="text-[13px] font-semibold text-[#2D2D2D]">Нет прошедших записей</p>
+                <p className="mt-1 text-[12px] text-[#6B6B6B]">История появится после завершённых визитов</p>
               </div>
             )
           ) : null}
@@ -1720,42 +1795,108 @@ export default function MasterDashboardStats({
         />
       )}
 
+      {/* Mobile finance mini row — доход + подтверждённые/ожидают (mobile-only) */}
+      {currentStatsBucket && (
+        <div className="grid grid-cols-2 gap-2 lg:hidden">
+          <div className="rounded-[10px] border border-[#E7E2DF] bg-white p-3 shadow-[0_1px_2px_rgba(45,45,45,0.06)]">
+            <p className="text-[11px] leading-tight text-[#A0A0A0]">
+              Доход{stats.top_period_range ? ` · ${stats.top_period_range}` : ''}
+            </p>
+            <p className="mt-1 text-[15px] font-bold tabular-nums leading-tight text-[#45A049]">
+              {formatMoney(Math.round(Number(currentStatsBucket.income_total_rub ?? currentStatsBucket.income ?? 0)))}
+            </p>
+          </div>
+          <div className="rounded-[10px] border border-[#E7E2DF] bg-white p-3 shadow-[0_1px_2px_rgba(45,45,45,0.06)]">
+            <p className="text-[11px] leading-tight text-[#A0A0A0]">Подтв./ожидают</p>
+            <p className="mt-1 text-[15px] font-bold tabular-nums leading-tight text-[#2D2D2D]">
+              <span>{Number(currentStatsBucket.bookings_confirmed ?? 0)}</span>
+              <span className="mx-1 font-normal text-[#A0A0A0]">/</span>
+              <span className="text-amber-700">{Number(currentStatsBucket.bookings_pending ?? 0)}</span>
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Mobile compact tariff card — тариф + срок + кнопка «Продлить» (mobile-only) */}
+      {(balance || subscriptionStatus) && (onOpenSubscriptionModal || onOpenTariff) && (() => {
+        const planTitle =
+          subscriptionStatus?.plan_display_name ||
+          getPlanNameInRussian(subscriptionStatus?.plan_name) ||
+          'Free';
+        const daysRemaining =
+          typeof subscriptionStatus?.days_remaining === 'number'
+            ? subscriptionStatus.days_remaining
+            : null;
+        return (
+          <div className="relative flex items-center justify-between gap-3 overflow-hidden rounded-[10px] bg-gradient-to-br from-[#1B1B1B] to-[#2D2D2D] px-4 py-3 text-white before:pointer-events-none before:absolute before:-right-5 before:-top-5 before:h-24 before:w-24 before:rounded-full before:bg-[radial-gradient(circle,rgba(76,175,80,0.22),transparent_70%)] before:content-[''] lg:hidden">
+            <div className="relative min-w-0">
+              <p className="text-[11px] leading-tight text-white/60">Тариф</p>
+              <p className="mt-0.5 truncate text-[14px] font-bold leading-tight text-white">
+                {planTitle}
+              </p>
+              {daysRemaining != null && (
+                <p className="mt-0.5 text-[11px] leading-tight text-white/60">
+                  Осталось: {daysRemaining} дн.
+                </p>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                if (onOpenSubscriptionModal) {
+                  onOpenSubscriptionModal();
+                } else if (onOpenTariff) {
+                  onOpenTariff();
+                }
+              }}
+              className="relative shrink-0 whitespace-nowrap rounded-lg border border-white/20 bg-white/10 px-3 py-1.5 text-[11px] font-semibold text-white transition hover:bg-white/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
+            >
+              Продлить →
+            </button>
+          </div>
+        );
+      })()}
+
       <div className="lg:hidden">{topServicesSectionMobile}</div>
 
       {/* Гистограммы: только mobile; на desktop график в панели «Активность за неделю» */}
       {stats.weeks_data && stats.weeks_data.length > 0 && (
-        <div className="space-y-4 lg:hidden">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <h2 className="text-[15px] font-semibold tracking-tight text-[#2D2D2D]">Статистика за неделю</h2>
-            <div className="flex flex-row items-stretch gap-2 sm:flex-wrap sm:justify-end">
-              <button
-                type="button"
-                onClick={() => setChartsExpanded((v) => !v)}
-                className="inline-flex min-h-[40px] min-w-0 flex-1 items-center justify-center gap-1 rounded-[10px] border border-dashed border-[#E7E2DF] bg-[#F4F1EF]/80 px-2.5 py-1.5 text-xs font-semibold text-[#2D2D2D] hover:bg-[#EDE8E4] sm:flex-initial"
-              >
-                <ChartBarIcon className="h-3.5 w-3.5 shrink-0 text-gray-600" strokeWidth={2} aria-hidden />
-                <span className="truncate">{chartsExpanded ? 'Скрыть графики' : 'Показать графики'}</span>
-              </button>
-              {onNavigateToStats ? (
-                <button
-                  type="button"
-                  onClick={onNavigateToStats}
-                  className="inline-flex min-h-[40px] min-w-0 flex-1 items-center justify-center gap-1 rounded-[10px] border border-[#E7E2DF] bg-white px-2.5 py-1.5 text-xs font-semibold text-[#2D2D2D] shadow-[0_1px_2px_rgba(45,45,45,0.06)] hover:bg-[#F4F1EF] sm:flex-initial"
-                >
-                  <PresentationChartLineIcon
-                    className="h-3.5 w-3.5 shrink-0 text-gray-600"
-                    strokeWidth={2}
-                    aria-hidden
-                  />
-                  <span className="truncate">Раздел «Статистика»</span>
-                </button>
-              ) : null}
-            </div>
-          </div>
+        <div className="space-y-3 lg:hidden">
+          <button
+            type="button"
+            onClick={() => setChartsExpanded((v) => !v)}
+            className="flex w-full items-center justify-between gap-2 rounded-[10px] border border-[#E7E2DF]/70 bg-white/60 px-3 py-2 text-left transition-colors hover:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4CAF50] focus-visible:ring-offset-1"
+            aria-expanded={chartsExpanded}
+          >
+            <span className="flex items-center gap-2 min-w-0">
+              <ChartBarIcon className="h-3.5 w-3.5 shrink-0 text-[#A0A0A0]" strokeWidth={2} aria-hidden />
+              <span className="truncate text-[12px] font-medium text-[#6B6B6B]">Статистика за неделю</span>
+            </span>
+            <ChevronRightIcon
+              className={`h-3.5 w-3.5 shrink-0 text-[#A0A0A0] transition-transform ${chartsExpanded ? 'rotate-90' : ''}`}
+              strokeWidth={2}
+              aria-hidden
+            />
+          </button>
+          {chartsExpanded && onNavigateToStats ? (
+            <button
+              type="button"
+              onClick={onNavigateToStats}
+              className="inline-flex w-full items-center justify-center gap-1 rounded-[10px] border border-[#E7E2DF] bg-white px-2.5 py-1.5 text-[11px] font-medium text-[#6B6B6B] shadow-[0_1px_2px_rgba(45,45,45,0.06)] hover:bg-[#F4F1EF]"
+            >
+              <PresentationChartLineIcon
+                className="h-3 w-3 shrink-0 text-[#A0A0A0]"
+                strokeWidth={2}
+                aria-hidden
+              />
+              <span className="truncate">Раздел «Статистика»</span>
+            </button>
+          ) : null}
 
+          {chartsExpanded ? (
           <div
             ref={chartsAnchorRef}
-            className={`relative ${chartsExpanded ? '' : 'hidden'}`}
+            className="relative"
           >
             {!hasExtendedStats && (
             <div
@@ -1781,17 +1922,18 @@ export default function MasterDashboardStats({
             )}
 
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 lg:gap-6">
-            {/* График бронирований (слева) */}
+            {/* График бронирований */}
             <div className="rounded-2xl border border-[#E7E2DF]/90 bg-white p-4 shadow-[0_8px_32px_-20px_rgba(45,45,45,0.1)] ring-1 ring-[#2D2D2D]/[0.03] lg:rounded-[14px] lg:p-6 lg:shadow-[0_1px_2px_rgba(45,45,45,0.06)] lg:ring-0">
               <h3 className="mb-2 text-base font-semibold text-[#2D2D2D] lg:mb-4 lg:text-lg">Бронирования за период</h3>
             <div className="h-[220px] w-full lg:h-[300px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <ComposedChart data={stats.weeks_data} margin={{ top: 20, right: 30, bottom: 20, left: 20 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+            <ResponsiveContainer width="100%" height="100%" minWidth={0}>
+              <ComposedChart data={stats.weeks_data} margin={{ top: 16, right: 16, bottom: 12, left: 8 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
                 <XAxis
                   dataKey="period_label"
-                  tick={{ fontSize: 12 }}
-                  label={{ value: 'Период', position: 'insideBottom', offset: -10, fontSize: 11 }}
+                  tick={{ fontSize: 11, fill: '#6B6B6B' }}
+                  tickLine={false}
+                  axisLine={{ stroke: '#E7E2DF' }}
                   tickFormatter={(value, index) =>
                     formatStatsAxisLabel(
                       stats.weeks_data[index]?.period_start,
@@ -1800,76 +1942,42 @@ export default function MasterDashboardStats({
                     )
                   }
                 />
-                <YAxis 
-                  yAxisId="left"
-                  tick={{ fontSize: 12 }}
-                  label={{ value: 'Количество', angle: -90, position: 'insideLeft', fontSize: 11 }}
+                <YAxis
+                  tick={{ fontSize: 11, fill: '#6B6B6B' }}
+                  tickLine={false}
+                  axisLine={false}
+                  width={32}
                 />
-                <YAxis 
-                  yAxisId="right"
-                  orientation="right"
-                  tick={{ fontSize: 12 }}
-                  label={{ value: 'Изменение %', angle: 90, position: 'insideRight', fontSize: 11 }}
-                />
-                <Tooltip content={<CustomTooltip chartType="bookings" />} />
-                <Bar yAxisId="left" stackId="bookings" dataKey="bookings_confirmed" radius={[0, 0, 0, 0]}>
-                  {stats.weeks_data.map((entry, index) => (
-                    <Cell key={`bc-${index}`} fill={stackSegmentFills(entry).confirmed} />
-                  ))}
-                </Bar>
-                <Bar yAxisId="left" stackId="bookings" dataKey="bookings_pending" radius={[8, 8, 0, 0]}>
-                  {stats.weeks_data.map((entry, index) => (
-                    <Cell key={`bp-${index}`} fill={stackSegmentFills(entry).pending} />
-                  ))}
-                </Bar>
-                <Line
-                  yAxisId="right"
-                  type="monotone"
-                  dataKey="bookings_change"
-                  stroke={MASTER_STATS_CHANGE_LINE_STROKE}
-                  strokeWidth={2}
-                  dot={{ fill: MASTER_STATS_CHANGE_LINE_DOT, r: 4 }}
-                  activeDot={{ r: 6 }}
-                />
+                <Tooltip content={<CustomTooltip chartType="bookings" />} cursor={{ fill: 'rgba(76,175,80,0.06)' }} />
+                <Bar stackId="bookings" dataKey="bookings_confirmed" fill="#4CAF50" radius={[6, 6, 0, 0]} maxBarSize={36} />
+                <Bar stackId="bookings" dataKey="bookings_pending" fill="#C8E8D8" radius={[6, 6, 0, 0]} maxBarSize={36} />
               </ComposedChart>
             </ResponsiveContainer>
             </div>
-            <div className="mt-2 flex flex-nowrap justify-center gap-x-1.5 overflow-x-auto px-0.5 text-[10px] leading-tight text-gray-700 [-ms-overflow-style:none] [scrollbar-width:none] sm:gap-x-2 sm:text-[11px] lg:mt-4 lg:flex-wrap lg:gap-x-4 lg:gap-y-2 lg:overflow-visible lg:px-0 lg:text-sm [&::-webkit-scrollbar]:hidden">
-              <div className="flex shrink-0 items-center gap-1 lg:gap-2">
-                <div className="h-2.5 w-2.5 shrink-0 rounded bg-green-500 lg:h-3 lg:w-3" />
-                <span className="whitespace-nowrap">
-                  <span className="lg:hidden">Сейчас</span>
-                  <span className="hidden lg:inline">Текущий период</span>
-                </span>
+            <div className="mt-3 flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-[12px] leading-tight text-[#4A4A4A]">
+              <div className="flex shrink-0 items-center gap-1.5">
+                <span className="h-2.5 w-2.5 shrink-0 rounded-sm bg-[#4CAF50]" aria-hidden />
+                <span>Подтверждённые</span>
               </div>
-              <div className="flex shrink-0 items-center gap-1 lg:gap-2">
-                <div className="h-2.5 w-2.5 shrink-0 rounded bg-gray-400 lg:h-3 lg:w-3" />
-                <span className="whitespace-nowrap">
-                  <span className="lg:hidden">Прошлые</span>
-                  <span className="hidden lg:inline">Прошлые периоды</span>
-                </span>
-              </div>
-              <div className="flex shrink-0 items-center gap-1 lg:gap-2">
-                <div className="h-2.5 w-2.5 shrink-0 rounded bg-blue-400 lg:h-3 lg:w-3" />
-                <span className="whitespace-nowrap">
-                  <span className="lg:hidden">Будущие</span>
-                  <span className="hidden lg:inline">Будущие периоды</span>
-                </span>
+              <div className="flex shrink-0 items-center gap-1.5">
+                <span className="h-2.5 w-2.5 shrink-0 rounded-sm bg-[#C8E8D8]" aria-hidden />
+                <span>Ожидают</span>
               </div>
             </div>
           </div>
 
-          {/* График доходов (справа) */}
+          {/* График доходов */}
           <div className="rounded-2xl border border-[#E7E2DF]/90 bg-white p-4 shadow-[0_8px_32px_-20px_rgba(45,45,45,0.1)] ring-1 ring-[#2D2D2D]/[0.03] lg:rounded-[14px] lg:p-6 lg:shadow-[0_1px_2px_rgba(45,45,45,0.06)] lg:ring-0">
             <h3 className="mb-2 text-base font-semibold text-[#2D2D2D] lg:mb-4 lg:text-lg">Доход за период</h3>
             <div className="h-[220px] w-full lg:h-[300px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <ComposedChart data={stats.weeks_data} margin={{ top: 20, right: 30, bottom: 20, left: 20 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+            <ResponsiveContainer width="100%" height="100%" minWidth={0}>
+              <ComposedChart data={stats.weeks_data} margin={{ top: 16, right: 16, bottom: 12, left: 8 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
                 <XAxis
                   dataKey="period_label"
-                  tick={{ fontSize: 12 }}
-                  label={{ value: 'Период', position: 'insideBottom', offset: -10, fontSize: 11 }}
+                  tick={{ fontSize: 11, fill: '#6B6B6B' }}
+                  tickLine={false}
+                  axisLine={{ stroke: '#E7E2DF' }}
                   tickFormatter={(value, index) =>
                     formatStatsAxisLabel(
                       stats.weeks_data[index]?.period_start,
@@ -1878,70 +1986,36 @@ export default function MasterDashboardStats({
                     )
                   }
                 />
-                <YAxis 
-                  yAxisId="left"
-                  tick={{ fontSize: 12 }}
-                  label={{ value: 'Рубли', angle: -90, position: 'insideLeft', fontSize: 11 }}
+                <YAxis
+                  tick={{ fontSize: 11, fill: '#6B6B6B' }}
+                  tickLine={false}
+                  axisLine={false}
+                  width={40}
                 />
-                <YAxis 
-                  yAxisId="right"
-                  orientation="right"
-                  tick={{ fontSize: 12 }}
-                  label={{ value: 'Изменение %', angle: 90, position: 'insideRight', fontSize: 11 }}
-                />
-                <Tooltip content={<CustomTooltip chartType="income" />} />
-                <Bar yAxisId="left" stackId="income" dataKey="income_confirmed_rub" radius={[0, 0, 0, 0]}>
-                  {stats.weeks_data.map((entry, index) => (
-                    <Cell key={`ic-${index}`} fill={stackSegmentFills(entry).confirmed} />
-                  ))}
-                </Bar>
-                <Bar yAxisId="left" stackId="income" dataKey="income_pending_rub" radius={[8, 8, 0, 0]}>
-                  {stats.weeks_data.map((entry, index) => (
-                    <Cell key={`ip-${index}`} fill={stackSegmentFills(entry).pending} />
-                  ))}
-                </Bar>
-                <Line
-                  yAxisId="right"
-                  type="monotone"
-                  dataKey="income_change"
-                  stroke={MASTER_STATS_CHANGE_LINE_STROKE}
-                  strokeWidth={2}
-                  dot={{ fill: MASTER_STATS_CHANGE_LINE_DOT, r: 4 }}
-                  activeDot={{ r: 6 }}
-                />
+                <Tooltip content={<CustomTooltip chartType="income" />} cursor={{ fill: 'rgba(76,175,80,0.06)' }} />
+                <Bar stackId="income" dataKey="income_confirmed_rub" fill="#4CAF50" radius={[6, 6, 0, 0]} maxBarSize={36} />
+                <Bar stackId="income" dataKey="income_pending_rub" fill="#C8E8D8" radius={[6, 6, 0, 0]} maxBarSize={36} />
               </ComposedChart>
             </ResponsiveContainer>
             </div>
-            <div className="mt-2 flex flex-nowrap justify-center gap-x-1.5 overflow-x-auto px-0.5 text-[10px] leading-tight text-gray-700 [-ms-overflow-style:none] [scrollbar-width:none] sm:gap-x-2 sm:text-[11px] lg:mt-4 lg:flex-wrap lg:gap-x-4 lg:gap-y-2 lg:overflow-visible lg:px-0 lg:text-sm [&::-webkit-scrollbar]:hidden">
-              <div className="flex shrink-0 items-center gap-1 lg:gap-2">
-                <div className="h-2.5 w-2.5 shrink-0 rounded bg-green-500 lg:h-3 lg:w-3" />
-                <span className="whitespace-nowrap">
-                  <span className="lg:hidden">Сейчас</span>
-                  <span className="hidden lg:inline">Текущий период</span>
-                </span>
+            <div className="mt-3 flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-[12px] leading-tight text-[#4A4A4A]">
+              <div className="flex shrink-0 items-center gap-1.5">
+                <span className="h-2.5 w-2.5 shrink-0 rounded-sm bg-[#4CAF50]" aria-hidden />
+                <span>Подтверждённые</span>
               </div>
-              <div className="flex shrink-0 items-center gap-1 lg:gap-2">
-                <div className="h-2.5 w-2.5 shrink-0 rounded bg-gray-400 lg:h-3 lg:w-3" />
-                <span className="whitespace-nowrap">
-                  <span className="lg:hidden">Прошлые</span>
-                  <span className="hidden lg:inline">Прошлые периоды</span>
-                </span>
-              </div>
-              <div className="flex shrink-0 items-center gap-1 lg:gap-2">
-                <div className="h-2.5 w-2.5 shrink-0 rounded bg-blue-400 lg:h-3 lg:w-3" />
-                <span className="whitespace-nowrap">
-                  <span className="lg:hidden">Будущие</span>
-                  <span className="hidden lg:inline">Будущие периоды</span>
-                </span>
+              <div className="flex shrink-0 items-center gap-1.5">
+                <span className="h-2.5 w-2.5 shrink-0 rounded-sm bg-[#C8E8D8]" aria-hidden />
+                <span>Ожидают</span>
               </div>
             </div>
           </div>
         </div>
         </div>
-      </div>
+      ) : null}
+        </div>
       )}
         </div>
-        <aside className="min-w-0 space-y-4 max-lg:order-1 lg:col-span-4 lg:space-y-4">
+        <aside className="min-w-0 space-y-4 max-lg:order-2 lg:col-span-4 lg:space-y-4">
           {(balance || subscriptionStatus) && (() => {
             const planTitle =
               subscriptionStatus?.plan_display_name ||
@@ -2043,7 +2117,7 @@ export default function MasterDashboardStats({
             );
           })()}
           {(onOpenSchedule || onOpenTariff || onOpenSettings) && (
-            <div className="lg:hidden overflow-hidden rounded-[22px] border-2 border-[#E7E2DF] bg-gradient-to-b from-white to-[#F0EBE7] p-4 shadow-[0_20px_44px_-28px_rgba(28,25,23,0.4)] ring-2 ring-[#4CAF50]/15">
+            <div className="hidden overflow-hidden rounded-[22px] border-2 border-[#E7E2DF] bg-gradient-to-b from-white to-[#F0EBE7] p-4 shadow-[0_20px_44px_-28px_rgba(28,25,23,0.4)] ring-2 ring-[#4CAF50]/15">
               <div className="mb-3 flex items-end justify-between gap-2">
                 <div>
                   <p className="text-[10px] font-extrabold uppercase tracking-[0.22em] text-[#2E7D32]">Быстрые переходы</p>

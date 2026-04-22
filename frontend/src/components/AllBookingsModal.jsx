@@ -264,12 +264,12 @@ function PaginationControls({ page, totalPages, total, onPageChange, loading, em
   const hasNext = page < totalPages;
 
   const wrapClass = embedded
-    ? 'mt-0 flex flex-nowrap items-center gap-x-1 gap-y-0 overflow-x-auto text-[10px] text-gray-600 [-ms-overflow-style:none] [scrollbar-width:none] sm:text-[11px] [&::-webkit-scrollbar]:hidden lg:mt-0 lg:mb-0 lg:flex-wrap lg:overflow-visible lg:gap-2 lg:rounded-md lg:border lg:border-gray-200 lg:bg-gray-50/70 lg:px-2.5 lg:py-1.5 lg:text-sm'
+    ? 'flex flex-nowrap items-center gap-x-1.5 overflow-x-auto text-[13px] text-[#6B6B6B] [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden lg:mt-0 lg:mb-0 lg:flex-wrap lg:overflow-visible lg:gap-2 lg:rounded-md lg:border lg:border-gray-200 lg:bg-gray-50/70 lg:px-2.5 lg:py-1.5 lg:text-sm lg:text-gray-600'
     : 'mb-2 flex flex-wrap items-center gap-x-1.5 gap-y-1 rounded-md border border-gray-200 bg-gray-50 px-2 py-1.5 text-[11px] text-gray-600 lg:mb-3 lg:gap-2 lg:rounded-lg lg:border-0 lg:border-b lg:bg-gray-50/50 lg:px-3 lg:py-2 lg:text-sm';
 
   return (
     <div className={wrapClass}>
-      <span className="shrink-0 font-medium text-gray-700 lg:hidden">Стр.</span>
+      <span className="shrink-0 font-medium text-[#6B6B6B] lg:hidden">Стр.</span>
       <span className="hidden shrink-0 font-medium text-gray-600 lg:inline">Страница:</span>
       <input
         type="number"
@@ -279,7 +279,7 @@ function PaginationControls({ page, totalPages, total, onPageChange, loading, em
         onChange={(e) => setInputPage(e.target.value)}
         onKeyDown={(e) => e.key === 'Enter' && handleApply()}
         className={`shrink-0 rounded border border-gray-300 text-center tabular-nums lg:w-14 lg:px-2 lg:py-1 lg:text-sm ${
-          embedded ? 'w-9 px-0.5 py-px text-[10px] sm:w-10 sm:text-[11px]' : 'w-11 px-1 py-0.5 text-[11px]'
+          embedded ? 'w-10 px-1 py-0.5 text-[13px]' : 'w-11 px-1 py-0.5 text-[11px]'
         }`}
         disabled={loading}
         aria-label="Номер страницы"
@@ -288,7 +288,7 @@ function PaginationControls({ page, totalPages, total, onPageChange, loading, em
         type="button"
         onClick={handleApply}
         disabled={loading}
-        className="shrink-0 rounded px-1.5 py-0.5 text-[11px] font-medium text-green-700 hover:bg-green-50 disabled:opacity-50 lg:hidden"
+        className="shrink-0 rounded px-1.5 py-0.5 text-[13px] font-medium text-green-700 hover:bg-green-50 disabled:opacity-50 lg:hidden"
       >
         OK
       </button>
@@ -337,7 +337,7 @@ function PaginationControls({ page, totalPages, total, onPageChange, loading, em
         <ChevronRightIcon className="h-4 w-4" strokeWidth={2} aria-hidden />
       </button>
       {total != null && (
-        <span className="ml-auto shrink-0 text-[10px] text-gray-500 lg:ml-1 lg:text-xs">
+        <span className="ml-auto shrink-0 text-[11px] text-gray-400 lg:ml-1 lg:text-xs lg:text-gray-500">
           всего: {total}
         </span>
       )}
@@ -623,30 +623,30 @@ export default function AllBookingsModal({ isOpen, onClose, onConfirmSuccess, in
 
   const modalLayer = (
     <div
-      className={`fixed inset-0 ${masterZClass('allBookingsListModal')} isolate flex items-end justify-center bg-black/60 lg:items-center`}
+      className="fixed inset-0 z-[200] isolate bg-black/70 lg:flex lg:items-center lg:justify-center lg:bg-black/60"
       onClick={handleBackdropClick}
       onMouseDown={handleMouseDown}
     >
       <div
-        className="relative z-[1] flex max-h-[100dvh] w-full max-w-full flex-col rounded-t-2xl bg-white pt-0 shadow-xl lg:mx-4 lg:max-h-[85vh] lg:max-w-3xl lg:rounded-xl"
+        className="fixed inset-x-0 bottom-0 top-[calc(6rem+env(safe-area-inset-top,0px))] flex flex-col overflow-hidden bg-white lg:relative lg:inset-auto lg:mx-4 lg:h-auto lg:max-h-[85vh] lg:max-w-3xl lg:rounded-xl lg:shadow-xl"
         role="dialog"
         aria-modal="true"
         aria-labelledby="all-bookings-modal-title"
       >
-        <div className="shrink-0 space-y-1 border-b border-gray-200 bg-white px-2.5 pb-2 pt-[max(0.875rem,calc(10px+env(safe-area-inset-top,0px)))] lg:space-y-2 lg:px-5 lg:pb-3 lg:pt-4">
-          <div className="flex items-center gap-2 lg:gap-3">
+        <div className="sticky top-0 z-20 border-b border-[#E7E2DF] bg-white lg:space-y-2 lg:px-5 lg:pb-3 lg:pt-4">
+          <div className="flex items-center justify-between gap-2 px-4 py-[14px] lg:gap-3 lg:p-0">
             <h2
               id="all-bookings-modal-title"
-              className="order-2 min-w-0 flex-1 text-center text-sm font-semibold leading-snug text-gray-900 lg:order-1 lg:text-left lg:text-lg"
+              className="order-1 min-w-0 flex-1 truncate text-[18px] font-semibold leading-snug text-[#2D2D2D] lg:text-lg"
             >
               {title}
             </h2>
-            <div className="order-3 flex shrink-0 items-center gap-1.5 lg:order-2">
+            <div className="order-2 flex shrink-0 items-center gap-1.5">
               {mode === 'past' && (
                 <button
                   type="button"
                   onClick={() => setFiltersPanelOpen(true)}
-                  className="rounded-md px-2 py-1 text-[11px] font-semibold text-green-700 hover:bg-green-50 lg:px-3 lg:py-1.5 lg:text-sm"
+                  className="rounded-md px-2 py-1 text-[13px] font-medium text-green-700 hover:bg-green-50 lg:px-3 lg:py-1.5 lg:text-sm lg:font-semibold"
                 >
                   Фильтры
                 </button>
@@ -655,20 +655,22 @@ export default function AllBookingsModal({ isOpen, onClose, onConfirmSuccess, in
             <button
               type="button"
               onClick={onClose}
-              className="order-1 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border-2 border-gray-300 bg-white text-gray-800 shadow-md hover:bg-gray-50 hover:border-gray-400 lg:order-3 lg:h-10 lg:w-10 lg:rounded-full lg:border lg:border-gray-200 lg:bg-gray-100 lg:shadow-sm lg:hover:bg-gray-200"
+              className="relative z-30 order-3 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] bg-[#F4F1EF] text-[#6B6B6B] hover:bg-[#EAE4E0] focus:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400 lg:h-10 lg:w-10 lg:rounded-full lg:bg-white lg:text-neutral-900 lg:shadow-md lg:ring-1 lg:ring-neutral-300 lg:hover:bg-neutral-50 lg:hover:ring-neutral-400"
               aria-label="Закрыть список записей"
             >
-              <XMarkIcon className="h-6 w-6 lg:h-5 lg:w-5" strokeWidth={2.5} />
+              <XMarkIcon className="h-4 w-4 lg:h-5 lg:w-5" strokeWidth={2} />
             </button>
           </div>
-          <PaginationControls
-            embedded
-            page={page}
-            totalPages={totalPages}
-            total={total}
-            onPageChange={handlePageChange}
-            loading={loading}
-          />
+          <div className="px-4 pb-2.5 lg:p-0">
+            <PaginationControls
+              embedded
+              page={page}
+              totalPages={totalPages}
+              total={total}
+              onPageChange={handlePageChange}
+              loading={loading}
+            />
+          </div>
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-2.5 py-1.5 pb-[max(6rem,calc(4.5rem+env(safe-area-inset-bottom,0px)))] lg:px-5 lg:py-3 lg:pb-6">

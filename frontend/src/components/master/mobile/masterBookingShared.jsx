@@ -67,36 +67,39 @@ export function MasterBookingClientBlockMobile({ booking, noteSlot = null, size 
   const nameLine = alias || account || legacyDistinct;
   const nameSize = size === 'comfortable' ? 'text-base font-semibold' : 'text-[11px] font-semibold';
   const phoneSize = size === 'comfortable' ? 'text-sm' : 'text-[10px]';
-  const nameColor = alias ? '' : 'text-gray-900';
+  const nameStyle = alias ? { color: BRAND_GREEN } : undefined;
+  const nameColorCls = alias ? '' : 'text-gray-900';
 
-  let primary;
-  let secondary;
-  if (nameLine) {
-    primary = (
-      <span className={`truncate ${nameSize} leading-tight ${nameColor}`} style={alias ? { color: BRAND_GREEN } : undefined}>
+  let content;
+  if (nameLine && phone) {
+    // Имя и телефон в одной строке: имя акцентом, разделитель и телефон слабее.
+    content = (
+      <span className={`block truncate leading-tight ${nameSize}`}>
+        <span className={nameColorCls} style={nameStyle}>{nameLine}</span>
+        <span className="mx-1 font-normal text-gray-400">·</span>
+        <span className={`font-normal tabular-nums text-gray-500 ${phoneSize}`}>{phone}</span>
+      </span>
+    );
+  } else if (nameLine) {
+    content = (
+      <span className={`block truncate leading-tight ${nameSize} ${nameColorCls}`} style={nameStyle}>
         {nameLine}
       </span>
     );
-    secondary = phone ? (
-      <span className={`mt-0.5 block truncate tabular-nums leading-tight text-gray-500 ${phoneSize}`}>{phone}</span>
-    ) : (
-      <span className={`mt-0.5 block truncate leading-tight text-gray-400 ${phoneSize}`}>Телефон не указан</span>
-    );
   } else if (phone) {
-    primary = <span className={`truncate ${nameSize} leading-tight text-gray-900 tabular-nums`}>{phone}</span>;
-    secondary = null;
+    content = (
+      <span className={`block truncate leading-tight tabular-nums text-gray-900 ${nameSize}`}>{phone}</span>
+    );
   } else {
-    primary = <span className={`truncate ${nameSize} leading-tight text-gray-500`}>Клиент не указан</span>;
-    secondary = null;
+    content = (
+      <span className={`block truncate leading-tight text-gray-500 ${nameSize}`}>Клиент не указан</span>
+    );
   }
 
   return (
-    <div className="flex min-w-0 items-start gap-1">
-      <div className="min-w-0 flex-1">
-        {primary}
-        {secondary}
-      </div>
-      {noteSlot ? <span className="shrink-0 pt-0.5">{noteSlot}</span> : null}
+    <div className="flex min-w-0 items-center gap-1">
+      <div className="min-w-0 flex-1">{content}</div>
+      {noteSlot ? <span className="shrink-0">{noteSlot}</span> : null}
     </div>
   );
 }

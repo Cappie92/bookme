@@ -17,10 +17,10 @@ function MenuNavButton({ label, tab, activeTab, onSelect, badge, dataTestId }) {
       type="button"
       data-testid={dataTestId}
       onClick={() => onSelect(tab)}
-      className={`flex w-full items-center justify-between gap-2 border-b border-gray-100/90 px-3 py-2.5 text-left text-sm leading-snug transition-colors last:border-b-0 min-h-[44px] ${
+      className={`flex w-full items-center justify-between gap-2 border-b border-[#E7E2DF]/55 px-3 py-2.5 text-left text-[14px] leading-snug transition-colors last:border-b-0 min-h-[48px] ${
         active
-          ? 'bg-[#2e7d32]/[0.07] font-medium text-[#2e7d32]'
-          : 'font-normal text-gray-600 hover:bg-gray-50/90'
+          ? 'bg-[#2e7d32]/[0.08] font-semibold text-[#2e7d32]'
+          : 'font-normal text-[#57534E] hover:bg-[#F4F1EF]/90'
       } `}
     >
       <span className="flex min-w-0 items-center gap-2.5">
@@ -109,13 +109,13 @@ export default function MasterMobileMenu({
 
   return (
     <div
-      className={`fixed inset-0 ${masterZClass('fullscreenMenu')} flex flex-col bg-white lg:hidden`}
+      className={`fixed inset-0 ${masterZClass('fullscreenMenu')} flex flex-col bg-[#FDFCFB] lg:hidden`}
       role="dialog"
       aria-modal="true"
       aria-label="Меню кабинета мастера"
     >
-      <div className="flex shrink-0 items-center justify-between border-b border-gray-100 px-3 py-2.5 pt-[max(0.75rem,env(safe-area-inset-top))]">
-        <h2 className="text-base font-medium tracking-tight text-gray-900">Разделы</h2>
+      <div className="flex shrink-0 items-center justify-between border-b border-[#E7E2DF]/80 bg-[linear-gradient(180deg,#FFFFFF_0%,#FAF8F6_100%)] px-3 py-2.5 pt-[max(0.75rem,env(safe-area-inset-top))] shadow-[0_1px_0_rgba(45,45,45,0.04)]">
+        <h2 className="text-[15px] font-semibold tracking-tight text-[#2D2D2D]">Разделы</h2>
         <button
           type="button"
           onClick={onClose}
@@ -126,7 +126,7 @@ export default function MasterMobileMenu({
         </button>
       </div>
 
-      <nav className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+      <nav className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-white pb-[max(0.5rem,env(safe-area-inset-bottom))]">
         {catalogRows.map((row) =>
           row.unlocked ? (
             <MenuNavButton
