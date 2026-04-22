@@ -18,10 +18,10 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v5
       
-    - name: Install sshpass
+    - name: Install deploy tools
       run: |
         sudo apt-get update
-        sudo apt-get install -y sshpass
+        sudo apt-get install -y sshpass rsync
         
     - name: Add known hosts
       run: |
@@ -31,26 +31,13 @@ jobs:
     - name: Deploy to server
       run: |
         sshpass -p '${{ secrets.SERVER_PASSWORD }}' ssh ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} << 'EOF'
-          # Same logic as scripts/prod/compose.sh (not sourced here: scp has not run yet)
-          compose_run() {
-            if docker compose version >/dev/null 2>&1; then
-              docker compose "$@"
-            elif docker-compose version >/dev/null 2>&1; then
-              docker-compose "$@"
-            else
-              echo "ERROR: need 'docker compose' (Compose v2 plugin) or 'docker-compose' (v1) in PATH." >&2
-              return 1
-            fi
-          }
-          # Create project directory
           mkdir -p /opt/dedato
-          cd /opt/dedato
-          # Intentionally no "compose down" here: keep stack running during artifact upload.
         EOF
-        
-        # Copy files to server
-        sshpass -p '${{ secrets.SERVER_PASSWORD }}' scp -r . ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:/opt/dedato/
-        
+
+        export RSYNC_RSH="sshpass -p '${{ secrets.SERVER_PASSWORD }}' ssh -o StrictHostKeyChecking=yes"
+
+        rsync -az --info=progress2           --exclude '.git'           --exclude '.github'           --exclude '.cursor'           --exclude '.vscode'           --exclude '.idea'           --exclude 'docs'           --exclude 'frontend/node_modules'           --exclude 'frontend/dist'           --exclude 'backend/.venv'           --exclude 'backend/venv'           --exclude '**/__pycache__'           --exclude '**/.pytest_cache'           --exclude '**/.mypy_cache'           --exclude '**/.ruff_cache'           --exclude '**/node_modules'           --exclude '**/dist'           --exclude '**/*.log'           ./ ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:/opt/dedato/
+
         # Deploy on server
         sshpass -p '${{ secrets.SERVER_PASSWORD }}' ssh ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} << 'EOF'
           set -euo pipefail
