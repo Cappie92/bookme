@@ -2634,6 +2634,23 @@ class SubscriptionPlanOut(SubscriptionPlanBase):
         use_enum_values = True
 
 
+class PricingCatalogServiceFunctionItem(BaseModel):
+    """Минимальный read-only срез service_functions для публичной витрины тарифов."""
+
+    id: int
+    name: str
+    display_name: Optional[str] = None
+    description: Optional[str] = None
+    display_order: int = 0
+
+
+class SubscriptionPlanPricingCatalogResponse(BaseModel):
+    """Один запрос для страницы тарифов: планы + подписи функций из админки."""
+
+    plans: List[SubscriptionPlanOut]
+    service_functions: List[PricingCatalogServiceFunctionItem]
+
+
 
 
 # Схемы для функций сервиса
