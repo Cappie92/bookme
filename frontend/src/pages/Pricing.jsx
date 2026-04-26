@@ -143,7 +143,7 @@ function PeriodToggle({ value, onChange, discountBadgeLabel }) {
   ]
   return (
     <div
-      className="inline-flex rounded-xl p-1 bg-[#F9F7F6] border border-[#E7E2DF]"
+      className="inline-flex rounded-xl p-1 bg-[#F9F7F6] border border-[#E7E2DF] max-sm:w-full max-sm:max-w-full max-sm:gap-0.5"
       role="group"
       aria-label="Период оплаты"
     >
@@ -152,13 +152,13 @@ function PeriodToggle({ value, onChange, discountBadgeLabel }) {
           key={opt.months}
           type="button"
           onClick={() => onChange(opt.months)}
-          className={`relative px-3 sm:px-4 py-2 text-[13px] sm:text-sm font-semibold rounded-lg transition inline-flex items-center gap-2 whitespace-nowrap ${
+          className={`relative max-sm:flex-1 max-sm:min-w-0 max-sm:px-1 max-sm:py-2.5 max-sm:text-[10px] max-sm:font-semibold max-sm:leading-tight max-sm:justify-center max-sm:text-center max-sm:whitespace-normal sm:px-4 sm:py-2 text-[13px] sm:text-sm font-semibold rounded-lg transition inline-flex items-center sm:gap-1.5 sm:whitespace-nowrap max-lg:min-h-[44px] ${
             value === opt.months ? 'bg-white text-[#1C1917] shadow-sm' : 'text-neutral-600'
           }`}
         >
-          {opt.label}
+          <span className="max-sm:block max-sm:px-0.5">{opt.label}</span>
           {opt.months === 12 && discountBadgeLabel ? (
-            <span className="text-[10px] uppercase tracking-wide font-bold text-[#3D8B42] bg-[#DFF5EC] border border-[#C8E8D8] rounded-full px-2 py-0.5">
+            <span className="hidden sm:inline-flex shrink-0 text-[10px] uppercase tracking-wide font-bold text-[#3D8B42] bg-[#DFF5EC] border border-[#C8E8D8] rounded-full px-2 py-0.5">
               {discountBadgeLabel}
             </span>
           ) : null}
@@ -196,10 +196,10 @@ export default function Pricing() {
       'unlimited_bookings',
       'custom_domain',
       'clients_list',
-      'loyalty',
-      'finance',
       'extended_stats',
       'client_restrictions',
+      'loyalty',
+      'finance',
     ]
     if (hasAnyYearlyFreeze) {
       desiredOrder.push('freeze_yearly')
@@ -251,18 +251,24 @@ export default function Pricing() {
 
     return (
       <div>
-        <div className="font-display text-4xl md:text-5xl font-bold text-[#1C1917] tracking-tight">
+        <div className="font-display text-4xl max-sm:text-[26px] md:text-5xl font-bold text-[#1C1917] tracking-tight leading-none">
           {formatRub(perMonth)}
         </div>
-        <p className="mt-1 text-sm text-neutral-500">за месяц в пакете на {formatMonthsRu(duration)}</p>
-        <p className="mt-2 text-sm text-neutral-600">
+        <p className="mt-1 max-sm:mt-0.5 text-sm max-sm:text-[13px] max-sm:leading-snug text-neutral-500">
+          за месяц в пакете на {formatMonthsRu(duration)}
+        </p>
+        <p className="mt-2 max-sm:mt-1 text-sm max-sm:text-[13px] max-sm:leading-snug text-neutral-600">
           К оплате: <span className="font-semibold text-[#1C1917]">{formatRub(total)}</span>
         </p>
         {savings != null ? (
-          <p className="mt-1 text-xs font-medium text-[#3D8B42]">Выгода к помесячному пакету: {savings}%</p>
+          <p className="mt-1 max-sm:mt-0.5 text-xs max-sm:leading-snug font-medium text-[#3D8B42]">
+            Выгода к помесячному пакету: {savings}%
+          </p>
         ) : null}
         {freeze > 0 ? (
-          <p className="mt-2 text-xs text-neutral-600">Дней заморозки в этом пакете: {freeze}</p>
+          <p className="mt-2 max-sm:mt-1 text-xs max-sm:leading-snug text-neutral-600">
+            Дней заморозки в этом пакете: {freeze}
+          </p>
         ) : null}
       </div>
     )
@@ -275,34 +281,43 @@ export default function Pricing() {
         <meta name="description" content="Тарифы DeDato: сравните условия и стоимость и выберите лучший вариант." />
       </Helmet>
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-14 md:pb-20">
+      <div className="max-w-7xl mx-auto px-5 sm:px-6 lg:px-8 pb-14 md:pb-20">
         {/* Hero */}
         <section
-          className="rounded-2xl md:rounded-3xl py-8 md:py-12 px-3 sm:px-6 md:px-8 mb-10 md:mb-14"
+          className="rounded-2xl md:rounded-3xl py-8 md:py-12 px-5 sm:px-6 md:px-8 mb-10 md:mb-14 max-sm:pt-12 max-sm:pb-10"
           style={{
             backgroundImage:
               'radial-gradient(ellipse 900px 420px at 110% -10%, rgba(76,175,80,0.07), transparent 55%), radial-gradient(ellipse 500px 300px at -5% 110%, rgba(76,175,80,0.04), transparent 55%)',
           }}
         >
           <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-6">
-            <div className="max-w-2xl">
-              <h1 className="text-3xl md:text-5xl font-bold text-neutral-900 leading-[1.08] tracking-[-0.02em]">
+            <div className="max-w-2xl max-sm:text-center">
+              <h1 className="text-[32px] sm:text-3xl md:text-5xl font-bold text-neutral-900 leading-[1.08] tracking-[-0.02em]">
                 Выберите тариф, который подходит вашему{" "}
                 <span className="text-[#45A049]">формату работы</span>
               </h1>
-              <p className="mt-4 text-base md:text-lg text-neutral-600 leading-relaxed">
+              <p className="mt-4 text-[15px] sm:text-base md:text-lg text-neutral-600 leading-relaxed">
                 Сравните условия, возможности и стоимость — и подключите план, который вам комфортен.
               </p>
             </div>
-            <div className="flex flex-col items-start gap-3">
+            <div className="flex flex-col items-start gap-3 max-lg:w-full max-lg:items-center">
               {loading ? (
                 <div className="h-11 w-64 rounded-xl bg-white/60 border border-[#E7E2DF] animate-pulse" />
               ) : (
-                <PeriodToggle
-                  value={billingPeriodMonths}
-                  onChange={setBillingPeriodMonths}
-                  discountBadgeLabel={discountBadgeLabel}
-                />
+                <div className="max-sm:w-full max-sm:max-w-full">
+                  <PeriodToggle
+                    value={billingPeriodMonths}
+                    onChange={setBillingPeriodMonths}
+                    discountBadgeLabel={discountBadgeLabel}
+                  />
+                  {discountBadgeLabel ? (
+                    <div className="sm:hidden mt-1.5 flex w-full justify-end pr-0.5">
+                      <span className="inline-flex max-w-full min-w-0 items-center rounded-full bg-[#4CAF50] px-2.5 py-1 text-[10px] font-bold leading-none tracking-wide text-white tabular-nums">
+                        <span className="truncate">{discountBadgeLabel}</span>
+                      </span>
+                    </div>
+                  ) : null}
+                </div>
               )}
             </div>
           </div>
@@ -361,7 +376,7 @@ export default function Pricing() {
             </div>
           ) : (
             <div
-              className={`grid gap-4 md:gap-6 ${
+              className={`grid max-sm:gap-2.5 gap-4 md:gap-6 ${
                 visiblePlans.length >= 4
                   ? 'md:grid-cols-2 xl:grid-cols-4'
                   : visiblePlans.length === 3
@@ -381,54 +396,56 @@ export default function Pricing() {
                 return (
                   <article
                     key={plan.id}
-                    className={`${CARD} p-6 flex flex-col shadow-md ${isRecommended ? 'ring-2 ring-[#4CAF50]/25 shadow-[0_18px_40px_rgba(16,24,40,0.10)]' : ''}`}
+                    className={`${CARD} p-6 max-sm:p-3.5 flex flex-col shadow-md rounded-[20px] ${isRecommended ? 'ring-2 ring-[#4CAF50]/25 shadow-[0_18px_40px_rgba(16,24,40,0.10)]' : ''}`}
                   >
-                    <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-start justify-between gap-2 max-sm:gap-1.5">
                       <div className="min-w-0">
-                        <h3 className="text-lg font-bold text-[#1C1917] truncate">{getPlanDisplayName(plan)}</h3>
-                        <div className="mt-2 flex flex-wrap gap-2">
+                        <h3 className="text-lg max-sm:text-[15px] font-bold text-[#1C1917] truncate leading-tight">
+                          {getPlanDisplayName(plan)}
+                        </h3>
+                        <div className="mt-2 max-sm:mt-1 flex flex-wrap gap-2 max-sm:gap-1.5">
                           {isRecommended ? (
-                            <span className="text-[11px] font-bold uppercase tracking-wide text-[#2E7D32] bg-[#DFF5EC] border border-[#C8E8D8] rounded-full px-2 py-0.5">
+                            <span className="text-[11px] max-sm:text-[9px] font-bold uppercase tracking-wide text-[#2E7D32] bg-[#DFF5EC] border border-[#C8E8D8] rounded-full px-2 py-0.5">
                               Рекомендуем
                             </span>
                           ) : null}
                           {isBestValue ? (
-                            <span className="text-[11px] font-bold uppercase tracking-wide text-neutral-700 bg-neutral-100 border border-neutral-200 rounded-full px-2 py-0.5">
+                            <span className="text-[11px] max-sm:text-[9px] font-bold uppercase tracking-wide text-neutral-700 bg-neutral-100 border border-neutral-200 rounded-full px-2 py-0.5">
                               Выгоднее на год
                             </span>
                           ) : null}
                           {!isRecommended && isStarter ? (
-                            <span className="text-[11px] font-bold uppercase tracking-wide text-neutral-700 bg-neutral-100 border border-neutral-200 rounded-full px-2 py-0.5">
+                            <span className="text-[11px] max-sm:text-[9px] font-bold uppercase tracking-wide text-neutral-700 bg-neutral-100 border border-neutral-200 rounded-full px-2 py-0.5">
                               Старт
                             </span>
                           ) : null}
                           {!isRecommended && isMax ? (
-                            <span className="text-[11px] font-bold uppercase tracking-wide text-neutral-700 bg-neutral-100 border border-neutral-200 rounded-full px-2 py-0.5">
+                            <span className="text-[11px] max-sm:text-[9px] font-bold uppercase tracking-wide text-neutral-700 bg-neutral-100 border border-neutral-200 rounded-full px-2 py-0.5">
                               Максимум
                             </span>
                           ) : null}
                         </div>
                       </div>
                     </div>
-                    <div className="mt-4">{renderPriceBlock(plan)}</div>
+                    <div className="mt-4 max-sm:mt-2.5">{renderPriceBlock(plan)}</div>
                     {feats.length ? (
-                      <ul className="mt-6 space-y-2 text-sm text-neutral-700 flex-1">
+                      <ul className="mt-6 max-sm:mt-3 space-y-2 max-sm:space-y-1 text-sm max-sm:text-[13px] max-sm:leading-snug text-neutral-700 flex-1">
                         {feats.map((f, idx) => (
-                          <li key={idx} className="flex gap-2">
-                            <span className="text-[#4CAF50] font-bold">✓</span>
+                          <li key={idx} className="flex gap-2 max-sm:gap-1.5">
+                            <span className="text-[#4CAF50] font-bold shrink-0">✓</span>
                             <span>{f.text}</span>
                           </li>
                         ))}
                       </ul>
                     ) : (
-                      <div className="mt-6 flex-1" />
+                      <div className="mt-6 max-sm:mt-3 flex-1" />
                     )}
-                    <div className="mt-8 flex flex-col gap-2">
+                    <div className="mt-8 max-sm:mt-4 flex flex-col gap-2">
                       <Button
                         type="button"
                         size="lg"
                         variant="primary"
-                        className={`w-full ${BTN_PRIMARY}`}
+                        className={`w-full max-lg:min-h-[44px] max-sm:!py-2.5 ${BTN_PRIMARY}`}
                         onClick={handleRegister}
                       >
                         Подключить
@@ -452,50 +469,72 @@ export default function Pricing() {
             Ключевые возможности — сравните, что доступно в каждом тарифе.
           </p>
           {(
-            <div className="space-y-3 md:space-y-0">
-              {/* Mobile: stacked rows */}
-              <div className="md:hidden space-y-3">
-                {comparisonRowDefs.map((rowKey) => {
-                  const label = getComparisonRowLabelFromKey(rowKey, visiblePlans[0])
-                  return (
-                    <div key={rowKey} className={`${CARD} p-4`}>
-                      <p className="font-medium text-[#1C1917]">{label}</p>
-                      <div className="mt-3 flex flex-col gap-2">
-                        {visiblePlans.map((plan) => {
-                          const row = getPricingComparisonRow(plan, rowKey)
-                          const detail = row?.available ? getComparisonRowDetail(plan, rowKey) : null
-                          const right =
-                            rowKey === 'freeze_yearly'
-                              ? (detail ?? '—')
-                              : row?.available
-                                ? (detail ? `Да · ${detail}` : 'Да')
-                                : '—'
-                          return (
-                            <div key={plan.id} className="flex items-center justify-between gap-2 text-sm">
-                              <span className="text-neutral-600 truncate">{getPlanDisplayName(plan)}</span>
-                              <span
-                                className={
-                                  rowKey === 'freeze_yearly'
-                                    ? 'text-[#1C1917] font-normal'
-                                    : row?.available
-                                      ? 'text-[#4CAF50] font-bold'
-                                      : 'text-neutral-300'
-                                }
-                              >
-                                {right}
-                              </span>
-                            </div>
-                          )
-                        })}
-                      </div>
+            <div className="space-y-3 lg:space-y-0">
+              {/* Mobile: horizontal scroll table with sticky first column */}
+              <div className="lg:hidden">
+                <div className="overflow-x-auto -mx-5 px-5">
+                  <div className="min-w-max rounded-2xl border border-[#E7E2DF] bg-white shadow-sm overflow-hidden">
+                    {/* Header */}
+                    <div
+                      className="grid text-xs font-semibold text-neutral-600 border-b border-[#E7E2DF] bg-[#FAFAF9]"
+                      style={{
+                        gridTemplateColumns: `minmax(11rem, 11rem) repeat(${visiblePlans.length}, minmax(9rem, 9rem))`,
+                      }}
+                    >
+                      <div className="sticky left-0 z-20 bg-[#FAFAF9] px-3 py-3">Возможность</div>
+                      {visiblePlans.map((p) => (
+                        <div key={p.id} className="px-3 py-3 text-center text-[#1C1917]">
+                          {getPlanDisplayName(p)}
+                        </div>
+                      ))}
                     </div>
-                  )
-                })}
+
+                    {/* Rows */}
+                    {comparisonRowDefs.map((rowKey) => {
+                      const label = getComparisonRowLabelFromKey(rowKey, visiblePlans[0])
+                      const isFreeze = rowKey === 'freeze_yearly'
+                      return (
+                        <div
+                          key={rowKey}
+                          className="grid text-sm border-b border-[#F0EBE8] last:border-b-0"
+                          style={{
+                            gridTemplateColumns: `minmax(11rem, 11rem) repeat(${visiblePlans.length}, minmax(9rem, 9rem))`,
+                          }}
+                        >
+                          <div className="sticky left-0 z-10 bg-white px-3 py-3 font-medium text-neutral-800">
+                            {label}
+                          </div>
+                          {visiblePlans.map((plan) => {
+                            const row = getPricingComparisonRow(plan, rowKey)
+                            const detail = row?.available ? getComparisonRowDetail(plan, rowKey) : null
+                            const ok = Boolean(row?.available)
+                            return (
+                              <div
+                                key={`${rowKey}-${plan.id}`}
+                                className="px-3 py-3 text-center bg-white flex items-center justify-center"
+                              >
+                                {isFreeze ? (
+                                  <span className={ok && detail ? 'text-[#1C1917]' : 'text-neutral-300'}>
+                                    {ok && detail ? detail : '—'}
+                                  </span>
+                                ) : (
+                                  <span className={ok ? 'text-[#2E7D32] font-bold' : 'text-neutral-300'}>
+                                    {ok ? '✓' : '—'}
+                                  </span>
+                                )}
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
               </div>
 
               {/* Desktop: CSS grid, no horizontal scroll */}
               <div
-                className="hidden md:grid gap-x-2 gap-y-2 text-sm"
+                className="hidden lg:grid gap-x-2 gap-y-2 text-sm"
                 style={{
                   gridTemplateColumns: `minmax(10rem, 14rem) repeat(${visiblePlans.length}, minmax(0, 1fr))`,
                 }}
@@ -561,20 +600,20 @@ export default function Pricing() {
         {/* Final CTA */}
         {(!error) ? (
           <section
-            className={`${CARD} shadow-md p-8 md:p-10 text-center`}
+            className={`${CARD} shadow-md p-8 md:p-10 text-center max-sm:bg-neutral-900 max-sm:text-white max-sm:border-neutral-800`}
             style={{
               backgroundImage:
                 'radial-gradient(ellipse 600px 280px at 100% 0%, rgba(76,175,80,0.06), transparent 50%)',
             }}
           >
-            <h2 className="text-2xl md:text-3xl font-bold text-[#1C1917]">
+            <h2 className="text-2xl md:text-3xl font-bold text-[#1C1917] max-sm:text-[26px] max-sm:text-white">
               Готовы начать?
             </h2>
-            <p className="mt-3 text-neutral-600 max-w-xl mx-auto">
+            <p className="mt-3 text-neutral-600 max-sm:text-white/70 max-w-xl mx-auto">
               Подключите подходящий тариф и переходите к работе — регистрация занимает пару минут.
             </p>
-            <div className="mt-6 flex flex-col sm:flex-row gap-3 justify-center">
-              <Button type="button" size="lg" variant="primary" className={BTN_PRIMARY} onClick={handleRegister}>
+            <div className="mt-6 flex flex-col sm:flex-row gap-3 justify-center max-sm:items-stretch">
+              <Button type="button" size="lg" variant="primary" className={`max-sm:w-full max-sm:min-h-[44px] ${BTN_PRIMARY}`} onClick={handleRegister}>
                 Зарегистрироваться
                 <ArrowRightIcon className="h-4 w-4 ml-2" />
               </Button>
