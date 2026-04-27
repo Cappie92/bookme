@@ -2,7 +2,7 @@
  * Публичная запись к мастеру — wizard: Услуга → Дата → Время.
  * Только /api/public/masters/{slug}. Master-only, без indie.
  */
-import React, { useState, useEffect, useMemo, useCallback } from 'react'
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ChevronDownIcon, ChevronUpIcon, MagnifyingGlassIcon, CalendarIcon, ChevronLeftIcon, ChevronRightIcon, XMarkIcon } from '@heroicons/react/24/outline'
 import { formatTimeShort, formatTimezoneLabel } from '../../utils/dateFormat'
@@ -249,6 +249,8 @@ export default function PublicBookingWizard({
 }) {
   const { openAuthModal } = useAuth()
   const navigate = useNavigate()
+  const autoSubmitSeqRef = useRef(0)
+  const mountedRef = useRef(true)
   const [selectedService, setSelectedService] = useState(null)
   const [selectedDate, setSelectedDate] = useState(null)
   const [selectedSlot, setSelectedSlot] = useState(null)
@@ -393,6 +395,13 @@ export default function PublicBookingWizard({
     if (currentUser) setShowAuthPrompt(false)
   }, [currentUser])
 
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
+
   // После логина: либо быстрый авто-POST (свежее намерение), либо только восстановление формы + явный «Записаться».
   useEffect(() => {
     if (!slug || !profile || !currentUser) return
@@ -458,7 +467,8 @@ export default function PublicBookingWizard({
     }
 
     const ac = new AbortController()
-    let cancelled = false
+    const requestSeq = ++autoSubmitSeqRef.current
+    const isActive = () => mountedRef.current && autoSubmitSeqRef.current === requestSeq
     const url = `/api/public/masters/${encodeURIComponent(slug)}/bookings`
     const payload = { service_id: draft.service_id, start_time: draft.start_time, end_time: draft.end_time }
     if (typeof __DEV__ !== 'undefined' && __DEV__) {
@@ -466,8 +476,10 @@ export default function PublicBookingWizard({
     }
 
     ;(async () => {
-      setSubmitting(true)
-      setSubmitError(null)
+      if (isActive()) {
+        setSubmitting(true)
+        setSubmitError(null)
+      }
       // помечаем, что auto-submit начался, чтобы не сделать второй POST при повторных эффектах
       updateDraftStatus({ status: 'submitted', submitted_at: Date.now() })
       metrikaGoal(M.PUBLIC_BOOKING_FORM_SUBMIT, { slug, context: 'public_wizard_post_login' })
@@ -489,8 +501,13 @@ export default function PublicBookingWizard({
           }
           throw new Error(typeof msg === 'string' ? msg : 'Ошибка создания записи')
         }
-        const result = await res.json()
-        if (cancelled) return
+        let result
+        try {
+          result = await res.json()
+        } catch (e) {
+          throw new Error('Сервер вернул 200, но ответ не удалось прочитать. Обновите страницу и попробуйте ещё раз.')
+        }
+        if (!isActive()) return
         updateDraftStatus({
           status: 'done',
           created_booking_id: result.id,
@@ -505,18 +522,16 @@ export default function PublicBookingWizard({
         onBookingSuccess?.(result)
       } catch (err) {
         if (err?.name === 'AbortError') return
-        if (!cancelled) {
-          updateDraftStatus({ status: 'pending', submitted_at: null })
-          setSubmitError(err.message || 'Ошибка создания записи')
-          onBookingError?.(err.message)
-        }
+        if (!isActive()) return
+        updateDraftStatus({ status: 'pending', submitted_at: null })
+        setSubmitError(err.message || 'Ошибка создания записи')
+        onBookingError?.(err.message)
       } finally {
-        if (!cancelled) setSubmitting(false)
+        if (isActive()) setSubmitting(false)
       }
     })()
 
     return () => {
-      cancelled = true
       ac.abort()
     }
   }, [slug, profile, currentUser]) // eslint-disable-line react-hooks/exhaustive-deps -- только slug/profile/user
