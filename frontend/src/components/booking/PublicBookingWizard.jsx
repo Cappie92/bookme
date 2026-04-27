@@ -569,19 +569,31 @@ export default function PublicBookingWizard({
           start_time: payload.start_time,
           end_time: payload.end_time,
         })
-        if (!isActive()) return
-        updateDraftStatus({
-          status: 'done',
-          created_booking_id: result.id,
-          created_public_reference: result.public_reference,
-        })
-        clearDraft()
-        setPostLoginRestoreNotice(false)
-        setSuccess(result)
-        setSelectedService(null)
-        setSelectedDate(null)
-        setSelectedSlot(null)
-        onBookingSuccess?.(result)
+        {
+          // Успех на сервере не должен теряться из‑за гонки isActive: снимаем «submitted» с draft,
+          // если в storage всё ещё тот же create_after_auth payload.
+          const d = getDraft()
+          if (
+            d &&
+            d.slug === slug &&
+            d.intent === 'create_after_auth' &&
+            d.service_id === payload.service_id &&
+            d.start_time === payload.start_time &&
+            d.end_time === payload.end_time
+          ) {
+            clearDraft()
+          }
+        }
+        if (mountedRef.current) {
+          setPostLoginRestoreNotice(false)
+          setSuccess(result)
+          setSelectedService(null)
+          setSelectedDate(null)
+          setSelectedSlot(null)
+          onBookingSuccess?.(result)
+          // Если effect уже rerun'нулся, finally не снимет submitting — снимаем вручную.
+          if (!isActive()) setSubmitting(false)
+        }
       } catch (err) {
         if (err?.name === 'AbortError') return
         if (!isActive()) return
