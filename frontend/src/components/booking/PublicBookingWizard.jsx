@@ -305,6 +305,8 @@ export default function PublicBookingWizard({
   const navigate = useNavigate()
   const autoSubmitSeqRef = useRef(0)
   const mountedRef = useRef(true)
+  /** Один исходящий POST create на /bookings: блокирует гонку auto-submit × ручной «Записаться» (второй POST → 400). */
+  const publicBookingCreateInFlightRef = useRef(false)
   const [selectedService, setSelectedService] = useState(null)
   const [selectedDate, setSelectedDate] = useState(null)
   const [selectedSlot, setSelectedSlot] = useState(null)
@@ -324,6 +326,41 @@ export default function PublicBookingWizard({
   const [calendarExpanded, setCalendarExpanded] = useState(true)
   /** После логина с «длинной» паузой: форма восстановлена, нужно явно нажать «Записаться». */
   const [postLoginRestoreNotice, setPostLoginRestoreNotice] = useState(false)
+
+  const downloadPublicBookingIcs = useCallback(async () => {
+    if (!success) return
+    setCalendarError(null)
+    const token = localStorage.getItem('access_token')
+    if (!token) {
+      setCalendarError('Чтобы добавить запись в календарь, нужно войти в аккаунт.')
+      return
+    }
+    const url = success.public_reference
+      ? `/api/client/bookings/ref/${encodeURIComponent(success.public_reference)}/calendar.ics?alarm_minutes=60`
+      : `/api/client/bookings/${success.id}/calendar.ics?alarm_minutes=60`
+    setCalendarDownloading(true)
+    try {
+      const res = await fetch(url, {
+        headers: { Authorization: `Bearer ${token}` },
+        credentials: 'include',
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error(err?.detail || 'Не удалось получить файл календаря')
+      }
+      const blob = await res.blob()
+      const a = document.createElement('a')
+      a.href = URL.createObjectURL(blob)
+      const pr = success.public_reference != null ? String(success.public_reference).trim() : ''
+      a.download = pr ? `booking-${pr}.ics` : `booking-${success.id}.ics`
+      a.click()
+      URL.revokeObjectURL(a.href)
+    } catch (e) {
+      setCalendarError(e?.message || 'Не удалось скачать файл календаря')
+    } finally {
+      setCalendarDownloading(false)
+    }
+  }, [success])
 
   const services = profile?.services || []
   const groups = useMemo(() => {
@@ -530,6 +567,7 @@ export default function PublicBookingWizard({
     }
 
     ;(async () => {
+      publicBookingCreateInFlightRef.current = true
       if (isActive()) {
         setSubmitting(true)
         setSubmitError(null)
@@ -626,6 +664,7 @@ export default function PublicBookingWizard({
         setSubmitError(err.message || 'Ошибка создания записи')
         onBookingError?.(err.message)
       } finally {
+        publicBookingCreateInFlightRef.current = false
         if (isActive()) setSubmitting(false)
       }
     })()
@@ -704,6 +743,19 @@ export default function PublicBookingWizard({
       setShowAuthPrompt(true)
       return
     }
+    if (success) return
+    if (publicBookingCreateInFlightRef.current) return
+    const dBlock = getDraft()
+    if (
+      dBlock &&
+      dBlock.slug === slug &&
+      dBlock.intent === 'create_after_auth' &&
+      dBlock.status === 'submitted'
+    ) {
+      // Идёт post-login auto-submit; повторный ручной POST на тот же слот даст 400 и сломает storage
+      return
+    }
+    publicBookingCreateInFlightRef.current = true
     setSubmitting(true)
     metrikaGoal(M.PUBLIC_BOOKING_FORM_SUBMIT, { slug, context: 'public_wizard' })
     const url = `/api/public/masters/${encodeURIComponent(slug)}/bookings`
@@ -753,6 +805,7 @@ export default function PublicBookingWizard({
         start_time: selectedSlot.start_time,
         end_time: selectedSlot.end_time,
       })
+      clearDraft()
       setPostLoginRestoreNotice(false)
       setSuccess(result)
       setSelectedService(null)
@@ -789,6 +842,7 @@ export default function PublicBookingWizard({
         onBookingError?.(err.message)
       }
     } finally {
+      publicBookingCreateInFlightRef.current = false
       setSubmitting(false)
     }
   }
@@ -832,7 +886,7 @@ export default function PublicBookingWizard({
             : 'Запись создана — номер доступен в личном кабинете.'}
         </p>
         <p className="text-gray-600 text-sm mb-6">Мастер подтвердит запись. Вы можете посмотреть её в личном кабинете.</p>
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-center gap-3 sm:gap-4">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-start justify-center gap-3 sm:gap-4">
           <button
             type="button"
             onClick={() => navigate(goToMyBookingsHref)}
@@ -841,48 +895,46 @@ export default function PublicBookingWizard({
           >
             Перейти в личный кабинет
           </button>
-          <button
-            type="button"
-            onClick={async () => {
-              setCalendarError(null)
-              const token = localStorage.getItem('access_token')
-              if (!token) {
-                setCalendarError('Чтобы добавить запись в календарь, нужно войти в аккаунт.')
-                return
-              }
-              const url = success.public_reference
-                ? `/api/client/bookings/ref/${encodeURIComponent(success.public_reference)}/calendar.ics?alarm_minutes=60`
-                : `/api/client/bookings/${success.id}/calendar.ics?alarm_minutes=60`
-              setCalendarDownloading(true)
-              try {
-                const res = await fetch(url, {
-                  headers: { Authorization: `Bearer ${token}` },
-                  credentials: 'include',
-                })
-                if (!res.ok) {
-                  const err = await res.json().catch(() => ({}))
-                  throw new Error(err?.detail || 'Не удалось получить файл календаря')
-                }
-                const blob = await res.blob()
-                const a = document.createElement('a')
-                a.href = URL.createObjectURL(blob)
-                const pr = success.public_reference != null ? String(success.public_reference).trim() : ''
-                a.download = pr ? `booking-${pr}.ics` : `booking-${success.id}.ics`
-                a.click()
-                URL.revokeObjectURL(a.href)
-              } catch (e) {
-                setCalendarError(e?.message || 'Не удалось добавить в календарь')
-              } finally {
-                setCalendarDownloading(false)
-              }
-            }}
-            disabled={calendarDownloading}
-            className={`${btnBase} bg-white text-gray-700 border-2 border-gray-200 hover:border-gray-300 disabled:opacity-60`}
-            data-testid="add-to-calendar"
+          <div
+            className="flex w-full sm:w-auto flex-col gap-2 sm:min-w-[14rem] border border-gray-200 rounded-lg bg-white overflow-hidden text-left"
+            data-testid="calendar-actions"
           >
-            <CalendarIcon className="w-5 h-5 shrink-0" />
-            {calendarDownloading ? 'Загрузка…' : 'Добавить в календарь'}
-          </button>
+            <div className="px-3 py-2 text-xs font-medium text-gray-500 bg-gray-50 border-b border-gray-100">
+              Календарь
+            </div>
+            <div className="p-2 flex flex-col gap-1.5">
+              <button
+                type="button"
+                onClick={downloadPublicBookingIcs}
+                disabled={calendarDownloading}
+                className="inline-flex items-center justify-center gap-2 min-h-11 w-full rounded-lg text-sm font-medium text-gray-800 bg-white border-2 border-gray-200 px-3 py-2.5 hover:border-gray-300 hover:bg-gray-50 disabled:opacity-60"
+                data-testid="calendar-download-ics"
+              >
+                <CalendarIcon className="w-5 h-5 shrink-0" />
+                {calendarDownloading ? 'Загрузка…' : 'Скачать .ics'}
+              </button>
+              <button
+                type="button"
+                disabled
+                className="inline-flex items-center justify-center gap-2 min-h-11 w-full rounded-lg text-sm text-gray-400 border border-dashed border-gray-200 px-3 py-2.5 cursor-not-allowed"
+                title="Скоро"
+                data-testid="calendar-google-todo"
+              >
+                Google Календарь
+                <span className="text-xs font-normal">(скоро)</span>
+              </button>
+              <button
+                type="button"
+                disabled
+                className="inline-flex items-center justify-center gap-2 min-h-11 w-full rounded-lg text-sm text-gray-400 border border-dashed border-gray-200 px-3 py-2.5 cursor-not-allowed"
+                title="Скоро"
+                data-testid="calendar-email-todo"
+              >
+                Напоминание на e-mail
+                <span className="text-xs font-normal">(скоро)</span>
+              </button>
+            </div>
+          </div>
         </div>
         {calendarError ? (
           <p className="mt-4 text-sm text-rose-700" data-testid="calendar-error">
