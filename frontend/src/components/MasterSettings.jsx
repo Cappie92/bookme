@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import { ArrowTopRightOnSquareIcon, ClipboardDocumentIcon, UserCircleIcon } from '@heroicons/react/24/outline'
 import { cities, getTimezoneByCity } from '../utils/cities'
 import { getImageUrl, API_BASE_URL } from '../utils/config'
@@ -78,7 +78,6 @@ export default function MasterSettings({
   const [showFreeSlotsCardModal, setShowFreeSlotsCardModal] = useState(false)
 
   const frontendBaseUrl = getFrontendBaseUrl()
-  const websiteSaveBtnRef = useRef(null)
 
   const slugChanged = useMemo(() => {
     const current = (websiteSettings?.domain || '').toString().trim()
@@ -862,7 +861,11 @@ export default function MasterSettings({
               {/* Ссылка на страницу записи: канонический URL /m/:slug */}
               <div>
                 <h3 className="text-sm font-semibold text-gray-900 mb-2">Ссылка на страницу записи</h3>
-                <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                <div
+                  className={`bg-gray-50 border border-gray-200 rounded-lg p-4 ${
+                    slugChanged ? 'relative pb-16' : ''
+                  }`}
+                >
                   {canCustomizeDomainEffective ? (
                     <div className="space-y-3">
                       <div className="flex flex-col sm:flex-row sm:items-center gap-2">
@@ -909,18 +912,6 @@ export default function MasterSettings({
                           </Tooltip>
                         </div>
                       </div>
-                      {slugChanged ? (
-                        <div className="flex justify-end">
-                          <button
-                            type="button"
-                            onClick={() => websiteSaveBtnRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
-                            className="inline-flex items-center gap-2 rounded-lg bg-[#4CAF50] px-3 py-2 text-sm font-semibold text-white hover:bg-[#43a047] transition-colors"
-                            data-testid="settings-scroll-to-save-website"
-                          >
-                            Перейти к сохранению
-                          </button>
-                        </div>
-                      ) : null}
                       <div className="mt-3">
                         <button
                           type="button"
@@ -932,6 +923,17 @@ export default function MasterSettings({
                           Картинка со свободными часами
                         </button>
                       </div>
+                      {slugChanged ? (
+                        <button
+                          type="button"
+                          onClick={handleSaveWebsiteSettings}
+                          disabled={!websiteSettingsChanged || loading}
+                          className="absolute bottom-4 right-4 inline-flex items-center gap-2 rounded-lg bg-[#4CAF50] px-3 py-2 text-sm font-semibold text-white hover:bg-[#43a047] transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+                          data-testid="settings-save-domain-inline"
+                        >
+                          Сохранить адрес
+                        </button>
+                      ) : null}
                     </div>
                   ) : (
                     <div className="space-y-2">
@@ -1246,7 +1248,6 @@ export default function MasterSettings({
                 <button
                   type="button"
                   onClick={handleSaveWebsiteSettings}
-                  ref={websiteSaveBtnRef}
                   disabled={!websiteSettingsChanged}
                   className={`px-4 py-2 rounded-lg font-semibold transition-colors text-sm ${
                     websiteSettingsChanged
