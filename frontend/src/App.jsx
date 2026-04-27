@@ -22,9 +22,7 @@ const Pricing = lazy(() => import("./pages/Pricing"))
 const About = lazy(() => import("./pages/About"))
 const BlogList = lazy(() => import("./pages/BlogList"))
 const BlogPost = lazy(() => import("./pages/BlogPost"))
-const TermsPage = lazy(() => import("./pages/TermsPage"))
-const PersonalDataConsentPage = lazy(() => import("./pages/PersonalDataConsentPage"))
-const MarketingConsentPage = lazy(() => import("./pages/MarketingConsentPage"))
+const UserAgreement = lazy(() => import("./pages/UserAgreement"))
 const PublicProfile = lazy(() => import("./pages/PublicProfile"))
 const SubdomainPage = lazy(() => import("./pages/SubdomainPage"))
 const MasterPublicBookingPage = lazy(() => import("./pages/MasterPublicBookingPage"))
@@ -118,10 +116,7 @@ function App() {
           <Route path="/admin/functions" element={<AdminLayout><AdminFunctions/></AdminLayout>} />
           <Route path="/admin/always-free-logs" element={<AdminLayout><AdminAlwaysFreeLogs/></AdminLayout>} />
           <Route path="/admin/settings" element={<AdminLayout><AdminSettings/></AdminLayout>} />
-          <Route path="/terms" element={<TermsPage />} />
-          <Route path="/personal-data-consent" element={<PersonalDataConsentPage />} />
-          <Route path="/marketing-consent" element={<MarketingConsentPage />} />
-          <Route path="/user-agreement" element={<Navigate to="/terms" replace />} />
+          <Route path="/user-agreement" element={<MainLayout><UserAgreement/></MainLayout>} />
           <Route path="/payment/success" element={<PaymentSuccess/>} />
           <Route path="/payment/failed" element={<PaymentFailed/>} />
           <Route path="/client" element={<ClientLayout><ClientDashboard/></ClientLayout>} />
