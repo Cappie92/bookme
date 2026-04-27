@@ -668,7 +668,7 @@ async def send_calendar_email_by_public_ref(
             detail="Мастер не настроил часовой пояс. Добавление в календарь недоступно.",
         )
     _check_booking_future_and_tz(booking, master_tz)
-    email = body.get("email") or (current_user.email if hasattr(current_user, "email") else None)
+    email = getattr(current_user, "email", None)
     if not email or not str(email).strip():
         raise HTTPException(status_code=422, detail="Email required")
     alarm_minutes = max(5, min(120, body.get("alarm_minutes", 60)))
@@ -782,7 +782,7 @@ async def send_calendar_email(
             detail="Мастер не настроил часовой пояс. Добавление в календарь недоступно.",
         )
     _check_booking_future_and_tz(booking, master_tz)
-    email = body.get("email") or (current_user.email if hasattr(current_user, "email") else None)
+    email = getattr(current_user, "email", None)
     if not email or not str(email).strip():
         raise HTTPException(status_code=422, detail="Email required")
     alarm_minutes = max(5, min(120, body.get("alarm_minutes", 60)))

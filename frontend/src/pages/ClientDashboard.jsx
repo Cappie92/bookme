@@ -12,7 +12,13 @@ import { useFavorites } from '../contexts/FavoritesContext'
 import { useToast } from '../contexts/ToastContext'
 import Tooltip from '../components/Tooltip'
 import ClientLoyaltyPoints from '../components/ClientLoyaltyPoints'
-import { clientBookingCalendarPathSegment } from '../utils/bookingCalendarApi'
+import {
+  downloadClientBookingIcsFile,
+  triggerIcsBlobDownload,
+  icsDownloadFilename,
+  fetchClientGoogleCalendarUrl,
+  sendClientCalendarEmail,
+} from '../utils/clientBookingCalendarActions'
 
 // Вспомогательные функции
 function formatDate(dateStr) {
@@ -678,45 +684,19 @@ export default function ClientDashboard() {
 
   const handleCalendarGoogle = async (booking) => {
     setCalendarDropdownId(null)
-    const seg = clientBookingCalendarPathSegment(booking)
-    if (!seg) {
-      showToast('Нет данных записи для календаря', 'error')
-      return
-    }
     try {
-      const res = await apiGet(`/api/client/bookings/${seg}/calendar/google-link`)
-      if (res?.url) window.open(res.url, '_blank')
-      else showToast('Ошибка получения ссылки', 'error')
+      const url = await fetchClientGoogleCalendarUrl(booking, 60)
+      window.open(url, '_blank', 'noopener,noreferrer')
     } catch (e) {
-      showToast(e?.response?.data?.detail || 'Ошибка', 'error')
+      showToast(e?.response?.data?.detail || e?.message || 'Ошибка', 'error')
     }
   }
 
   const handleCalendarDownloadIcs = async (booking, alarmMinutes = 60) => {
     setCalendarDropdownId(null)
-    const seg = clientBookingCalendarPathSegment(booking)
-    if (!seg) {
-      showToast('Нет данных записи для календаря', 'error')
-      return
-    }
     try {
-      const url = `/api/client/bookings/${seg}/calendar.ics?alarm_minutes=${alarmMinutes}`
-      const token = localStorage.getItem('access_token')
-      const res = await fetch(url, {
-        headers: { Authorization: `Bearer ${token}` },
-        credentials: 'include',
-      })
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}))
-        throw new Error(err?.detail || 'Ошибка')
-      }
-      const blob = await res.blob()
-      const a = document.createElement('a')
-      a.href = URL.createObjectURL(blob)
-      const pr = booking?.public_reference != null ? String(booking.public_reference).trim() : ''
-      a.download = pr ? `booking-${pr}.ics` : `booking-${booking.id}.ics`
-      a.click()
-      URL.revokeObjectURL(a.href)
+      const blob = await downloadClientBookingIcsFile(booking, alarmMinutes)
+      triggerIcsBlobDownload(blob, icsDownloadFilename(booking))
       showToast('Файл скачан', 'success')
     } catch (e) {
       showToast(e?.message || e?.response?.data?.detail || 'Ошибка', 'error')
@@ -738,27 +718,18 @@ export default function ClientDashboard() {
 
   const handleCalendarSendEmail = async () => {
     if (!calendarEmailBooking) return
-    const email = (calendarEmail || '').trim()
-    if (!email) {
-      showToast('Введите email', 'error')
+    if (!(calendarEmail || '').trim()) {
+      showToast('В профиле не указан e-mail. Добавьте адрес в настройках профиля.', 'error')
       return
     }
     setCalendarEmailSending(true)
     try {
-      const seg = clientBookingCalendarPathSegment(calendarEmailBooking)
-      if (!seg) {
-        showToast('Нет данных записи для календаря', 'error')
-        return
-      }
-      await apiPost(`/api/client/bookings/${seg}/calendar/email`, {
-        email,
-        alarm_minutes: calendarAlarmMinutes,
-      })
+      await sendClientCalendarEmail(calendarEmailBooking, calendarAlarmMinutes)
       showToast('Отправлено', 'success')
       setShowCalendarEmailModal(false)
       setCalendarEmailBooking(null)
     } catch (e) {
-      showToast(e?.response?.data?.detail || 'Ошибка', 'error')
+      showToast(e?.response?.data?.detail || e?.message || 'Ошибка', 'error')
     } finally {
       setCalendarEmailSending(false)
     }
@@ -2798,6 +2769,69 @@ export default function ClientDashboard() {
                 </>
               )}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Напоминание на e-mail: адрес берётся только с сервера (профиль клиента) */}
+      {showCalendarEmailModal && calendarEmailBooking && (
+        <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
+          <div className="bg-white rounded-t-2xl sm:rounded-lg shadow-xl w-full sm:max-w-md max-h-[90dvh] overflow-y-auto p-4 sm:p-6">
+            <div className="flex justify-between items-start gap-2 mb-4">
+              <h2 className="text-lg font-semibold text-gray-900">Напоминание на e-mail</h2>
+              <DashboardModalClose
+                onClick={() => {
+                  setShowCalendarEmailModal(false)
+                  setCalendarEmailBooking(null)
+                }}
+              />
+            </div>
+            {calendarEmail ? (
+              <>
+                <p className="text-sm text-gray-600 mb-1">Файл с записью будет отправлен на:</p>
+                <p className="text-sm font-medium text-gray-900 break-all mb-4" data-testid="calendar-email-modal-address">
+                  {calendarEmail}
+                </p>
+                <label className="block text-sm text-gray-700 mb-1">Напоминание за (мин.)</label>
+                <select
+                  value={calendarAlarmMinutes}
+                  onChange={(e) => setCalendarAlarmMinutes(Number(e.target.value))}
+                  className="w-full border rounded-lg px-3 py-2 mb-4 text-sm"
+                >
+                  {[15, 30, 45, 60, 90, 120].map((m) => (
+                    <option key={m} value={m}>
+                      {m} мин
+                    </option>
+                  ))}
+                </select>
+                <div className="flex flex-col-reverse sm:flex-row gap-2 sm:justify-end">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowCalendarEmailModal(false)
+                      setCalendarEmailBooking(null)
+                    }}
+                    className="w-full sm:w-auto px-4 py-2 rounded-lg border border-gray-200 text-gray-800 hover:bg-gray-50"
+                  >
+                    Отмена
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCalendarSendEmail}
+                    disabled={calendarEmailSending}
+                    className="w-full sm:w-auto px-4 py-2 rounded-lg bg-[#4CAF50] text-white font-medium hover:bg-[#45a049] disabled:opacity-50"
+                    data-testid="calendar-email-modal-send"
+                  >
+                    {calendarEmailSending ? 'Отправка…' : 'Отправить'}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <p className="text-sm text-amber-900 bg-amber-50 border border-amber-200 rounded-lg p-3" data-testid="calendar-email-modal-no-email">
+                В профиле не указан e-mail. Добавьте адрес в настройках профиля, чтобы получать
+                напоминания.
+              </p>
+            )}
           </div>
         </div>
       )}

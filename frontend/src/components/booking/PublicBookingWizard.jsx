@@ -10,6 +10,15 @@ import { useAuth } from '../../contexts/AuthContext'
 import PublicBookingAuthPrompt from './PublicBookingAuthPrompt'
 import { metrikaGoal } from '../../analytics/metrika'
 import { M } from '../../analytics/metrikaEvents'
+import { apiGet } from '../../utils/api'
+import {
+  bookingLikeFromSuccess,
+  downloadClientBookingIcsFile,
+  triggerIcsBlobDownload,
+  icsDownloadFilename,
+  fetchClientGoogleCalendarUrl,
+  sendClientCalendarEmail,
+} from '../../utils/clientBookingCalendarActions'
 
 const WEEKDAYS = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
 
@@ -329,41 +338,79 @@ export default function PublicBookingWizard({
   const [calendarExpanded, setCalendarExpanded] = useState(true)
   /** После логина с «длинной» паузой: форма восстановлена, нужно явно нажать «Записаться». */
   const [postLoginRestoreNotice, setPostLoginRestoreNotice] = useState(false)
+  /** E-mail учётки для подписи «на …» (null = ещё грузим). */
+  const [accountEmailForCal, setAccountEmailForCal] = useState(null)
+  const [googleCalLoading, setGoogleCalLoading] = useState(false)
+  const [emailRemindStatus, setEmailRemindStatus] = useState('idle')
+
+  useEffect(() => {
+    if (!success) {
+      setAccountEmailForCal(null)
+      setEmailRemindStatus('idle')
+      return
+    }
+    let cancelled = false
+    setAccountEmailForCal(null)
+    setEmailRemindStatus('idle')
+    ;(async () => {
+      try {
+        const me = await apiGet('/api/auth/users/me')
+        if (!cancelled) {
+          const em = me?.email != null ? String(me.email).trim() : ''
+          setAccountEmailForCal(em)
+        }
+      } catch {
+        if (!cancelled) setAccountEmailForCal('')
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [success])
 
   const downloadPublicBookingIcs = useCallback(async () => {
     if (!success) return
     setCalendarError(null)
-    const token = localStorage.getItem('access_token')
-    if (!token) {
-      setCalendarError('Чтобы добавить запись в календарь, нужно войти в аккаунт.')
-      return
-    }
-    const url = success.public_reference
-      ? `/api/client/bookings/ref/${encodeURIComponent(success.public_reference)}/calendar.ics?alarm_minutes=60`
-      : `/api/client/bookings/${success.id}/calendar.ics?alarm_minutes=60`
     setCalendarDownloading(true)
     try {
-      const res = await fetch(url, {
-        headers: { Authorization: `Bearer ${token}` },
-        credentials: 'include',
-      })
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}))
-        throw new Error(err?.detail || 'Не удалось получить файл календаря')
-      }
-      const blob = await res.blob()
-      const a = document.createElement('a')
-      a.href = URL.createObjectURL(blob)
-      const pr = success.public_reference != null ? String(success.public_reference).trim() : ''
-      a.download = pr ? `booking-${pr}.ics` : `booking-${success.id}.ics`
-      a.click()
-      URL.revokeObjectURL(a.href)
+      const like = bookingLikeFromSuccess(success)
+      const blob = await downloadClientBookingIcsFile(like, 60)
+      triggerIcsBlobDownload(blob, icsDownloadFilename(like))
     } catch (e) {
       setCalendarError(e?.message || 'Не удалось скачать файл календаря')
     } finally {
       setCalendarDownloading(false)
     }
   }, [success])
+
+  const openGoogleCalendarFromSuccess = useCallback(async () => {
+    if (!success) return
+    setCalendarError(null)
+    setGoogleCalLoading(true)
+    try {
+      const url = await fetchClientGoogleCalendarUrl(bookingLikeFromSuccess(success), 60)
+      window.open(url, '_blank', 'noopener,noreferrer')
+    } catch (e) {
+      const d = e?.response?.data?.detail
+      setCalendarError(typeof d === 'string' ? d : e?.message || 'Не удалось открыть Google Календарь')
+    } finally {
+      setGoogleCalLoading(false)
+    }
+  }, [success])
+
+  const sendEmailReminderFromSuccess = useCallback(async () => {
+    if (!success || !accountEmailForCal) return
+    setCalendarError(null)
+    setEmailRemindStatus('loading')
+    try {
+      await sendClientCalendarEmail(bookingLikeFromSuccess(success), 60)
+      setEmailRemindStatus('sent')
+    } catch (e) {
+      setEmailRemindStatus('error')
+      const d = e?.response?.data?.detail
+      setCalendarError(typeof d === 'string' ? d : e?.message || 'Не удалось отправить письмо')
+    }
+  }, [success, accountEmailForCal])
 
   const services = profile?.services || []
   const groups = useMemo(() => {
@@ -907,6 +954,16 @@ export default function PublicBookingWizard({
             <div className="px-3 py-2 text-xs font-medium text-gray-500 bg-gray-50 border-b border-gray-100">
               Календарь
             </div>
+            {accountEmailForCal != null && accountEmailForCal ? (
+              <p className="px-3 py-1.5 text-xs text-gray-600 border-b border-gray-100" data-testid="calendar-email-hint">
+                Напоминание на e-mail: <span className="font-medium text-gray-800">{accountEmailForCal}</span>
+              </p>
+            ) : null}
+            {accountEmailForCal != null && !accountEmailForCal ? (
+              <p className="px-3 py-1.5 text-xs text-amber-800 border-b border-amber-100 bg-amber-50/80" data-testid="calendar-no-email-hint">
+                В профиле не указан e-mail — добавьте его в кабинете, чтобы получать напоминания.
+              </p>
+            ) : null}
             <div className="p-2 flex flex-col gap-1.5">
               <button
                 type="button"
@@ -920,23 +977,30 @@ export default function PublicBookingWizard({
               </button>
               <button
                 type="button"
-                disabled
-                className="inline-flex items-center justify-center gap-2 min-h-11 w-full rounded-lg text-sm text-gray-400 border border-dashed border-gray-200 px-3 py-2.5 cursor-not-allowed"
-                title="Скоро"
-                data-testid="calendar-google-todo"
+                onClick={openGoogleCalendarFromSuccess}
+                disabled={googleCalLoading}
+                className="inline-flex items-center justify-center gap-2 min-h-11 w-full rounded-lg text-sm font-medium text-gray-800 bg-white border-2 border-gray-200 px-3 py-2.5 hover:border-gray-300 hover:bg-gray-50 disabled:opacity-60"
+                data-testid="calendar-google"
               >
-                Google Календарь
-                <span className="text-xs font-normal">(скоро)</span>
+                {googleCalLoading ? 'Открытие…' : 'Google Календарь'}
               </button>
               <button
                 type="button"
-                disabled
-                className="inline-flex items-center justify-center gap-2 min-h-11 w-full rounded-lg text-sm text-gray-400 border border-dashed border-gray-200 px-3 py-2.5 cursor-not-allowed"
-                title="Скоро"
-                data-testid="calendar-email-todo"
+                onClick={sendEmailReminderFromSuccess}
+                disabled={
+                  accountEmailForCal == null ||
+                  !accountEmailForCal ||
+                  emailRemindStatus === 'loading' ||
+                  emailRemindStatus === 'sent'
+                }
+                className="inline-flex items-center justify-center gap-2 min-h-11 w-full rounded-lg text-sm font-medium text-gray-800 bg-white border-2 border-gray-200 px-3 py-2.5 hover:border-gray-300 hover:bg-gray-50 disabled:opacity-60"
+                data-testid="calendar-email"
               >
-                Напоминание на e-mail
-                <span className="text-xs font-normal">(скоро)</span>
+                {emailRemindStatus === 'loading'
+                  ? 'Отправка…'
+                  : emailRemindStatus === 'sent'
+                    ? 'Письмо отправлено'
+                    : 'Напоминание на e-mail'}
               </button>
             </div>
           </div>
