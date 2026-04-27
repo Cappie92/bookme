@@ -1813,7 +1813,8 @@ export default function MasterScheduleCalendar({
                           const startTime = new Date(booking.start_time)
                           const endTime = new Date(booking.end_time)
                           const duration = (endTime - startTime) / (1000 * 60) // в минутах
-                          const height = Math.max(16, (duration / 10) * 24) // высота в пикселях для 10-минутных слотов
+                          // 30-мин сетка: 1 ряд = TIMELINE_ROW_HEIGHT_PX (10 мин. была ошибка — визуал в ~3 ряза выше)
+                          const height = Math.max(16, (duration / 30) * TIMELINE_ROW_HEIGHT_PX)
                           
                           return (
                             <div

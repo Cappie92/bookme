@@ -412,16 +412,22 @@ def get_available_slots(
                 # Создаем datetime для начала и конца слота
                 slot_start_dt = datetime.combine(date, slot_start)
                 slot_end_dt = slot_start_dt + timedelta(minutes=service_duration)
-                
+
+                # Конец окна доступности: слот с услугой не должен вылезать за рамку
+                if isinstance(end_time, time):
+                    window_end_dt = datetime.combine(date, end_time)
+                else:
+                    window_end_dt = _to_naive(end_time) if end_time is not None else None
+                if window_end_dt is not None and _to_naive(slot_end_dt) > _to_naive(window_end_dt):
+                    logger.debug(
+                        f"sched: ⏱️ Слот {slot_start} не помещается (конец {slot_end_dt} > окно {window_end_dt})"
+                    )
+                    continue
+
                 # Создаем уникальный ключ для слота
                 slot_key = slot_start_dt.isoformat()
-                
-                # Не добавляем пересекающиеся слоты (для одной длительности услуги слоты не должны перекрываться)
-                overlaps = any(
-                    slot_start_dt < s["end_time"] and slot_end_dt > s["start_time"]
-                    for s in available_slots
-                )
-                if slot_key not in seen_slots and not overlaps:
+
+                if slot_key not in seen_slots:
                     available_slots.append({
                         "start_time": slot_start_dt,
                         "end_time": slot_end_dt

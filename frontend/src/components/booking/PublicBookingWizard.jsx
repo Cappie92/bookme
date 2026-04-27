@@ -307,6 +307,9 @@ export default function PublicBookingWizard({
   const mountedRef = useRef(true)
   /** Один исходящий POST create на /bookings: блокирует гонку auto-submit × ручной «Записаться» (второй POST → 400). */
   const publicBookingCreateInFlightRef = useRef(false)
+  /** Актуальный profile: читать в post-login effect из ref, чтобы не включать `profile` в deps (там новый объект с каждого fetch → abort in-flight). */
+  const profileForAutoRef = useRef(profile)
+  profileForAutoRef.current = profile
   const [selectedService, setSelectedService] = useState(null)
   const [selectedDate, setSelectedDate] = useState(null)
   const [selectedSlot, setSelectedSlot] = useState(null)
@@ -494,8 +497,10 @@ export default function PublicBookingWizard({
   }, [])
 
   // После логина: либо быстрый авто-POST (свежее намерение), либо только восстановление формы + явный «Записаться».
+  // deps: без `profile` (только profile.master_id) — смена ссылки на profile с сервера не рвёт in-flight create.
   useEffect(() => {
-    if (!slug || !profile || !currentUser || success) return
+    const p = profileForAutoRef.current
+    if (!slug || !p || !currentUser || success) return
     const draft = getDraft()
     if (typeof __DEV__ !== 'undefined' && __DEV__) {
       console.debug('[public-booking] post-login effect', {
@@ -530,7 +535,7 @@ export default function PublicBookingWizard({
       setSelectedSlot(null)
       return
     }
-    const svc = profile.services?.find((s) => s.id === draft.service_id)
+    const svc = p.services?.find((s) => s.id === draft.service_id)
     if (!svc) {
       clearDraft()
       return
@@ -672,7 +677,7 @@ export default function PublicBookingWizard({
     return () => {
       ac.abort()
     }
-  }, [slug, profile, currentUser, success]) // eslint-disable-line react-hooks/exhaustive-deps -- slug/profile/user/success
+  }, [slug, currentUser, success, profile?.master_id ?? 0]) // eslint-disable-line react-hooks/exhaustive-deps
 
   /** Если запись уже создана, но React-state успеха потерян — восстановить success-screen по sessionStorage + текущему слоту. */
   useEffect(() => {

@@ -252,10 +252,6 @@ def test_get_available_slots_with_bookings(db, test_master):
     )
 
     assert len(slots) > 0
-    # Проверяем, что слоты не пересекаются
-    for i in range(len(slots)):
-        for j in range(i + 1, len(slots)):
-            assert (
-                slots[i]["end_time"] <= slots[j]["start_time"]
-                or slots[j]["end_time"] <= slots[i]["start_time"]
-            )
+    # Слоты — стартовые окна длины service_duration; старты с шагом 30 мин могут пересекаться по времени (9:00 и 9:30 для 60 мин).
+    for s in slots:
+        assert s["end_time"] - s["start_time"] == timedelta(minutes=service_duration)
