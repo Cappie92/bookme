@@ -1,5 +1,8 @@
-import React, { createContext, useContext, useState, useEffect } from 'react'
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
+// AUTH_LOGIN_SUCCESS / AUTH_REGISTER_SUCCESS не вызывать здесь — только authReachGoals.js из AuthModal
+import { metrikaGoal } from '../analytics/metrika'
+import { M } from '../analytics/metrikaEvents'
 
 const AuthContext = createContext()
 
@@ -17,6 +20,7 @@ export function AuthProvider({ children }) {
   /** Контекст открытия (аналитика/будущее); автосоздание брони на /m/:slug решает по sessionStorage draft + TTL в PublicBookingWizard, не по этому полю. Сбрасывается при закрытии модалки. */
   const [authModalFlow, setAuthModalFlow] = useState('default')
   const navigate = useNavigate()
+  const wasAuthModalOpen = useRef(false)
 
   const getAuthHeaders = () => {
     const token = localStorage.getItem('access_token')
@@ -106,6 +110,17 @@ export function AuthProvider({ children }) {
     checkAuthStatus()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  useEffect(() => {
+    if (authModalOpen && !wasAuthModalOpen.current) {
+      metrikaGoal(M.AUTH_MODAL_OPEN, {
+        type: authModalType,
+        tab: authModalInitialTab,
+        flow: authModalFlow,
+      })
+    }
+    wasAuthModalOpen.current = authModalOpen
+  }, [authModalOpen, authModalType, authModalInitialTab, authModalFlow])
 
   const value = {
     isAuthenticated,

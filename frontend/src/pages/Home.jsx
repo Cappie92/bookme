@@ -12,6 +12,8 @@ import { ArrowRightIcon, CheckIcon } from '@heroicons/react/24/solid'
 import { Button } from '../components/ui'
 import { useAuth } from '../contexts/AuthContext'
 import { useNavigate } from 'react-router-dom'
+import { metrikaGoal } from '../analytics/metrika'
+import { M } from '../analytics/metrikaEvents'
 
 const FEATURES = [
   {
@@ -64,8 +66,18 @@ export default function Home() {
   const { openAuthModal } = useAuth()
   const navigate = useNavigate()
 
-  const handleTryFreeClick = () => openAuthModal('master', 'register')
-  const handleDemoCabinetClick = () => navigate('/demo/master')
+  const handleTryFreeClick = () => {
+    metrikaGoal(M.LANDING_HERO_REGISTER)
+    openAuthModal('master', 'register')
+  }
+  const handleFinalCtaRegister = () => {
+    metrikaGoal(M.LANDING_FINAL_CTA_REGISTER)
+    openAuthModal('master', 'register')
+  }
+  const handleDemoCabinetClick = () => {
+    metrikaGoal(M.LANDING_HERO_DEMO)
+    navigate('/demo/master')
+  }
 
   useEffect(() => {
     const id = window.location.hash.replace(/^#/, '')
@@ -428,7 +440,7 @@ export default function Home() {
               Создайте страницу мастера и попробуйте DeDato в работе — это бесплатно.
             </p>
             <div className="mt-6 flex flex-col sm:flex-row justify-center gap-3">
-              <Button variant="primary" size="lg" onClick={handleTryFreeClick} className="w-full sm:w-auto">
+              <Button variant="primary" size="lg" onClick={handleFinalCtaRegister} className="w-full sm:w-auto">
                 Зарегистрироваться бесплатно
                 <ArrowRightIcon className="h-4 w-4 ml-2" />
               </Button>

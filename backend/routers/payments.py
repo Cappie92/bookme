@@ -355,6 +355,21 @@ async def robokassa_result(
         db.commit()
         return f"ERROR: Amount mismatch for invoice {invoice_id}"
 
+    # Повторный ResultURL: подписка уже зачислена — ранняя идемпотентность без фазы 1/2
+    if (
+        payment.payment_type == "subscription"
+        and payment.status == "paid"
+        and (payment.subscription_apply_status or "") == "applied"
+        and payment.subscription_id
+    ):
+        logger.info(
+            "robokassa_result idempotent_ok already_applied invoice_id=%s payment_id=%s user_id=%s",
+            invoice_id,
+            payment.id,
+            payment.user_id,
+        )
+        return f"OK{invoice_id}"
+
     now = datetime.utcnow()
 
     # ------------------------
@@ -618,12 +633,16 @@ async def robokassa_result(
         logger.exception("robokassa_result phase2 apply failed invoice_id=%s", invoice_id)
         try:
             meta = (payment.payment_metadata or {}) if payment else {}
-            logger.error(
-                "subscription/apply_failed invoice_id=%s payment_id=%s user_id=%s calculation_id=%s",
+            dep_applied = bool((meta or {}).get("subscription_deposit_applied"))
+            logger.critical(
+                "subscription/apply_FAILED money_on_balance_but_subscription_not_activated: "
+                "invoice_id=%s payment_id=%s user_id=%s dep_applied=%s calculation_id=%s err=%s",
                 invoice_id,
                 getattr(payment, "id", None),
                 getattr(payment, "user_id", None),
+                dep_applied,
                 meta.get("calculation_id"),
+                repr(e),
             )
         except Exception:
             pass

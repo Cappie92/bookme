@@ -74,8 +74,9 @@ def get_robokassa_config() -> Dict[str, Any]:
     При ROBOKASSA_IS_TEST=true: подпись init — ROBOKASSA_TEST_PASSWORD_1,
     ResultURL — ROBOKASSA_TEST_PASSWORD_2; в generate_payment_url передаётся IsTest=1.
 
-    В stub-режиме, если тестовые пароли не заданы, для локальной подписи stub-complete
-    используются ROBOKASSA_PASSWORD_1/2 (без реального запроса к Robokassa).
+    В stub-режиме при пустых тестовых паролях **по умолчанию** конфиг не поднимается
+    (не смешиваем IsTest с боевыми паролями). Исключение — явный
+    ROBOKASSA_ALLOW_INSECURE_PROD_PASSWORDS_IN_TEST=true (только для осознанного local stub).
     """
     from settings import get_settings
 
@@ -89,13 +90,27 @@ def get_robokassa_config() -> Dict[str, Any]:
         credential_branch = "test_passwords"
         if not p1 or not p2:
             if stub:
-                p1 = (s.ROBOKASSA_PASSWORD_1 or "").strip()
-                p2 = (s.ROBOKASSA_PASSWORD_2 or "").strip()
-                credential_branch = "stub_fallback_production_passwords"
-                logger.warning(
-                    "Robokassa: ROBOKASSA_IS_TEST=true, но ROBOKASSA_TEST_PASSWORD_1/2 не заданы — "
-                    "для stub используется пара ROBOKASSA_PASSWORD_1/2 (только локальная подпись)."
-                )
+                if s.robokassa_allow_insecure_prod_passwords_in_test:
+                    p1 = (s.ROBOKASSA_PASSWORD_1 or "").strip()
+                    p2 = (s.ROBOKASSA_PASSWORD_2 or "").strip()
+                    credential_branch = "stub_insecure_production_passwords"
+                    if not p1 or not p2:
+                        raise ValueError(
+                            "ROBOKASSA_IS_TEST=true, ROBOKASSA_ALLOW_INSECURE_PROD_PASSWORDS_IN_TEST=true: "
+                            "нужны ROBOKASSA_PASSWORD_1 и ROBOKASSA_PASSWORD_2 для локальной подписи stub."
+                        )
+                    logger.critical(
+                        "Robokassa: INSECURE config — ROBOKASSA_IS_TEST=true, тестовые пароли пусты, "
+                        "используются боевые пароли (ROBOKASSA_ALLOW_INSECURE_PROD_PASSWORDS_IN_TEST). "
+                        "Только для локального stub; в общем случае задайте ROBOKASSA_TEST_PASSWORD_1/2."
+                    )
+                else:
+                    raise ValueError(
+                        "ROBOKASSA_IS_TEST=true, но ROBOKASSA_TEST_PASSWORD_1/2 не заданы. "
+                        "Укажите тестовые пароли Robokassa; либо для чисто локального stub без test-режима кассы "
+                        "выставьте ROBOKASSA_IS_TEST=false; либо явно (опасно) "
+                        "ROBOKASSA_ALLOW_INSECURE_PROD_PASSWORDS_IN_TEST=true и задайте ROBOKASSA_PASSWORD_1/2."
+                    )
             else:
                 raise ValueError(
                     "ROBOKASSA_IS_TEST=true: задайте ROBOKASSA_TEST_PASSWORD_1 и ROBOKASSA_TEST_PASSWORD_2 "

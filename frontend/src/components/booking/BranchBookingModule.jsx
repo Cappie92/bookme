@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { CalendarIcon, ClockIcon, UserIcon, TagIcon } from '@heroicons/react/24/outline'
 import { dateToISOString, formatTime, getMinDate, getSelectedCity } from '../../utils/dateUtils'
+import { metrikaGoal } from '../../analytics/metrika'
+import { M } from '../../analytics/metrikaEvents'
 
 export default function BranchBookingModule({ 
   salonId, 
@@ -377,6 +379,12 @@ export default function BranchBookingModule({
       const result = await response.json()
       
       if (currentUser) {
+        metrikaGoal(M.PUBLIC_BOOKING_SUCCESS, {
+          source: 'branch_module',
+          flow: 'logged_in',
+          salonId,
+          branchId,
+        })
         setSuccess('Запись успешно создана!')
         resetForm()
         if (onBookingSuccess) {
@@ -384,6 +392,12 @@ export default function BranchBookingModule({
         }
       } else {
         if (result.access_token) {
+          metrikaGoal(M.PUBLIC_BOOKING_SUCCESS, {
+            source: 'branch_module',
+            flow: 'guest_with_token',
+            salonId,
+            branchId,
+          })
           localStorage.setItem('access_token', result.access_token)
           
           if (result.needs_phone_verification) {

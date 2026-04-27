@@ -7,6 +7,7 @@ import { isSalonFeaturesEnabled } from '../config/features'
 import { useModal } from '../hooks/useModal'
 import { cities, getTimezoneByCity } from '../utils/cities'
 import { normalizeRussianPhoneForApi } from '../utils/normalizeRussianPhoneForApi'
+import { reportAuthLoginSuccess, reportAuthRegisterSuccess } from '../analytics/authReachGoals'
 
 const REGISTER_FIELDS = {
   client: [
@@ -100,13 +101,22 @@ export default function AuthModal() {
       setAuthModalInitialTab(null)
     }
   }, [open, authModalInitialTab, setAuthModalInitialTab])
+
+  useEffect(() => {
+    if (!open) {
+      setAgreeTerms(false)
+      setAgreePersonalData(false)
+      setMarketingOptIn(false)
+    }
+  }, [open])
   
   // Обновляем тип регистрации при изменении defaultRegType
   useEffect(() => {
     setRegType(defaultRegType)
   }, [defaultRegType])
-  const [agree, setAgree] = useState(false)
-  const [infoAgree, setInfoAgree] = useState(false)
+  const [agreeTerms, setAgreeTerms] = useState(false)
+  const [agreePersonalData, setAgreePersonalData] = useState(false)
+  const [marketingOptIn, setMarketingOptIn] = useState(false)
   const [form, setForm] = useState({})
   const [loading, setLoading] = useState(false)
   const [errors, setErrors] = useState({})
@@ -274,6 +284,12 @@ export default function AuthModal() {
     if (regType === 'master' && (!(form.city || '').trim())) {
       errs.city = 'Выберите город'
     }
+    if (!agreeTerms) {
+      errs.agreeTerms = 'Нужно принять пользовательское соглашение'
+    }
+    if (!agreePersonalData) {
+      errs.agreePersonalData = 'Нужно дать согласие на обработку персональных данных'
+    }
     return errs
   }
 
@@ -341,6 +357,9 @@ export default function AuthModal() {
       if (city) payload.city = city
       if (tz) payload.timezone = tz
     }
+    payload.accept_terms = Boolean(agreeTerms)
+    payload.accept_personal_data = Boolean(agreePersonalData)
+    payload.marketing_opt_in = Boolean(marketingOptIn)
     try {
       const res = await fetch('/api/auth/register', {
         method: 'POST',
@@ -350,7 +369,7 @@ export default function AuthModal() {
       if (res.ok) {
         const data = await res.json()
         // Получаем роль пользователя
-        let role = null;
+        let role = null
         // Пробуем декодировать JWT (access_token) чтобы узнать роль
         try {
           const payload = JSON.parse(atob(data.access_token.split('.')[1]))
@@ -358,6 +377,7 @@ export default function AuthModal() {
         } catch {
           // Игнорируем ошибки декодирования токена
         }
+        reportAuthRegisterSuccess({ role: (role || regType).toString() })
         
         // Сохраняем токены в localStorage
         localStorage.setItem('access_token', data.access_token)
@@ -431,6 +451,7 @@ export default function AuthModal() {
         }
 
         login(userData || data)
+        reportAuthLoginSuccess({ role: (role || userData?.role || '').toString() })
         setLoginForm({ phone: '+7', password: '' })
         onClose()
         const stayOrReturn = authModalRedirectMode === 'stay' || authModalRedirectMode === 'returnTo'
@@ -1147,16 +1168,72 @@ export default function AuthModal() {
                   </div>
                 ))}
                 <div className="flex items-start gap-2 mt-2">
-                  <input id="agree" type="checkbox" checked={agree} onChange={e=>setAgree(e.target.checked)} required className="mt-1" />
-                  <label htmlFor="agree" className="text-xs text-gray-700 select-none">
-                    Нажимая на кнопку Зарегистрироваться, я подтверждаю свое согласие с{' '}
-                    <a href="/user-agreement" target="_blank" rel="noopener noreferrer" className="underline text-[#4CAF50]">условиями пользовательского соглашения</a>
-                    {' '}и даю согласие на обработку персональных данных <span className="text-red-500">*</span>
+                  <input
+                    id="agreeTerms"
+                    type="checkbox"
+                    checked={agreeTerms}
+                    onChange={(e) => {
+                      setAgreeTerms(e.target.checked)
+                      if (errors.agreeTerms) setErrors((er) => ({ ...er, agreeTerms: undefined }))
+                    }}
+                    className="mt-1"
+                  />
+                  <label htmlFor="agreeTerms" className="text-xs text-gray-700 select-none">
+                    Я принимаю{' '}
+                    <a href="/terms" target="_blank" rel="noopener noreferrer" className="underline text-[#4CAF50]">
+                      пользовательское соглашение
+                    </a>{' '}
+                    <span className="text-red-500">*</span>
                   </label>
                 </div>
-                <div className="flex items-start gap-2">
-                  <input id="infoAgree" type="checkbox" checked={infoAgree} onChange={e=>setInfoAgree(e.target.checked)} className="mt-1" />
-                  <label htmlFor="infoAgree" className="text-xs text-gray-700 select-none">Я даю согласие на получение информационных сообщений</label>
+                {errors.agreeTerms && <span className="text-xs text-red-500 -mt-1">{errors.agreeTerms}</span>}
+                <div className="flex items-start gap-2 mt-2">
+                  <input
+                    id="agreePersonalData"
+                    type="checkbox"
+                    checked={agreePersonalData}
+                    onChange={(e) => {
+                      setAgreePersonalData(e.target.checked)
+                      if (errors.agreePersonalData) setErrors((er) => ({ ...er, agreePersonalData: undefined }))
+                    }}
+                    className="mt-1"
+                  />
+                  <label htmlFor="agreePersonalData" className="text-xs text-gray-700 select-none">
+                    Я даю{' '}
+                    <a
+                      href="/personal-data-consent"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="underline text-[#4CAF50]"
+                    >
+                      согласие на обработку персональных данных
+                    </a>{' '}
+                    <span className="text-red-500">*</span>
+                  </label>
+                </div>
+                {errors.agreePersonalData && (
+                  <span className="text-xs text-red-500 -mt-1">{errors.agreePersonalData}</span>
+                )}
+                <div className="flex items-start gap-2 mt-2">
+                  <input
+                    id="marketingOptIn"
+                    type="checkbox"
+                    checked={marketingOptIn}
+                    onChange={(e) => setMarketingOptIn(e.target.checked)}
+                    className="mt-1"
+                  />
+                  <label htmlFor="marketingOptIn" className="text-xs text-gray-700 select-none">
+                    Я даю{' '}
+                    <a
+                      href="/marketing-consent"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="underline text-[#4CAF50]"
+                    >
+                      согласие на получение рекламных и информационных рассылок
+                    </a>{' '}
+                    (опционально)
+                  </label>
                 </div>
                 {phoneVerificationError && (
                   <div className="p-3 bg-red-50 border border-red-200 rounded">
@@ -1164,7 +1241,7 @@ export default function AuthModal() {
                   </div>
                 )}
                 
-                <Button type="submit" disabled={!agree || loading}>
+                <Button type="submit" disabled={!agreeTerms || !agreePersonalData || loading}>
                   {loading ? 'Регистрация...' : 'Зарегистрироваться'}
                 </Button>
               </form>

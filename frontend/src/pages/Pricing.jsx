@@ -3,6 +3,8 @@ import { Helmet } from 'react-helmet-async'
 import { ArrowRightIcon } from '@heroicons/react/24/solid'
 import { Button } from '../components/ui'
 import { useAuth } from '../contexts/AuthContext'
+import { metrikaGoal } from '../analytics/metrika'
+import { M } from '../analytics/metrikaEvents'
 import { isSalonFeaturesEnabled } from '../config/features'
 import { usePricingCatalog } from '../hooks/usePricingCatalog'
 import { getPlanDisplayName } from '../utils/subscriptionPlanNames'
@@ -177,6 +179,11 @@ export default function Pricing() {
 
   const [billingPeriodMonths, setBillingPeriodMonths] = useState(1)
 
+  const onBillingPeriodChange = (months) => {
+    setBillingPeriodMonths(months)
+    metrikaGoal(M.PRICING_PERIOD_CHANGE, { months })
+  }
+
   useEffect(() => {
     if (salonOn) return
     setAudience('master')
@@ -210,6 +217,7 @@ export default function Pricing() {
   }, [plans, hasAnyYearlyFreeze])
 
   const handleRegister = () => {
+    metrikaGoal(M.PRICING_CTA_REGISTER, { audience: subscriptionType })
     openAuthModal(audience === 'salon' ? 'salon' : 'master', 'register')
   }
 
@@ -307,7 +315,7 @@ export default function Pricing() {
                 <div className="max-sm:w-full max-sm:max-w-full">
                   <PeriodToggle
                     value={billingPeriodMonths}
-                    onChange={setBillingPeriodMonths}
+                    onChange={onBillingPeriodChange}
                     discountBadgeLabel={discountBadgeLabel}
                   />
                   {discountBadgeLabel ? (

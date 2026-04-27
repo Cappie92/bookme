@@ -8,6 +8,8 @@ import { ChevronDownIcon, ChevronUpIcon, MagnifyingGlassIcon, CalendarIcon, Chev
 import { formatTimeShort, formatTimezoneLabel } from '../../utils/dateFormat'
 import { useAuth } from '../../contexts/AuthContext'
 import PublicBookingAuthPrompt from './PublicBookingAuthPrompt'
+import { metrikaGoal } from '../../analytics/metrika'
+import { M } from '../../analytics/metrikaEvents'
 
 const WEEKDAYS = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
 
@@ -453,6 +455,7 @@ export default function PublicBookingWizard({
     ;(async () => {
       setSubmitting(true)
       setSubmitError(null)
+      metrikaGoal(M.PUBLIC_BOOKING_FORM_SUBMIT, { slug, context: 'public_wizard_post_login' })
       try {
         const res = await fetch(url, {
           method: 'POST',
@@ -548,10 +551,12 @@ export default function PublicBookingWizard({
       if (typeof __DEV__ !== 'undefined' && __DEV__) {
         console.debug('[public-booking] No user: opening auth prompt', { intent: 'create_after_auth' })
       }
+      metrikaGoal(M.PUBLIC_BOOKING_WIZARD_NEED_AUTH, { slug })
       setShowAuthPrompt(true)
       return
     }
     setSubmitting(true)
+    metrikaGoal(M.PUBLIC_BOOKING_FORM_SUBMIT, { slug, context: 'public_wizard' })
     const url = `/api/public/masters/${encodeURIComponent(slug)}/bookings`
     const payload = { service_id: selectedService.id, start_time: selectedSlot.start_time, end_time: selectedSlot.end_time }
     if (typeof __DEV__ !== 'undefined' && __DEV__) {
@@ -984,8 +989,14 @@ export default function PublicBookingWizard({
         onClose={() => setShowAuthPrompt(false)}
         profile={profile}
         summary={authPromptSummary}
-        onLogin={() => openAuthModal('client', 'login', { redirectMode: 'stay', returnToPath: typeof window !== 'undefined' ? window.location.pathname + window.location.search : '', flow: 'publicBookingConfirm' })}
-        onRegister={() => openAuthModal('client', 'register', { redirectMode: 'stay', returnToPath: typeof window !== 'undefined' ? window.location.pathname + window.location.search : '', flow: 'publicBookingConfirm' })}
+        onLogin={() => {
+          metrikaGoal(M.PUBLIC_BOOKING_AUTH_CHOICE, { choice: 'login' })
+          openAuthModal('client', 'login', { redirectMode: 'stay', returnToPath: typeof window !== 'undefined' ? window.location.pathname + window.location.search : '', flow: 'publicBookingConfirm' })
+        }}
+        onRegister={() => {
+          metrikaGoal(M.PUBLIC_BOOKING_AUTH_CHOICE, { choice: 'register' })
+          openAuthModal('client', 'register', { redirectMode: 'stay', returnToPath: typeof window !== 'undefined' ? window.location.pathname + window.location.search : '', flow: 'publicBookingConfirm' })
+        }}
       />
     </div>
   )

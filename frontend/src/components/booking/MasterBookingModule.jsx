@@ -6,6 +6,8 @@ import { dateToISOString, formatTime, getMinDate, getSelectedCity } from '../../
 import { supportsReverseFlashCall } from '../../utils/deviceUtils'
 import { useToast } from '../../contexts/ToastContext'
 import PaymentModal from '../modals/PaymentModal'
+import { metrikaGoal } from '../../analytics/metrika'
+import { M } from '../../analytics/metrikaEvents'
 
 export default function MasterBookingModule({ 
   masterId, 
@@ -434,6 +436,7 @@ export default function MasterBookingModule({
       }
     } else {
       if (slug && onAuthRequired) {
+        metrikaGoal(M.PUBLIC_BOOKING_AUTH_REQUIRED, { slug })
         onAuthRequired()
         setLoading(false)
         return
@@ -520,6 +523,11 @@ export default function MasterBookingModule({
       const result = await response.json()
       
       if (currentUser) {
+        metrikaGoal(M.PUBLIC_BOOKING_SUCCESS, {
+          source: slug ? 'master_module' : 'master_module_internal',
+          flow: 'logged_in',
+          slug: slug || undefined,
+        })
         setSuccess('Запись успешно создана!')
         resetForm()
         if (onBookingSuccess) {
@@ -527,6 +535,11 @@ export default function MasterBookingModule({
         }
       } else {
         if (result.access_token) {
+          metrikaGoal(M.PUBLIC_BOOKING_SUCCESS, {
+            source: slug ? 'master_module' : 'master_module_internal',
+            flow: 'guest_with_token',
+            slug: slug || undefined,
+          })
           localStorage.setItem('access_token', result.access_token)
           
           if (result.needs_phone_verification) {
@@ -760,6 +773,11 @@ export default function MasterBookingModule({
     setShowPaymentModal(false)
     setTemporaryBookingId(null)
     setPaymentAmount(0)
+    metrikaGoal(M.PUBLIC_BOOKING_SUCCESS, {
+      source: slug ? 'master_module' : 'master_module_internal',
+      flow: 'prepayment',
+      slug: slug || undefined,
+    })
     setSuccess('Запись успешно создана!')
     resetForm()
     if (onBookingSuccess) {

@@ -2,12 +2,28 @@ import React, { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import Header from '../components/Header'
 import Logo from '../components/ui/Logo'
+import { metrikaInitOnce, metrikaGoal } from '../analytics/metrika'
+import { M } from '../analytics/metrikaEvents'
 
 function PaymentSuccess() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const paymentId = searchParams.get('payment_id')
   const [countdown, setCountdown] = useState(10)
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+    // Один reachGoal на успешный return URL (и при React StrictMode remount)
+    const k = `dedato_ym_subscription_ok_${paymentId || 'none'}`
+    if (window.sessionStorage.getItem(k) === '1') {
+      return
+    }
+    window.sessionStorage.setItem(k, '1')
+    void metrikaInitOnce().then(() => {
+      metrikaGoal(M.PAYMENT_SUBSCRIPTION_SUCCESS, { payment_id: paymentId || undefined })
+    })
+  }, [paymentId])
 
   useEffect(() => {
     // Таймер обратного отсчета

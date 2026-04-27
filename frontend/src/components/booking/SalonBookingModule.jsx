@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { CalendarIcon, ClockIcon, UserIcon, TagIcon } from '@heroicons/react/24/outline'
 import { dateToISOString, formatTime, getMinDate, getSelectedCity } from '../../utils/dateUtils'
+import { metrikaGoal } from '../../analytics/metrika'
+import { M } from '../../analytics/metrikaEvents'
 
 export default function SalonBookingModule({ 
   salonId, 
@@ -537,6 +539,11 @@ export default function SalonBookingModule({
       const result = await response.json()
       
       if (currentUser) {
+        metrikaGoal(M.PUBLIC_BOOKING_SUCCESS, {
+          source: 'salon_module',
+          flow: 'logged_in',
+          salonId,
+        })
         setSuccess('Запись успешно создана!')
         resetForm()
         if (onBookingSuccess) {
@@ -544,6 +551,11 @@ export default function SalonBookingModule({
         }
       } else {
         if (result.access_token) {
+          metrikaGoal(M.PUBLIC_BOOKING_SUCCESS, {
+            source: 'salon_module',
+            flow: 'guest_with_token',
+            salonId,
+          })
           localStorage.setItem('access_token', result.access_token)
           
           if (result.needs_phone_verification) {
@@ -562,6 +574,11 @@ export default function SalonBookingModule({
           
           navigate('/client')
         } else if (result.success) {
+          metrikaGoal(M.PUBLIC_BOOKING_SUCCESS, {
+            source: 'salon_module',
+            flow: 'any_master',
+            salonId,
+          })
           // Успешное создание записи с "Любым мастером"
           setSuccess(`Запись успешно создана с мастером ${result.master_name}!`)
           resetForm()

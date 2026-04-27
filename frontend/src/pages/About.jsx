@@ -9,6 +9,8 @@ import {
 import { ArrowRightIcon } from '@heroicons/react/24/solid'
 import { Button } from '../components/ui'
 import { useAuth } from '../contexts/AuthContext'
+import { metrikaGoal } from '../analytics/metrika'
+import { M } from '../analytics/metrikaEvents'
 
 const PAGE_BG = 'bg-[#F9F7F6]'
 
@@ -73,7 +75,15 @@ function StatCell({ title, text }) {
 export default function About() {
   const { openAuthModal } = useAuth()
 
-  const handleTryFree = () => openAuthModal('master', 'register')
+  const handleAboutHeroRegister = () => {
+    metrikaGoal(M.ABOUT_HERO_REGISTER)
+    openAuthModal('master', 'register')
+  }
+  const handleAboutFinalRegister = () => {
+    metrikaGoal(M.ABOUT_FINAL_CTA_REGISTER)
+    openAuthModal('master', 'register')
+  }
+
 
   return (
     <div className={`${PAGE_BG} pt-[104px] overflow-x-hidden min-h-full`}>
@@ -106,7 +116,7 @@ export default function About() {
             лишней сложности.
           </p>
           <div className="mt-8 flex flex-col sm:flex-row gap-3 justify-center items-stretch sm:items-center">
-            <Button variant="primary" size="lg" onClick={handleTryFree} className="w-full sm:w-auto">
+            <Button variant="primary" size="lg" onClick={handleAboutHeroRegister} className="w-full sm:w-auto">
               Попробовать бесплатно
               <ArrowRightIcon className="h-4 w-4 ml-2" />
             </Button>
@@ -185,7 +195,7 @@ export default function About() {
             <div className="relative mt-8 lg:mt-0 flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-center lg:justify-end flex-shrink-0">
               <button
                 type="button"
-                onClick={handleTryFree}
+                onClick={handleAboutFinalRegister}
                 className="inline-flex items-center justify-center font-medium rounded-xl px-6 py-3 text-base bg-white text-[#1C1917] hover:bg-[#F4F1EF] shadow-md transition-colors"
               >
                 Начать бесплатно
@@ -193,6 +203,7 @@ export default function About() {
               </button>
               <Link
                 to="/pricing"
+                onClick={() => metrikaGoal(M.ABOUT_CTA_PRICING)}
                 className="inline-flex items-center justify-center rounded-xl px-5 py-3 text-base font-medium text-white border border-white/40 hover:bg-white/10 transition-colors"
               >
                 Перейти к тарифам

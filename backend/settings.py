@@ -73,6 +73,8 @@ class Settings(BaseSettings):
     ROBOKASSA_RESULT_URL: str = ""
     ROBOKASSA_SUCCESS_URL: str = ""
     ROBOKASSA_FAIL_URL: str = ""
+    # Только осознанный opt-in: при ROBOKASSA_IS_TEST=true и пустых тестовых паролях в stub разрешить подпись боевыми паролями (небезопасно)
+    ROBOKASSA_ALLOW_INSECURE_PROD_PASSWORDS_IN_TEST: str = "false"
 
     # --- Telephony / SMS ---
     ZVONOK_API_KEY: str = ""
@@ -186,6 +188,11 @@ class Settings(BaseSettings):
         return _parse_bool(self.ROBOKASSA_IS_TEST)
 
     @property
+    def robokassa_allow_insecure_prod_passwords_in_test(self) -> bool:
+        """Небезопасный fallback боевых паролей в тест-режиме (только с явного env, см. get_robokassa_config)."""
+        return _parse_bool(self.ROBOKASSA_ALLOW_INSECURE_PROD_PASSWORDS_IN_TEST)
+
+    @property
     def zvonok_stub(self) -> bool:
         return self.ZVONOK_MODE.strip().lower() == "stub"
 
@@ -207,6 +214,7 @@ class Settings(BaseSettings):
             "DATABASE": "sqlite" if "sqlite" in self.DATABASE_URL else "postgres",
             "ROBOKASSA_MODE": self.ROBOKASSA_MODE or "(empty)",
             "ROBOKASSA_IS_TEST": self.robokassa_is_test,
+            "ROBOKASSA_ALLOW_INSECURE_PROD_PASSWORDS_IN_TEST": self.robokassa_allow_insecure_prod_passwords_in_test,
             "ENABLE_DEV_TESTDATA": self.enable_dev_testdata,
             "DEV_E2E": self.dev_e2e,
             "LEGACY_INDIE_MODE": _parse_bool(self.LEGACY_INDIE_MODE),

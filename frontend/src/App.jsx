@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom"
 import { HelmetProvider } from 'react-helmet-async'
 import { lazy, Suspense } from 'react'
 import { AuthProvider } from './contexts/AuthContext'
+import MetrikaRouteListener from './analytics/MetrikaRouteListener'
 import { FavoritesProvider } from './contexts/FavoritesContext'
 import { ToastProvider } from './contexts/ToastContext'
 import MainLayout from "./layouts/MainLayout"
@@ -21,7 +22,9 @@ const Pricing = lazy(() => import("./pages/Pricing"))
 const About = lazy(() => import("./pages/About"))
 const BlogList = lazy(() => import("./pages/BlogList"))
 const BlogPost = lazy(() => import("./pages/BlogPost"))
-const UserAgreement = lazy(() => import("./pages/UserAgreement"))
+const TermsPage = lazy(() => import("./pages/TermsPage"))
+const PersonalDataConsentPage = lazy(() => import("./pages/PersonalDataConsentPage"))
+const MarketingConsentPage = lazy(() => import("./pages/MarketingConsentPage"))
 const PublicProfile = lazy(() => import("./pages/PublicProfile"))
 const SubdomainPage = lazy(() => import("./pages/SubdomainPage"))
 const MasterPublicBookingPage = lazy(() => import("./pages/MasterPublicBookingPage"))
@@ -81,6 +84,7 @@ function App() {
   return (
     <HelmetProvider>
       <BrowserRouter>
+            <MetrikaRouteListener />
             <AuthProvider>
               <ToastProvider>
               <FavoritesProvider>
@@ -114,7 +118,10 @@ function App() {
           <Route path="/admin/functions" element={<AdminLayout><AdminFunctions/></AdminLayout>} />
           <Route path="/admin/always-free-logs" element={<AdminLayout><AdminAlwaysFreeLogs/></AdminLayout>} />
           <Route path="/admin/settings" element={<AdminLayout><AdminSettings/></AdminLayout>} />
-          <Route path="/user-agreement" element={<UserAgreement/>} />
+          <Route path="/terms" element={<TermsPage />} />
+          <Route path="/personal-data-consent" element={<PersonalDataConsentPage />} />
+          <Route path="/marketing-consent" element={<MarketingConsentPage />} />
+          <Route path="/user-agreement" element={<Navigate to="/terms" replace />} />
           <Route path="/payment/success" element={<PaymentSuccess/>} />
           <Route path="/payment/failed" element={<PaymentFailed/>} />
           <Route path="/client" element={<ClientLayout><ClientDashboard/></ClientLayout>} />

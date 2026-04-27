@@ -3,7 +3,7 @@
  * Master-only. Slug = masters.domain.
  * SEO: title, description, og, canonical.
  */
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Helmet } from 'react-helmet-async'
 import Header from '../components/Header'
@@ -13,6 +13,8 @@ import PublicBookingSidebar from '../components/booking/PublicBookingSidebar'
 import ErrorBoundary from '../components/ErrorBoundary'
 import { useAuth } from '../contexts/AuthContext'
 import { formatPublicAddressLine } from '../utils/publicAddressDisplay'
+import { metrikaGoal } from '../analytics/metrika'
+import { M } from '../analytics/metrikaEvents'
 
 const API_BASE = '/api/public/masters'
 
@@ -33,10 +35,18 @@ export default function MasterPublicBookingPage() {
   const [eligibility, setEligibility] = useState(null)
   const [clientNote, setClientNote] = useState(null)
   const [showAppBanner, setShowAppBanner] = useState(false)
+  const publicBookingPageViewSlug = useRef(null)
 
   useEffect(() => {
     if (slug) loadProfile()
   }, [slug])
+
+  useEffect(() => {
+    if (!slug || !profile || error) return
+    if (publicBookingPageViewSlug.current === slug) return
+    publicBookingPageViewSlug.current = slug
+    metrikaGoal(M.PUBLIC_BOOKING_PAGE_VIEW, { slug })
+  }, [slug, profile, error])
 
   useEffect(() => {
     if (!slug || !profile) return
@@ -351,7 +361,9 @@ export default function MasterPublicBookingPage() {
                   currentUser={currentUser}
                   eligibility={eligibility}
                   onAuthRequired={() => openAuthModal('client')}
-                  onBookingSuccess={() => {}}
+                  onBookingSuccess={() => {
+                    metrikaGoal(M.PUBLIC_BOOKING_SUCCESS, { source: 'public_wizard', slug })
+                  }}
                   onBookingError={() => {}}
                 />
               </ErrorBoundary>

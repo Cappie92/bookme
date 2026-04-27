@@ -2,6 +2,38 @@
 import pytest
 
 
+def test_get_robokassa_config_rejects_test_mode_without_test_passwords_or_opt_in(monkeypatch):
+    """При IS_TEST=true и пустых тестовых паролях не подставляем боевые без явного opt-in."""
+    monkeypatch.setenv("ROBOKASSA_MODE", "stub")
+    monkeypatch.setenv("ROBOKASSA_IS_TEST", "true")
+    monkeypatch.setenv("ROBOKASSA_TEST_PASSWORD_1", "")
+    monkeypatch.setenv("ROBOKASSA_TEST_PASSWORD_2", "")
+    monkeypatch.setenv("ROBOKASSA_ALLOW_INSECURE_PROD_PASSWORDS_IN_TEST", "false")
+    from settings import reload_settings
+
+    reload_settings()
+    from utils.robokassa import get_robokassa_config
+
+    with pytest.raises(ValueError, match="ROBOKASSA_TEST_PASSWORD"):
+        get_robokassa_config()
+
+
+def test_get_robokassa_config_rejects_production_mode_with_test_flag_and_empty_test_passwords(monkeypatch):
+    """IS_TEST=true и пустые тестовые пароли: не-stub (production) — явный ValueError, без fallback на prod."""
+    monkeypatch.setenv("ROBOKASSA_MODE", "production")
+    monkeypatch.setenv("ROBOKASSA_IS_TEST", "true")
+    monkeypatch.setenv("ROBOKASSA_TEST_PASSWORD_1", "")
+    monkeypatch.setenv("ROBOKASSA_TEST_PASSWORD_2", "")
+    monkeypatch.setenv("ROBOKASSA_ALLOW_INSECURE_PROD_PASSWORDS_IN_TEST", "false")
+    from settings import reload_settings
+
+    reload_settings()
+    from utils.robokassa import get_robokassa_config
+
+    with pytest.raises(ValueError, match="ROBOKASSA_IS_TEST=true: задайте ROBOKASSA_TEST_PASSWORD"):
+        get_robokassa_config()
+
+
 def test_init_returns_stub_url_when_stub_mode(client, db, monkeypatch):
     """При ROBOKASSA_MODE=stub init возвращает stub payment_url."""
     monkeypatch.setenv("ROBOKASSA_MODE", "stub")
