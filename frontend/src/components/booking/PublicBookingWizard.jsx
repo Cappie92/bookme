@@ -259,6 +259,8 @@ export default function PublicBookingWizard({
   const [submitting, setSubmitting] = useState(false)
   const [success, setSuccess] = useState(null)
   const [submitError, setSubmitError] = useState(null)
+  const [calendarError, setCalendarError] = useState(null)
+  const [calendarDownloading, setCalendarDownloading] = useState(false)
   const [showServiceDropdown, setShowServiceDropdown] = useState(false)
   const [serviceSearch, setServiceSearch] = useState('')
   const [expandedCategories, setExpandedCategories] = useState(new Set())
@@ -406,6 +408,17 @@ export default function PublicBookingWizard({
     }
     if (!draft || draft.slug !== slug) return
     if (draft.intent !== 'create_after_auth') return
+    // Идемпотентность: если auto-submit уже стартовал (submitted) — не стартуем второй раз
+    if (draft.status === 'submitted') {
+      const submittedAt = typeof draft.submitted_at === 'number' ? draft.submitted_at : 0
+      const ageMs = submittedAt ? Date.now() - submittedAt : 0
+      // safety valve: если submitted завис слишком давно — разрешаем повтор как pending
+      if (ageMs > 30_000) {
+        updateDraftStatus({ status: 'pending', submitted_at: null })
+      } else {
+        return
+      }
+    }
     if (draft.status === 'done' && (draft.created_booking_id || draft.created_public_reference)) {
       clearDraft()
       setSuccess({
@@ -455,6 +468,8 @@ export default function PublicBookingWizard({
     ;(async () => {
       setSubmitting(true)
       setSubmitError(null)
+      // помечаем, что auto-submit начался, чтобы не сделать второй POST при повторных эффектах
+      updateDraftStatus({ status: 'submitted', submitted_at: Date.now() })
       metrikaGoal(M.PUBLIC_BOOKING_FORM_SUBMIT, { slug, context: 'public_wizard_post_login' })
       try {
         const res = await fetch(url, {
@@ -491,7 +506,7 @@ export default function PublicBookingWizard({
       } catch (err) {
         if (err?.name === 'AbortError') return
         if (!cancelled) {
-          updateDraftStatus({ status: 'pending' })
+          updateDraftStatus({ status: 'pending', submitted_at: null })
           setSubmitError(err.message || 'Ошибка создания записи')
           onBookingError?.(err.message)
         }
@@ -653,18 +668,54 @@ export default function PublicBookingWizard({
           >
             Перейти в личный кабинет
           </button>
-          <a
-            href={
-              success.public_reference
+          <button
+            type="button"
+            onClick={async () => {
+              setCalendarError(null)
+              const token = localStorage.getItem('access_token')
+              if (!token) {
+                setCalendarError('Чтобы добавить запись в календарь, нужно войти в аккаунт.')
+                return
+              }
+              const url = success.public_reference
                 ? `/api/client/bookings/ref/${encodeURIComponent(success.public_reference)}/calendar.ics?alarm_minutes=60`
                 : `/api/client/bookings/${success.id}/calendar.ics?alarm_minutes=60`
-            }
-            className={`${btnBase} bg-white text-gray-700 border-2 border-gray-200 hover:border-gray-300`}
+              setCalendarDownloading(true)
+              try {
+                const res = await fetch(url, {
+                  headers: { Authorization: `Bearer ${token}` },
+                  credentials: 'include',
+                })
+                if (!res.ok) {
+                  const err = await res.json().catch(() => ({}))
+                  throw new Error(err?.detail || 'Не удалось получить файл календаря')
+                }
+                const blob = await res.blob()
+                const a = document.createElement('a')
+                a.href = URL.createObjectURL(blob)
+                const pr = success.public_reference != null ? String(success.public_reference).trim() : ''
+                a.download = pr ? `booking-${pr}.ics` : `booking-${success.id}.ics`
+                a.click()
+                URL.revokeObjectURL(a.href)
+              } catch (e) {
+                setCalendarError(e?.message || 'Не удалось добавить в календарь')
+              } finally {
+                setCalendarDownloading(false)
+              }
+            }}
+            disabled={calendarDownloading}
+            className={`${btnBase} bg-white text-gray-700 border-2 border-gray-200 hover:border-gray-300 disabled:opacity-60`}
+            data-testid="add-to-calendar"
           >
             <CalendarIcon className="w-5 h-5 shrink-0" />
-            Добавить в календарь
-          </a>
+            {calendarDownloading ? 'Загрузка…' : 'Добавить в календарь'}
+          </button>
         </div>
+        {calendarError ? (
+          <p className="mt-4 text-sm text-rose-700" data-testid="calendar-error">
+            {calendarError}
+          </p>
+        ) : null}
       </div>
     )
   }

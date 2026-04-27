@@ -177,7 +177,7 @@ export default function ClientLayout({ children }) {
       <ClientMobileNav managedBranches={managedBranches} />
       <ClientSidebar managedBranches={managedBranches} />
       {/* header h-24 (6rem) + mobile tab bar ~2.75rem ≈ 8.75rem; safe area сверху учитывает Header */}
-      <main className="ml-0 w-full min-w-0 max-w-[100vw] overflow-x-hidden px-3 sm:px-4 lg:px-6 pt-[8.75rem] lg:pt-24 pb-12 lg:pb-10 lg:ml-64 min-h-screen">
+      <main className="ml-0 w-full lg:w-[calc(100%-16rem)] min-w-0 overflow-x-hidden px-3 sm:px-4 lg:px-6 pt-[8.75rem] lg:pt-24 pb-12 lg:pb-10 lg:ml-64 min-h-screen">
         {children}
       </main>
     </div>

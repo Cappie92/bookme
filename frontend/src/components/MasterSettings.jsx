@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef, useMemo } from 'react'
 import { ArrowTopRightOnSquareIcon, ClipboardDocumentIcon, UserCircleIcon } from '@heroicons/react/24/outline'
 import { cities, getTimezoneByCity } from '../utils/cities'
 import { getImageUrl, API_BASE_URL } from '../utils/config'
@@ -78,6 +78,13 @@ export default function MasterSettings({
   const [showFreeSlotsCardModal, setShowFreeSlotsCardModal] = useState(false)
 
   const frontendBaseUrl = getFrontendBaseUrl()
+  const websiteSaveBtnRef = useRef(null)
+
+  const slugChanged = useMemo(() => {
+    const current = (websiteSettings?.domain || '').toString().trim()
+    const saved = (profile?.master?.domain || '').toString().trim()
+    return current !== saved
+  }, [websiteSettings?.domain, profile?.master?.domain])
 
   /** Публичная страница записи: /m/:slug (slug = masters.domain) */
   const buildPublicBookingUrl = (slug) => {
@@ -902,9 +909,18 @@ export default function MasterSettings({
                           </Tooltip>
                         </div>
                       </div>
-                      <p className="text-xs text-gray-500">
-                        Короткий адрес в конце ссылки. Страница открывается по адресу вида …/m/… Сохраните настройки внизу блока, чтобы применить изменение.
-                      </p>
+                      {slugChanged ? (
+                        <div className="flex justify-end">
+                          <button
+                            type="button"
+                            onClick={() => websiteSaveBtnRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
+                            className="inline-flex items-center gap-2 rounded-lg bg-[#4CAF50] px-3 py-2 text-sm font-semibold text-white hover:bg-[#43a047] transition-colors"
+                            data-testid="settings-scroll-to-save-website"
+                          >
+                            Перейти к сохранению
+                          </button>
+                        </div>
+                      ) : null}
                       <div className="mt-3">
                         <button
                           type="button"
@@ -1230,6 +1246,7 @@ export default function MasterSettings({
                 <button
                   type="button"
                   onClick={handleSaveWebsiteSettings}
+                  ref={websiteSaveBtnRef}
                   disabled={!websiteSettingsChanged}
                   className={`px-4 py-2 rounded-lg font-semibold transition-colors text-sm ${
                     websiteSettingsChanged
