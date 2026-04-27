@@ -85,7 +85,6 @@ export default function AuthModal() {
     setAuthModalRedirectMode,
     setAuthModalReturnToPath,
     closeAuthModal,
-    checkAuthStatus,
   } = useAuth()
   const open = authModalOpen
   const onClose = closeAuthModal
@@ -472,7 +471,6 @@ export default function AuthModal() {
           else if (r === 'salon') navigate('/salon')
           else navigate('/')
         }
-        checkAuthStatus().catch(() => {})
       } else {
         const err = await res.json()
         setLoginErrors({ general: err.detail || 'Не удалось войти' })
