@@ -1,6 +1,6 @@
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom"
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom"
 import { HelmetProvider } from 'react-helmet-async'
-import { lazy, Suspense } from 'react'
+import { lazy, Suspense, useEffect } from 'react'
 import { AuthProvider } from './contexts/AuthContext'
 import MetrikaRouteListener from './analytics/MetrikaRouteListener'
 import { FavoritesProvider } from './contexts/FavoritesContext'
@@ -78,12 +78,21 @@ const PageLoader = () => (
   </div>
 )
 
+function ScrollToTopOnRouteChange() {
+  const location = useLocation()
+  useEffect(() => {
+    window.scrollTo(0, 0)
+  }, [location.pathname])
+  return null
+}
+
 function App() {
 
   return (
     <HelmetProvider>
       <BrowserRouter>
             <MetrikaRouteListener />
+            <ScrollToTopOnRouteChange />
             <AuthProvider>
               <ToastProvider>
               <FavoritesProvider>
@@ -117,7 +126,7 @@ function App() {
           <Route path="/admin/functions" element={<AdminLayout><AdminFunctions/></AdminLayout>} />
           <Route path="/admin/always-free-logs" element={<AdminLayout><AdminAlwaysFreeLogs/></AdminLayout>} />
           <Route path="/admin/settings" element={<AdminLayout><AdminSettings/></AdminLayout>} />
-          <Route path="/user-agreement" element={<MainLayout><UserAgreement/></MainLayout>} />
+          <Route path="/user-agreement" element={<UserAgreement/>} />
           <Route path="/personal-data-consent" element={<PersonalDataConsentPage />} />
           <Route path="/payment/success" element={<PaymentSuccess/>} />
           <Route path="/payment/failed" element={<PaymentFailed/>} />
