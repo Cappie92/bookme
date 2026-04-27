@@ -86,6 +86,26 @@ export default function Footer({ compact = false }) {
           >
             О нас
           </Link>
+          <Link
+            to="/user-agreement"
+            className={
+              compact
+                ? 'text-xs md:text-sm text-neutral-600 hover:text-neutral-900 transition-colors'
+                : 'text-sm text-neutral-600 hover:text-neutral-900 transition-colors'
+            }
+          >
+            Пользовательское соглашение
+          </Link>
+          <Link
+            to="/personal-data-consent"
+            className={
+              compact
+                ? 'text-xs md:text-sm text-neutral-600 hover:text-neutral-900 transition-colors'
+                : 'text-sm text-neutral-600 hover:text-neutral-900 transition-colors'
+            }
+          >
+            Обработка персональных данных
+          </Link>
         </div>
 
         {/* Копирайт и контакты */}
