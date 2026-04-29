@@ -20,6 +20,18 @@ def ensure_utc_aware(dt: datetime) -> datetime:
     return dt.astimezone(pytz.UTC)
 
 
+def booking_start_end_utc(booking, master_tz: str) -> tuple[datetime, datetime]:
+    """
+    UTC-моменты начала/конца записи — та же интерпретация, что в ICS:
+    naive в БД = локальное «настенное» время мастера в master_tz.
+    Для ссылок Google Calendar (dates=…Z) нужны эти же UTC, а не ensure_utc_aware(naive→UTC).
+    """
+    return (
+        _booking_datetime_to_utc(booking.start_time, master_tz),
+        _booking_datetime_to_utc(booking.end_time, master_tz),
+    )
+
+
 def _booking_datetime_to_utc(dt: datetime, master_tz: str) -> datetime:
     """
     Момент на границе записи: naive в БД — локальное время мастера (см. scheduling store);

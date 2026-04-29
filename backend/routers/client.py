@@ -32,7 +32,7 @@ from utils.master_canon import (
     MASTER_CANON_DEBUG,
     resolve_master_for_booking,
 )
-from utils.calendar_ics import build_booking_ics, ensure_utc_aware
+from utils.calendar_ics import build_booking_ics, booking_start_end_utc, ensure_utc_aware
 from utils.yandex_maps_url import (
     booking_calendar_location_string,
     yandex_maps_url_for_booking,
@@ -646,8 +646,7 @@ def get_google_calendar_link_by_public_ref(
             detail="Мастер не настроил часовой пояс. Добавление в календарь недоступно.",
         )
     _check_booking_future_and_tz(booking, master_tz)
-    start_utc = ensure_utc_aware(booking.start_time)
-    end_utc = ensure_utc_aware(booking.end_time)
+    start_utc, end_utc = booking_start_end_utc(booking, master_tz)
     start_str = start_utc.strftime("%Y%m%dT%H%M%SZ")
     end_str = end_utc.strftime("%Y%m%dT%H%M%SZ")
     service_name = booking.service.name if booking.service else "-"
@@ -753,8 +752,7 @@ def get_google_calendar_link(
             detail="Мастер не настроил часовой пояс. Добавление в календарь недоступно.",
         )
     _check_booking_future_and_tz(booking, master_tz)
-    start_utc = ensure_utc_aware(booking.start_time)
-    end_utc = ensure_utc_aware(booking.end_time)
+    start_utc, end_utc = booking_start_end_utc(booking, master_tz)
     start_str = start_utc.strftime("%Y%m%dT%H%M%SZ")
     end_str = end_utc.strftime("%Y%m%dT%H%M%SZ")
     service_name = booking.service.name if booking.service else "-"

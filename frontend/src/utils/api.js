@@ -204,6 +204,10 @@ export const apiRequest = async (endpoint, options = {}) => {
     if (error.response) {
       throw error
     }
+    // Штатная отмена fetch (смена страницы, cleanup эффекта, новый запрос) — не шумим в консоль
+    if (error?.name === 'AbortError') {
+      throw error
+    }
     // TEMP DEBUG — fetch failed, JSON parse, etc. (no error.response)
     const msg = error?.message != null ? String(error.message) : String(error)
     tempDebugLogHandledApiFailure({
@@ -280,6 +284,9 @@ export const apiRequestSilent = async (endpoint, options = {}) => {
     
     return await response.json()
   } catch (error) {
+    if (error?.name === 'AbortError') {
+      throw error
+    }
     // Не логируем ошибки 404, так как это нормальное поведение для несуществующих заметок
     if (!error.message.includes('status: 404')) {
       console.error(`API request failed for ${endpoint}:`, error)

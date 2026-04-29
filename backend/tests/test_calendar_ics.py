@@ -5,7 +5,7 @@ import pytz
 
 import pytest
 
-from utils.calendar_ics import build_booking_ics, ensure_utc_aware
+from utils.calendar_ics import booking_start_end_utc, build_booking_ics, ensure_utc_aware
 
 
 def test_ensure_utc_aware_naive():
@@ -24,6 +24,18 @@ def test_ensure_utc_aware_already_aware():
     result = ensure_utc_aware(dt)
     assert result.tzinfo == pytz.UTC
     assert result.hour == 14  # MSK+3 -> UTC
+
+
+def test_booking_start_end_utc_matches_ics_interpretation():
+    """Google-link и ICS должны использовать один и тот же UTC для naive wall time мастера."""
+    booking = MagicMock()
+    booking.start_time = datetime(2025, 2, 10, 12, 0, 0)
+    booking.end_time = datetime(2025, 2, 10, 13, 0, 0)
+    start_utc, end_utc = booking_start_end_utc(booking, "Europe/Moscow")
+    assert start_utc.tzinfo == pytz.UTC
+    assert end_utc.tzinfo == pytz.UTC
+    assert start_utc.strftime("%Y%m%dT%H%M%SZ") == "20250210T090000Z"
+    assert end_utc.strftime("%Y%m%dT%H%M%SZ") == "20250210T100000Z"
 
 
 def test_build_booking_ics_contains_required_fields():
