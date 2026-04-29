@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useMemo } from 'react'
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { XMarkIcon, UserIcon, TagIcon, CalendarIcon } from '@heroicons/react/24/outline'
-import { apiGet } from '../utils/api'
+import { apiGet, apiRequest } from '../utils/api'
 import { CalendarGrid } from '../components/booking/PublicBookingCalendarGrid'
 import { useModal } from '../hooks/useModal'
 import {
@@ -11,6 +11,9 @@ import {
   fetchClientGoogleCalendarUrl,
   sendClientCalendarEmail,
 } from '../utils/clientBookingCalendarActions'
+
+/** Не более N параллельных GET к available-slots-repeat (раньше было до 90 сразу → шторм и 504). */
+const SLOT_FETCH_CONCURRENCY = 5
 
 export default function RepeatBookingModal({ 
   isOpen, 
@@ -50,8 +53,24 @@ export default function RepeatBookingModal({
     return { owner_type: '', owner_id: 0 }
   }, [booking?.indie_master_id, booking?.master_id, booking?.salon_id])
 
+  // Минимальная дата — завтра. Максимальная — +90 дней (возможна навигация по календарю).
+  const minDateStr = useMemo(() => {
+    const t = new Date()
+    t.setDate(t.getDate() + 1)
+    return t.toISOString().split('T')[0]
+  }, [])
+  const maxDateStr = useMemo(() => {
+    const t = new Date()
+    t.setDate(t.getDate() + 90)
+    return t.toISOString().split('T')[0]
+  }, [])
+
+  /** Уже загруженные месяцы (y-m0) в рамках открытой модалки — без повторного шторма при смене месяца туда-обратно. */
+  const loadedMonthsRef = useRef(new Set())
+
   useEffect(() => {
     if (isOpen && booking) {
+      loadedMonthsRef.current = new Set()
       setSubmitSuccess(false)
       setCreatedBooking(null)
       setAccountEmailForCal(null)
@@ -133,33 +152,137 @@ export default function RepeatBookingModal({
     }
   }
 
-  // Грузим availability на 90 дней вперёд (тот же эндпоинт, что и /m/:slug).
+  /**
+   * Один месяц: только дни в [minDateStr, maxDateStr], чанки по SLOT_FETCH_CONCURRENCY,
+   * AbortController отменяет при закрытии модалки / смене параметров (499 на nginx при уходе).
+   */
+  const loadAvailabilityMonth = useCallback(
+    async (year, month0, signal) => {
+      if (!serviceInfo?.duration || !owner.owner_type || !owner.owner_id) return
+
+      const serviceDuration = serviceInfo.duration || 60
+      const lastDay = new Date(year, month0 + 1, 0).getDate()
+      const days = []
+      for (let day = 1; day <= lastDay; day++) {
+        const dateStr = `${year}-${String(month0 + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+        if (dateStr < minDateStr || dateStr > maxDateStr) continue
+        days.push(dateStr)
+      }
+
+      for (let i = 0; i < days.length; i += SLOT_FETCH_CONCURRENCY) {
+        if (signal.aborted) return
+        const chunk = days.slice(i, i + SLOT_FETCH_CONCURRENCY)
+        const results = await Promise.all(
+          chunk.map(async (dateStr) => {
+            const [y, mo, d] = dateStr.split('-').map((x) => parseInt(x, 10))
+            const q = new URLSearchParams({
+              owner_type: owner.owner_type,
+              owner_id: String(owner.owner_id),
+              year: String(y),
+              month: String(mo),
+              day: String(d),
+              service_duration: String(serviceDuration),
+            })
+            const path = `/api/bookings/available-slots-repeat?${q.toString()}`
+            try {
+              const slots = await apiRequest(path, { method: 'GET', signal })
+              return { dateStr, slots: Array.isArray(slots) ? slots : [] }
+            } catch (e) {
+              if (e?.name === 'AbortError') throw e
+              return { dateStr, slots: [] }
+            }
+          })
+        )
+        if (signal.aborted) return
+        const patch = {}
+        for (const { dateStr, slots } of results) {
+          if (slots.length > 0) patch[dateStr] = slots
+        }
+        if (Object.keys(patch).length > 0) {
+          setSlotsByDate((prev) => ({ ...prev, ...patch }))
+        }
+      }
+    },
+    [serviceInfo?.duration, owner.owner_type, owner.owner_id, minDateStr, maxDateStr]
+  )
+
+  const monthLoadAbortRef = useRef(null)
+
   useEffect(() => {
-    if (serviceInfo?.id) {
-      const today = new Date()
-      const to = new Date()
-      to.setDate(today.getDate() + 90)
-      loadAvailabilityRange(today, to)
+    if (!isOpen || !serviceInfo?.id || !serviceInfo?.duration || !owner.owner_type || !owner.owner_id) {
+      return
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [serviceInfo])
+
+    const ac = new AbortController()
+    setSlotsByDate({})
+    setCalendarLoading(true)
+
+    const min = new Date(minDateStr + 'T12:00:00')
+    const minY = min.getFullYear()
+    const minM = min.getMonth()
+    loadedMonthsRef.current.add(`${minY}-${minM}`)
+
+    const now = new Date()
+    const viewY = now.getFullYear()
+    const viewM = now.getMonth()
+    if (`${viewY}-${viewM}` !== `${minY}-${minM}`) {
+      loadedMonthsRef.current.add(`${viewY}-${viewM}`)
+    }
+
+    ;(async () => {
+      try {
+        await loadAvailabilityMonth(minY, minM, ac.signal)
+        if (ac.signal.aborted) return
+        if (`${viewY}-${viewM}` !== `${minY}-${minM}`) {
+          await loadAvailabilityMonth(viewY, viewM, ac.signal)
+        }
+      } catch (e) {
+        if (e?.name !== 'AbortError') console.error('Ошибка загрузки доступности:', e)
+      } finally {
+        if (!ac.signal.aborted) setCalendarLoading(false)
+      }
+    })()
+
+    return () => {
+      ac.abort()
+    }
+  }, [
+    isOpen,
+    serviceInfo?.id,
+    serviceInfo?.duration,
+    owner.owner_type,
+    owner.owner_id,
+    minDateStr,
+    maxDateStr,
+    loadAvailabilityMonth,
+  ])
+
+  const handleCalendarMonthChange = useCallback(
+    ({ year, month }) => {
+      if (!isOpen || !serviceInfo?.duration || !owner.owner_type || !owner.owner_id) return
+      const monthKey = `${year}-${month}`
+      if (loadedMonthsRef.current.has(monthKey)) return
+      loadedMonthsRef.current.add(monthKey)
+
+      monthLoadAbortRef.current?.abort()
+      const ac = new AbortController()
+      monthLoadAbortRef.current = ac
+
+      ;(async () => {
+        try {
+          await loadAvailabilityMonth(year, month, ac.signal)
+        } catch (e) {
+          if (e?.name !== 'AbortError') console.error('Ошибка дозагрузки месяца:', e)
+        }
+      })()
+    },
+    [isOpen, serviceInfo?.duration, owner.owner_type, owner.owner_id, loadAvailabilityMonth]
+  )
 
   // Адаптер для CalendarGrid.
   const availableDateSet = useMemo(() => {
     return new Set(Object.keys(slotsByDate))
   }, [slotsByDate])
-
-  // Минимальная дата — завтра. Максимальная — +90 дней (возможна навигация по календарю).
-  const minDateStr = useMemo(() => {
-    const t = new Date()
-    t.setDate(t.getDate() + 1)
-    return t.toISOString().split('T')[0]
-  }, [])
-  const maxDateStr = useMemo(() => {
-    const t = new Date()
-    t.setDate(t.getDate() + 90)
-    return t.toISOString().split('T')[0]
-  }, [])
 
   // Авто-выбор ближайшей доступной даты после загрузки availability,
   // если selectedDate ещё не выбрана пользователем или больше не доступна.
@@ -220,56 +343,6 @@ export default function RepeatBookingModal({
       setError('Не удалось загрузить детали записи')
     } finally {
       setLoading(false)
-    }
-  }
-
-  /**
-   * Грузим availability на диапазон дат через per-day endpoint
-   * `/api/bookings/available-slots-repeat`, параллельно (Promise.all).
-   *
-   * Почему не /api/public/masters/{slug}/availability:
-   *   - Booking.service_id (FK → services.id) и MasterService.id живут в разных
-   *     таблицах. Публичный эндпоинт ищет MasterService.id == service_id и
-   *     возвращает 404 «Услуга не найдена» для всех bookings, у которых
-   *     service_id ссылается на salon-flow Service (а не на MasterService).
-   *   - per-day эндпоинт принимает service_duration (а не service_id), так что
-   *     совместим с любым типом booking — salon-flow и independent.
-   */
-  const loadAvailabilityRange = async (fromDate, toDate) => {
-    if (!serviceInfo?.duration) return
-    if (!owner.owner_type || !owner.owner_id) return
-
-    setCalendarLoading(true)
-    try {
-      const map = {}
-      const serviceDuration = serviceInfo.duration || 60
-      const promises = []
-      const cur = new Date(fromDate)
-      const end = new Date(toDate)
-      while (cur <= end) {
-        const y = cur.getFullYear()
-        const m = cur.getMonth() + 1
-        const d = cur.getDate()
-        const dateStr = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`
-        promises.push(
-          apiGet(
-            `/api/bookings/available-slots-repeat?owner_type=${owner.owner_type}&owner_id=${owner.owner_id}&year=${y}&month=${m}&day=${d}&service_duration=${serviceDuration}`
-          )
-            .then((slots) => ({ dateStr, slots: Array.isArray(slots) ? slots : [] }))
-            .catch(() => ({ dateStr, slots: [] }))
-        )
-        cur.setDate(cur.getDate() + 1)
-      }
-      const results = await Promise.all(promises)
-      for (const { dateStr, slots } of results) {
-        if (slots.length > 0) map[dateStr] = slots
-      }
-      setSlotsByDate(map)
-    } catch (e) {
-      console.error('Ошибка загрузки доступности:', e)
-      setSlotsByDate({})
-    } finally {
-      setCalendarLoading(false)
     }
   }
 
@@ -542,6 +615,7 @@ export default function RepeatBookingModal({
                   maxDateStr={maxDateStr}
                   selectedDate={selectedDate || null}
                   onSelectDate={(dateStr) => setSelectedDate(dateStr)}
+                  onMonthChange={handleCalendarMonthChange}
                 />
                 {calendarLoading && (
                   <p className="text-xs text-gray-500 mt-2">
