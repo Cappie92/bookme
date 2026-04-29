@@ -34,12 +34,17 @@ class EmailService(ABC):
         pass
 
     async def send_ics_to_email(
-        self, to_email: str, subject: str, ics_content: str, filename: str = "booking.ics"
+        self,
+        to_email: str,
+        subject: str,
+        ics_content: str,
+        filename: str = "booking.ics",
+        extra_body_html: Optional[str] = None,
     ) -> bool:
-        """Отправить ICS-файл на email. По умолчанию заглушка."""
-        return await self.send_email(
-            to_email, subject, f"<pre>{ics_content[:500]}...</pre>" if len(ics_content) > 500 else f"<pre>{ics_content}</pre>"
-        )
+        """Отправить ICS-файл на email. По умолчанию заглушка. extra_body_html — блок перед телом (например ссылка на карты)."""
+        ics_block = f"<pre>{ics_content[:500]}...</pre>" if len(ics_content) > 500 else f"<pre>{ics_content}</pre>"
+        prefix = extra_body_html or ""
+        return await self.send_email(to_email, subject, prefix + ics_block)
 
 
 class MockEmailService(EmailService):
@@ -103,7 +108,12 @@ class MockEmailService(EmailService):
         return await self.send_email(user.email, subject, html_content)
 
     async def send_ics_to_email(
-        self, to_email: str, subject: str, ics_content: str, filename: str = "booking.ics"
+        self,
+        to_email: str,
+        subject: str,
+        ics_content: str,
+        filename: str = "booking.ics",
+        extra_body_html: Optional[str] = None,
     ) -> bool:
         """Мок: логируем и возвращаем OK."""
         print(f"\n{'='*60}")
@@ -111,6 +121,8 @@ class MockEmailService(EmailService):
         print(f"Кому: {to_email}")
         print(f"Тема: {subject}")
         print(f"Файл: {filename}")
+        if extra_body_html:
+            print(f"Доп. HTML: {extra_body_html[:200]}...")
         print(f"ICS (первые 300 символов): {ics_content[:300]}...")
         print(f"{'='*60}\n")
         return True

@@ -84,7 +84,7 @@ export default function ClientLoyaltyPoints({ onShowHistory }) {
             <td className="py-2 px-3">
               {masterPoints.master_domain ? (
                 <Link 
-                  to={`/domain/${masterPoints.master_domain}`}
+                  to={`/m/${masterPoints.master_domain}`}
                   className="text-green-600 hover:text-green-800 hover:underline font-medium"
                 >
                   {masterPoints.master_name}

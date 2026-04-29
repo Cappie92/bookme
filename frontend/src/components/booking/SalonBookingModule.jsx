@@ -96,34 +96,19 @@ export default function SalonBookingModule({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedService, selectedMaster])
   
+  // Legacy /domain/:subdomain удалён из активного фронтового runtime.
+  // Все три loader'а ходят через salonId-prop, никакого
+  // window.location.pathname.split('/')[2] больше нет. Это исключает
+  // случайный вызов /api/domain/<test|any-master|...>/... на test/dev-роутах.
   const loadMasters = async () => {
+    if (!salonId) return
     try {
-      // Проверяем, находимся ли мы на поддомене
-      const subdomain = window.location.pathname.split('/')[2] // /domain/subdomain
-      console.log('SalonBookingModule: subdomain =', subdomain)
-      let response
-      
-      if (subdomain) {
-        // Используем API для поддомена
-        const url = `/api/domain/${subdomain}/masters`
-        console.log('SalonBookingModule: загружаем мастеров через поддомен:', url)
-        response = await fetch(url)
-      } else {
-        // Используем обычный API
-        const url = `/salon/masters/list?salon_id=${salonId}`
-        console.log('SalonBookingModule: загружаем мастеров через обычный API:', url)
-        response = await fetch(url, {
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${localStorage.getItem('access_token')}`
-          }
-        })
-      }
-      
-      console.log('SalonBookingModule: статус ответа мастеров:', response.status)
+      const token = localStorage.getItem('access_token')
+      const headers = { 'Content-Type': 'application/json' }
+      if (token) headers.Authorization = `Bearer ${token}`
+      const response = await fetch(`/salon/masters/list?salon_id=${salonId}`, { headers })
       if (response.ok) {
         const data = await response.json()
-        console.log('SalonBookingModule: полученные мастера:', data)
         setMasters(data.masters || data)
       } else {
         console.error('Ошибка загрузки мастеров:', response.status)
@@ -132,30 +117,13 @@ export default function SalonBookingModule({
       console.error('Ошибка загрузки мастеров:', error)
     }
   }
-  
+
   const loadBranches = async () => {
+    if (!salonId) return
     try {
-      // Проверяем, находимся ли мы на поддомене
-      const subdomain = window.location.pathname.split('/')[2] // /domain/subdomain
-      console.log('SalonBookingModule: загружаем филиалы, subdomain =', subdomain)
-      let response
-      
-      if (subdomain) {
-        // Используем API для поддомена
-        const url = `/api/domain/${subdomain}/branches`
-        console.log('SalonBookingModule: загружаем филиалы через поддомен:', url)
-        response = await fetch(url)
-      } else {
-        // Используем обычный API
-        const url = `/salon/branches/public?salon_id=${salonId}`
-        console.log('SalonBookingModule: загружаем филиалы через обычный API:', url)
-        response = await fetch(url)
-      }
-      
-      console.log('SalonBookingModule: статус ответа филиалов:', response.status)
+      const response = await fetch(`/salon/branches/public?salon_id=${salonId}`)
       if (response.ok) {
         const data = await response.json()
-        console.log('SalonBookingModule: полученные филиалы:', data)
         setBranches(data.branches || data)
       } else {
         console.error('Ошибка загрузки филиалов:', response.status)
@@ -164,30 +132,13 @@ export default function SalonBookingModule({
       console.error('Ошибка загрузки филиалов:', error)
     }
   }
-  
+
   const loadServices = async () => {
+    if (!salonId) return
     try {
-      // Проверяем, находимся ли мы на поддомене
-      const subdomain = window.location.pathname.split('/')[2] // /domain/subdomain
-      console.log('SalonBookingModule: загружаем услуги, subdomain =', subdomain)
-      let response
-      
-      if (subdomain) {
-        // Используем API для поддомена
-        const url = `/api/domain/${subdomain}/services`
-        console.log('SalonBookingModule: загружаем услуги через поддомен:', url)
-        response = await fetch(url)
-      } else {
-        // Используем обычный API
-        const url = `/salon/services/public?salon_id=${salonId}`
-        console.log('SalonBookingModule: загружаем услуги через обычный API:', url)
-        response = await fetch(url)
-      }
-      
-      console.log('SalonBookingModule: статус ответа услуг:', response.status)
+      const response = await fetch(`/salon/services/public?salon_id=${salonId}`)
       if (response.ok) {
         const data = await response.json()
-        console.log('SalonBookingModule: полученные услуги:', data)
         setServices(data.services || data)
       } else {
         console.error('Ошибка загрузки услуг:', response.status)
@@ -201,17 +152,19 @@ export default function SalonBookingModule({
     const token = localStorage.getItem('access_token')
     if (token) {
       try {
-        const response = await fetch('/auth/users/me', {
+        const response = await fetch('/api/auth/users/me', {
           headers: {
             'Authorization': `Bearer ${token}`
           }
         })
-        
+
         if (response.ok) {
           const user = await response.json()
           setCurrentUser(user)
         } else {
-          localStorage.removeItem('access_token')
+          if (response.status === 401 || response.status === 403) {
+            localStorage.removeItem('access_token')
+          }
           setCurrentUser(null)
         }
       } catch (error) {

@@ -34,13 +34,13 @@ export default function MasterBookingSidebar({
     
     try {
       const token = localStorage.getItem('access_token')
-      const response = await fetch(`/api/client/profile/master-notes/${ownerId}`, {
+      const response = await fetch(`/api/client/master-notes/${ownerId}`, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         }
       })
-      
+
       if (response.ok) {
         const data = await response.json()
         setNote(data)
@@ -66,7 +66,7 @@ export default function MasterBookingSidebar({
       // Для индивидуальных мастеров salon_id может быть null
       const salonId = null
       
-      const response = await fetch('/api/client/profile/master-notes', {
+      const response = await fetch('/api/client/master-notes', {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -106,7 +106,7 @@ export default function MasterBookingSidebar({
       const token = localStorage.getItem('access_token')
       const newRating = rating === 'dislike' ? null : 'dislike'
       
-      const response = await fetch(`/api/client/profile/master-notes/${ownerId}/rating`, {
+      const response = await fetch(`/api/client/master-notes/${ownerId}/rating`, {
         method: 'PUT',
         headers: {
           'Authorization': `Bearer ${token}`,

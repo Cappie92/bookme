@@ -33,6 +33,11 @@ from utils.master_canon import (
     resolve_master_for_booking,
 )
 from utils.calendar_ics import build_booking_ics, ensure_utc_aware
+from utils.yandex_maps_url import (
+    booking_calendar_location_string,
+    yandex_maps_url_for_booking,
+    yandex_link_html_for_email,
+)
 from services.email_service import get_email_service
 from urllib.parse import quote
 
@@ -69,6 +74,16 @@ def get_master_timezone(booking: Booking) -> Optional[str]:
     except Exception as e:
         logger.warning("booking %s: timezone resolve error %s", booking.id, e)
         return None
+
+
+def _google_calendar_event_strings(booking: Booking) -> tuple[str, str]:
+    """Текст details (с Яндекс.Картами) и location для ссылки Google Calendar — согласовано с .ics."""
+    code = (getattr(booking, "public_reference", None) or "").strip() or str(booking.id)
+    details = f"Статус: {booking.status or 'created'}\nКод записи: {code}"
+    yu = yandex_maps_url_for_booking(booking)
+    if yu:
+        details = f"{details}\nЯндекс.Карты: {yu}"
+    return details, booking_calendar_location_string(booking)
 
 
 def get_current_time_in_timezone(timezone_str: str) -> datetime:
@@ -170,13 +185,17 @@ def get_future_bookings(
             print(f"🔍 ОТЛАДКА: Запись {b.id} ДОБАВЛЕНА (будущая): {start_time_in_master_tz} > {current_time_in_master_tz}")
         
         try:
-            salon_name = b.salon.name if b.salon else "-"
+            # Сущность «салонный мастер» удалена из продукта.
+            # Все salon_*/branch_* поля в клиентском ответе принудительно None,
+            # независимо от того, что лежит в БД (у legacy-bookings salon_id может
+            # быть выставлен — но клиент его не должен видеть).
+            salon_name = None
             service_name = b.service.name if b.service else "-"
             price = float(b.service.price) if b.service and b.service.price is not None else 0.0
             duration = int(b.service.duration) if b.service and b.service.duration is not None else 0
             date = b.start_time
-            branch_name = b.branch.name if b.branch else None
-            branch_address = b.branch.address if b.branch else None
+            branch_name = None
+            branch_address = None
             master_domain = None
             if b.master and b.master.domain:
                 master_domain = b.master.domain
@@ -217,9 +236,10 @@ def get_future_bookings(
                 branch_name=branch_name,
                 branch_address=branch_address,
                 master_id=_mid,
+                indie_master_id=b.indie_master_id,
                 service_id=b.service_id,
-                salon_id=b.salon_id,
-                branch_id=b.branch_id,
+                salon_id=None,
+                branch_id=None,
                 master_domain=master_domain,
                 master_timezone=master_timezone,
             ))
@@ -333,13 +353,16 @@ def get_past_bookings(
             print(f"🔍 ОТЛАДКА get_past_bookings: Запись {b.id} ДОБАВЛЕНА (прошедшая): {start_time_in_master_tz} <= {current_time_in_master_tz}")
         
         try:
-            salon_name = b.salon.name if b.salon else "-"
+            # «Салонный мастер» удалён из продукта: salon_*/branch_* в клиентском
+            # ответе всегда None. Legacy-bookings с salon_id в БД остаются, но клиент
+            # их в этом виде больше не получает.
+            salon_name = None
             service_name = b.service.name if b.service else "-"
             price = float(b.service.price) if b.service and b.service.price is not None else 0.0
             duration = int(b.service.duration) if b.service and b.service.duration is not None else 0
             date = b.start_time
-            branch_name = b.branch.name if b.branch else None
-            branch_address = b.branch.address if b.branch else None
+            branch_name = None
+            branch_address = None
             master_domain = None
             if b.master and b.master.domain:
                 master_domain = b.master.domain
@@ -380,9 +403,10 @@ def get_past_bookings(
                 branch_name=branch_name,
                 branch_address=branch_address,
                 master_id=_mid,
+                indie_master_id=b.indie_master_id,
                 service_id=b.service_id,
-                salon_id=b.salon_id,
-                branch_id=b.branch_id,
+                salon_id=None,
+                branch_id=None,
                 master_domain=master_domain,
                 master_timezone=master_timezone,
             ))
@@ -513,7 +537,7 @@ def _calendar_booking_query(db: Session):
             joinedload(Booking.service),
             joinedload(Booking.master).joinedload(Master.user),
             joinedload(Booking.indie_master).joinedload(IndieMaster.user),
-            joinedload(Booking.branch),
+            joinedload(Booking.branch).joinedload(SalonBranch.salon),
         )
     )
 
@@ -633,15 +657,7 @@ def get_google_calendar_link_by_public_ref(
     elif booking.indie_master and booking.indie_master.user:
         master_name = booking.indie_master.user.full_name or "-"
     event_title = f"{service_name} — {master_name}"
-    code = (getattr(booking, "public_reference", None) or "").strip() or str(booking.id)
-    details = f"Статус: {booking.status or 'created'}\nКод записи: {code}"
-    location = ""
-    if booking.branch and booking.branch.address:
-        location = booking.branch.address
-    elif booking.branch and booking.branch.name:
-        location = booking.branch.name
-    elif booking.master and getattr(booking.master, "address", None):
-        location = booking.master.address or ""
+    details, location = _google_calendar_event_strings(booking)
     url = (
         "https://calendar.google.com/calendar/render"
         f"?action=TEMPLATE&text={quote(event_title)}&dates={start_str}/{end_str}"
@@ -686,6 +702,7 @@ async def send_calendar_email_by_public_ref(
         subject=subject,
         ics_content=ics,
         filename=_calendar_attachment_basename(booking),
+        extra_body_html=yandex_link_html_for_email(yandex_maps_url_for_booking(booking)),
     )
     return {"ok": True}
 
@@ -747,15 +764,7 @@ def get_google_calendar_link(
     elif booking.indie_master and booking.indie_master.user:
         master_name = booking.indie_master.user.full_name or "-"
     event_title = f"{service_name} — {master_name}"
-    code = (getattr(booking, "public_reference", None) or "").strip() or str(booking_id)
-    details = f"Статус: {booking.status or 'created'}\nКод записи: {code}"
-    location = ""
-    if booking.branch and booking.branch.address:
-        location = booking.branch.address
-    elif booking.branch and booking.branch.name:
-        location = booking.branch.name
-    elif booking.master and getattr(booking.master, "address", None):
-        location = booking.master.address or ""
+    details, location = _google_calendar_event_strings(booking)
     url = (
         "https://calendar.google.com/calendar/render"
         f"?action=TEMPLATE&text={quote(event_title)}&dates={start_str}/{end_str}"
@@ -800,6 +809,7 @@ async def send_calendar_email(
         subject=subject,
         ics_content=ics,
         filename=_calendar_attachment_basename(booking),
+        extra_body_html=yandex_link_html_for_email(yandex_maps_url_for_booking(booking)),
     )
     return {"ok": True}
 
@@ -857,23 +867,32 @@ def create_booking(
                     detail="Для этого мастера требуется предоплата. Используйте эндпоинт /api/client/bookings/temporary для создания временной брони."
                 )
     
-    # Проверка доступности времени
-    existing_booking = (
-        db.query(Booking)
-        .filter(
-            Booking.start_time == booking_in.start_time,
-            Booking.status != BookingStatus.CANCELLED,
-            (
-                (Booking.master_id == booking_in.master_id)
-                | (Booking.indie_master_id == booking_in.indie_master_id)
-                | (Booking.salon_id == booking_in.salon_id)
-            ),
-        )
-        .first()
-    )
+    # Проверка доступности времени.
+    # Важно: SQLAlchemy `Booking.indie_master_id == None` рендерится как `IS NULL`
+    # и матчит ВСЕ записи с null indie. Поэтому в OR подключаем только те owner-поля,
+    # которые в booking_in реально не None — иначе ложноположительный clash на
+    # любой чужой booking без indie/salon в это же время.
+    clash_filters = []
+    if booking_in.master_id is not None:
+        clash_filters.append(Booking.master_id == booking_in.master_id)
+    if booking_in.indie_master_id is not None:
+        clash_filters.append(Booking.indie_master_id == booking_in.indie_master_id)
+    if booking_in.salon_id is not None:
+        clash_filters.append(Booking.salon_id == booking_in.salon_id)
 
-    if existing_booking:
-        raise HTTPException(status_code=400, detail="This time slot is already booked")
+    if clash_filters:
+        from sqlalchemy import or_
+        existing_booking = (
+            db.query(Booking)
+            .filter(
+                Booking.start_time == booking_in.start_time,
+                Booking.status != BookingStatus.CANCELLED,
+                or_(*clash_filters),
+            )
+            .first()
+        )
+        if existing_booking:
+            raise HTTPException(status_code=400, detail="This time slot is already booked")
 
     # Обработка баллов лояльности
     loyalty_points_used = 0
@@ -883,7 +902,6 @@ def create_booking(
             get_loyalty_settings, get_available_points,
             calculate_points_to_spend
         )
-        from models import Service
         
         # Получаем настройки лояльности мастера
         loyalty_settings = get_loyalty_settings(db, booking_in.master_id)
@@ -930,7 +948,15 @@ def create_booking(
     # Создаем booking_data (salon_id/branch_id через normalize_booking_fields)
     from utils.booking_factory import normalize_booking_fields, BookingOwnerError
 
-    booking_data = booking_in.dict(exclude={'use_loyalty_points', 'client_name', 'service_name', 'service_duration', 'service_price'})
+    booking_data = booking_in.dict(
+        exclude={
+            "use_loyalty_points",
+            "client_name",
+            "service_name",
+            "service_duration",
+            "service_price",
+        }
+    )
     booking_data.pop('salon_id', None)
     booking_data.pop('branch_id', None)
     booking_data['loyalty_points_used'] = loyalty_points_used

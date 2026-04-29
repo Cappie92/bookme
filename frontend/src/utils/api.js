@@ -4,16 +4,23 @@ import { tempDebugLogHandledApiFailure } from '../tempDebugErrorCapture.js'
 // Базовый URL для API
 const API_BASE_URL = '' // Используем относительные пути для прокси Vite
 
-// Префиксы эндпоинтов, которые требуют авторизации
+// Префиксы эндпоинтов, которые требуют авторизации.
+// Если токена нет — apiRequest fail-fast и не уходит в backend без Authorization
+// (исключает 401-storm в клиентском кабинете при истечении токена / разлогине из соседней вкладки).
 const AUTH_REQUIRED_PREFIXES = [
   '/api/master/',
   '/api/loyalty/',
-  '/api/master/loyalty/'
+  '/api/master/loyalty/',
+  '/api/client/',
+  '/api/salon/',
 ]
 
-// Публичные эндпоинты внутри защищённых префиксов (исключения из auth-guard)
+// Публичные эндпоинты внутри защищённых префиксов (исключения из auth-guard).
+// Перечисляем явно, чтобы добавление /api/salon/ не блокировало legitimate public-роуты.
 const PUBLIC_ENDPOINTS = [
-  // Добавьте сюда другие публичные endpoints, если появятся
+  '/api/salon/services/public',
+  '/api/salon/branches/public',
+  '/api/salon/masters/list',
 ]
 
 // Проверка, требует ли эндпоинт авторизации
@@ -118,6 +125,18 @@ export const apiRequest = async (endpoint, options = {}) => {
           detail = data?.detail ?? ''
         } catch { /* ignore */ }
         console.warn('[API 401]', { method: config.method || 'GET', url, hasAuthHeader: hasAuth, credentials: creds, detail: String(detail).slice(0, 100) })
+      }
+
+      // Глобальная синхронизация auth-state: 401 на protected endpoint = сессия не валидна.
+      // AuthContext слушает 'auth:logout' и моментально сбрасывает isAuthenticated/user,
+      // header перерисовывается. Не вызываем navigate — компонент сам решит, что показать.
+      if (response.status === 401 && requiresAuth(endpoint)) {
+        try {
+          if (typeof window !== 'undefined') {
+            localStorage.removeItem('access_token')
+            window.dispatchEvent(new CustomEvent('auth:logout', { detail: { reason: '401', endpoint } }))
+          }
+        } catch { /* noop */ }
       }
       // Сохраняем response для доступа к status и headers
       const error = new Error(`HTTP error! status: ${response.status}`)

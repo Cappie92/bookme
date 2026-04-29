@@ -141,17 +141,19 @@ export default function BranchBookingModule({
     const token = localStorage.getItem('access_token')
     if (token) {
       try {
-        const response = await fetch('/auth/users/me', {
+        const response = await fetch('/api/auth/users/me', {
           headers: {
             'Authorization': `Bearer ${token}`
           }
         })
-        
+
         if (response.ok) {
           const user = await response.json()
           setCurrentUser(user)
         } else {
-          localStorage.removeItem('access_token')
+          if (response.status === 401 || response.status === 403) {
+            localStorage.removeItem('access_token')
+          }
           setCurrentUser(null)
         }
       } catch (error) {

@@ -111,6 +111,44 @@ export function AuthProvider({ children }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // Синхронизация auth-state в трёх кейсах:
+  //   1) `auth:logout` — диспатчится из apiRequest при 401 на protected endpoint
+  //      (см. utils/api.js). Это закрывает рассинхрон header'а с реальной сессией.
+  //   2) `storage` event — токен пропал в соседней вкладке (логаут / истёк refresh).
+  //   3) Возврат фокуса на вкладку — токен мог быть стёрт, пока вкладка была фоном.
+  // Не вызываем navigate — пусть текущий экран сам решит, что показать.
+  useEffect(() => {
+    const dropAuth = () => {
+      setIsAuthenticated(false)
+      setUser(null)
+    }
+
+    const onAuthLogout = () => {
+      dropAuth()
+    }
+
+    const onStorage = (e) => {
+      if (e.key === 'access_token' && !e.newValue) {
+        dropAuth()
+      }
+    }
+
+    const onFocus = () => {
+      if (isAuthenticated && !localStorage.getItem('access_token')) {
+        dropAuth()
+      }
+    }
+
+    window.addEventListener('auth:logout', onAuthLogout)
+    window.addEventListener('storage', onStorage)
+    window.addEventListener('focus', onFocus)
+    return () => {
+      window.removeEventListener('auth:logout', onAuthLogout)
+      window.removeEventListener('storage', onStorage)
+      window.removeEventListener('focus', onFocus)
+    }
+  }, [isAuthenticated])
+
   useEffect(() => {
     if (authModalOpen && !wasAuthModalOpen.current) {
       metrikaGoal(M.AUTH_MODAL_OPEN, {

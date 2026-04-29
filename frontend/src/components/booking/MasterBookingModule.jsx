@@ -137,27 +137,13 @@ export default function MasterBookingModule({
   
   const loadServices = async () => {
     try {
-      // Безопасный парсинг subdomain: только если path начинается с "/domain/"
-      const path = window.location.pathname
-      let subdomain = null
-      if (path.startsWith('/domain/')) {
-        const parts = path.split('/')
-        if (parts.length >= 3 && parts[1] === 'domain' && parts[2]) {
-          subdomain = parts[2]
-        }
-      }
-      
-      if (subdomain) {
-        // Используем API для поддомена
-        const data = await apiGet(`/api/domain/${subdomain}/services`)
-        setServices(data.services || data)
-      } else if (masterId) {
-        // Используем публичный endpoint для получения услуг по master_id
+      // Legacy subdomain parsing (/domain/:subdomain) удалён вместе с роутом.
+      // Услуги мастера всегда грузим по masterId через публичный endpoint.
+      if (masterId) {
         const data = await apiGet(`/api/domain/services?master_id=${masterId}`)
         setServices(data.services || data)
       } else {
-        // Нет ни subdomain, ни masterId - показываем ошибку
-        setError('Для бронирования необходимо открыть страницу по доменному адресу мастера или указать ID мастера')
+        setError('Для бронирования необходимо указать ID мастера')
         setServices([])
       }
     } catch (error) {
@@ -180,17 +166,21 @@ export default function MasterBookingModule({
     const token = localStorage.getItem('access_token')
     if (token) {
       try {
-        const response = await fetch('/auth/users/me', {
+        const response = await fetch('/api/auth/users/me', {
           headers: {
             'Authorization': `Bearer ${token}`
           }
         })
-        
+
         if (response.ok) {
           const user = await response.json()
           setCurrentUser(user)
         } else {
-          localStorage.removeItem('access_token')
+          // Стираем токен только если backend явно сказал «не авторизован».
+          // Иначе случайные 404/5xx уносят валидную сессию (см. AUDIT_AND_HANDOFF.md).
+          if (response.status === 401 || response.status === 403) {
+            localStorage.removeItem('access_token')
+          }
           setCurrentUser(null)
         }
       } catch (error) {

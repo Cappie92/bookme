@@ -27,22 +27,23 @@ def test_ensure_utc_aware_already_aware():
 
 
 def test_build_booking_ics_contains_required_fields():
-    """ICS содержит UID, DTSTART;TZID=..., VALARM, SUMMARY."""
+    """ICS: UID, DTSTART/DTEND в UTC (Z) как в Google, VALARM, SUMMARY."""
     booking = MagicMock()
     booking.id = 42
     booking.start_time = datetime(2025, 2, 10, 12, 0, 0)
     booking.end_time = datetime(2025, 2, 10, 13, 0, 0)
     booking.status = "created"
     booking.service = MagicMock(name="Стрижка")
-    booking.master = MagicMock(user=MagicMock(full_name="Иван"))
+    booking.master = MagicMock(user=MagicMock(full_name="Иван"), address=None, city=None)
     booking.indie_master = None
     booking.branch = None
 
     ics = build_booking_ics(booking, "Europe/Moscow", alarm_minutes=60)
 
     assert "UID:booking-42@dedato" in ics
-    assert "DTSTART;TZID=Europe/Moscow:" in ics
-    assert "DTEND;TZID=Europe/Moscow:" in ics
+    # naive = локальное Europe/Moscow: 12:00 MSK → 09:00 UTC (зима, +3)
+    assert "DTSTART:20250210T090000Z" in ics
+    assert "DTEND:20250210T100000Z" in ics
     assert "SUMMARY:" in ics
     assert "Стрижка" in ics or "—" in ics
     assert "Иван" in ics or "—" in ics

@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef, useMemo } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { apiGet, apiFetch } from '../utils/api'
-import { PencilIcon, TrashIcon, ArrowPathIcon, PencilSquareIcon, HandThumbDownIcon, CalendarIcon, ChevronDownIcon, XMarkIcon } from "@heroicons/react/24/outline"
+import { PencilIcon, TrashIcon, ArrowPathIcon, PencilSquareIcon, HandThumbDownIcon, CalendarIcon, ChevronDownIcon, XMarkIcon, HeartIcon } from "@heroicons/react/24/outline"
 import PasswordSetupModal from "../modals/PasswordSetupModal"
 import ManagerInvitations from "../components/ManagerInvitations"
 import ClientDashboardStats from "../components/ClientDashboardStats"
@@ -12,6 +12,7 @@ import { useFavorites } from '../contexts/FavoritesContext'
 import { useToast } from '../contexts/ToastContext'
 import Tooltip from '../components/Tooltip'
 import ClientLoyaltyPoints from '../components/ClientLoyaltyPoints'
+import { CalendarGrid as PublicCalendarGrid } from '../components/booking/PublicBookingCalendarGrid'
 import {
   downloadClientBookingIcsFile,
   triggerIcsBlobDownload,
@@ -76,19 +77,32 @@ function formatTimeOnly(dateStr) {
   return `${hours}:${minutes}`
 }
 
-/** Крестик закрытия модалок: SVG, без Unicode ✕ (iOS). */
+/** Крестик закрытия модалок: SVG, без Unicode ✕ (iOS).
+ * Единый паттерн кабинета: на mobile — pill F4F1EF 32×32, на desktop — белый круг 40×40 с border + shadow.
+ * Совместим со всеми клиентскими модалками страницы. */
 function DashboardModalClose({ onClick, ariaLabel = 'Закрыть' }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className="shrink-0 p-2 rounded-lg text-gray-500 hover:text-gray-900 hover:bg-gray-100 transition-colors min-h-[44px] min-w-[44px] inline-flex items-center justify-center"
+      className="relative z-30 shrink-0 inline-flex h-8 w-8 items-center justify-center rounded-[10px] bg-[#F4F1EF] text-[#6B6B6B] hover:bg-[#EAE4E0] focus:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400 lg:h-10 lg:w-10 lg:rounded-full lg:bg-white lg:text-neutral-900 lg:shadow-md lg:ring-1 lg:ring-neutral-300 lg:hover:bg-neutral-50 lg:hover:ring-neutral-400"
       aria-label={ariaLabel}
     >
-      <XMarkIcon className="w-6 h-6" strokeWidth={2} />
+      <XMarkIcon className="h-4 w-4 lg:h-5 lg:w-5" strokeWidth={2} />
     </button>
   )
 }
+
+/**
+ * Единый стиль кнопок клиентских модалок — выровнен под кабинет мастера.
+ * Использовать через классы в JSX, без обёрток (минимизируем риск регрессий).
+ *   PRIMARY:     `bg-[#4CAF50] text-white hover:bg-[#45A049]`
+ *   SECONDARY:   `bg-white text-gray-900 border border-gray-300 hover:bg-gray-50`
+ *   DESTRUCTIVE: `bg-red-600 text-white hover:bg-red-700`
+ *   DESTRUCTIVE-OUTLINE: `border-2 border-red-300 text-red-600 hover:bg-red-50`
+ * Размеры:  px-4 py-2 text-sm font-semibold rounded-lg.
+ * Эта блокировка cosmetics — никаких новых сущностей, никаких изменений в обработчиках.
+ */
 
 function getBookingStatusLabel(status) {
   const statusLabels = {
@@ -143,6 +157,33 @@ export default function ClientDashboard() {
   const [loadingDates, setLoadingDates] = useState(new Set())
   const [showCalendar, setShowCalendar] = useState(false)
   const [currentMonth, setCurrentMonth] = useState(new Date())
+
+  // Адаптеры для CalendarGrid из публичной страницы /m/:slug — переиспользуем
+  // тот же визуальный календарь в TimeEdit-модалке. dateAvailability мапится
+  // в Set<YYYY-MM-DD>; выходные и прошедшие даты выпиливаем (как было в inline-календаре).
+  const timeEditAvailableDateSet = useMemo(() => {
+    const set = new Set()
+    const todayStr = new Date().toISOString().split('T')[0]
+    for (const [dateStr, hasSlots] of Object.entries(dateAvailability)) {
+      if (hasSlots !== true) continue
+      if (dateStr < todayStr) continue
+      const d = new Date(dateStr + 'T12:00:00')
+      const dow = d.getDay()
+      if (dow === 0 || dow === 6) continue // воскресенье/суббота — как в исходной логике
+      set.add(dateStr)
+    }
+    return set
+  }, [dateAvailability])
+  const timeEditMinDateStr = useMemo(() => {
+    const t = new Date()
+    return t.toISOString().split('T')[0]
+  }, [])
+  const timeEditMaxDateStr = useMemo(() => {
+    const t = new Date()
+    t.setDate(t.getDate() + 90) // 3 месяца вперёд
+    return t.toISOString().split('T')[0]
+  }, [])
+
   const navigate = useNavigate()
   const [showRepeatBookingModal, setShowRepeatBookingModal] = useState(false)
   const [selectedRepeatBooking, setSelectedRepeatBooking] = useState(null)
@@ -162,13 +203,116 @@ export default function ClientDashboard() {
   const [showLoyaltyHistoryModal, setShowLoyaltyHistoryModal] = useState(false)
   const [loyaltyPoints, setLoyaltyPoints] = useState([])
   const [selectedLoyaltyMaster, setSelectedLoyaltyMaster] = useState(null)
-  const [calendarDropdownId, setCalendarDropdownId] = useState(null)
   const [showCalendarEmailModal, setShowCalendarEmailModal] = useState(false)
   const [calendarEmailBooking, setCalendarEmailBooking] = useState(null)
   const [calendarEmail, setCalendarEmail] = useState('')
   const [calendarAlarmMinutes, setCalendarAlarmMinutes] = useState(60)
   const [calendarEmailSending, setCalendarEmailSending] = useState(false)
   const { showToast } = useToast()
+
+  const PAGE_SIZE = 20
+  const [allFuturePage, setAllFuturePage] = useState(0)
+  const [allPastPage, setAllPastPage] = useState(0)
+
+  const [calendarMenu, setCalendarMenu] = useState({
+    open: false,
+    booking: null,
+    anchorRect: null,
+    top: 0,
+    left: 0,
+  })
+  const calendarMenuRef = useRef(null)
+  const calendarMenuAnchorRef = useRef(null)
+
+  const closeCalendarMenu = () => {
+    setCalendarMenu((prev) => (prev.open ? { open: false, booking: null, anchorRect: null, top: 0, left: 0 } : prev))
+    calendarMenuAnchorRef.current = null
+  }
+
+  const openCalendarMenu = (booking, anchorEl) => {
+    if (!booking || !anchorEl) return
+    setCalendarMenu((prev) => {
+      if (prev.open && prev.booking?.id === booking.id) {
+        calendarMenuAnchorRef.current = null
+        return { open: false, booking: null, anchorRect: null, top: 0, left: 0 }
+      }
+      const rect = anchorEl.getBoundingClientRect()
+      calendarMenuAnchorRef.current = anchorEl
+      return {
+        open: true,
+        booking,
+        anchorRect: rect,
+        top: rect.bottom + 8,
+        left: Math.max(8, rect.right - 192),
+      }
+    })
+  }
+
+  useEffect(() => {
+    if (!calendarMenu.open) return
+
+    const onMouseDown = (e) => {
+      const menuEl = calendarMenuRef.current
+      const anchorEl = calendarMenuAnchorRef.current
+      const target = e.target
+      if (menuEl && menuEl.contains(target)) return
+      if (anchorEl && anchorEl.contains(target)) return
+      closeCalendarMenu()
+    }
+
+    const onAnyScroll = () => closeCalendarMenu()
+    const onResize = () => closeCalendarMenu()
+
+    document.addEventListener('mousedown', onMouseDown, true)
+    window.addEventListener('scroll', onAnyScroll, true)
+    window.addEventListener('resize', onResize)
+    return () => {
+      document.removeEventListener('mousedown', onMouseDown, true)
+      window.removeEventListener('scroll', onAnyScroll, true)
+      window.removeEventListener('resize', onResize)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [calendarMenu.open])
+
+  useEffect(() => {
+    if (!calendarMenu.open || !calendarMenu.anchorRect) return
+    const menuEl = calendarMenuRef.current
+    if (!menuEl) return
+
+    const rect = calendarMenu.anchorRect
+    const menuRect = menuEl.getBoundingClientRect()
+    const pad = 8
+
+    const spaceBelow = window.innerHeight - rect.bottom - pad
+    const spaceAbove = rect.top - pad
+    let top = rect.bottom + 8
+    if (menuRect.height > spaceBelow && spaceAbove >= menuRect.height) {
+      top = rect.top - menuRect.height - 8
+    }
+
+    let left = rect.right - menuRect.width
+    if (left < pad) left = pad
+    const maxLeft = window.innerWidth - menuRect.width - pad
+    if (left > maxLeft) left = maxLeft
+
+    const maxTop = window.innerHeight - menuRect.height - pad
+    if (top < pad) top = pad
+    if (top > maxTop) top = maxTop
+
+    setCalendarMenu((prev) => {
+      if (!prev.open) return prev
+      if (prev.top === top && prev.left === left) return prev
+      return { ...prev, top, left }
+    })
+  }, [calendarMenu.open, calendarMenu.anchorRect])
+
+  useEffect(() => {
+    if (showAllFutureBookingsModal) setAllFuturePage(0)
+  }, [showAllFutureBookingsModal])
+
+  useEffect(() => {
+    if (showAllPastBookingsModal) setAllPastPage(0)
+  }, [showAllPastBookingsModal])
 
   // Helper: единый ключ мастера для синхронизации favorites
   const getMasterKey = (row) => {
@@ -481,7 +625,7 @@ export default function ClientDashboard() {
             <div className="text-xs text-gray-500 mb-1">{title}</div>
             {masterDomain ? (
               <Link 
-                to={`/domain/${masterDomain}`}
+                to={`/m/${masterDomain}`}
                 className="text-green-600 hover:text-green-800 hover:underline font-medium text-sm block truncate"
               >
                 {name}
@@ -683,7 +827,7 @@ export default function ClientDashboard() {
   }, [changeCounter])
 
   const handleCalendarGoogle = async (booking) => {
-    setCalendarDropdownId(null)
+    closeCalendarMenu()
     try {
       const url = await fetchClientGoogleCalendarUrl(booking, 60)
       window.open(url, '_blank', 'noopener,noreferrer')
@@ -693,7 +837,7 @@ export default function ClientDashboard() {
   }
 
   const handleCalendarDownloadIcs = async (booking, alarmMinutes = 60) => {
-    setCalendarDropdownId(null)
+    closeCalendarMenu()
     try {
       const blob = await downloadClientBookingIcsFile(booking, alarmMinutes)
       triggerIcsBlobDownload(blob, icsDownloadFilename(booking))
@@ -704,6 +848,7 @@ export default function ClientDashboard() {
   }
 
   const openCalendarEmailModal = async (b) => {
+    closeCalendarMenu()
     setCalendarEmailBooking(b)
     setCalendarAlarmMinutes(60)
     try {
@@ -713,7 +858,6 @@ export default function ClientDashboard() {
       setCalendarEmail('')
     }
     setShowCalendarEmailModal(true)
-    setCalendarDropdownId(null)
   }
 
   const handleCalendarSendEmail = async () => {
@@ -806,14 +950,23 @@ export default function ClientDashboard() {
 
   const handleTimeEdit = async () => {
     if (!selectedBooking) return
-    
+
     setShowTimeEditModal(true)
-    // TODO: setSelectedMonth was removed, need to restore if needed
-    // setSelectedMonth(new Date(selectedBooking.date))
     setSelectedDate(selectedBooking.date)
-    
-    // Загружаем доступность для месяца записи
-    await loadDateAvailabilityForMonth(new Date(selectedBooking.date))
+
+    // CalendarGrid стартует с текущего месяца. Грузим availability на сегодня —
+    // чтобы при открытии модалки сразу были подсвечены доступные даты.
+    // Если запись в другом месяце — догрузим её месяц тоже (одинокий useEffect
+    // в CalendarGrid с onMonthChange делает остальное при навигации).
+    const todayMonth = new Date()
+    todayMonth.setDate(1)
+    const bookingMonth = new Date(selectedBooking.date)
+    bookingMonth.setDate(1)
+    setCurrentMonth(todayMonth)
+    await loadDateAvailabilityForMonth(todayMonth)
+    if (bookingMonth.getMonth() !== todayMonth.getMonth() || bookingMonth.getFullYear() !== todayMonth.getFullYear()) {
+      await loadMonthAvailability(bookingMonth)
+    }
   }
 
   const loadAvailableSlots = async (date) => {
@@ -1062,7 +1215,7 @@ export default function ClientDashboard() {
   }
 
   const handleRepeatBooking = (booking) => {
-    setSelectedBooking(booking)
+    setSelectedRepeatBooking(booking)
     setShowRepeatBookingModal(true)
   }
 
@@ -1113,315 +1266,147 @@ export default function ClientDashboard() {
     })
   }
 
+  const allFutureTotal = allFutureBookings.length
+  const allFutureTotalPages = Math.max(1, Math.ceil(allFutureTotal / PAGE_SIZE))
+  const allFuturePageSafe = Math.min(allFuturePage, allFutureTotalPages - 1)
+  const allFutureStartIdx = allFuturePageSafe * PAGE_SIZE
+  const allFutureEndIdx = Math.min(allFutureTotal, allFutureStartIdx + PAGE_SIZE)
+  const allFuturePageItems = allFutureBookings.slice(allFutureStartIdx, allFutureEndIdx)
+
+  const allPastTotal = allPastBookings.length
+  const allPastTotalPages = Math.max(1, Math.ceil(allPastTotal / PAGE_SIZE))
+  const allPastPageSafe = Math.min(allPastPage, allPastTotalPages - 1)
+  const allPastStartIdx = allPastPageSafe * PAGE_SIZE
+  const allPastEndIdx = Math.min(allPastTotal, allPastStartIdx + PAGE_SIZE)
+  const allPastPageItems = allPastBookings.slice(allPastStartIdx, allPastEndIdx)
+
   return (
     <div className="py-4 lg:py-8" data-testid="client-dashboard">
-      <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-6">
+      <div className="max-w-5xl mx-auto px-3 sm:px-4 lg:px-6">
       {/* Приглашения стать управляющим филиала */}
       <ManagerInvitations />
-      
-      {/* Секции с единым spacing */}
-      <div className="space-y-4 lg:space-y-6">
-        {/* Будущие записи */}
-        <div className="bg-white rounded-lg shadow-sm border border-gray-100 p-4 lg:p-6" data-testid="client-future-bookings-section">
-        <div className="flex flex-col gap-2 sm:flex-row sm:justify-between sm:items-center mb-3 lg:mb-4">
-          <h2 className="text-lg lg:text-xl font-semibold" data-testid="client-bookings-title">Будущие записи</h2>
-          {futureBookings.length > 3 && (
-            <button
-              type="button"
-              onClick={() => {
-                loadAllFutureBookings()
-                setShowAllFutureBookingsModal(true)
-              }}
-              className="text-green-600 hover:text-green-800 font-medium text-sm px-3 py-2 rounded-lg hover:bg-green-50 transition-colors border border-green-200 w-full sm:w-auto text-center min-h-[40px]"
-            >
-              Посмотреть все
-            </button>
-          )}
-        </div>
-        {futureLoading ? (
-          <div>Загрузка...</div>
-        ) : futureBookingsError ? (
-          <div className="text-red-600 text-sm" role="alert" data-testid="client-bookings-error">
-            {futureBookingsError}
-          </div>
-        ) : futureBookings.length === 0 ? (
-          <div className="text-gray-500" data-testid="client-bookings-empty">Нет записей</div>
-        ) : (
-          <div data-testid="client-bookings-list">
-            <div className="lg:hidden space-y-2">
-              {(Array.isArray(futureBookings) ? futureBookings : []).slice(0, 3).map((b, idx) => {
-                const masterKey = getMasterKey(b)
-                const isFav = masterKey !== null && favoriteMasterIds.has(masterKey)
-                return (
-                  <div
-                    key={b.id}
-                    className="rounded-lg border border-gray-100 bg-white p-2.5 shadow-sm"
-                    data-testid={`client-booking-item-${idx}`}
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="text-[13px] font-semibold text-gray-900 leading-tight tabular-nums">
-                        {b.start_time ? formatDateTimeShort(b.start_time) : formatDateTimeShort(b.date)}
-                      </div>
-                      <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-semibold leading-tight shrink-0 max-w-[52%] text-right ${getBookingStatusColor(b.status)}`}>
-                        {getBookingStatusLabel(b.status)}
-                      </span>
-                    </div>
-                    {salonsEnabled && b.salon_name && (
-                      <p className="text-[11px] text-gray-500 mt-0.5 truncate">{b.salon_name}</p>
-                    )}
-                    {salonsEnabled && (b.branch_name || b.branch_address) && (
-                      <p className="text-[11px] text-gray-500 leading-snug line-clamp-1">
-                        {b.branch_name || 'Основной'}
-                        {b.branch_address ? ` · ${b.branch_address}` : ''}
-                      </p>
-                    )}
-                    <div className="text-[13px] text-gray-900 leading-snug mt-1">
-                      {b.master_domain ? (
-                        <Link
-                          to={`/domain/${b.master_domain}`}
-                          className="text-[#2e7d32] font-medium hover:underline"
-                        >
-                          {b.master_name}
-                        </Link>
-                      ) : (
-                        <span className="font-medium">{b.master_name}</span>
-                      )}
-                    </div>
-                    <p className="text-[12px] text-gray-600 leading-snug line-clamp-2 mt-0.5">
-                      {b.service_name
-                        ? b.service_name.includes(' - ')
-                          ? b.service_name.split(' - ')[0]
-                          : b.service_name
-                        : '—'}
-                      <span className="text-gray-400"> · </span>
-                      <span className="tabular-nums">{b.price} ₽</span>
-                      <span className="text-gray-400"> · </span>
-                      <span>{b.duration} мин</span>
-                    </p>
-                    <div className="flex flex-wrap items-center justify-end gap-0.5 mt-2 pt-1.5 border-t border-gray-100">
-                      <div className="inline-flex items-center justify-center w-10 h-10 min-w-[40px] min-h-[40px]">
-                        {b.master_name && b.master_name !== '-' && (
-                          <>
-                            {b.indie_master_id ? (
-                              <FavoriteButton
-                                type="indie_master"
-                                itemId={b.indie_master_id}
-                                itemName={b.master_name}
-                                size="sm"
-                                isFavorite={isFav}
-                                onFavoriteChange={handleFavoriteChange}
-                              />
-                            ) : b.master_id ? (
-                              <FavoriteButton
-                                type="master"
-                                itemId={b.master_id}
-                                itemName={b.master_name}
-                                size="sm"
-                                isFavorite={isFav}
-                                onFavoriteChange={handleFavoriteChange}
-                              />
-                            ) : null}
-                          </>
-                        )}
-                      </div>
-                      {b.master_timezone?.trim?.() && (
-                        <div className="inline-flex items-center justify-center w-10 h-10 min-w-[40px] min-h-[40px] relative">
-                          <button
-                            type="button"
-                            onClick={() => setCalendarDropdownId(calendarDropdownId === b.id ? null : b.id)}
-                            className="text-blue-600 hover:text-blue-900 hover:bg-blue-50 rounded-md p-2 min-w-[40px] min-h-[40px] inline-flex items-center justify-center"
-                            title="Добавить в календарь"
-                          >
-                            <CalendarIcon className="w-4 h-4" />
-                          </button>
-                          {calendarDropdownId === b.id && (
-                            <div className="absolute right-0 top-full mt-1 z-50 w-48 bg-white rounded-lg shadow-lg border border-gray-200 py-1">
-                              <button
-                                type="button"
-                                className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 flex items-center gap-2"
-                                onClick={() => handleCalendarGoogle(b)}
-                              >
-                                <CalendarIcon className="w-4 h-4" /> Google Calendar
-                              </button>
-                              <button
-                                type="button"
-                                className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 flex items-center gap-2"
-                                onClick={() => handleCalendarDownloadIcs(b)}
-                              >
-                                <CalendarIcon className="w-4 h-4" /> Скачать .ics
-                              </button>
-                              <button
-                                type="button"
-                                className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 flex items-center gap-2"
-                                onClick={() => openCalendarEmailModal(b)}
-                              >
-                                <CalendarIcon className="w-4 h-4" /> Отправить на email
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => handleEditBooking(b)}
-                        className="text-green-600 hover:text-green-900 hover:bg-green-50 rounded-md p-2 min-w-[40px] min-h-[40px] inline-flex items-center justify-center"
-                        title="Редактировать"
-                      >
-                        <PencilIcon className="w-4 h-4" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteBooking(b)}
-                        className="text-red-600 hover:text-red-900 hover:bg-red-50 rounded-md p-2 min-w-[40px] min-h-[40px] inline-flex items-center justify-center"
-                        title="Отменить"
-                        data-testid="client-booking-cancel-btn"
-                      >
-                        <TrashIcon className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </div>
-                )
-              })}
+
+      {/* Основные секции */}
+      <div className="space-y-5 lg:space-y-6">
+
+        {/* ══ БУДУЩИЕ ЗАПИСИ ══ */}
+        <section className="bg-white rounded-2xl border border-gray-100 shadow-sm" data-testid="client-future-bookings-section">
+          <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 bg-green-50 rounded-xl flex items-center justify-center shrink-0">
+                <CalendarIcon className="w-[18px] h-[18px] text-green-600" />
+              </div>
+              <h2 className="font-semibold text-gray-900" data-testid="client-bookings-title">Будущие записи</h2>
+              {!futureLoading && futureBookings.length > 0 && (
+                <span className="px-2 py-0.5 rounded-full bg-green-100 text-green-700 text-xs font-semibold tabular-nums">
+                  {futureBookings.length}
+                </span>
+              )}
             </div>
-            <div className="hidden lg:block overflow-x-auto">
-          <table className="w-full text-left border-collapse min-w-[720px]">
-            <thead>
-              <tr className="border-b">
-                {salonsEnabled && <th className="py-2 px-3">Салон</th>}
-                {salonsEnabled && <th className="py-2 px-3">Филиал</th>}
-                <th className="py-2 px-3">Мастер</th>
-                <th className="py-2 px-3">Услуга</th>
-                <th className="py-2 px-3">Стоимость</th>
-                <th className="py-2 px-3">Длительность</th>
-                <th className="py-2 px-3">Дата и время</th>
-                <th className="py-2 px-3">Статус</th>
-                <th className="py-2 px-3 w-[96px] text-center align-middle">Действия</th>
-              </tr>
-            </thead>
-            <tbody>
-              {Array.isArray(futureBookings) ? futureBookings.slice(0, 3).map((b, idx) => (
-                <tr key={b.id} className="border-b hover:bg-gray-100" data-testid={`client-booking-item-${idx}`}>
-                  {salonsEnabled && <td className="py-2 px-3">{b.salon_name}</td>}
-                  {salonsEnabled && (
-                    <td className="py-2 px-3">
-                      {b.branch_name ? (
-                        <div>
-                          <div className="font-medium">{b.branch_name}</div>
-                          {b.branch_address && (
-                            <div className="text-xs text-gray-500">{b.branch_address}</div>
-                          )}
-                        </div>
-                      ) : (
-                        <span className="text-gray-400">Основной</span>
+            {futureBookings.length > 3 && (
+              <button
+                type="button"
+                onClick={() => { loadAllFutureBookings(); setShowAllFutureBookingsModal(true) }}
+                className="text-sm text-green-600 hover:text-green-800 font-medium px-3 py-1.5 rounded-lg hover:bg-green-50 transition-colors border border-green-200 min-h-[36px]"
+              >
+                Все записи
+              </button>
+            )}
+          </div>
+          {futureLoading ? (
+            <div className="px-5 py-6 space-y-3">
+              {[1, 2].map(i => (
+                <div key={i} className="animate-pulse flex gap-4 items-center">
+                  <div className="flex-1 space-y-2">
+                    <div className="h-4 bg-gray-100 rounded-lg w-1/3" />
+                    <div className="h-3 bg-gray-100 rounded-lg w-1/2" />
+                  </div>
+                  <div className="h-6 w-16 bg-gray-100 rounded-full" />
+                </div>
+              ))}
+            </div>
+          ) : futureBookingsError ? (
+            <div className="px-5 py-5">
+              <p className="text-sm text-red-600" role="alert" data-testid="client-bookings-error">{futureBookingsError}</p>
+            </div>
+          ) : futureBookings.length === 0 ? (
+            <div className="px-5 py-10 text-center" data-testid="client-bookings-empty">
+              <div className="text-4xl mb-2 select-none">{"📅"}</div>
+              <p className="text-sm text-gray-400">Нет предстоящих записей</p>
+            </div>
+          ) : (
+            <div data-testid="client-bookings-list">
+              {/* Mobile cards */}
+              <div className="lg:hidden divide-y divide-gray-100">
+                {(Array.isArray(futureBookings) ? futureBookings : []).slice(0, 3).map((b, idx) => {
+                  const masterKey = getMasterKey(b)
+                  const isFav = masterKey !== null && favoriteMasterIds.has(masterKey)
+                  return (
+                    <div key={b.id} className="px-4 py-3.5" data-testid={`client-booking-item-${idx}`}>
+                      <div className="flex items-center justify-between gap-2 mb-1.5">
+                        <span className="text-[13px] font-semibold text-gray-900 tabular-nums">
+                          {b.start_time ? formatDateTimeShort(b.start_time) : formatDateTimeShort(b.date)}
+                        </span>
+                        <span className={`shrink-0 px-2 py-0.5 rounded-full text-[10px] font-semibold leading-tight ${getBookingStatusColor(b.status)}`}>
+                          {getBookingStatusLabel(b.status)}
+                        </span>
+                      </div>
+                      {salonsEnabled && b.salon_name && (
+                        <p className="text-[11px] text-gray-400 truncate mb-0.5">{b.salon_name}</p>
                       )}
-                    </td>
-                  )}
-                  <td className="py-2 px-3">
-                    {b.master_domain ? (
-                      <Link 
-                        to={`/domain/${b.master_domain}`}
-                        className="text-green-600 hover:text-green-800 hover:underline"
-                      >
-                        {b.master_name}
-                      </Link>
-                    ) : (
-                      <span>{b.master_name}</span>
-                    )}
-                  </td>
-                  <td className="py-2 px-3">
-                    {b.service_name ? (
-                      b.service_name.includes(' - ') ? 
-                        b.service_name.split(' - ')[0] : 
-                        b.service_name
-                    ) : '-'}
-                  </td>
-                  <td className="py-2 px-3">{b.price} ₽</td>
-                  <td className="py-2 px-3">{b.duration} мин</td>
-                  <td className="py-2 px-3 whitespace-nowrap">
-                    {b.start_time ? formatDateTimeShort(b.start_time) : formatDateTimeShort(b.date)}
-                  </td>
-                  <td className="py-2 px-3">
-                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${getBookingStatusColor(b.status)}`}>
-                      {getBookingStatusLabel(b.status)}
-                    </span>
-                  </td>
-                  <td className="py-2 px-3 text-right">
-                    <div className="flex items-center justify-end gap-[2px]">
-                      <div className="inline-flex items-center justify-center w-8 h-8">
-                        {b.master_name && b.master_name !== '-' && (() => {
-                          const masterKey = getMasterKey(b)
-                          const isFav = masterKey !== null && favoriteMasterIds.has(masterKey)
-                          return (
+                      {salonsEnabled && (b.branch_name || b.branch_address) && (
+                        <p className="text-[11px] text-gray-400 line-clamp-1 mb-0.5">
+                          {b.branch_name || 'Основной'}{b.branch_address ? ` · ${b.branch_address}` : ''}
+                        </p>
+                      )}
+                      <div className="text-[13px] font-medium text-gray-900 mb-0.5">
+                        {b.master_domain ? (
+                          <Link to={`/m/${b.master_domain}`} className="text-[#2e7d32] hover:underline">{b.master_name}</Link>
+                        ) : (b.master_name)}
+                      </div>
+                      <p className="text-xs text-gray-500 mb-2.5 leading-snug">
+                        {b.service_name ? (b.service_name.includes(' - ') ? b.service_name.split(' - ')[0] : b.service_name) : '—'}
+                        <span className="text-gray-300 mx-1">·</span>
+                        <span className="tabular-nums">{b.price} ₽</span>
+                        <span className="text-gray-300 mx-1">·</span>
+                        <span>{b.duration} мин</span>
+                      </p>
+                      <div className="flex items-center gap-0.5">
+                        <div className="inline-flex items-center justify-center w-9 h-9 min-w-[36px] min-h-[36px]">
+                          {b.master_name && b.master_name !== '-' && (
                             <>
                               {b.indie_master_id ? (
-                                <FavoriteButton
-                                  type="indie_master"
-                                  itemId={b.indie_master_id}
-                                  itemName={b.master_name}
-                                  size="sm"
-                                  isFavorite={isFav}
-                                  onFavoriteChange={handleFavoriteChange}
-                                />
+                                <FavoriteButton type="indie_master" itemId={b.indie_master_id} itemName={b.master_name} size="sm" isFavorite={isFav} onFavoriteChange={handleFavoriteChange} />
                               ) : b.master_id ? (
-                                <FavoriteButton
-                                  type="master"
-                                  itemId={b.master_id}
-                                  itemName={b.master_name}
-                                  size="sm"
-                                  isFavorite={isFav}
-                                  onFavoriteChange={handleFavoriteChange}
-                                />
+                                <FavoriteButton type="master" itemId={b.master_id} itemName={b.master_name} size="sm" isFavorite={isFav} onFavoriteChange={handleFavoriteChange} />
                               ) : null}
                             </>
-                          )
-                        })()}
-                      </div>
-                      {b.master_timezone?.trim?.() && (
-                        <div className="inline-flex items-center justify-center w-8 h-8 relative">
-                          <button
-                            onClick={() => setCalendarDropdownId(calendarDropdownId === b.id ? null : b.id)}
-                            className="text-blue-600 hover:text-blue-900 hover:bg-blue-50 rounded-md p-1"
-                            title="Добавить в календарь"
-                          >
-                            <CalendarIcon className="w-4 h-4" />
-                          </button>
-                          {calendarDropdownId === b.id && (
-                            <div className="absolute right-0 top-full mt-1 z-50 w-48 bg-white rounded-lg shadow-lg border border-gray-200 py-1">
-                              <button
-                                className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 flex items-center gap-2"
-                                onClick={() => handleCalendarGoogle(b)}
-                              >
-                                <CalendarIcon className="w-4 h-4" /> Google Calendar
-                              </button>
-                              <button
-                                className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 flex items-center gap-2"
-                                onClick={() => handleCalendarDownloadIcs(b)}
-                              >
-                                <CalendarIcon className="w-4 h-4" /> Скачать .ics
-                              </button>
-                              <button
-                                className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 flex items-center gap-2"
-                                onClick={() => openCalendarEmailModal(b)}
-                              >
-                                <CalendarIcon className="w-4 h-4" /> Отправить на email
-                              </button>
-                            </div>
                           )}
                         </div>
-                      )}
-                      <div className="inline-flex items-center justify-center w-8 h-8">
-                        <button 
+                        {b.master_timezone?.trim?.() && (
+                          <div className="relative inline-flex items-center justify-center w-9 h-9 min-w-[36px] min-h-[36px]">
+                            <button
+                              type="button"
+                              onClick={(e) => openCalendarMenu(b, e.currentTarget)}
+                              className="inline-flex items-center justify-center w-8 h-8 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+                              title="Добавить в календарь"
+                            >
+                              <CalendarIcon className="w-4 h-4" />
+                            </button>
+                          </div>
+                        )}
+                        <button
+                          type="button"
                           onClick={() => handleEditBooking(b)}
-                          className="text-green-600 hover:text-green-900 hover:bg-green-50 rounded-md p-1" 
+                          className="inline-flex items-center justify-center w-9 h-9 min-w-[36px] min-h-[36px] rounded-lg text-slate-400 hover:text-green-600 hover:bg-green-50 transition-colors"
                           title="Редактировать"
                         >
                           <PencilIcon className="w-4 h-4" />
                         </button>
-                      </div>
-                      <div className="inline-flex items-center justify-center w-8 h-8">
-                        <button 
+                        <button
+                          type="button"
                           onClick={() => handleDeleteBooking(b)}
-                          className="text-red-600 hover:text-red-900 hover:bg-red-50 rounded-md p-1" 
+                          className="inline-flex items-center justify-center w-9 h-9 min-w-[36px] min-h-[36px] rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors"
                           title="Отменить"
                           data-testid="client-booking-cancel-btn"
                         >
@@ -1429,369 +1414,450 @@ export default function ClientDashboard() {
                         </button>
                       </div>
                     </div>
-                  </td>
-                </tr>
-              )) : (
-                <tr>
-                  <td colSpan="9" className="text-center py-4 text-gray-500">
-                    Нет данных для отображения
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-            </div>
-          </div>
-        )}
-        </div>
-        
-        {/* Прошедшие записи */}
-        <div className="bg-white rounded-lg shadow-sm border border-gray-100 p-4 lg:p-6">
-          <div className="flex flex-col gap-2 sm:flex-row sm:justify-between sm:items-center mb-3 lg:mb-4">
-            <h2 className="text-lg lg:text-xl font-semibold">Прошедшие записи</h2>
-          {bookings.length > 3 && (
-            <button
-              type="button"
-              onClick={() => {
-                loadAllPastBookings()
-                setShowAllPastBookingsModal(true)
-              }}
-              className="text-green-600 hover:text-green-800 font-medium text-sm px-3 py-2 rounded-lg hover:bg-green-50 transition-colors border border-green-200 w-full sm:w-auto text-center min-h-[40px]"
-            >
-              Посмотреть все
-            </button>
-          )}
-        </div>
-        {loading ? (
-          <div>Загрузка...</div>
-        ) : pastBookingsError ? (
-          <div className="text-red-600 text-sm" role="alert">
-            {pastBookingsError}
-          </div>
-        ) : bookings.length === 0 ? (
-          <div className="text-gray-500">Нет записей</div>
-        ) : (
-          <>
-            <div className="lg:hidden space-y-2" data-testid="client-past-bookings-list-mobile">
-              {(Array.isArray(bookings) ? bookings : []).slice(0, 3).map((b) => {
-                const masterKey = getMasterKey(b)
-                const isFav = masterKey !== null && favoriteMasterIds.has(masterKey)
-                const serviceDisplay = b.service_name
-                  ? b.salon_name && b.salon_name !== '-'
-                    ? b.service_name.split(' - ')[0]
-                    : b.service_name
-                  : '—'
-                const masterSalonBlock =
-                  salonsEnabled && b.salon_name && b.salon_name !== '-' && b.master_name && b.master_name !== '-' ? (
-                    <div className="text-[12px] leading-snug mt-0.5">
-                      <div className="text-gray-500 text-[11px] truncate">{b.salon_name}</div>
-                      <div className="font-medium text-gray-900">
-                        {b.master_domain ? (
-                          <Link
-                            to={`/domain/${b.master_domain}`}
-                            className="text-[#2e7d32] hover:underline"
-                          >
-                            {b.master_name}
-                          </Link>
-                        ) : (
-                          b.master_name
-                        )}
-                      </div>
-                    </div>
-                  ) : salonsEnabled && b.salon_name && b.salon_name !== '-' ? (
-                    <div className="text-[13px] font-medium text-gray-900 mt-0.5 truncate">{b.salon_name}</div>
-                  ) : b.master_name && b.master_name !== '-' ? (
-                    <div className="text-[13px] font-medium text-gray-900 mt-0.5">
-                      {b.master_domain ? (
-                        <Link
-                          to={`/domain/${b.master_domain}`}
-                          className="text-[#2e7d32] hover:underline"
-                        >
-                          {b.master_name}
-                        </Link>
-                      ) : (
-                        b.master_name
-                      )}
-                    </div>
-                  ) : (
-                    <span className="text-[12px] text-gray-500">—</span>
                   )
-                return (
-                  <div key={b.id} className="rounded-lg border border-gray-100 bg-white p-2.5 shadow-sm">
-                    <div className="text-[13px] font-semibold text-gray-900 tabular-nums">
-                      {formatDateShort(b.date)}
-                    </div>
-                    <div className="mt-0.5">{masterSalonBlock}</div>
-                    <p className="text-[12px] text-gray-600 leading-snug line-clamp-2 mt-1">
-                      {serviceDisplay}
-                      <span className="text-gray-400"> · </span>
-                      <span className="tabular-nums">{b.price} ₽</span>
-                    </p>
-                    <div className="flex flex-wrap items-center gap-0.5 mt-2 pt-1.5 border-t border-gray-100">
-                      <div className="inline-flex items-center justify-center w-10 h-10 min-w-[40px] min-h-[40px]">
-                        {b.master_name && b.master_name !== '-' && (
-                          <>
-                            {b.indie_master_id ? (
-                              <FavoriteButton
-                                type="indie_master"
-                                itemId={b.indie_master_id}
-                                itemName={b.master_name}
-                                size="sm"
-                                isFavorite={isFav}
-                                onFavoriteChange={handleFavoriteChange}
-                              />
-                            ) : b.master_id ? (
-                              <FavoriteButton
-                                type="master"
-                                itemId={b.master_id}
-                                itemName={b.master_name}
-                                size="sm"
-                                isFavorite={isFav}
-                                onFavoriteChange={handleFavoriteChange}
-                              />
-                            ) : null}
-                          </>
-                        )}
-                      </div>
-                      <Tooltip text="Повторить запись" position="top" compact>
-                        <button
-                          type="button"
-                          onClick={() => handleRepeatBooking(b)}
-                          className="text-[#4CAF50] hover:bg-[#DFF5EC] rounded-md p-2 min-w-[40px] min-h-[40px] inline-flex items-center justify-center"
-                        >
-                          <ArrowPathIcon className="w-4 h-4" />
-                        </button>
-                      </Tooltip>
-                      <Tooltip text="Добавить заметку" position="top" compact>
-                        <button
-                          type="button"
-                          onClick={() => handleNote(b)}
-                          className="text-gray-600 hover:bg-gray-100 rounded-md p-2 min-w-[40px] min-h-[40px] inline-flex items-center justify-center"
-                        >
-                          <PencilSquareIcon className="w-4 h-4" />
-                        </button>
-                      </Tooltip>
-                      <Tooltip
-                        content={
-                          <div className="max-w-[200px]">
-                            <div className="text-xs leading-tight">
-                              Не понравилось. Отобразится при следующем бронировании
-                            </div>
-                          </div>
-                        }
-                        position="top"
-                        compact
-                      >
-                        <button
-                          type="button"
-                          onClick={() => {}}
-                          className="text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-md p-2 min-w-[40px] min-h-[40px] inline-flex items-center justify-center"
-                        >
-                          <HandThumbDownIcon className="w-4 h-4" />
-                        </button>
-                      </Tooltip>
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-            <div className="hidden lg:block overflow-x-auto">
-          <table className="w-full text-left border-collapse min-w-[560px]">
-            <thead>
-              <tr className="border-b">
-                <th className="py-2 px-3">{salonsEnabled ? 'Салон / Мастер' : 'Мастер'}</th>
-                <th className="py-2 px-3">Услуга</th>
-                <th className="py-2 px-3">Стоимость</th>
-                <th className="py-2 px-3">Дата</th>
-                <th className="py-2 px-3 w-[112px] text-center align-middle">Действия</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(Array.isArray(bookings) ? bookings : []).slice(0, 3).map(b => (
-                <tr key={b.id} className="border-b hover:bg-gray-100">
-                  <td className="py-2 px-3">
-                    {salonsEnabled && b.salon_name && b.salon_name !== '-' && b.master_name && b.master_name !== '-' ? (
-                      <div>
-                        <div>{b.salon_name}</div>
-                        <div>
-                          {b.master_domain ? (
-                            <Link 
-                              to={`/domain/${b.master_domain}`}
-                              className="text-green-600 hover:text-green-800 hover:underline"
-                            >
-                              {b.master_name}
-                            </Link>
-                          ) : (
-                            <span>{b.master_name}</span>
+                })}
+              </div>
+              {/* Desktop table */}
+              <div className="hidden lg:block overflow-x-auto overflow-y-visible">
+                <table className="w-full text-sm min-w-[640px]">
+                  <thead>
+                    <tr className="border-b border-gray-100">
+                      {salonsEnabled && <th className="py-3 px-4 text-left text-xs font-semibold text-gray-400 uppercase tracking-wide">Салон</th>}
+                      {salonsEnabled && <th className="py-3 px-4 text-left text-xs font-semibold text-gray-400 uppercase tracking-wide">Филиал</th>}
+                      <th className="py-3 px-4 text-left text-xs font-semibold text-gray-400 uppercase tracking-wide">Мастер</th>
+                      <th className="py-3 px-4 text-left text-xs font-semibold text-gray-400 uppercase tracking-wide">Услуга</th>
+                      <th className="py-3 px-4 text-left text-xs font-semibold text-gray-400 uppercase tracking-wide">Стоимость</th>
+                      <th className="py-3 px-4 text-left text-xs font-semibold text-gray-400 uppercase tracking-wide">Дата и время</th>
+                      <th className="py-3 px-4 text-left text-xs font-semibold text-gray-400 uppercase tracking-wide">Статус</th>
+                      <th className="py-3 px-4 text-right text-xs font-semibold text-gray-400 uppercase tracking-wide w-[120px]">Действия</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {(Array.isArray(futureBookings) ? futureBookings : []).slice(0, 3).map((b, idx) => {
+                      const masterKey = getMasterKey(b)
+                      const isFav = masterKey !== null && favoriteMasterIds.has(masterKey)
+                      return (
+                        <tr key={b.id} className="hover:bg-gray-50/60 transition-colors" data-testid={`client-booking-item-${idx}`}>
+                          {salonsEnabled && <td className="py-3.5 px-4 text-gray-600">{b.salon_name}</td>}
+                          {salonsEnabled && (
+                            <td className="py-3.5 px-4">
+                              {b.branch_name ? (
+                                <div>
+                                  <div className="text-gray-800 font-medium text-sm">{b.branch_name}</div>
+                                  {b.branch_address && <div className="text-xs text-gray-400 mt-0.5">{b.branch_address}</div>}
+                                </div>
+                              ) : <span className="text-gray-400 text-sm">Основной</span>}
+                            </td>
                           )}
+                          <td className="py-3.5 px-4">
+                            {b.master_domain ? (
+                              <Link to={`/m/${b.master_domain}`} className="text-[#2e7d32] hover:underline font-medium">{b.master_name}</Link>
+                            ) : <span className="text-gray-800 font-medium">{b.master_name}</span>}
+                          </td>
+                          <td className="py-3.5 px-4 text-gray-600">
+                            {b.service_name ? (b.service_name.includes(' - ') ? b.service_name.split(' - ')[0] : b.service_name) : '—'}
+                          </td>
+                          <td className="py-3.5 px-4 text-gray-700 tabular-nums whitespace-nowrap">{b.price} ₽</td>
+                          <td className="py-3.5 px-4 text-gray-600 tabular-nums whitespace-nowrap">
+                            {b.start_time ? formatDateTimeShort(b.start_time) : formatDateTimeShort(b.date)}
+                          </td>
+                          <td className="py-3.5 px-4">
+                            <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${getBookingStatusColor(b.status)}`}>
+                              {getBookingStatusLabel(b.status)}
+                            </span>
+                          </td>
+                          <td className="py-3.5 px-4">
+                            <div className="flex items-center justify-end gap-0.5">
+                              <div className="inline-flex items-center justify-center w-8 h-8">
+                                {b.master_name && b.master_name !== '-' && (() => {
+                                  const mk = getMasterKey(b)
+                                  const fav = mk !== null && favoriteMasterIds.has(mk)
+                                  return (
+                                    <>
+                                      {b.indie_master_id ? (
+                                        <FavoriteButton type="indie_master" itemId={b.indie_master_id} itemName={b.master_name} size="sm" isFavorite={fav} onFavoriteChange={handleFavoriteChange} />
+                                      ) : b.master_id ? (
+                                        <FavoriteButton type="master" itemId={b.master_id} itemName={b.master_name} size="sm" isFavorite={fav} onFavoriteChange={handleFavoriteChange} />
+                                      ) : null}
+                                    </>
+                                  )
+                                })()}
+                              </div>
+                              {b.master_timezone?.trim?.() && (
+                                <div className="relative inline-flex items-center justify-center w-8 h-8">
+                                  <button
+                                    type="button"
+                                    onClick={(e) => openCalendarMenu(b, e.currentTarget)}
+                                    className="inline-flex items-center justify-center w-7 h-7 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+                                    title="Добавить в календарь"
+                                  >
+                                    <CalendarIcon className="w-4 h-4" />
+                                  </button>
+                                </div>
+                              )}
+                              <div className="inline-flex items-center justify-center w-8 h-8">
+                                <button
+                                  onClick={() => handleEditBooking(b)}
+                                  className="inline-flex items-center justify-center w-7 h-7 rounded-lg text-slate-400 hover:text-green-600 hover:bg-green-50 transition-colors"
+                                  title="Редактировать"
+                                >
+                                  <PencilIcon className="w-4 h-4" />
+                                </button>
+                              </div>
+                              <div className="inline-flex items-center justify-center w-8 h-8">
+                                <button
+                                  onClick={() => handleDeleteBooking(b)}
+                                  className="inline-flex items-center justify-center w-7 h-7 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                                  title="Отменить"
+                                  data-testid="client-booking-cancel-btn"
+                                >
+                                  <TrashIcon className="w-4 h-4" />
+                                </button>
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </section>
+
+        {/* ══ ПРОШЕДШИЕ ЗАПИСИ ══ */}
+        <section className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+          <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 bg-gray-50 rounded-xl flex items-center justify-center shrink-0">
+                <svg className="w-[18px] h-[18px] text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                </svg>
+              </div>
+              <h2 className="font-semibold text-gray-900">Прошедшие записи</h2>
+            </div>
+            {bookings.length > 3 && (
+              <button
+                type="button"
+                onClick={() => { loadAllPastBookings(); setShowAllPastBookingsModal(true) }}
+                className="text-sm text-green-600 hover:text-green-800 font-medium px-3 py-1.5 rounded-lg hover:bg-green-50 transition-colors border border-green-200 min-h-[36px]"
+              >
+                Все записи
+              </button>
+            )}
+          </div>
+          {loading ? (
+            <div className="px-5 py-6 space-y-3">
+              {[1, 2].map(i => (
+                <div key={i} className="animate-pulse flex gap-4 items-center">
+                  <div className="flex-1 space-y-2">
+                    <div className="h-4 bg-gray-100 rounded-lg w-1/4" />
+                    <div className="h-3 bg-gray-100 rounded-lg w-1/3" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : pastBookingsError ? (
+            <div className="px-5 py-5">
+              <p className="text-sm text-red-600" role="alert">{pastBookingsError}</p>
+            </div>
+          ) : bookings.length === 0 ? (
+            <div className="px-5 py-10 text-center">
+              <div className="text-4xl mb-2 select-none">{"📋"}</div>
+              <p className="text-sm text-gray-400">Нет прошедших записей</p>
+            </div>
+          ) : (
+            <>
+              {/* Mobile */}
+              <div className="lg:hidden divide-y divide-gray-100" data-testid="client-past-bookings-list-mobile">
+                {(Array.isArray(bookings) ? bookings : []).slice(0, 3).map((b) => {
+                  const masterKey = getMasterKey(b)
+                  const isFav = masterKey !== null && favoriteMasterIds.has(masterKey)
+                  const serviceDisplay = b.service_name
+                    ? b.salon_name && b.salon_name !== '-' ? b.service_name.split(' - ')[0] : b.service_name
+                    : '—'
+                  const masterSalonBlock =
+                    salonsEnabled && b.salon_name && b.salon_name !== '-' && b.master_name && b.master_name !== '-' ? (
+                      <div>
+                        <div className="text-[11px] text-gray-400 truncate">{b.salon_name}</div>
+                        <div className="text-[13px] font-medium text-gray-900">
+                          {b.master_domain ? (
+                            <Link to={`/m/${b.master_domain}`} className="text-[#2e7d32] hover:underline">{b.master_name}</Link>
+                          ) : b.master_name}
                         </div>
                       </div>
                     ) : salonsEnabled && b.salon_name && b.salon_name !== '-' ? (
-                      b.salon_name
+                      <div className="text-[13px] font-medium text-gray-900 truncate">{b.salon_name}</div>
                     ) : b.master_name && b.master_name !== '-' ? (
-                      b.master_domain ? (
-                        <Link 
-                          to={`/domain/${b.master_domain}`}
-                          className="text-green-600 hover:text-green-800 hover:underline"
-                        >
-                          {b.master_name}
-                        </Link>
-                      ) : (
-                        <span>{b.master_name}</span>
-                      )
+                      <div className="text-[13px] font-medium text-gray-900">
+                        {b.master_domain ? (
+                          <Link to={`/m/${b.master_domain}`} className="text-[#2e7d32] hover:underline">{b.master_name}</Link>
+                        ) : b.master_name}
+                      </div>
                     ) : (
-                      '-'
-                    )}
-                  </td>
-                  <td className="py-2 px-3">
-                    {b.service_name ? (
-                      b.salon_name && b.salon_name !== '-' ? 
-                        // Если есть салон, показываем только название услуги без мастера
-                        b.service_name.split(' - ')[0]
-                        : 
-                        // Если нет салона (индивидуальный/гибридный мастер), показываем полное название услуги
-                        b.service_name
-                    ) : '-'}
-                  </td>
-                  <td className="py-2 px-3">{b.price} ₽</td>
-                  <td className="py-2 px-3 whitespace-nowrap">{formatDateShort(b.date)}</td>
-                  <td className="py-2 px-3 w-[112px] align-middle">
-                    <div className="inline-flex items-center justify-start gap-[1px]">
-                      <div className="inline-flex items-center justify-center w-7 h-7">
-                        {b.master_name && b.master_name !== '-' && (() => {
-                          const masterKey = getMasterKey(b)
-                          const isFav = masterKey !== null && favoriteMasterIds.has(masterKey)
-                          return (
+                      <span className="text-[12px] text-gray-400">—</span>
+                    )
+                  return (
+                    <div key={b.id} className="px-4 py-3.5">
+                      <div className="text-[13px] font-semibold text-gray-900 tabular-nums mb-1.5">{formatDateShort(b.date)}</div>
+                      <div className="mb-1">{masterSalonBlock}</div>
+                      <p className="text-xs text-gray-500 mb-2.5">
+                        {serviceDisplay}
+                        <span className="text-gray-300 mx-1">·</span>
+                        <span className="tabular-nums">{b.price} ₽</span>
+                      </p>
+                      <div className="flex items-center gap-0.5">
+                        <div className="inline-flex items-center justify-center w-9 h-9 min-w-[36px] min-h-[36px]">
+                          {b.master_name && b.master_name !== '-' && (
                             <>
                               {b.indie_master_id ? (
-                                <FavoriteButton
-                                  type="indie_master"
-                                  itemId={b.indie_master_id}
-                                  itemName={b.master_name}
-                                  size="sm"
-                                  isFavorite={isFav}
-                                  onFavoriteChange={handleFavoriteChange}
-                                />
+                                <FavoriteButton type="indie_master" itemId={b.indie_master_id} itemName={b.master_name} size="sm" isFavorite={isFav} onFavoriteChange={handleFavoriteChange} />
                               ) : b.master_id ? (
-                                <FavoriteButton
-                                  type="master"
-                                  itemId={b.master_id}
-                                  itemName={b.master_name}
-                                  size="sm"
-                                  isFavorite={isFav}
-                                  onFavoriteChange={handleFavoriteChange}
-                                />
+                                <FavoriteButton type="master" itemId={b.master_id} itemName={b.master_name} size="sm" isFavorite={isFav} onFavoriteChange={handleFavoriteChange} />
                               ) : null}
                             </>
-                          )
-                        })()}
-                      </div>
-                      <Tooltip text="Повторить запись" position="top">
-                        <div className="inline-flex items-center justify-center w-7 h-7">
+                          )}
+                        </div>
+                        <Tooltip text="Повторить запись" position="top" compact>
                           <button
+                            type="button"
                             onClick={() => handleRepeatBooking(b)}
-                            className="text-[#4CAF50] hover:bg-[#DFF5EC] rounded-md transition-colors"
+                            className="inline-flex items-center justify-center w-9 h-9 min-w-[36px] min-h-[36px] rounded-lg text-slate-400 hover:text-[#4CAF50] hover:bg-green-50 transition-colors"
                           >
-                            <ArrowPathIcon className="w-5 h-5" />
+                            <ArrowPathIcon className="w-4 h-4" />
                           </button>
-                        </div>
-                      </Tooltip>
-                      <Tooltip text="Добавить заметку" position="top">
-                        <div className="inline-flex items-center justify-center w-7 h-7">
+                        </Tooltip>
+                        <Tooltip text="Добавить заметку" position="top" compact>
                           <button
+                            type="button"
                             onClick={() => handleNote(b)}
-                            className="text-gray-600 hover:bg-gray-100 rounded-md transition-colors"
+                            className="inline-flex items-center justify-center w-9 h-9 min-w-[36px] min-h-[36px] rounded-lg text-slate-400 hover:text-gray-700 hover:bg-gray-100 transition-colors"
                           >
-                            <PencilSquareIcon className="w-5 h-5" />
+                            <PencilSquareIcon className="w-4 h-4" />
                           </button>
-                        </div>
-                      </Tooltip>
-                      <Tooltip 
-                        content={
-                          <div className="max-w-[200px]">
-                            <div className="text-xs leading-tight">
-                              Не понравилось. Отобразится при следующем бронировании
-                            </div>
-                          </div>
-                        }
-                        position="top"
-                      >
-                        <div className="inline-flex items-center justify-center w-7 h-7">
+                        </Tooltip>
+                        <Tooltip
+                          content={<div className="max-w-[200px] text-xs leading-tight">Не понравилось. Отобразится при следующем бронировании</div>}
+                          position="top"
+                          compact
+                        >
                           <button
+                            type="button"
                             onClick={() => {}}
-                            className="text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-md transition-colors"
+                            className="inline-flex items-center justify-center w-9 h-9 min-w-[36px] min-h-[36px] rounded-lg text-slate-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
                           >
-                            <HandThumbDownIcon className="w-5 h-5" />
+                            <HandThumbDownIcon className="w-4 h-4" />
                           </button>
-                        </div>
-                      </Tooltip>
+                        </Tooltip>
+                      </div>
                     </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-            </div>
-          </>
-        )}
-        </div>
-        
-        {/* Избранное (предпоследний блок) */}
-        <div className="bg-white rounded-lg shadow-sm border border-gray-100 p-4 lg:p-5">
-        <div className="flex flex-col gap-2 sm:flex-row sm:justify-between sm:items-center mb-3">
-          <h2 className="text-lg lg:text-xl font-semibold">Избранные</h2>
-          {favorites.length > 3 && (
-            <button
-              type="button"
-              onClick={() => navigate('/client/favorites')}
-              className="text-green-600 hover:text-green-800 font-medium text-sm px-3 py-2 rounded-lg hover:bg-green-50 transition-colors border border-green-200 w-full sm:w-auto text-center min-h-[40px]"
-            >
-              Посмотреть все
-            </button>
-          )}
-        </div>
-        {favoritesLoading ? (
-          <div className="text-sm text-gray-500">Загрузка...</div>
-        ) : favorites.length === 0 ? (
-          <div className="text-sm text-gray-500">Нет избранных</div>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 justify-items-stretch sm:justify-items-start">
-            {favorites.slice(0, 3).map((favorite, index) => (
-              <div key={favorite.client_favorite_id || favorite.id || index} className="w-full sm:max-w-[280px]">
-                {renderFavoriteCard(favorite)}
+                  )
+                })}
               </div>
-            ))}
-          </div>
-        )}
-        </div>
-        
-        {/* Мои баллы (последний блок, компактный) */}
-        <div className="bg-white rounded-lg shadow-sm border border-gray-100 p-4 lg:p-6">
-          <div className="flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-center mb-3 lg:mb-4">
-            <h2 className="text-lg lg:text-xl font-semibold">Мои баллы</h2>
-            <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
-              <button
-                type="button"
-                onClick={handleShowLoyaltyHistory}
-                className="text-green-600 hover:text-green-800 font-medium text-sm px-3 py-2 rounded-lg hover:bg-green-50 transition-colors border border-green-200 text-center min-h-[40px]"
-                data-testid="client-loyalty-history"
-              >
-                История
-              </button>
-              <button
-                type="button"
-                onClick={() => {/* TODO: navigate to loyalty history page */}}
-                className="text-green-600 hover:text-green-800 font-medium text-sm px-3 py-2 rounded-lg hover:bg-green-50 transition-colors border border-green-200 text-center min-h-[40px]"
-                data-testid="client-loyalty-view-all"
-              >
-                Посмотреть все
-              </button>
+              {/* Desktop */}
+              <div className="hidden lg:block overflow-x-auto">
+                <table className="w-full text-sm min-w-[520px]">
+                  <thead>
+                    <tr className="border-b border-gray-100">
+                      <th className="py-3 px-4 text-left text-xs font-semibold text-gray-400 uppercase tracking-wide">{salonsEnabled ? 'Салон / Мастер' : 'Мастер'}</th>
+                      <th className="py-3 px-4 text-left text-xs font-semibold text-gray-400 uppercase tracking-wide">Услуга</th>
+                      <th className="py-3 px-4 text-left text-xs font-semibold text-gray-400 uppercase tracking-wide">Стоимость</th>
+                      <th className="py-3 px-4 text-left text-xs font-semibold text-gray-400 uppercase tracking-wide">Дата</th>
+                      <th className="py-3 px-4 text-right text-xs font-semibold text-gray-400 uppercase tracking-wide w-[112px]">Действия</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {(Array.isArray(bookings) ? bookings : []).slice(0, 3).map(b => {
+                      const mk = getMasterKey(b)
+                      const fav = mk !== null && favoriteMasterIds.has(mk)
+                      return (
+                        <tr key={b.id} className="hover:bg-gray-50/60 transition-colors">
+                          <td className="py-3.5 px-4">
+                            {salonsEnabled && b.salon_name && b.salon_name !== '-' && b.master_name && b.master_name !== '-' ? (
+                              <div>
+                                <div className="text-xs text-gray-400 mb-0.5">{b.salon_name}</div>
+                                <div className="font-medium text-gray-800">
+                                  {b.master_domain ? <Link to={`/m/${b.master_domain}`} className="text-[#2e7d32] hover:underline">{b.master_name}</Link> : b.master_name}
+                                </div>
+                              </div>
+                            ) : salonsEnabled && b.salon_name && b.salon_name !== '-' ? (
+                              <span className="text-gray-700">{b.salon_name}</span>
+                            ) : b.master_name && b.master_name !== '-' ? (
+                              b.master_domain ? <Link to={`/m/${b.master_domain}`} className="text-[#2e7d32] hover:underline font-medium">{b.master_name}</Link> : <span className="text-gray-800 font-medium">{b.master_name}</span>
+                            ) : '—'}
+                          </td>
+                          <td className="py-3.5 px-4 text-gray-600">
+                            {b.service_name ? (b.salon_name && b.salon_name !== '-' ? b.service_name.split(' - ')[0] : b.service_name) : '—'}
+                          </td>
+                          <td className="py-3.5 px-4 text-gray-700 tabular-nums whitespace-nowrap">{b.price} ₽</td>
+                          <td className="py-3.5 px-4 text-gray-600 tabular-nums whitespace-nowrap">{formatDateShort(b.date)}</td>
+                          <td className="py-3.5 px-4 w-[112px]">
+                            <div className="inline-flex items-center justify-end gap-0.5 w-full">
+                              <div className="inline-flex items-center justify-center w-8 h-8">
+                                {b.master_name && b.master_name !== '-' && (() => {
+                                  const mk2 = getMasterKey(b)
+                                  const fav2 = mk2 !== null && favoriteMasterIds.has(mk2)
+                                  return (
+                                    <>
+                                      {b.indie_master_id ? (
+                                        <FavoriteButton type="indie_master" itemId={b.indie_master_id} itemName={b.master_name} size="sm" isFavorite={fav2} onFavoriteChange={handleFavoriteChange} />
+                                      ) : b.master_id ? (
+                                        <FavoriteButton type="master" itemId={b.master_id} itemName={b.master_name} size="sm" isFavorite={fav2} onFavoriteChange={handleFavoriteChange} />
+                                      ) : null}
+                                    </>
+                                  )
+                                })()}
+                              </div>
+                              <Tooltip text="Повторить запись" position="top" compact>
+                                <button onClick={() => handleRepeatBooking(b)} className="inline-flex items-center justify-center w-8 h-8 rounded-lg text-slate-400 hover:text-[#4CAF50] hover:bg-green-50 transition-colors" aria-label="Повторить запись">
+                                  <ArrowPathIcon className="w-4 h-4" />
+                                </button>
+                              </Tooltip>
+                              <Tooltip text="Добавить заметку" position="top" compact>
+                                <button onClick={() => handleNote(b)} className="inline-flex items-center justify-center w-8 h-8 rounded-lg text-slate-400 hover:text-gray-700 hover:bg-gray-100 transition-colors" aria-label="Добавить заметку">
+                                  <PencilSquareIcon className="w-4 h-4" />
+                                </button>
+                              </Tooltip>
+                              <Tooltip
+                                content={<div className="max-w-[200px] text-xs leading-tight">Не понравилось. Отобразится при следующем бронировании</div>}
+                                position="top"
+                                compact
+                              >
+                                <button onClick={() => {}} className="inline-flex items-center justify-center w-8 h-8 rounded-lg text-slate-400 hover:text-gray-600 hover:bg-gray-100 transition-colors" aria-label="Не понравилось">
+                                  <HandThumbDownIcon className="w-4 h-4" />
+                                </button>
+                              </Tooltip>
+                            </div>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+        </section>
+
+        {/* ══ НИЖНЯЯ СТРОКА: Избранные + Баллы ══ */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 lg:gap-6">
+
+          {/* Избранные */}
+          <section className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 bg-amber-50 rounded-xl flex items-center justify-center shrink-0">
+                  <HeartIcon className="w-[18px] h-[18px] text-amber-500" strokeWidth={2} />
+                </div>
+                <h2 className="font-semibold text-gray-900">Избранные</h2>
+              </div>
+              {favorites.length > 3 && (
+                <button
+                  type="button"
+                  onClick={() => navigate('/client/favorites')}
+                  className="text-sm text-green-600 hover:text-green-800 font-medium px-3 py-1.5 rounded-lg hover:bg-green-50 transition-colors border border-green-200"
+                >
+                  Все
+                </button>
+              )}
             </div>
-          </div>
-          <ClientLoyaltyPoints />
+            <div className="p-4">
+              {favoritesLoading ? (
+                <div className="space-y-2.5">
+                  {[1, 2].map(i => (
+                    <div key={i} className="animate-pulse h-12 bg-gray-100 rounded-xl" />
+                  ))}
+                </div>
+              ) : favorites.length === 0 ? (
+                <div className="py-8 text-center">
+                  <HeartIcon className="w-10 h-10 mx-auto mb-2 text-gray-300" strokeWidth={1.5} aria-hidden />
+                  <p className="text-sm text-gray-400">Нет избранных</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {favorites.slice(0, 3).map((favorite, index) => {
+                    let title = 'Избранное'
+                    let name = favorite.favorite_name || 'Название не указано'
+                    let masterDomain = null
+                    if (favorite.type === 'salon' && favorite.salon) {
+                      title = 'Салон'; name = favorite.salon.name || favorite.favorite_name || 'Салон'
+                    } else if (favorite.type === 'master' && favorite.master) {
+                      title = 'Мастер'; name = favorite.master.user?.full_name || favorite.favorite_name || 'Мастер'; masterDomain = favorite.master.domain || null
+                    } else if (favorite.type === 'indie_master') {
+                      title = 'Мастер'
+                      if (favorite.indie_master && favorite.indie_master.user) {
+                        name = favorite.indie_master.user.full_name || favorite.favorite_name || 'Мастер'; masterDomain = favorite.indie_master.domain || null
+                      } else { name = favorite.favorite_name || 'Мастер' }
+                    } else if (favorite.type === 'service' && favorite.service) {
+                      title = 'Услуга'; name = favorite.service.name || favorite.favorite_name || 'Услуга'
+                    } else {
+                      title = favorite.type === 'salon' ? 'Салон' : favorite.type === 'master' ? 'Мастер' : favorite.type === 'indie_master' ? 'Мастер' : favorite.type === 'service' ? 'Услуга' : 'Избранное'
+                    }
+                    return (
+                      <div key={favorite.client_favorite_id || favorite.id || index} className="flex items-center justify-between gap-2 p-3 rounded-xl border border-gray-100 hover:border-gray-200 hover:bg-gray-50/60 transition-colors">
+                        <div className="min-w-0 flex-1">
+                          <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-0.5">{title}</div>
+                          {masterDomain ? (
+                            <Link to={`/m/${masterDomain}`} className="text-sm font-medium text-[#2e7d32] hover:underline truncate block">{name}</Link>
+                          ) : (
+                            <div className="text-sm font-medium text-gray-800 truncate">{name}</div>
+                          )}
+                        </div>
+                        <div className="shrink-0">
+                          {(favorite.type === 'master' && favorite.master_id) && (
+                            <FavoriteButton type="master" itemId={favorite.master_id} itemName={name} size="sm" onFavoriteChange={handleFavoriteChange} />
+                          )}
+                          {(favorite.type === 'indie_master' && favorite.indie_master_id) && (
+                            <FavoriteButton type="indie_master" itemId={favorite.indie_master_id} itemName={name} size="sm" onFavoriteChange={handleFavoriteChange} />
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          </section>
+
+          {/* Мои баллы */}
+          <section className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 bg-violet-50 rounded-xl flex items-center justify-center shrink-0">
+                  <svg className="w-[18px] h-[18px] text-violet-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                </div>
+                <h2 className="font-semibold text-gray-900">Мои баллы</h2>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleShowLoyaltyHistory}
+                  className="text-sm text-green-600 hover:text-green-800 font-medium px-3 py-1.5 rounded-lg hover:bg-green-50 transition-colors border border-green-200 min-h-[36px]"
+                  data-testid="client-loyalty-history"
+                >
+                  История
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {/* TODO: navigate to loyalty history page */}}
+                  className="text-sm text-green-600 hover:text-green-800 font-medium px-3 py-1.5 rounded-lg hover:bg-green-50 transition-colors border border-green-200 min-h-[36px]"
+                  data-testid="client-loyalty-view-all"
+                >
+                  Все
+                </button>
+              </div>
+            </div>
+            <div className="p-4">
+              <ClientLoyaltyPoints />
+            </div>
+          </section>
+
         </div>
+
       </div>
-      
       {/* Модальное окно для установки пароля */}
       <PasswordSetupModal
         isOpen={showPasswordModal}
@@ -1802,46 +1868,55 @@ export default function ClientDashboard() {
 
       {/* Модальное окно редактирования бронирования */}
       {showEditBookingModal && selectedBooking && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-xl font-bold">Редактирование записи</h2>
+        <div className="fixed inset-0 z-[80] isolate bg-black/70 lg:flex lg:items-center lg:justify-center lg:bg-black/60">
+          <div
+            className="fixed inset-x-0 bottom-0 top-[calc(6rem+env(safe-area-inset-top,0px))] flex flex-col overflow-hidden bg-white lg:relative lg:inset-auto lg:mx-4 lg:h-auto lg:max-h-[85vh] lg:max-w-md lg:rounded-xl lg:shadow-xl lg:w-full"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="client-edit-booking-title"
+          >
+            <div className="sticky top-0 z-20 flex items-center justify-between gap-3 border-b border-[#E7E2DF] bg-white px-4 py-[14px] lg:px-5">
+              <h2 id="client-edit-booking-title" className="min-w-0 flex-1 truncate text-[18px] font-semibold leading-snug text-[#2D2D2D] lg:text-lg">
+                Редактирование записи
+              </h2>
               <DashboardModalClose onClick={() => setShowEditBookingModal(false)} />
             </div>
-            
-            <div className="space-y-3">
+
+            <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 lg:px-5 space-y-3">
               <div>
-                <label className="block text-sm font-medium text-gray-700">Услуга</label>
-                <p className="text-sm text-gray-900">{selectedBooking.service_name}</p>
+                <label className="block text-[11px] font-semibold uppercase tracking-wide text-gray-500">Услуга</label>
+                <p className="mt-0.5 text-sm font-medium text-gray-900">{selectedBooking.service_name}</p>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700">Мастер</label>
-                <p className="text-sm text-gray-900">{selectedBooking.master_name}</p>
+                <label className="block text-[11px] font-semibold uppercase tracking-wide text-gray-500">Мастер</label>
+                <p className="mt-0.5 text-sm font-medium text-gray-900">{selectedBooking.master_name}</p>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700">Дата и время</label>
-                <p className="text-sm text-gray-900">
+                <label className="block text-[11px] font-semibold uppercase tracking-wide text-gray-500">Дата и время</label>
+                <p className="mt-0.5 text-sm font-medium text-gray-900">
                   {selectedBooking.start_time ? formatDate(selectedBooking.start_time) : formatDate(selectedBooking.date)}
                 </p>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700">Статус</label>
-                <span className={`px-2 py-1 rounded-full text-xs font-medium ${getBookingStatusColor(selectedBooking.status)}`}>
+                <label className="block text-[11px] font-semibold uppercase tracking-wide text-gray-500">Статус</label>
+                <span className={`mt-1 inline-block px-2 py-0.5 rounded-full text-[11px] font-semibold ${getBookingStatusColor(selectedBooking.status)}`}>
                   {getBookingStatusLabel(selectedBooking.status)}
                 </span>
               </div>
             </div>
-            
-            <div className="mt-6 flex justify-end space-x-3">
+
+            <div className="border-t border-[#E7E2DF] bg-white px-4 py-3 lg:px-5 flex flex-col-reverse gap-2 lg:flex-row lg:justify-end">
               <button
+                type="button"
                 onClick={() => setShowEditBookingModal(false)}
-                className="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400"
+                className="px-4 py-2 text-sm font-semibold rounded-lg bg-white text-gray-900 border border-gray-300 hover:bg-gray-50"
               >
                 Закрыть
               </button>
               <button
+                type="button"
                 onClick={handleTimeEdit}
-                className="px-4 py-2 bg-[#4CAF50] text-white rounded-lg hover:bg-[#45A049]"
+                className="px-4 py-2 text-sm font-semibold rounded-lg bg-[#4CAF50] text-white hover:bg-[#45A049]"
               >
                 Изменить время
               </button>
@@ -1852,10 +1927,17 @@ export default function ClientDashboard() {
 
       {/* Модальное окно изменения времени */}
       {showTimeEditModal && selectedBooking && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 max-w-4xl w-full mx-4 h-[95vh] overflow-y-auto">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-xl font-bold">Изменение времени записи</h2>
+        <div className="fixed inset-0 z-[80] isolate bg-black/70 lg:flex lg:items-center lg:justify-center lg:bg-black/60">
+          <div
+            className="fixed inset-x-0 bottom-0 top-[calc(6rem+env(safe-area-inset-top,0px))] flex flex-col overflow-hidden bg-white lg:relative lg:inset-auto lg:mx-4 lg:h-auto lg:max-h-[85vh] lg:max-w-3xl lg:rounded-xl lg:shadow-xl lg:w-full"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="client-time-edit-title"
+          >
+            <div className="sticky top-0 z-20 flex items-center justify-between gap-3 border-b border-[#E7E2DF] bg-white px-4 py-[14px] lg:px-5">
+              <h2 id="client-time-edit-title" className="min-w-0 flex-1 truncate text-[18px] font-semibold leading-snug text-[#2D2D2D] lg:text-lg">
+                Изменение времени записи
+              </h2>
               <DashboardModalClose
                 onClick={() => {
                   setShowTimeEditModal(false)
@@ -1866,8 +1948,8 @@ export default function ClientDashboard() {
                 }}
               />
             </div>
-            
-            <div className="space-y-6">
+
+            <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 lg:px-5 space-y-6">
               {/* Информация о записи */}
               <div className="bg-gray-50 rounded-lg p-4">
                 <h3 className="font-semibold text-gray-900 mb-2">Информация о записи</h3>
@@ -1893,156 +1975,37 @@ export default function ClientDashboard() {
                 </div>
               </div>
 
-              {/* Выбор даты */}
+              {/* Выбор даты — общий CalendarGrid с публичной страницы /m/:slug */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Выберите дату
-                </label>
-                
-                <div className="relative calendar-container">
-                  {/* Кнопка выбора даты */}
-                  <button
-                    onClick={() => setShowCalendar(!showCalendar)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white text-left flex justify-between items-center"
-                  >
-                    <span>
-                      {selectedDate ? new Date(selectedDate).toLocaleDateString('ru-RU', {
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-sm font-medium text-gray-700">
+                    Выберите дату
+                  </label>
+                  {selectedDate && (
+                    <span className="text-xs text-gray-500 tabular-nums">
+                      {new Date(selectedDate).toLocaleDateString('ru-RU', {
                         year: 'numeric',
                         month: 'long',
-                        day: 'numeric'
-                      }) : 'Выберите дату'}
+                        day: 'numeric',
+                      })}
                     </span>
-                    <span className="text-gray-400">▼</span>
-                  </button>
-                  
-                  {/* Выпадающий календарь */}
-                  {showCalendar && (
-                    <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-300 rounded-lg shadow-lg z-10 p-3">
-                      {/* Навигация по месяцам */}
-                      <div className="flex justify-between items-center mb-3">
-                        <button
-                          onClick={() => changeMonth(-1)}
-                          className="p-1 hover:bg-gray-100 rounded"
-                        >
-                          ←
-                        </button>
-                        <span className="font-medium text-gray-900">
-                          {currentMonth.toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' })}
-                        </span>
-                        <button
-                          onClick={() => changeMonth(1)}
-                          className="p-1 hover:bg-gray-100 rounded"
-                        >
-                          →
-                        </button>
-                      </div>
-                      
-                      {availabilityLoading ? (
-                        <div className="text-center py-4">
-                          <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-[#4CAF50] mx-auto"></div>
-                          <p className="text-gray-600 mt-2 text-sm">Загрузка доступности дат...</p>
-                        </div>
-                      ) : (
-                        <div className="grid grid-cols-7 gap-1">
-                          {/* Заголовки дней недели - начинаем с понедельника */}
-                          {['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'].map(day => (
-                            <div key={day} className="text-center text-xs font-medium text-gray-500 py-2">
-                              {day}
-                            </div>
-                          ))}
-                          
-                          {/* Дни месяца */}
-                          {(() => {
-                            // JavaScript getDay(): 0=Воскресенье, 1=Понедельник, 2=Вторник, 3=Среда, 4=Четверг, 5=Пятница, 6=Суббота
-                            // Вычисляем день недели ПЕРВОГО ДНЯ месяца (не текущей даты!)
-                            const firstDayOfMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1)
-                            const firstDayOfWeek = firstDayOfMonth.getDay()
-                            const daysInMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0).getDate()
-                            
-                            const days = []
-                            
-                            // Вычисляем отступ для начала календаря
-                            // Если первый день месяца - воскресенье (0), то отступ = 6 (6 пустых ячеек)
-                            // Если первый день месяца - понедельник (1), то отступ = 0 (0 пустых ячеек)
-                            // Если первый день месяца - вторник (2), то отступ = 1 (1 пустая ячейка)
-                            // И так далее...
-                            const offset = firstDayOfWeek === 0 ? 6 : firstDayOfWeek - 1
-                            for (let i = 0; i < offset; i++) {
-                              days.push(<div key={`empty-${i}`} className="h-8"></div>)
-                            }
-                            
-                            // Дни месяца
-                            for (let day = 1; day <= daysInMonth; day++) {
-                              const date = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), day)
-                              const dateStr = date.toISOString().split('T')[0]
-                              const isToday = dateStr === new Date().toISOString().split('T')[0]
-                              const isSelected = dateStr === selectedDate
-                              const isPast = date < new Date()
-                              
-                              // Проверяем, является ли день выходным (суббота или воскресенье)
-                              // JavaScript getDay(): 0=Воскресенье, 1=Понедельник, 2=Вторник, 3=Среда, 4=Четверг, 5=Пятница, 6=Суббота
-                              // Наша схема: 1=Понедельник, 2=Вторник, 3=Среда, 4=Четверг, 5=Пятница, 6=Суббота, 7=Воскресенье
-                              const dayOfWeek = date.getDay()
-                              // Преобразуем в нашу схему: 0(Вс)->7, 1(Пн)->1, 2(Вт)->2, 3(Ср)->3, 4(Чт)->4, 5(Пт)->5, 6(Сб)->6
-                              const normalizedDayOfWeek = dayOfWeek === 0 ? 7 : dayOfWeek
-                              const isWeekend = normalizedDayOfWeek === 6 || normalizedDayOfWeek === 7 // 6 = суббота, 7 = воскресенье
-                              
-                              // Определяем статус доступности слота
-                              const hasSlots = dateAvailability[dateStr]
-                              const isLoading = loadingDates.has(dateStr)
-                              
-                              // День доступен для записи если:
-                              // 1. Не прошедший
-                              // 2. Не выходной
-                              // 3. Есть доступные слоты (если уже проверено) или еще не проверен
-                              const isAvailable = !isPast && !isWeekend && (hasSlots === true || hasSlots === undefined)
-                              
-                              // Отладочная информация для понедельника
-                              if (normalizedDayOfWeek === 1) {
-                                // Понедельник - всегда доступен для записи
-                              }
-                              
-                              days.push(
-                                <button
-                                  key={day}
-                                  onClick={() => isAvailable && !isLoading && handleDateChange(dateStr)}
-                                  disabled={!isAvailable || isLoading}
-                                  className={`h-8 rounded text-sm font-medium transition-colors relative ${
-                                    isSelected
-                                      ? 'bg-[#4CAF50] text-white'
-                                      : isToday
-                                      ? 'bg-[#4CAF50] text-white'
-                                      : isPast
-                                      ? 'text-gray-300 cursor-not-allowed'
-                                      : isWeekend
-                                      ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
-                                      : isLoading
-                                      ? 'bg-gray-100 text-gray-500 cursor-wait'
-                                      : hasSlots === true
-                                      ? 'bg-[#4CAF50] text-white hover:bg-[#45A049]'
-                                      : hasSlots === false
-                                      ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
-                                      : 'bg-white text-gray-700 hover:bg-[#DFF5EC] border border-gray-200'
-                                  }`}
-                                >
-                                  {isLoading ? (
-                                    <div className="flex items-center justify-center">
-                                      <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-gray-400"></div>
-                                    </div>
-                                  ) : (
-                                    day
-                                  )}
-                                </button>
-                              )
-                            }
-                            
-                            return days
-                          })()}
-                        </div>
-                      )}
-                    </div>
                   )}
                 </div>
+                <PublicCalendarGrid
+                  availableDateSet={timeEditAvailableDateSet}
+                  minDateStr={timeEditMinDateStr}
+                  maxDateStr={timeEditMaxDateStr}
+                  selectedDate={selectedDate || null}
+                  onSelectDate={(dateStr) => handleDateChange(dateStr)}
+                  onMonthChange={({ year, month }) => {
+                    const next = new Date(year, month, 1)
+                    setCurrentMonth(next)
+                    if (selectedBooking) loadMonthAvailability(next)
+                  }}
+                />
+                {availabilityLoading && (
+                  <p className="text-xs text-gray-500 mt-2">Загрузка доступности дат...</p>
+                )}
               </div>
 
               {/* Доступные слоты */}
@@ -2098,8 +2061,9 @@ export default function ClientDashboard() {
               )}
             </div>
             
-            <div className="mt-6 flex justify-end space-x-3">
+            <div className="border-t border-[#E7E2DF] bg-white px-4 py-3 lg:px-5 flex flex-col-reverse gap-2 lg:flex-row lg:justify-end">
               <button
+                type="button"
                 onClick={() => {
                   setShowTimeEditModal(false)
                   setDateAvailability({})
@@ -2110,14 +2074,15 @@ export default function ClientDashboard() {
                   setShowCalendar(false)
                   setCurrentMonth(new Date())
                 }}
-                className="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400"
+                className="px-4 py-2 text-sm font-semibold rounded-lg bg-white text-gray-900 border border-gray-300 hover:bg-gray-50 disabled:opacity-50"
                 disabled={timeEditLoading}
               >
                 Отмена
               </button>
               <button
+                type="button"
                 onClick={handleTimeEditConfirm}
-                className="px-4 py-2 bg-[#4CAF50] text-white rounded-lg hover:bg-[#45A049] disabled:opacity-50"
+                className="px-4 py-2 text-sm font-semibold rounded-lg bg-[#4CAF50] text-white hover:bg-[#45A049] disabled:opacity-50"
                 disabled={timeEditLoading || !newDateTime}
               >
                 {timeEditLoading ? 'Сохранение...' : 'Сохранить'}
@@ -2129,35 +2094,43 @@ export default function ClientDashboard() {
 
       {/* Модальное окно подтверждения отмены бронирования */}
       {showDeleteBookingModal && selectedBooking && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-xl font-bold text-red-600">Отмена записи</h2>
+        <div className="fixed inset-0 z-[80] isolate bg-black/70 lg:flex lg:items-center lg:justify-center lg:bg-black/60">
+          <div
+            className="fixed inset-x-0 bottom-0 max-h-[88vh] flex flex-col overflow-hidden bg-white rounded-t-2xl lg:relative lg:inset-auto lg:mx-4 lg:h-auto lg:max-h-[85vh] lg:max-w-md lg:rounded-xl lg:shadow-xl lg:w-full lg:rounded-t-xl"
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="client-cancel-title"
+            aria-describedby="client-cancel-desc"
+          >
+            <div className="sticky top-0 z-20 flex items-center justify-between gap-3 border-b border-[#E7E2DF] bg-white px-4 py-[14px] lg:px-5">
+              <h2 id="client-cancel-title" className="min-w-0 flex-1 truncate text-[18px] font-semibold leading-snug text-[#2D2D2D] lg:text-lg">
+                Отмена записи
+              </h2>
               <DashboardModalClose onClick={() => setShowDeleteBookingModal(false)} />
             </div>
-            
-            <div className="mb-6">
-              <p className="text-gray-700">
-                Вы действительно хотите отменить запись на <strong>{selectedBooking.service_name}</strong>?
+
+            <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 lg:px-5 space-y-3">
+              <p id="client-cancel-desc" className="text-sm text-gray-700">
+                Вы действительно хотите отменить запись на <strong>«{selectedBooking.service_name}»</strong>?
               </p>
-              <p className="text-sm text-gray-500 mt-2">
-                Дата: {selectedBooking.start_time ? formatDate(selectedBooking.start_time) : formatDate(selectedBooking.date)}
-              </p>
-              <p className="text-sm text-gray-500 mt-2">
-                Мастер: {selectedBooking.master_name}
-              </p>
+              <div className="rounded-xl border border-gray-100 bg-gray-50 px-3 py-3 text-sm text-gray-800">
+                <div><strong>Дата:</strong> {selectedBooking.start_time ? formatDate(selectedBooking.start_time) : formatDate(selectedBooking.date)}</div>
+                <div className="mt-1"><strong>Мастер:</strong> {selectedBooking.master_name}</div>
+              </div>
             </div>
-            
-            <div className="flex justify-end space-x-3">
+
+            <div className="border-t border-[#E7E2DF] bg-white px-4 py-3 lg:px-5 flex flex-col-reverse gap-2 lg:flex-row lg:justify-end">
               <button
+                type="button"
                 onClick={() => setShowDeleteBookingModal(false)}
-                className="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400"
+                className="px-4 py-2 text-sm font-semibold rounded-lg bg-white text-gray-900 border border-gray-300 hover:bg-gray-50"
               >
-                Отмена
+                Не отменять
               </button>
               <button
+                type="button"
                 onClick={handleDeleteBookingConfirm}
-                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
+                className="px-4 py-2 text-sm font-semibold rounded-lg bg-red-600 text-white hover:bg-red-700"
                 data-testid="client-booking-cancel-confirm"
               >
                 Отменить запись
@@ -2179,17 +2152,53 @@ export default function ClientDashboard() {
 
       {/* Модальное окно всех будущих записей */}
       {showAllFutureBookingsModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-2 sm:p-4">
-          <div className="bg-white rounded-xl shadow-xl max-w-6xl w-full max-h-[min(92dvh,92vh)] overflow-hidden flex flex-col min-h-0">
-            <div className="flex justify-between items-start gap-2 px-4 pt-4 pb-2 border-b border-gray-100 shrink-0">
-              <h2 className="text-lg sm:text-xl font-bold text-gray-900 pr-2">Все будущие записи</h2>
+        <div className="fixed inset-0 z-50 isolate bg-black/70 lg:flex lg:items-center lg:justify-center lg:bg-black/60">
+          <div
+            className="fixed inset-x-0 bottom-0 top-[calc(6rem+env(safe-area-inset-top,0px))] flex flex-col overflow-hidden bg-white lg:relative lg:inset-auto lg:mx-4 lg:h-auto lg:max-h-[85vh] lg:max-w-5xl lg:rounded-xl lg:shadow-xl lg:w-full"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="client-all-future-title"
+          >
+            <div className="sticky top-0 z-20 flex items-center justify-between gap-3 border-b border-[#E7E2DF] bg-white px-4 py-[14px] lg:px-5">
+              <h2 id="client-all-future-title" className="min-w-0 flex-1 truncate text-[18px] font-semibold leading-snug text-[#2D2D2D] lg:text-lg">
+                Все будущие записи
+              </h2>
               <DashboardModalClose onClick={() => setShowAllFutureBookingsModal(false)} />
             </div>
-            
-            <div className="flex-1 min-h-0 overflow-y-auto px-3 sm:px-4 py-3">
+
+            {!allFutureLoading && !allFutureError && allFutureBookings.length > 0 && (
+              <div className="border-b border-[#E7E2DF] bg-white px-4 py-2.5 lg:px-5 flex items-center justify-between gap-2 text-xs text-gray-500">
+                <span className="tabular-nums">
+                  Показано {allFutureTotal === 0 ? 0 : allFutureStartIdx + 1}–{allFutureEndIdx} из {allFutureTotal}
+                </span>
+                <div className="inline-flex items-center gap-1">
+                  <button
+                    type="button"
+                    className="px-2.5 py-1 text-xs rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-40"
+                    onClick={() => setAllFuturePage((p) => Math.max(0, p - 1))}
+                    disabled={allFuturePageSafe === 0}
+                  >
+                    Назад
+                  </button>
+                  <div className="tabular-nums px-1">
+                    {allFuturePageSafe + 1}/{allFutureTotalPages}
+                  </div>
+                  <button
+                    type="button"
+                    className="px-2.5 py-1 text-xs rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-40"
+                    onClick={() => setAllFuturePage((p) => Math.min(allFutureTotalPages - 1, p + 1))}
+                    disabled={allFuturePageSafe >= allFutureTotalPages - 1}
+                  >
+                    Вперёд
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <div className="flex-1 min-h-0 overflow-y-auto px-3 sm:px-4 py-3 lg:px-5">
               {allFutureLoading ? (
                 <div className="text-center py-10">
-                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-600 mx-auto" />
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#4CAF50] mx-auto" />
                   <p className="text-gray-600 mt-2 text-sm">Загрузка записей...</p>
                 </div>
               ) : allFutureError ? (
@@ -2201,7 +2210,7 @@ export default function ClientDashboard() {
               ) : (
                 <>
                   <div className="lg:hidden space-y-3">
-                    {allFutureBookings.map((b) => {
+                    {allFuturePageItems.map((b) => {
                       const masterKey = getMasterKey(b)
                       const isFav = masterKey !== null && favoriteMasterIds.has(masterKey)
                       return (
@@ -2227,7 +2236,7 @@ export default function ClientDashboard() {
                           )}
                           <div className="text-sm text-gray-900 mt-1">
                             {b.master_domain ? (
-                              <Link to={`/domain/${b.master_domain}`} className="text-[#2e7d32] font-medium hover:underline">
+                              <Link to={`/m/${b.master_domain}`} className="text-[#2e7d32] font-medium hover:underline">
                                 {b.master_name}
                               </Link>
                             ) : (
@@ -2272,40 +2281,15 @@ export default function ClientDashboard() {
                               )}
                             </div>
                             {b.master_timezone?.trim?.() && (
-                              <div className="inline-flex items-center justify-center w-10 h-10 min-w-[40px] min-h-[40px] relative">
+                              <div className="inline-flex items-center justify-center w-10 h-10 min-w-[40px] min-h-[40px]">
                                 <button
                                   type="button"
-                                  onClick={() => setCalendarDropdownId(calendarDropdownId === b.id ? null : b.id)}
+                                  onClick={(e) => openCalendarMenu(b, e.currentTarget)}
                                   className="text-blue-600 hover:text-blue-900 hover:bg-blue-50 rounded-md p-2 min-w-[40px] min-h-[40px] inline-flex items-center justify-center"
                                   title="Добавить в календарь"
                                 >
                                   <CalendarIcon className="w-4 h-4" />
                                 </button>
-                                {calendarDropdownId === b.id && (
-                                  <div className="absolute right-0 top-full mt-1 z-[100] w-48 bg-white rounded-lg shadow-lg border border-gray-200 py-1">
-                                    <button
-                                      type="button"
-                                      className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 flex items-center gap-2"
-                                      onClick={() => handleCalendarGoogle(b)}
-                                    >
-                                      <CalendarIcon className="w-4 h-4" /> Google Calendar
-                                    </button>
-                                    <button
-                                      type="button"
-                                      className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 flex items-center gap-2"
-                                      onClick={() => handleCalendarDownloadIcs(b)}
-                                    >
-                                      <CalendarIcon className="w-4 h-4" /> Скачать .ics
-                                    </button>
-                                    <button
-                                      type="button"
-                                      className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 flex items-center gap-2"
-                                      onClick={() => openCalendarEmailModal(b)}
-                                    >
-                                      <CalendarIcon className="w-4 h-4" /> Отправить на email
-                                    </button>
-                                  </div>
-                                )}
                               </div>
                             )}
                             <button
@@ -2333,25 +2317,25 @@ export default function ClientDashboard() {
                   <div className="hidden lg:block overflow-x-auto -mx-1 px-1">
                     <table className="min-w-[960px] w-full text-left border-collapse text-sm">
                       <thead className="sticky top-0 bg-white z-10 shadow-sm">
-                    <tr className="border-b">
-                          {salonsEnabled && <th className="py-2 px-2">Салон</th>}
-                          {salonsEnabled && <th className="py-2 px-2">Филиал</th>}
-                          <th className="py-2 px-2">Мастер</th>
-                          <th className="py-2 px-2">Услуга</th>
-                          <th className="py-2 px-2">Стоимость</th>
-                          <th className="py-2 px-2">Длит.</th>
-                          <th className="py-2 px-2">Дата</th>
-                          <th className="py-2 px-2">Время</th>
-                          <th className="py-2 px-2">Статус</th>
-                          <th className="py-2 px-2 text-center w-[200px]">Действия</th>
+                    <tr className="border-b border-[#E7E2DF]">
+                          {salonsEnabled && <th className="py-2.5 px-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-500">Салон</th>}
+                          {salonsEnabled && <th className="py-2.5 px-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-500">Филиал</th>}
+                          <th className="py-2.5 px-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-500">Мастер</th>
+                          <th className="py-2.5 px-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-500">Услуга</th>
+                          <th className="py-2.5 px-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-500">Стоимость</th>
+                          <th className="py-2.5 px-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-500">Длит.</th>
+                          <th className="py-2.5 px-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-500">Дата</th>
+                          <th className="py-2.5 px-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-500">Время</th>
+                          <th className="py-2.5 px-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-500">Статус</th>
+                          <th className="py-2.5 px-3 text-right text-[11px] font-semibold uppercase tracking-wide text-gray-500 w-[200px]">Действия</th>
                     </tr>
                   </thead>
                   <tbody>
-                        {allFutureBookings.map((b) => (
+                        {allFuturePageItems.map((b) => (
                           <tr key={b.id} className="border-b border-gray-100 hover:bg-gray-50">
-                            {salonsEnabled && <td className="py-2 px-2 align-top">{b.salon_name}</td>}
+                            {salonsEnabled && <td className="py-3 px-3 align-top">{b.salon_name}</td>}
                         {salonsEnabled && (
-                              <td className="py-2 px-2 align-top">
+                              <td className="py-3 px-3 align-top">
                             {b.branch_name ? (
                               <div>
                                 <div className="font-medium">{b.branch_name}</div>
@@ -2364,32 +2348,40 @@ export default function ClientDashboard() {
                             )}
                           </td>
                         )}
-                            <td className="py-2 px-2 align-top">{b.master_name}</td>
-                            <td className="py-2 px-2 align-top">
+                            <td className="py-3 px-3 align-top">
+                              {b.master_domain ? (
+                                <Link to={`/m/${b.master_domain}`} className="text-[#2e7d32] hover:underline font-medium">
+                                  {b.master_name}
+                                </Link>
+                              ) : (
+                                b.master_name
+                              )}
+                            </td>
+                            <td className="py-3 px-3 align-top">
                               {b.service_name
                                 ? b.service_name.includes(' - ')
                                   ? b.service_name.split(' - ')[0]
                                   : b.service_name
                                 : '-'}
                         </td>
-                            <td className="py-2 px-2 align-top whitespace-nowrap">{b.price} ₽</td>
-                            <td className="py-2 px-2 align-top whitespace-nowrap">
+                            <td className="py-3 px-3 align-top whitespace-nowrap">{b.price} ₽</td>
+                            <td className="py-3 px-3 align-top whitespace-nowrap">
                               {b.duration != null ? `${b.duration} мин` : '—'}
                         </td>
-                            <td className="py-2 px-2 align-top whitespace-nowrap">
+                            <td className="py-3 px-3 align-top whitespace-nowrap">
                               {formatDateShort(b.start_time || b.date)}
                         </td>
-                            <td className="py-2 px-2 align-top whitespace-nowrap">
+                            <td className="py-3 px-3 align-top whitespace-nowrap">
                               {formatTimeOnly(b.start_time || b.date)}
                             </td>
-                            <td className="py-2 px-2 align-top">
+                            <td className="py-3 px-3 align-top">
                               <span
                                 className={`px-2 py-1 rounded-full text-xs font-medium ${getBookingStatusColor(b.status)}`}
                               >
                             {getBookingStatusLabel(b.status)}
                           </span>
                         </td>
-                            <td className="py-2 px-2 text-right align-middle">
+                            <td className="py-3 px-3 text-right align-middle">
                               <div className="flex flex-wrap items-center justify-end gap-0.5">
                             <div className="inline-flex items-center justify-center w-8 h-8">
                                   {b.master_name &&
@@ -2423,40 +2415,15 @@ export default function ClientDashboard() {
                               })()}
                             </div>
                                 {b.master_timezone?.trim?.() && (
-                                  <div className="inline-flex items-center justify-center w-8 h-8 relative">
-                              <button 
+                                  <div className="inline-flex items-center justify-center w-8 h-8">
+                              <button
                                       type="button"
-                                      onClick={() => setCalendarDropdownId(calendarDropdownId === b.id ? null : b.id)}
+                                      onClick={(e) => openCalendarMenu(b, e.currentTarget)}
                                       className="text-blue-600 hover:text-blue-900 hover:bg-blue-50 rounded-md p-1"
                                       title="Календарь"
                                     >
                                       <CalendarIcon className="w-4 h-4" />
                                     </button>
-                                    {calendarDropdownId === b.id && (
-                                      <div className="absolute right-0 top-full mt-1 z-[100] w-48 bg-white rounded-lg shadow-lg border border-gray-200 py-1">
-                                        <button
-                                          type="button"
-                                          className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 flex items-center gap-2"
-                                          onClick={() => handleCalendarGoogle(b)}
-                                        >
-                                          <CalendarIcon className="w-4 h-4" /> Google
-                                        </button>
-                                        <button
-                                          type="button"
-                                          className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 flex items-center gap-2"
-                                          onClick={() => handleCalendarDownloadIcs(b)}
-                                        >
-                                          <CalendarIcon className="w-4 h-4" /> .ics
-                                        </button>
-                                        <button
-                                          type="button"
-                                          className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 flex items-center gap-2"
-                                          onClick={() => openCalendarEmailModal(b)}
-                                        >
-                                          <CalendarIcon className="w-4 h-4" /> Email
-                                        </button>
-                                      </div>
-                                    )}
                                   </div>
                                 )}
                                 <button
@@ -2491,17 +2458,53 @@ export default function ClientDashboard() {
 
       {/* Модальное окно всех прошедших записей */}
       {showAllPastBookingsModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-2 sm:p-4">
-          <div className="bg-white rounded-xl shadow-xl max-w-6xl w-full max-h-[min(92dvh,92vh)] overflow-hidden flex flex-col min-h-0">
-            <div className="flex justify-between items-start gap-2 px-4 pt-4 pb-2 border-b border-gray-100 shrink-0">
-              <h2 className="text-lg sm:text-xl font-bold text-gray-900 pr-2">Все прошедшие записи</h2>
+        <div className="fixed inset-0 z-50 isolate bg-black/70 lg:flex lg:items-center lg:justify-center lg:bg-black/60">
+          <div
+            className="fixed inset-x-0 bottom-0 top-[calc(6rem+env(safe-area-inset-top,0px))] flex flex-col overflow-hidden bg-white lg:relative lg:inset-auto lg:mx-4 lg:h-auto lg:max-h-[85vh] lg:max-w-5xl lg:rounded-xl lg:shadow-xl lg:w-full"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="client-all-past-title"
+          >
+            <div className="sticky top-0 z-20 flex items-center justify-between gap-3 border-b border-[#E7E2DF] bg-white px-4 py-[14px] lg:px-5">
+              <h2 id="client-all-past-title" className="min-w-0 flex-1 truncate text-[18px] font-semibold leading-snug text-[#2D2D2D] lg:text-lg">
+                Все прошедшие записи
+              </h2>
               <DashboardModalClose onClick={() => setShowAllPastBookingsModal(false)} />
             </div>
-            
-            <div className="flex-1 min-h-0 overflow-y-auto px-3 sm:px-4 py-3">
+
+            {!allPastLoading && !allPastError && allPastBookings.length > 0 && (
+              <div className="border-b border-[#E7E2DF] bg-white px-4 py-2.5 lg:px-5 flex items-center justify-between gap-2 text-xs text-gray-500">
+                <span className="tabular-nums">
+                  Показано {allPastTotal === 0 ? 0 : allPastStartIdx + 1}–{allPastEndIdx} из {allPastTotal}
+                </span>
+                <div className="inline-flex items-center gap-1">
+                  <button
+                    type="button"
+                    className="px-2.5 py-1 text-xs rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-40"
+                    onClick={() => setAllPastPage((p) => Math.max(0, p - 1))}
+                    disabled={allPastPageSafe === 0}
+                  >
+                    Назад
+                  </button>
+                  <div className="tabular-nums px-1">
+                    {allPastPageSafe + 1}/{allPastTotalPages}
+                  </div>
+                  <button
+                    type="button"
+                    className="px-2.5 py-1 text-xs rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-40"
+                    onClick={() => setAllPastPage((p) => Math.min(allPastTotalPages - 1, p + 1))}
+                    disabled={allPastPageSafe >= allPastTotalPages - 1}
+                  >
+                    Вперёд
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <div className="flex-1 min-h-0 overflow-y-auto px-3 sm:px-4 py-3 lg:px-5">
               {allPastLoading ? (
                 <div className="text-center py-10">
-                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-600 mx-auto" />
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#4CAF50] mx-auto" />
                   <p className="text-gray-600 mt-2 text-sm">Загрузка записей...</p>
                 </div>
               ) : allPastError ? (
@@ -2513,7 +2516,7 @@ export default function ClientDashboard() {
               ) : (
                 <>
                   <div className="lg:hidden space-y-3">
-                    {allPastBookings.map((b) => {
+                    {allPastPageItems.map((b) => {
                       const masterKey = getMasterKey(b)
                       const isFav = masterKey !== null && favoriteMasterIds.has(masterKey)
                       const serviceDisplay = b.service_name
@@ -2546,7 +2549,7 @@ export default function ClientDashboard() {
                           )}
                           <div className="text-sm font-medium text-gray-900 mt-1">
                             {b.master_domain ? (
-                              <Link to={`/domain/${b.master_domain}`} className="text-[#2e7d32] hover:underline">
+                              <Link to={`/m/${b.master_domain}`} className="text-[#2e7d32] hover:underline">
                                 {b.master_name}
                               </Link>
                             ) : (
@@ -2630,21 +2633,21 @@ export default function ClientDashboard() {
                   <div className="hidden lg:block overflow-x-auto -mx-1 px-1">
                     <table className="min-w-[920px] w-full text-left border-collapse text-sm">
                       <thead className="sticky top-0 bg-white z-10 shadow-sm">
-                    <tr className="border-b">
-                          <th className="py-2 px-2">{salonsEnabled ? 'Салон / мастер' : 'Мастер'}</th>
-                          <th className="py-2 px-2">Услуга</th>
-                          <th className="py-2 px-2">Цена</th>
-                          <th className="py-2 px-2">Длит.</th>
-                          <th className="py-2 px-2">Дата</th>
-                          <th className="py-2 px-2">Время</th>
-                          <th className="py-2 px-2">Статус</th>
-                          <th className="py-2 px-2 text-center w-[180px]">Действия</th>
+                    <tr className="border-b border-[#E7E2DF]">
+                          <th className="py-2.5 px-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-500">{salonsEnabled ? 'Салон / мастер' : 'Мастер'}</th>
+                          <th className="py-2.5 px-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-500">Услуга</th>
+                          <th className="py-2.5 px-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-500">Цена</th>
+                          <th className="py-2.5 px-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-500">Длит.</th>
+                          <th className="py-2.5 px-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-500">Дата</th>
+                          <th className="py-2.5 px-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-500">Время</th>
+                          <th className="py-2.5 px-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-500">Статус</th>
+                          <th className="py-2.5 px-3 text-right text-[11px] font-semibold uppercase tracking-wide text-gray-500 w-[180px]">Действия</th>
                     </tr>
                   </thead>
                   <tbody>
-                        {allPastBookings.map((b) => (
+                        {allPastPageItems.map((b) => (
                           <tr key={b.id} className="border-b border-gray-100 hover:bg-gray-50">
-                            <td className="py-2 px-2 align-top">
+                            <td className="py-3 px-3 align-top">
                               {salonsEnabled &&
                               b.salon_name &&
                               b.salon_name !== '-' &&
@@ -2652,115 +2655,127 @@ export default function ClientDashboard() {
                               b.master_name !== '-' ? (
                             <div>
                                   <div className="text-gray-600 text-xs">{b.salon_name}</div>
-                                  <div className="font-medium">{b.master_name}</div>
+                                  <div className="font-medium">
+                                    {b.master_domain ? (
+                                      <Link to={`/m/${b.master_domain}`} className="text-[#2e7d32] hover:underline">
+                                        {b.master_name}
+                                      </Link>
+                                    ) : (
+                                      b.master_name
+                                    )}
+                                  </div>
                             </div>
                           ) : salonsEnabled && b.salon_name && b.salon_name !== '-' ? (
                             b.salon_name
                           ) : b.master_name && b.master_name !== '-' ? (
-                            <span>{b.master_name}</span>
+                            b.master_domain ? (
+                              <Link to={`/m/${b.master_domain}`} className="text-[#2e7d32] hover:underline font-medium">
+                                {b.master_name}
+                              </Link>
+                            ) : (
+                              <span className="font-medium">{b.master_name}</span>
+                            )
                           ) : (
                             '-'
                           )}
                         </td>
-                            <td className="py-2 px-2 align-top">
+                            <td className="py-3 px-3 align-top">
                               {b.service_name
                                 ? b.salon_name && b.salon_name !== '-'
                                   ? b.service_name.split(' - ')[0]
                                   : b.service_name
                                 : '-'}
                         </td>
-                            <td className="py-2 px-2 align-top whitespace-nowrap">{b.price} ₽</td>
-                            <td className="py-2 px-2 align-top whitespace-nowrap">
+                            <td className="py-3 px-3 align-top whitespace-nowrap">{b.price} ₽</td>
+                            <td className="py-3 px-3 align-top whitespace-nowrap">
                               {b.duration != null ? `${b.duration} мин` : '—'}
                             </td>
-                            <td className="py-2 px-2 align-top whitespace-nowrap">{formatDateShort(b.date)}</td>
-                            <td className="py-2 px-2 align-top whitespace-nowrap">
+                            <td className="py-3 px-3 align-top whitespace-nowrap">{formatDateShort(b.date)}</td>
+                            <td className="py-3 px-3 align-top whitespace-nowrap">
                               {formatTimeOnly(b.start_time || b.date)}
                             </td>
-                            <td className="py-2 px-2 align-top">
+                            <td className="py-3 px-3 align-top">
                               <span
                                 className={`px-2 py-1 rounded-full text-xs font-medium ${getBookingStatusColor(b.status)}`}
                               >
                                 {getBookingStatusLabel(b.status)}
                               </span>
                             </td>
-                            <td className="py-2 px-2 align-middle">
-                              <div className="inline-flex items-center justify-end gap-0.5 w-full flex-wrap">
+                            <td className="py-3 px-3 align-middle">
+                              <div className="inline-flex items-center justify-end gap-1 w-full whitespace-nowrap">
                                 <div className="inline-flex items-center justify-center w-8 h-8">
                                   {b.master_name &&
                                     b.master_name !== '-' &&
                                     (() => {
-                                const masterKey = getMasterKey(b)
-                                const isFav = masterKey !== null && favoriteMasterIds.has(masterKey)
-                                return (
-                                  <>
-                                    {b.indie_master_id ? (
-                                      <FavoriteButton
-                                        type="indie_master"
-                                        itemId={b.indie_master_id}
-                                        itemName={b.master_name}
-                                        size="sm"
-                                        isFavorite={isFav}
-                                        onFavoriteChange={handleFavoriteChange}
-                                      />
-                                    ) : b.master_id ? (
-                                      <FavoriteButton
-                                        type="master"
-                                        itemId={b.master_id}
-                                        itemName={b.master_name}
-                                        size="sm"
-                                        isFavorite={isFav}
-                                        onFavoriteChange={handleFavoriteChange}
-                                      />
-                                    ) : null}
-                                  </>
-                                )
-                              })()}
-                            </div>
-                            <Tooltip text="Повторить запись" position="top">
-                                  <div className="inline-flex items-center justify-center w-8 h-8">
-                                <button
-                                      type="button"
-                                  onClick={() => handleRepeatBooking(b)}
-                                      className="text-[#4CAF50] hover:bg-[#DFF5EC] rounded-md p-1"
-                                >
-                                  <ArrowPathIcon className="w-5 h-5" />
-                                </button>
-                              </div>
-                            </Tooltip>
-                            <Tooltip text="Добавить заметку" position="top">
-                                  <div className="inline-flex items-center justify-center w-8 h-8">
-                                <button
-                                      type="button"
-                                  onClick={() => handleNote(b)}
-                                      className="text-gray-600 hover:bg-gray-100 rounded-md p-1"
-                                >
-                                  <PencilSquareIcon className="w-5 h-5" />
-                                </button>
-                              </div>
-                            </Tooltip>
-                            <Tooltip 
-                              content={
-                                <div className="max-w-[200px]">
-                                  <div className="text-xs leading-tight">
-                                    Не понравилось. Отобразится при следующем бронировании
-                                  </div>
+                                      const masterKey = getMasterKey(b)
+                                      const isFav = masterKey !== null && favoriteMasterIds.has(masterKey)
+                                      return (
+                                        <>
+                                          {b.indie_master_id ? (
+                                            <FavoriteButton
+                                              type="indie_master"
+                                              itemId={b.indie_master_id}
+                                              itemName={b.master_name}
+                                              size="sm"
+                                              isFavorite={isFav}
+                                              onFavoriteChange={handleFavoriteChange}
+                                            />
+                                          ) : b.master_id ? (
+                                            <FavoriteButton
+                                              type="master"
+                                              itemId={b.master_id}
+                                              itemName={b.master_name}
+                                              size="sm"
+                                              isFavorite={isFav}
+                                              onFavoriteChange={handleFavoriteChange}
+                                            />
+                                          ) : null}
+                                        </>
+                                      )
+                                    })()}
                                 </div>
-                              }
-                              position="top"
-                            >
-                                  <div className="inline-flex items-center justify-center w-8 h-8">
-                                <button
-                                      type="button"
-                                  onClick={() => {}}
-                                      className="text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-md p-1"
+                                <Tooltip text="Повторить запись" position="top" compact>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRepeatBooking(b)}
+                                    className="inline-flex items-center justify-center w-8 h-8 text-[#4CAF50] hover:bg-[#DFF5EC] rounded-md"
+                                    aria-label="Повторить запись"
+                                  >
+                                    <ArrowPathIcon className="w-5 h-5" />
+                                  </button>
+                                </Tooltip>
+                                <Tooltip text="Добавить заметку" position="top" compact>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleNote(b)}
+                                    className="inline-flex items-center justify-center w-8 h-8 text-gray-600 hover:bg-gray-100 rounded-md"
+                                    aria-label="Добавить заметку"
+                                  >
+                                    <PencilSquareIcon className="w-5 h-5" />
+                                  </button>
+                                </Tooltip>
+                                <Tooltip
+                                  content={
+                                    <div className="max-w-[200px]">
+                                      <div className="text-xs leading-tight">
+                                        Не понравилось. Отобразится при следующем бронировании
+                                      </div>
+                                    </div>
+                                  }
+                                  position="top"
+                                  compact
                                 >
-                                  <HandThumbDownIcon className="w-5 h-5" />
-                                </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {}}
+                                    className="inline-flex items-center justify-center w-8 h-8 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-md"
+                                    aria-label="Не понравилось"
+                                  >
+                                    <HandThumbDownIcon className="w-5 h-5" />
+                                  </button>
+                                </Tooltip>
                               </div>
-                            </Tooltip>
-                          </div>
-                        </td>
+                            </td>
                       </tr>
                     ))}
                   </tbody>
@@ -2775,7 +2790,7 @@ export default function ClientDashboard() {
 
       {/* Напоминание на e-mail: адрес берётся только с сервера (профиль клиента) */}
       {showCalendarEmailModal && calendarEmailBooking && (
-        <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
+        <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-[80] p-0 sm:p-4">
           <div className="bg-white rounded-t-2xl sm:rounded-lg shadow-xl w-full sm:max-w-md max-h-[90dvh] overflow-y-auto p-4 sm:p-6">
             <div className="flex justify-between items-start gap-2 mb-4">
               <h2 className="text-lg font-semibold text-gray-900">Напоминание на e-mail</h2>
@@ -2949,7 +2964,41 @@ export default function ClientDashboard() {
           </div>
         </div>
       )}
+
+      {/* Единый fixed dropdown календаря */}
+      {calendarMenu.open && calendarMenu.booking && (
+        <div className="fixed inset-0 z-[120] pointer-events-none">
+          <div
+            ref={calendarMenuRef}
+            className="pointer-events-auto fixed w-48 bg-white rounded-xl shadow-lg border border-gray-200 py-1"
+            style={{ top: `${calendarMenu.top}px`, left: `${calendarMenu.left}px` }}
+            role="menu"
+          >
+            <button
+              type="button"
+              className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 flex items-center gap-2"
+              onClick={() => handleCalendarGoogle(calendarMenu.booking)}
+            >
+              <CalendarIcon className="w-4 h-4 text-gray-400" /> Google Calendar
+            </button>
+            <button
+              type="button"
+              className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 flex items-center gap-2"
+              onClick={() => handleCalendarDownloadIcs(calendarMenu.booking)}
+            >
+              <CalendarIcon className="w-4 h-4 text-gray-400" /> Скачать .ics
+            </button>
+            <button
+              type="button"
+              className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 flex items-center gap-2"
+              onClick={() => openCalendarEmailModal(calendarMenu.booking)}
+            >
+              <CalendarIcon className="w-4 h-4 text-gray-400" /> Отправить на email
+            </button>
+          </div>
+        </div>
+      )}
       </div>
     </div>
   )
-} 
+}

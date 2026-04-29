@@ -689,7 +689,7 @@ export default function BranchesDashboard() {
 
   const loadUserData = async () => {
     try {
-      const response = await fetch('/auth/users/me', {
+      const response = await fetch('/api/auth/users/me', {
         headers: getAuthHeaders()
       })
       if (response.ok) {

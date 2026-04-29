@@ -5,7 +5,7 @@ import { selectOptionByPartialText } from './utils'
 
 test('client creates and cancels booking', async ({ page }) => {
   await loginViaUI(page, CLIENT_C.phone, CLIENT_C.password)
-  await page.goto('/domain/e2e-master-a')
+  await page.goto('/m/e2e-master-a')
   await expect(page.locator('[data-testid="public-book-button"]')).toBeVisible({ timeout: 20000 })
 
   const serviceSelect = page.getByTestId('service-select')

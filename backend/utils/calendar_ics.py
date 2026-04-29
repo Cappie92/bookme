@@ -20,9 +20,17 @@ def ensure_utc_aware(dt: datetime) -> datetime:
     return dt.astimezone(pytz.UTC)
 
 
-def _format_ics_datetime(dt: datetime, tz: pytz.BaseTzInfo) -> str:
-    """Format datetime for ICS DTSTART/DTEND with TZID."""
-    return dt.strftime("%Y%m%dT%H%M%S")
+def _booking_datetime_to_utc(dt: datetime, master_tz: str) -> datetime:
+    """
+    Момент на границе записи: naive в БД — локальное время мастера (см. scheduling store);
+    aware — приводим к UTC.
+    """
+    if dt is None:
+        raise ValueError("datetime cannot be None")
+    tz = pytz.timezone(master_tz)
+    if dt.tzinfo is None:
+        return tz.localize(dt).astimezone(pytz.UTC)
+    return dt.astimezone(pytz.UTC)
 
 
 def _escape_ics_text(s: str) -> str:
@@ -41,14 +49,12 @@ def build_booking_ics(
 ) -> str:
     """
     Build ICS content for a booking.
-    DTSTART/DTEND in master timezone (TZID format).
+    DTSTART/DTEND в UTC (суффикс Z).
     UID: booking-{id}@dedato
     """
-    tz = pytz.timezone(master_tz)
-    start_utc = ensure_utc_aware(booking.start_time)
-    end_utc = ensure_utc_aware(booking.end_time)
-    start_local = start_utc.astimezone(tz)
-    end_local = end_utc.astimezone(tz)
+    # Naive datetime в БД — локальное время мастера в master_tz, не UTC.
+    start_utc = _booking_datetime_to_utc(booking.start_time, master_tz)
+    end_utc = _booking_datetime_to_utc(booking.end_time, master_tz)
 
     service_name = getattr(booking.service, "name", None) or "-"
     master_name = "-"
@@ -60,24 +66,19 @@ def build_booking_ics(
     summary = f"{service_name} — {master_name}"
     summary_escaped = _escape_ics_text(summary)
 
+    from utils.yandex_maps_url import booking_calendar_location_string, yandex_maps_url_for_booking
+
     desc_parts = [f"Статус: {booking.status or 'created'}", f"Код записи: {booking.id}"]
+    yandex_url = yandex_maps_url_for_booking(booking)
+    if yandex_url:
+        desc_parts.append(f"Яндекс.Карты: {yandex_url}")
     description = _escape_ics_text("\n".join(desc_parts))
 
-    location = ""
-    if booking.branch:
-        addr = getattr(booking.branch, "address", None)
-        name = getattr(booking.branch, "name", None)
-        if addr:
-            location = addr
-        elif name:
-            location = name
-    elif booking.master and getattr(booking.master, "address", None):
-        location = booking.master.address or ""
-    location = _escape_ics_text(location)
+    location = _escape_ics_text(booking_calendar_location_string(booking))
 
     dtstamp = datetime.now(pytz.UTC).strftime("%Y%m%dT%H%M%SZ")
-    dtstart_str = _format_ics_datetime(start_local, tz)
-    dtend_str = _format_ics_datetime(end_local, tz)
+    dtstart_str = start_utc.astimezone(pytz.UTC).strftime("%Y%m%dT%H%M%SZ")
+    dtend_str = end_utc.astimezone(pytz.UTC).strftime("%Y%m%dT%H%M%SZ")
 
     alarm_minutes = max(5, min(120, alarm_minutes))
 
@@ -89,8 +90,8 @@ def build_booking_ics(
         "BEGIN:VEVENT",
         f"UID:booking-{booking.id}@dedato",
         f"DTSTAMP:{dtstamp}",
-        f"DTSTART;TZID={master_tz}:{dtstart_str}",
-        f"DTEND;TZID={master_tz}:{dtend_str}",
+        f"DTSTART:{dtstart_str}",
+        f"DTEND:{dtend_str}",
         f"SUMMARY:{summary_escaped}",
         f"SEQUENCE:{sequence}",
     ]

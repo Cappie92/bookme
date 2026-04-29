@@ -25,7 +25,8 @@ const BlogPost = lazy(() => import("./pages/BlogPost"))
 const UserAgreement = lazy(() => import("./pages/UserAgreement"))
 const PersonalDataConsentPage = lazy(() => import("./pages/PersonalDataConsentPage"))
 const PublicProfile = lazy(() => import("./pages/PublicProfile"))
-const SubdomainPage = lazy(() => import("./pages/SubdomainPage"))
+// SubdomainPage снят: legacy /domain/:subdomain удалён (см. AUDIT_AND_HANDOFF.md).
+// Все клиентские переходы идут на современную /m/:slug (MasterPublicBookingPage).
 const MasterPublicBookingPage = lazy(() => import("./pages/MasterPublicBookingPage"))
 const PaymentSuccess = lazy(() => import("./pages/PaymentSuccess"))
 const PaymentFailed = lazy(() => import("./pages/PaymentFailed"))
@@ -61,8 +62,7 @@ const AdminAlwaysFreeLogs = lazy(() => import("./pages/AdminAlwaysFreeLogs"))
 // Test pages
 const AuthTest = lazy(() => import("./pages/AuthTest"))
 const BookingForm = lazy(() => import("./pages/test/BookingForm"))
-const DomainTest = lazy(() => import("./pages/test/DomainTest"))
-const SimpleDomainTest = lazy(() => import("./pages/test/SimpleDomainTest"))
+// DomainTest / SimpleDomainTest сняты вместе с /domain/:subdomain.
 const WorkingHoursTest = lazy(() => import("./pages/test/WorkingHoursTest"))
 const ScheduleTest = lazy(() => import("./pages/test/ScheduleTest"))
 const YandexGeocoderTest = lazy(() => import("./pages/test/YandexGeocoderTest"))
@@ -102,10 +102,10 @@ function App() {
                 <BookingModal />
         <Suspense fallback={<PageLoader />}>
         <Routes>
-          {/* Роуты для поддоменов и публичной записи */}
-          <Route path="/domain/:subdomain" element={<SubdomainPage />} />
+          {/* Публичная страница записи к мастеру: /m/:slug.
+              Старый /domain/:subdomain удалён — все клиентские переходы строятся как /m/{master.domain}. */}
           <Route path="/m/:slug" element={<MasterPublicBookingPage />} />
-          
+
           {/* Основные роуты */}
           <Route path="/" element={<MainLayout><Home/></MainLayout>} />
           <Route path="/pricing" element={<MainLayout><Pricing/></MainLayout>} />
@@ -143,8 +143,6 @@ function App() {
           <Route path="/salon" element={<ServiceDashboard/>} />
           <Route path="/test/booking" element={<MainLayout><BookingForm/></MainLayout>} />
           <Route path="/test/auth" element={<MainLayout><AuthTest/></MainLayout>} />
-          <Route path="/test/domain" element={<MainLayout><DomainTest/></MainLayout>} />
-          <Route path="/test/simple-domain" element={<MainLayout><SimpleDomainTest/></MainLayout>} />
           <Route path="/test/working-hours" element={<MainLayout><WorkingHoursTest/></MainLayout>} />
           <Route path="/test/schedule" element={<MainLayout><ScheduleTest/></MainLayout>} />
           <Route path="/test/yandex-geocoder" element={<MainLayout><YandexGeocoderTest/></MainLayout>} />

@@ -808,7 +808,9 @@ class BookingFutureShort(BaseModel):
 class BookingFutureShortCanon(BaseModel):
     id: int
     public_reference: Optional[str] = None
-    salon_name: str
+    # salon_name теперь опционален: сущность «салонный мастер» удалена,
+    # клиентский кабинет всегда получает None.
+    salon_name: Optional[str] = None
     master_name: str
     service_name: str
     price: float
@@ -825,6 +827,7 @@ class BookingFutureShortCanon(BaseModel):
     branch_id: Optional[int] = None
     master_domain: Optional[str] = None
     master_timezone: Optional[str] = None
+    indie_master_id: Optional[int] = None
 
     class Config:
         from_attributes = True
@@ -833,7 +836,7 @@ class BookingFutureShortCanon(BaseModel):
 # Краткая схема для прошедших бронирований
 class BookingPastShort(BaseModel):
     id: int
-    salon_name: str
+    salon_name: Optional[str] = None
     master_name: str
     service_name: str
     price: float
@@ -860,7 +863,7 @@ class BookingPastShort(BaseModel):
 class BookingPastShortCanon(BaseModel):
     id: int
     public_reference: Optional[str] = None
-    salon_name: str
+    salon_name: Optional[str] = None
     master_name: str
     service_name: str
     price: float
@@ -877,6 +880,7 @@ class BookingPastShortCanon(BaseModel):
     branch_id: Optional[int] = None
     master_domain: Optional[str] = None
     master_timezone: Optional[str] = None
+    indie_master_id: Optional[int] = None
 
     class Config:
         from_attributes = True

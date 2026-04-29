@@ -4,7 +4,6 @@ Master-only. Slug = masters.domain.
 """
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
-from urllib.parse import quote_plus
 from typing import Any, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -28,6 +27,7 @@ from services.scheduling import get_available_slots, check_master_working_hours,
 from utils.loyalty_discounts import evaluate_and_prepare_applied_discount
 from utils.booking_factory import normalize_booking_fields, BookingOwnerError
 from models import Booking, BookingStatus, Service, AppliedDiscount, OwnerType
+from utils.yandex_maps_url import build_yandex_maps_url
 
 router = APIRouter(prefix="/api/public/masters", tags=["public_master"])
 
@@ -73,22 +73,6 @@ def _slot_bounds_in_master_tz(
     st = start.replace(tzinfo=tz) if start.tzinfo is None else start.astimezone(tz)
     et = end.replace(tzinfo=tz) if end.tzinfo is None else end.astimezone(tz)
     return st, et
-
-
-def _build_yandex_maps_url(*, city: Optional[str], address: Optional[str]) -> Optional[str]:
-    """Собрать ссылку на Яндекс.Карты из текстового адреса (без координат).
-
-    MVP: достаточно 'text=' параметра. Если адреса нет — пробуем хотя бы город.
-    """
-    parts: list[str] = []
-    if city and str(city).strip():
-        parts.append(str(city).strip())
-    if address and str(address).strip():
-        parts.append(str(address).strip())
-    if not parts:
-        return None
-    query = quote_plus(", ".join(parts))
-    return f"https://yandex.ru/maps/?text={query}"
 
 
 class PublicSlotOut(BaseModel):
@@ -183,7 +167,7 @@ def get_public_master_profile(slug: str, db: Session = Depends(get_db)) -> Any:
         address=master.address,
         address_detail=getattr(master, "address_detail", None),
         phone=user.phone,
-        yandex_maps_url=_build_yandex_maps_url(city=master.city, address=master.address),
+        yandex_maps_url=build_yandex_maps_url(city=master.city, address=master.address),
         services=service_list,
         requires_advance_payment=requires_advance,
         booking_blocked=False,
