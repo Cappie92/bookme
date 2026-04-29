@@ -15,6 +15,49 @@ import {
 /** Не более N параллельных GET к available-slots-repeat (раньше было до 90 сразу → шторм и 504). */
 const SLOT_FETCH_CONCURRENCY = 5
 
+/** Плоский список слотов публичного availability → карта по дате (как дальше фильтрует PublicBookingWizard). */
+function slotsFlatToByDate(slots) {
+  const map = {}
+  for (const s of slots || []) {
+    const st = s?.start_time
+    if (!st) continue
+    const dateKey = String(st).slice(0, 10)
+    if (!map[dateKey]) map[dateKey] = []
+    map[dateKey].push(s)
+  }
+  for (const k of Object.keys(map)) {
+    map[k].sort((a, b) => String(a.start_time).localeCompare(String(b.start_time)))
+  }
+  return map
+}
+
+/**
+ * Публичный API ждёт MasterService.id; в записи клиента booking.service_id — FK на services.id.
+ * Сопоставляем с услугами из GET /api/public/masters/{slug} (те же id, что на /m/:slug).
+ */
+function resolveMasterServiceId(profile, booking, serviceInfo) {
+  const list = profile?.services
+  if (!Array.isArray(list) || list.length === 0) return null
+  const name = String(serviceInfo?.name || booking?.service_name || '').trim()
+  const dur = serviceInfo?.duration ?? booking?.duration
+
+  if (name && dur != null) {
+    const exact = list.find(
+      (s) => String(s.name).trim() === name && Number(s.duration) === Number(dur)
+    )
+    if (exact) return exact.id
+  }
+  if (name) {
+    const byName = list.find((s) => String(s.name).trim() === name)
+    if (byName) return byName.id
+  }
+  if (dur != null) {
+    const byDur = list.find((s) => Number(s.duration) === Number(dur))
+    if (byDur) return byDur.id
+  }
+  return list[0]?.id ?? null
+}
+
 export default function RepeatBookingModal({ 
   isOpen, 
   onClose, 
@@ -34,12 +77,12 @@ export default function RepeatBookingModal({
   const [selectedDate, setSelectedDate] = useState('')
   const [selectedSlot, setSelectedSlot] = useState(null)
   const [serviceInfo, setServiceInfo] = useState(null)
-  // Карта доступности: { 'YYYY-MM-DD': Slot[] }. Заполняется из batch-эндпоинта
-  // /api/public/masters/{slug}/availability — тот же источник, что и /m/:slug,
-  // поэтому слоты в Repeat и на публичной странице совпадают 1:1.
+  // Карта доступности: { 'YYYY-MM-DD': Slot[] }.
   const [slotsByDate, setSlotsByDate] = useState({})
   const [calendarLoading, setCalendarLoading] = useState(false)
   const [clientName, setClientName] = useState('')
+  /** null | 'public' — один GET availability как на /m/:slug; 'repeat' — дозагрузка месяцев через available-slots-repeat */
+  const [availabilitySource, setAvailabilitySource] = useState(null)
 
   const uiMasterName = booking?.master_name || ''
   const uiServiceName = booking?.service_name || ''
@@ -47,8 +90,10 @@ export default function RepeatBookingModal({
   const uiPrice = booking?.price
 
   const owner = useMemo(() => {
-    if (booking?.indie_master_id) return { owner_type: 'indie_master', owner_id: booking.indie_master_id }
+    // Master-only canon: сначала мастер (как публичная запись и get_available_slots для MASTER),
+    // indie / salon только если мастера нет.
     if (booking?.master_id) return { owner_type: 'master', owner_id: booking.master_id }
+    if (booking?.indie_master_id) return { owner_type: 'indie_master', owner_id: booking.indie_master_id }
     if (booking?.salon_id) return { owner_type: 'salon', owner_id: booking.salon_id }
     return { owner_type: '', owner_id: 0 }
   }, [booking?.indie_master_id, booking?.master_id, booking?.salon_id])
@@ -67,10 +112,14 @@ export default function RepeatBookingModal({
 
   /** Уже загруженные месяцы (y-m0) в рамках открытой модалки — без повторного шторма при смене месяца туда-обратно. */
   const loadedMonthsRef = useRef(new Set())
+  const monthLoadAbortRef = useRef(null)
 
   useEffect(() => {
     if (isOpen && booking) {
       loadedMonthsRef.current = new Set()
+      setAvailabilitySource(null)
+      monthLoadAbortRef.current?.abort()
+      monthLoadAbortRef.current = null
       setSubmitSuccess(false)
       setCreatedBooking(null)
       setAccountEmailForCal(null)
@@ -206,35 +255,73 @@ export default function RepeatBookingModal({
     [serviceInfo?.duration, owner.owner_type, owner.owner_id, minDateStr, maxDateStr]
   )
 
-  const monthLoadAbortRef = useRef(null)
-
   useEffect(() => {
-    if (!isOpen || !serviceInfo?.id || !serviceInfo?.duration || !owner.owner_type || !owner.owner_id) {
+    if (!isOpen || !serviceInfo?.duration) {
       return
     }
+
+    const slug = String(booking?.master_domain || '').trim()
+    const canUsePublicMaster = Boolean(slug && booking?.master_id)
 
     const ac = new AbortController()
     setSlotsByDate({})
     setCalendarLoading(true)
 
-    const min = new Date(minDateStr + 'T12:00:00')
-    const minY = min.getFullYear()
-    const minM = min.getMonth()
-    loadedMonthsRef.current.add(`${minY}-${minM}`)
+    const runFallbackInitial = async (signal) => {
+      if (!owner.owner_type || !owner.owner_id) return
+      loadedMonthsRef.current = new Set()
+      const min = new Date(minDateStr + 'T12:00:00')
+      const minY = min.getFullYear()
+      const minM = min.getMonth()
+      loadedMonthsRef.current.add(`${minY}-${minM}`)
 
-    const now = new Date()
-    const viewY = now.getFullYear()
-    const viewM = now.getMonth()
-    if (`${viewY}-${viewM}` !== `${minY}-${minM}`) {
-      loadedMonthsRef.current.add(`${viewY}-${viewM}`)
+      const now = new Date()
+      const viewY = now.getFullYear()
+      const viewM = now.getMonth()
+      if (`${viewY}-${viewM}` !== `${minY}-${minM}`) {
+        loadedMonthsRef.current.add(`${viewY}-${viewM}`)
+      }
+
+      await loadAvailabilityMonth(minY, minM, signal)
+      if (signal.aborted) return
+      if (`${viewY}-${viewM}` !== `${minY}-${minM}`) {
+        await loadAvailabilityMonth(viewY, viewM, signal)
+      }
     }
 
     ;(async () => {
       try {
-        await loadAvailabilityMonth(minY, minM, ac.signal)
-        if (ac.signal.aborted) return
-        if (`${viewY}-${viewM}` !== `${minY}-${minM}`) {
-          await loadAvailabilityMonth(viewY, viewM, ac.signal)
+        if (canUsePublicMaster) {
+          try {
+            const profile = await apiRequest(`/api/public/masters/${encodeURIComponent(slug)}`, {
+              method: 'GET',
+              signal: ac.signal,
+            })
+            if (ac.signal.aborted) return
+            const msId = resolveMasterServiceId(profile, booking, serviceInfo)
+            if (msId) {
+              const q = new URLSearchParams({
+                service_id: String(msId),
+                from_date: minDateStr,
+                to_date: maxDateStr,
+              })
+              const data = await apiRequest(
+                `/api/public/masters/${encodeURIComponent(slug)}/availability?${q.toString()}`,
+                { method: 'GET', signal: ac.signal }
+              )
+              if (ac.signal.aborted) return
+              setSlotsByDate(slotsFlatToByDate(data.slots || []))
+              setAvailabilitySource('public')
+              return
+            }
+          } catch (e) {
+            if (e?.name === 'AbortError') throw e
+          }
+        }
+
+        await runFallbackInitial(ac.signal)
+        if (!ac.signal.aborted && owner.owner_type && owner.owner_id) {
+          setAvailabilitySource('repeat')
         }
       } catch (e) {
         if (e?.name !== 'AbortError') console.error('Ошибка загрузки доступности:', e)
@@ -248,17 +335,18 @@ export default function RepeatBookingModal({
     }
   }, [
     isOpen,
-    serviceInfo?.id,
-    serviceInfo?.duration,
-    owner.owner_type,
-    owner.owner_id,
+    serviceInfo,
+    booking,
     minDateStr,
     maxDateStr,
+    owner.owner_type,
+    owner.owner_id,
     loadAvailabilityMonth,
   ])
 
   const handleCalendarMonthChange = useCallback(
     ({ year, month }) => {
+      if (availabilitySource !== 'repeat') return
       if (!isOpen || !serviceInfo?.duration || !owner.owner_type || !owner.owner_id) return
       const monthKey = `${year}-${month}`
       if (loadedMonthsRef.current.has(monthKey)) return
@@ -276,7 +364,7 @@ export default function RepeatBookingModal({
         }
       })()
     },
-    [isOpen, serviceInfo?.duration, owner.owner_type, owner.owner_id, loadAvailabilityMonth]
+    [availabilitySource, isOpen, serviceInfo?.duration, owner.owner_type, owner.owner_id, loadAvailabilityMonth]
   )
 
   // Адаптер для CalendarGrid.
@@ -615,7 +703,7 @@ export default function RepeatBookingModal({
                   maxDateStr={maxDateStr}
                   selectedDate={selectedDate || null}
                   onSelectDate={(dateStr) => setSelectedDate(dateStr)}
-                  onMonthChange={handleCalendarMonthChange}
+                  onMonthChange={availabilitySource === 'repeat' ? handleCalendarMonthChange : undefined}
                 />
                 {calendarLoading && (
                   <p className="text-xs text-gray-500 mt-2">
