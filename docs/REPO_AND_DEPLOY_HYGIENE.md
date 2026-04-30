@@ -66,6 +66,19 @@
 
 **HTTPS:** типично host **nginx/traefik/caddy** слушает 443 и проксирует на `127.0.0.1:80` (порт, опубликованный compose для frontend). Схема TLS — в **конфиге хоста**, не внутри `docker-compose.prod.yml` (там публикуется HTTP:80). Проверки: `PROD_DEPLOY.md`, раздел про health.
 
+---
+
+## 5.1 Docker Compose: канон именования (prod)
+
+Причина исторических дублей volumes вида `dedato_dedato_data` — нефиксированный compose project name (зависит от cwd/флагов `-p`/обёрток).
+
+Чтобы избежать этого в production, в репозитории закреплён канон (см. также `PROD_DEPLOY.md`):
+- **project name**: `dedato` (задано в `docker-compose.prod.yml` как `name: dedato`)
+- **volumes**: `dedato_data`, `dedato_uploads`, `dedato_logs` (явные `volumes.*.name`)
+- **default network**: `dedato_network` (явный `networks.default.name`)
+
+Правило: production-деплой делать **только** через канонический `docker-compose.prod.yml` из корня репозитория.
+
 ## 6. План документации (актуализация)
 
 - **Первоочередь:** `PROD_DEPLOY.md`, `DATA_MIGRATION.md`, `RELEASE_CHECKLIST.md`, корневой `README.md` (ссылка на operational docs).

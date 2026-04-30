@@ -1,5 +1,14 @@
 #!/bin/bash
 
+# LEGACY SCRIPT (do not use for production).
+#
+# Этот скрипт исторический и может приводить к “плавающему” Docker Compose project name,
+# из-за чего появляются дубли named volumes (симптом: `dedato_dedato_data`).
+#
+# Канонический prod runbook и compose namespace закреплены в репозитории:
+# - `docker-compose.prod.yml` (name: dedato, volumes: dedato_*, network: dedato_network)
+# - `PROD_DEPLOY.md` (инструкции деплоя/миграции/бэкапа)
+
 echo "🚀 БЫСТРЫЙ ДЕПЛОЙ С НУЛЯ"
 echo "========================"
 

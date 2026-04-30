@@ -1,11 +1,10 @@
+name: dedato
 version: "3.8"
 
 services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-    networks:
-      - dedato-network
 
   backend:
     build: ./backend
@@ -25,8 +24,6 @@ services:
       - dedato_logs:/app/logs
     depends_on:
       - redis
-    networks:
-      - dedato-network
 
   frontend:
     build:
@@ -39,14 +36,15 @@ services:
       - "127.0.0.1:8080:80"
     depends_on:
       - backend
-    networks:
-      - dedato-network
 
 networks:
-  dedato-network:
-    driver: bridge
+  default:
+    name: dedato_network
 
 volumes:
   dedato_data:
+    name: dedato_data
   dedato_uploads:
+    name: dedato_uploads
   dedato_logs:
+    name: dedato_logs

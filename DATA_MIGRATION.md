@@ -1,5 +1,14 @@
 ## DeDato — Data migration (current reseed dataset → production)
 
+### Docker Compose naming canon (prod)
+
+Production использует **канонический** `docker-compose.prod.yml`, где закреплены:
+- project name: `dedato`
+- volumes: `dedato_data`, `dedato_uploads`, `dedato_logs`
+- default network: `dedato_network`
+
+Это важно, чтобы новые деплои не создавали дубликаты named volumes из-за “плавающего” compose project name (симптом: имена вида `dedato_dedato_data`).
+
 ### Storage / source of truth (audit, не предположения)
 
 Ниже — что реально является “источником правды” в текущей архитектуре backend (FastAPI + SQLAlchemy + SQLite + локальные файлы).

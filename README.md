@@ -134,7 +134,7 @@ make test-master-canon
 ### Production
 ```bash
 # Развертывание на сервере
-docker-compose -f docker-compose.prod.yml up -d
+docker compose -f docker-compose.prod.yml up -d --build
 ```
 
 ### Development

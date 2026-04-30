@@ -74,64 +74,28 @@ graph TB
 
 ### Docker Compose (Production)
 ```yaml
-# docker-compose.prod.yml
-version: '3.8'
+# Канонический production compose-файл находится в корне репозитория:
+# `docker-compose.prod.yml` (см. также `PROD_DEPLOY.md`).
+#
+# Важно: в prod закреплён канон именования, чтобы не появлялись дубли named volumes
+# из-за “плавающего” compose project name (симптом: `dedato_dedato_data`).
+name: dedato
+version: "3.8"
 
 services:
-  backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    container_name: dedato-backend
-    ports:
-      - "8000:8000"
-    volumes:
-      - ./backend/bookme.db:/app/bookme.db
-      - ./logs:/app/logs
-    environment:
-      - SECRET_KEY=${SECRET_KEY}
-      - DATABASE_URL=sqlite:///./bookme.db
-    restart: unless-stopped
-    networks:
-      - dedato-network
-
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile.prod
-    container_name: dedato-frontend
-    ports:
-      - "3000:80"
-    volumes:
-      - ./frontend/dist:/usr/share/nginx/html
-    restart: unless-stopped
-    networks:
-      - dedato-network
-
-  nginx:
-    image: nginx:alpine
-    container_name: dedato-nginx
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf
-      - ./frontend/dist:/var/www/html
-      - ./ssl:/etc/nginx/ssl
-    depends_on:
-      - backend
-      - frontend
-    restart: unless-stopped
-    networks:
-      - dedato-network
-
-networks:
-  dedato-network:
-    driver: bridge
+  # backend / frontend / redis — см. docker-compose.prod.yml
 
 volumes:
-  logs:
-  database:
+  dedato_data:
+    name: dedato_data
+  dedato_logs:
+    name: dedato_logs
+  dedato_uploads:
+    name: dedato_uploads
+
+networks:
+  default:
+    name: dedato_network
 ```
 
 ### Docker Compose (Development)

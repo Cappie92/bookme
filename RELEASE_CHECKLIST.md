@@ -2,6 +2,8 @@
 
 Порядок репо, сервера, игноров: **`docs/REPO_AND_DEPLOY_HYGIENE.md`**.
 
+Docker Compose canon (prod): `docker-compose.prod.yml` фиксирует `name: dedato`, volumes `dedato_*`, network `dedato_network` (чтобы не появлялись дубли вроде `dedato_dedato_data`).
+
 ### Preflight (before deploy)
 
 - [ ] Все изменения закоммичены и запушены в GitHub (`main`)
