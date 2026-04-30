@@ -73,7 +73,7 @@
 Причина исторических дублей volumes вида `dedato_dedato_data` — нефиксированный compose project name (зависит от cwd/флагов `-p`/обёрток).
 
 Чтобы избежать этого в production, в репозитории закреплён канон (см. также `PROD_DEPLOY.md`):
-- **project name**: `dedato` (задано в `docker-compose.prod.yml` как `name: dedato`)
+- **project name**: `dedato` (top-level `name:` не используем из-за legacy `docker-compose` v1.29.2; при необходимости задавайте `-p dedato` / `COMPOSE_PROJECT_NAME=dedato`)
 - **volumes**: `dedato_data`, `dedato_uploads`, `dedato_logs` (явные `volumes.*.name`)
 - **default network**: `dedato_network` (явный `networks.default.name`)
 

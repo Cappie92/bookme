@@ -79,7 +79,6 @@ graph TB
 #
 # Важно: в prod закреплён канон именования, чтобы не появлялись дубли named volumes
 # из-за “плавающего” compose project name (симптом: `dedato_dedato_data`).
-name: dedato
 version: "3.8"
 
 services:

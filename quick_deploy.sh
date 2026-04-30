@@ -6,7 +6,7 @@
 # из-за чего появляются дубли named volumes (симптом: `dedato_dedato_data`).
 #
 # Канонический prod runbook и compose namespace закреплены в репозитории:
-# - `docker-compose.prod.yml` (name: dedato, volumes: dedato_*, network: dedato_network)
+# - `docker-compose.prod.yml` (volumes: dedato_*, network: dedato_network; без верхнеуровневого `name:` ради совместимости с docker-compose v1.29.2)
 # - `PROD_DEPLOY.md` (инструкции деплоя/миграции/бэкапа)
 
 echo "🚀 БЫСТРЫЙ ДЕПЛОЙ С НУЛЯ"
