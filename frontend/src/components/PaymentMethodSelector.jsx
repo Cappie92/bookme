@@ -1,14 +1,28 @@
 import React, { useState, useEffect } from 'react'
 import { CreditCardIcon, CurrencyDollarIcon } from '@heroicons/react/24/outline'
 
-const PaymentMethodSelector = ({ 
-  paymentOnVisit, 
-  paymentAdvance, 
+const PaymentMethodSelector = ({
+  paymentOnVisit,
+  paymentAdvance,
   onPaymentMethodsChange,
-  disabled = false 
+  disabled = false,
+  /** Опционально: обёртка (например, страница настроек мастера) */
+  rootClassName,
+  /** Только для Master Settings — не меняет дефолтный вид на других экранах */
+  variant = 'default',
 }) => {
   const [localPaymentOnVisit, setLocalPaymentOnVisit] = useState(paymentOnVisit)
   const [localPaymentAdvance, setLocalPaymentAdvance] = useState(paymentAdvance)
+
+  const isSettings = variant === 'settings'
+  const checkboxEnabledClass = isSettings
+    ? 'h-4 w-4 rounded border-[#E7E2DF] text-[#4CAF50] focus:ring-2 focus:ring-[#4CAF50]/25'
+    : 'h-4 w-4 rounded border-gray-300 bg-gray-100 text-blue-600 focus:ring-2 focus:ring-blue-500'
+  const checkboxDisabledClass = isSettings
+    ? 'h-4 w-4 cursor-not-allowed rounded border-[#E7E2DF] text-[#4CAF50] opacity-50'
+    : 'h-4 w-4 cursor-not-allowed rounded border-gray-300 bg-gray-100 text-blue-600 opacity-60'
+  const iconDollarClass = isSettings ? 'h-5 w-5 text-[#3D8B42]' : 'h-5 w-5 text-green-600'
+  const iconCardClass = isSettings ? 'h-5 w-5 text-[#3D8B42]' : 'h-5 w-5 text-blue-600'
 
   useEffect(() => {
     setLocalPaymentOnVisit(paymentOnVisit)
@@ -38,7 +52,7 @@ const PaymentMethodSelector = ({
   }
 
   return (
-    <div className="bg-white rounded-lg border p-4">
+    <div className={rootClassName ?? 'rounded-lg border bg-white p-4'}>
       <h3 className="text-lg font-medium text-gray-900 mb-4">
         💳 Способы оплаты
       </h3>
@@ -53,12 +67,12 @@ const PaymentMethodSelector = ({
               checked={localPaymentOnVisit}
               onChange={(e) => handlePaymentOnVisitChange(e.target.checked)}
               disabled={disabled}
-              className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 focus:ring-2"
+              className={checkboxEnabledClass}
             />
           </div>
           <div className="flex-1">
             <label htmlFor="payment_on_visit" className="flex items-center space-x-2 cursor-pointer">
-              <CurrencyDollarIcon className="h-5 w-5 text-green-600" />
+              <CurrencyDollarIcon className={iconDollarClass} />
               <span className="font-medium text-gray-900">Оплата при посещении</span>
             </label>
             <p className="text-sm text-gray-600 mt-1">
@@ -76,12 +90,12 @@ const PaymentMethodSelector = ({
               checked={localPaymentAdvance}
               onChange={(e) => handlePaymentAdvanceChange(e.target.checked)}
               disabled
-              className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded opacity-60 cursor-not-allowed"
+              className={checkboxDisabledClass}
             />
           </div>
           <div className="flex-1">
             <label htmlFor="payment_advance" className="flex items-center space-x-2">
-              <CreditCardIcon className="h-5 w-5 text-blue-600" />
+              <CreditCardIcon className={iconCardClass} />
               <span className="font-medium text-gray-900">Предоплата при бронировании</span>
             </label>
             <p className="text-sm text-gray-600 mt-1">

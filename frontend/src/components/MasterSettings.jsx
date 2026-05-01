@@ -7,7 +7,7 @@ import PaymentMethodSelector from './PaymentMethodSelector'
 import Tooltip from './Tooltip'
 import FreeSlotsShareCardModal from './FreeSlotsShareCardModal'
 import { isSalonFeaturesEnabled } from '../config/features'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 
 const getFrontendBaseUrl = () => {
   // Приоритетно используем явный адрес из env, если он задан
@@ -39,6 +39,31 @@ function buildYandexMapsUrlFromParts(city, addressMain) {
   return `https://yandex.ru/maps/?text=${encodeURIComponent(parts.join(', '))}`
 }
 
+/** Визуальные токены страницы настроек (единый стиль read-only / edit, без новой логики) */
+const SV = {
+  pageWrap: 'mx-auto mt-3 max-w-7xl bg-[#FAF8F6] px-3 pb-8 sm:mt-5 sm:px-4',
+  shell:
+    'rounded-[16px] border border-[#E7E2DF]/95 bg-white/[0.98] p-4 shadow-[0_10px_26px_-20px_rgba(45,45,45,0.14)] sm:p-[17px]',
+  ctl:
+    'min-h-10 w-full rounded-[11px] border border-[#E7E2DF] bg-white px-3.5 py-2.5 text-sm text-[#2D2D2D] shadow-[inset_0_1px_0_rgba(255,255,255,0.9)] outline-none transition-[box-shadow,border-color] placeholder:text-[#9CA3AF] focus:border-[#4CAF50] focus:ring-2 focus:ring-[#4CAF50]/20',
+  ctlArea:
+    'min-h-[80px] w-full resize-y rounded-[11px] border border-[#E7E2DF] bg-white px-3.5 py-2.5 text-sm text-[#2D2D2D] outline-none focus:border-[#4CAF50] focus:ring-2 focus:ring-[#4CAF50]/20',
+  readValue:
+    'flex min-h-[42px] items-center rounded-[11px] border border-[#E7E2DF] bg-white px-3 py-2.5 text-sm text-[#2D2D2D] shadow-[inset_0_1px_0_rgba(255,255,255,0.9)]',
+  btnPri:
+    'inline-flex min-h-10 items-center justify-center rounded-[10px] bg-[#4CAF50] px-4 text-sm font-medium text-white transition-colors hover:bg-[#45A049] disabled:cursor-not-allowed disabled:opacity-50',
+  btnSec:
+    'inline-flex min-h-10 items-center justify-center rounded-[10px] border border-[#E7E2DF] bg-white px-4 text-sm font-medium text-[#2D2D2D] transition-colors hover:bg-[#F4F1EF]',
+  btnAccent:
+    'inline-flex min-h-10 items-center justify-center rounded-[10px] bg-[#E65100] px-4 text-sm font-medium text-white transition-colors hover:bg-[#EF6C00]',
+  btnGhost:
+    'inline-flex min-h-9 items-center justify-center gap-1 rounded-[10px] border border-[#E7E2DF] bg-white px-3 text-sm font-medium text-[#2D2D2D] transition-colors hover:bg-[#F4F1EF] hover:text-[#3D8B42]',
+  check:
+    'h-4 w-4 rounded border-[#E7E2DF] text-[#4CAF50] focus:ring-2 focus:ring-[#4CAF50]/25',
+  radio:
+    'h-4 w-4 border-[#E7E2DF] text-[#4CAF50] focus:ring-2 focus:ring-[#4CAF50]/25',
+}
+
 export default function MasterSettings({
   onSettingsUpdate,
   featuresLoading,
@@ -46,6 +71,7 @@ export default function MasterSettings({
   hasClientRestrictions,
   hasExtendedStats = false,
   planName,
+  subscriptionStatus = null,
 }) {
   const isDemoMode = typeof window !== 'undefined' && localStorage.getItem('demo_mode') === '1'
   const canCustomizeDomainEffective = isDemoMode || canCustomizeDomain
@@ -76,7 +102,11 @@ export default function MasterSettings({
   const [saveSuccessForE2E, setSaveSuccessForE2E] = useState(false) // устойчивый маркер для E2E
   const [editPublicPageMode, setEditPublicPageMode] = useState(false)
   const [showFreeSlotsCardModal, setShowFreeSlotsCardModal] = useState(false)
+  const [showDeleteAccountModal, setShowDeleteAccountModal] = useState(false)
+  const [deleteAccountPhase, setDeleteAccountPhase] = useState('call')
+  const [deleteAccountCode, setDeleteAccountCode] = useState('')
 
+  const navigate = useNavigate()
   const frontendBaseUrl = getFrontendBaseUrl()
 
   const slugChanged = useMemo(() => {
@@ -84,6 +114,19 @@ export default function MasterSettings({
     const saved = (profile?.master?.domain || '').toString().trim()
     return current !== saved
   }, [websiteSettings?.domain, profile?.master?.domain])
+
+  const profileFormDirty = useMemo(() => {
+    if (!profile) return false
+    const u = profile.user
+    const m = profile.master
+    return (
+      (form.full_name ?? '') !== (u.full_name ?? '') ||
+      (form.phone ?? '') !== (u.phone ?? '') ||
+      (form.email ?? '') !== (u.email ?? '') ||
+      String(form.birth_date ?? '') !== String(u.birth_date ?? '') ||
+      (form.city ?? '') !== (m.city ?? '')
+    )
+  }, [profile, form.full_name, form.phone, form.email, form.birth_date, form.city])
 
   /** Публичная страница записи: /m/:slug (slug = masters.domain) */
   const buildPublicBookingUrl = (slug) => {
@@ -140,6 +183,7 @@ export default function MasterSettings({
         site_description: data.master.site_description || '',
         domain: data.master.domain || ''
       })
+      setWebsiteSettingsChanged(false)
       setPhotoFile(null)
       await loadPaymentSettings()
     } catch {
@@ -270,7 +314,7 @@ export default function MasterSettings({
     }
   }
 
-  /** Фото / о себе / опыт — публичная часть профиля */
+  /** Фото, опыт, текст страницы записи (site_description) — публичная часть; bio в API не трогаем из этого сценария */
   const handleSavePublicProfile = async e => {
     e.preventDefault()
     setLoading(true)
@@ -278,8 +322,9 @@ export default function MasterSettings({
     setSuccess('')
     try {
       const formData = new FormData()
-      formData.append('bio', form.bio ?? '')
+      formData.append('bio', (profile?.master?.bio ?? '').toString())
       formData.append('experience_years', String(form.experience_years ?? 0))
+      formData.append('site_description', websiteSettings.site_description ?? '')
       if (photoFile) {
         formData.append('photo', photoFile)
       }
@@ -338,7 +383,7 @@ export default function MasterSettings({
     }
   }
 
-  /** Личные данные: ФИО, контакты, город (экран «Редактировать профиль») */
+  /** Личные данные: ФИО, контакты, город (inline в блоке «Настройка профиля») */
   const handleSaveProfile = async e => {
     e.preventDefault()
     setLoading(true)
@@ -428,6 +473,87 @@ export default function MasterSettings({
     }
   }
 
+  /** Существующий backend: DELETE /api/auth/delete-account → звонок с кодом → POST /api/auth/confirm-delete-account */
+  const openDeleteAccountModal = () => {
+    if (isDemoMode) {
+      setError('В демо-режиме удаление аккаунта недоступно')
+      setTimeout(() => setError(''), 4000)
+      return
+    }
+    setDeleteAccountPhase('call')
+    setDeleteAccountCode('')
+    setShowDeleteAccountModal(true)
+  }
+
+  const closeDeleteAccountModal = () => {
+    setShowDeleteAccountModal(false)
+    setDeleteAccountPhase('call')
+    setDeleteAccountCode('')
+  }
+
+  const requestDeleteAccountCall = async () => {
+    setLoading(true)
+    setError('')
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/auth/delete-account`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${localStorage.getItem('access_token')}` },
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setError(typeof data.detail === 'string' ? data.detail : data.message || 'Не удалось отправить запрос')
+        return
+      }
+      if (data.success === false) {
+        setError(data.message || 'Ошибка отправки звонка')
+        return
+      }
+      setDeleteAccountPhase('code')
+      setSuccess(data.message || 'Звонок с кодом отправлен')
+      setTimeout(() => setSuccess(''), 5000)
+    } catch {
+      setError('Ошибка сети')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const confirmDeleteAccount = async () => {
+    const code = deleteAccountCode.trim()
+    if (!code) return
+    setLoading(true)
+    setError('')
+    try {
+      const res = await fetch(
+        `${API_BASE_URL}/api/auth/confirm-delete-account?code=${encodeURIComponent(code)}`,
+        {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${localStorage.getItem('access_token')}` },
+        }
+      )
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setError(typeof data.detail === 'string' ? data.detail : data.message || 'Ошибка удаления')
+        return
+      }
+      if (data.success === false) {
+        setError(data.message || 'Неверный код или код истёк')
+        return
+      }
+      if (data.message === 'Аккаунт успешно удален') {
+        localStorage.removeItem('access_token')
+        closeDeleteAccountModal()
+        navigate('/')
+        return
+      }
+      setError(data.detail || data.message || 'Не удалось удалить аккаунт')
+    } catch {
+      setError('Ошибка сети')
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const handleSaveWebsiteSettings = async () => {
     setLoading(true)
     setError('')
@@ -445,7 +571,7 @@ export default function MasterSettings({
         body: formData
       })
       if (res.ok) {
-        setSuccess('Текст страницы записи сохранён')
+        setSuccess('Сохранено')
         setWebsiteSettingsChanged(false)
         loadProfile()
       } else {
@@ -465,6 +591,37 @@ export default function MasterSettings({
     return date.toLocaleDateString('ru-RU')
   }
 
+  const formatEndDateShort = (dt) => {
+    if (!dt) return null
+    try {
+      return new Date(dt).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' })
+    } catch {
+      return null
+    }
+  }
+
+  const subscriptionPillLabel = () => {
+    if (isDemoMode) return 'Демо'
+    if (subscriptionStatus?.is_frozen) return 'Заморозка'
+    if (subscriptionStatus?.status === 'no_subscription') return 'Нет подписки'
+    if (
+      subscriptionStatus &&
+      !subscriptionStatus.can_continue &&
+      subscriptionStatus.status !== 'no_subscription' &&
+      !subscriptionStatus.is_unlimited
+    ) {
+      return 'Внимание'
+    }
+    if (profile?.user?.is_always_free || subscriptionStatus?.is_always_free) return 'Бесплатно'
+    return 'Активна'
+  }
+
+  const displayPlanName = () =>
+    subscriptionStatus?.plan_display_name ||
+    subscriptionStatus?.plan_name ||
+    planName ||
+    'Free'
+
   if (loading && !profile) return <div>Загрузка...</div>
   if (error && !profile) return <div className="text-red-500">{error}</div>
   if (!profile) return null
@@ -472,438 +629,666 @@ export default function MasterSettings({
   const effectiveDomainSlug = (websiteSettings.domain || profile.master.domain || '').trim()
   const publicBookingUrl = buildPublicBookingUrl(effectiveDomainSlug || profile.master.domain)
 
-  // Если открыт режим редактирования профиля или пароля, показываем на весь экран
-  if (editMode || passwordMode) {
+  // Только смена пароля — отдельный экран; профиль редактируется inline в блоке «Настройка профиля»
+  if (passwordMode) {
     return (
-      <div className="mx-auto mt-4 max-w-2xl rounded-lg bg-white p-4 shadow sm:mt-8 sm:p-6">
-        {success && <div className="text-green-600 mb-4 bg-green-50 border border-green-200 rounded-lg p-4" data-testid="settings-save-success">{success}</div>}
-        {error && <div className="text-red-500 mb-4 bg-red-50 border border-red-200 rounded-lg p-4">{error}</div>}
-        
-        {editMode ? (
-          <form onSubmit={handleSaveProfile} className="space-y-4">
-            <h2 className="text-2xl font-bold mb-6">Редактирование профиля</h2>
-            <div>
-              <label className="block text-sm font-medium mb-1">
-                ФИО <span className="text-red-500">*</span>
-              </label>
-              <input 
-                type="text" 
-                name="full_name" 
-                value={form.full_name} 
-                onChange={handleChange} 
-                className="min-h-10 w-full rounded border px-3 py-2" 
-                required 
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">
-                Телефон <span className="text-red-500">*</span>
-              </label>
-              <input 
-                type="text" 
-                name="phone" 
-                value={form.phone} 
-                onChange={handleChange} 
-                className="min-h-10 w-full rounded border px-3 py-2" 
-                required 
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">
-                Email <span className="text-red-500">*</span>
-              </label>
-              <input 
-                type="email" 
-                name="email" 
-                value={form.email} 
-                onChange={handleChange} 
-                className="min-h-10 w-full rounded border px-3 py-2" 
-                required 
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">
-                Дата рождения
-              </label>
-              <input 
-                type="date" 
-                name="birth_date" 
-                value={form.birth_date} 
-                onChange={handleChange} 
-                className="min-h-10 w-full rounded border px-3 py-2" 
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">
-                Город
-              </label>
-              <select 
-                name="city" 
-                value={form.city || ''} 
-                onChange={handleChange}
-                className="min-h-10 w-full rounded border px-3 py-2"
-                aria-label="Город"
-              >
-                <option value="" disabled hidden>Выберите город</option>
-                {cities.map(city => (
-                  <option key={city.name} value={city.name}>
-                    {city.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="flex flex-col gap-2 sm:flex-row">
-              <button
-                type="submit"
-                disabled={!form.city?.trim()}
-                className="min-h-11 rounded bg-[#4CAF50] px-6 py-3 text-white transition-colors hover:bg-[#43a047] disabled:cursor-not-allowed disabled:opacity-50 sm:py-2"
-              >
-                Сохранить
-              </button>
-              <button type="button" onClick={() => setEditMode(false)} className="min-h-11 rounded bg-gray-200 px-6 py-3 text-gray-700 transition-colors hover:bg-gray-300 sm:py-2">
-                Отмена
-              </button>
-            </div>
-          </form>
-        ) : (
-          <form onSubmit={handlePasswordSave} className="space-y-4">
-            <h2 className="text-2xl font-bold mb-6">Изменение пароля</h2>
-            <div>
-              <label className="block text-sm font-medium mb-1">
-                Текущий пароль <span className="text-red-500">*</span>
-              </label>
-              <input 
-                type="password" 
-                name="oldPassword" 
-                value={passwordForm.oldPassword} 
-                onChange={handlePasswordChange} 
-                className="min-h-10 w-full rounded border px-3 py-2" 
-                required 
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">
-                Новый пароль <span className="text-red-500">*</span>
-              </label>
-              <input 
-                type="password" 
-                name="newPassword" 
-                value={passwordForm.newPassword} 
-                onChange={handlePasswordChange} 
-                className="min-h-10 w-full rounded border px-3 py-2" 
-                required 
-                minLength={6}
-              />
-              <p className="text-xs text-gray-500 mt-1">Минимум 6 символов</p>
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">
-                Подтвердите новый пароль <span className="text-red-500">*</span>
-              </label>
-              <input 
-                type="password" 
-                name="confirmPassword" 
-                value={passwordForm.confirmPassword} 
-                onChange={handlePasswordChange} 
-                className="min-h-10 w-full rounded border px-3 py-2" 
-                required 
-              />
-            </div>
-            <div className="flex flex-col gap-2 sm:flex-row">
-              <button type="submit" className="min-h-11 rounded bg-orange-600 px-6 py-3 text-white transition-colors hover:bg-orange-700 sm:py-2">
-                Изменить пароль
-              </button>
-              <button type="button" onClick={() => setPasswordMode(false)} className="min-h-11 rounded bg-gray-200 px-6 py-3 text-gray-700 transition-colors hover:bg-gray-300 sm:py-2">
-                Отмена
-              </button>
-            </div>
-          </form>
+      <div className={`${SV.pageWrap} pb-10`}>
+        {success && (
+          <div
+            className="mb-4 rounded-[11px] border border-green-200 bg-green-50 p-3 text-sm text-green-800"
+            data-testid="settings-save-success"
+          >
+            {success}
+          </div>
         )}
+        {error && (
+          <div className="mb-4 rounded-[11px] border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>
+        )}
+        <div className={`${SV.shell} mx-auto max-w-2xl`}>
+            <form onSubmit={handlePasswordSave} className="space-y-4">
+              <h2 className="m-0 text-lg font-semibold tracking-tight text-[#2D2D2D]">Изменение пароля</h2>
+              <div>
+                <label className="mb-1.5 block text-xs font-semibold text-[#6B6B6B]">
+                  Текущий пароль <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="password"
+                  name="oldPassword"
+                  value={passwordForm.oldPassword}
+                  onChange={handlePasswordChange}
+                  className={SV.ctl}
+                  required
+                />
+              </div>
+              <div>
+                <label className="mb-1.5 block text-xs font-semibold text-[#6B6B6B]">
+                  Новый пароль <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="password"
+                  name="newPassword"
+                  value={passwordForm.newPassword}
+                  onChange={handlePasswordChange}
+                  className={SV.ctl}
+                  required
+                  minLength={6}
+                />
+                <p className="mt-1.5 text-xs text-[#6B6B6B]">Минимум 6 символов</p>
+              </div>
+              <div>
+                <label className="mb-1.5 block text-xs font-semibold text-[#6B6B6B]">
+                  Подтвердите новый пароль <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="password"
+                  name="confirmPassword"
+                  value={passwordForm.confirmPassword}
+                  onChange={handlePasswordChange}
+                  className={SV.ctl}
+                  required
+                />
+              </div>
+              <div className="flex flex-col gap-2 pt-1 sm:flex-row">
+                <button type="submit" className={SV.btnAccent}>
+                  Изменить пароль
+                </button>
+                <button type="button" onClick={() => setPasswordMode(false)} className={SV.btnSec}>
+                  Отмена
+                </button>
+              </div>
+            </form>
+        </div>
       </div>
     )
   }
 
+  const panelShell = SV.shell
+  const inputLike = SV.readValue
+  const textareaLike = SV.ctlArea
+  const workPill = 'shrink-0 rounded-full px-2.5 py-1.5 text-xs font-semibold whitespace-nowrap'
+  const workPillGreen = `${workPill} bg-[#DFF5EC] text-[#3D8B42]`
+  const workPillNeutral = `${workPill} bg-[#F4F1EF] text-[#6B6B6B]`
+
+  const subscriptionMetaSecondary = () => {
+    const end = formatEndDateShort(subscriptionStatus?.end_date)
+    const dr = subscriptionStatus?.days_remaining
+    const paidish =
+      subscriptionStatus &&
+      !subscriptionStatus.is_unlimited &&
+      (subscriptionStatus.plan_name || '').toLowerCase() !== 'free'
+    if (end) {
+      return { label: 'Окончание', value: end }
+    }
+    if (typeof dr === 'number' && paidish) {
+      return { label: 'Дней доступа', value: String(dr) }
+    }
+    if (subscriptionStatus && typeof subscriptionStatus.balance === 'number') {
+      return {
+        label: 'Баланс',
+        value: `${subscriptionStatus.balance.toLocaleString('ru-RU')} ₽`,
+      }
+    }
+    if (subscriptionStatus?.is_unlimited) {
+      return { label: 'Период', value: 'Без ограничения' }
+    }
+    return { label: 'Период', value: '—' }
+  }
+
+  const showSubscriptionDaysBar =
+    typeof subscriptionStatus?.days_remaining === 'number' &&
+    subscriptionStatus &&
+    !subscriptionStatus.is_unlimited &&
+    (subscriptionStatus.plan_name || '').toLowerCase() !== 'free'
+
+  const subscriptionSecondaryMeta = subscriptionMetaSecondary()
+
   return (
-    <div className="mx-auto mt-4 max-w-7xl px-3 pb-8 sm:mt-8 sm:px-4">
+    <div className={`${SV.pageWrap} pb-10`}>
       {saveSuccessForE2E && <span data-testid="settings-save-success" aria-hidden="true" className="sr-only" />}
-      {/* Сообщения об успехе/ошибке */}
-      {success && <div className="mb-4 rounded-lg border border-green-200 bg-green-50 p-4 text-green-600">{success}</div>}
-      {error && <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-4 text-red-500">{error}</div>}
-      
-      {/* Grid 2x2 для настроек */}
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 md:gap-6">
-        
-        {/* Верхний левый угол - Настройка профиля */}
-        <div className="rounded-lg border bg-white p-4 shadow-sm sm:p-6">
-          <h2 className="mb-3 text-lg font-semibold sm:mb-4 sm:text-xl">Настройка профиля</h2>
-          
-          {/* Блок информации о подписке */}
-          {!featuresLoading && (
-            <div className="mb-4 rounded-lg border border-green-200 bg-green-50 p-3">
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                <div className="min-w-0">
-                  <div className="text-sm font-medium text-green-900">
-                    {isDemoMode ? (
-                      <>Демо-режим: <span className="font-bold">Показан полный функционал</span></>
-                    ) : (
-                      <>Ваша подписка: <span className="font-bold">{planName || 'Free'}</span></>
-                    )}
+      {success && <div className="mb-3 rounded-[11px] border border-green-200 bg-green-50 p-3 text-sm text-green-800">{success}</div>}
+      {error && <div className="mb-3 rounded-[11px] border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
+
+      <header className="mb-2 flex flex-row flex-wrap items-center gap-3 sm:mb-3">
+        <h1 className="m-0 text-2xl font-bold leading-tight tracking-[-0.03em] text-[#2D2D2D] sm:text-[28px]">Настройки</h1>
+      </header>
+
+      <div
+        className={
+          profile.master.can_work_independently
+            ? 'flex flex-col gap-3 lg:grid lg:grid-cols-[minmax(0,1fr)_min(390px,100%)] lg:items-stretch lg:gap-4'
+            : 'flex flex-col gap-3'
+        }
+      >
+        <div className="flex min-w-0 flex-col gap-3 lg:h-full lg:min-h-0">
+          <section className={panelShell}>
+            <div className="mb-3">
+              <h2 className="m-0 text-base font-semibold tracking-tight text-[#2D2D2D]">Настройка профиля</h2>
+            </div>
+            {!editMode ? (
+              <>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div>
+                    <div className="mb-1.5 text-xs font-semibold text-[#6B6B6B]">ФИО</div>
+                    <div className={`${inputLike} flex min-h-[44px] items-center`}>{profile.user.full_name}</div>
                   </div>
-                  {!isDemoMode && planName && planName !== 'Free' && (
-                    <div className="text-xs text-green-700 mt-1">
-                      Доступны расширенные функции
-                    </div>
+                  <div>
+                    <div className="mb-1.5 text-xs font-semibold text-[#6B6B6B]">Телефон</div>
+                    <div className={`${inputLike} flex min-h-[44px] items-center`}>{profile.user.phone}</div>
+                  </div>
+                  <div>
+                    <div className="mb-1.5 text-xs font-semibold text-[#6B6B6B]">Email</div>
+                    <div className={`${inputLike} flex min-h-[44px] items-center`}>{profile.user.email}</div>
+                  </div>
+                  <div>
+                    <div className="mb-1.5 text-xs font-semibold text-[#6B6B6B]">Дата рождения</div>
+                    <div className={`${inputLike} flex min-h-[44px] items-center`}>{formatDate(profile.user.birth_date)}</div>
+                  </div>
+                  <div className="sm:col-span-2">
+                    <div className="mb-1.5 text-xs font-semibold text-[#6B6B6B]">Город</div>
+                    <div className={`${inputLike} flex min-h-[44px] items-center`}>{profile.master.city || '—'}</div>
+                  </div>
+                </div>
+                {profile.user.is_always_free && (
+                  <div className="mt-3">
+                    <span className="inline-flex items-center rounded-full bg-purple-100 px-3 py-1 text-sm font-medium text-purple-800">
+                      ✨ Всегда бесплатно
+                    </span>
+                  </div>
+                )}
+                <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+                  <button type="button" onClick={() => setEditMode(true)} className={SV.btnPri}>
+                    Редактировать профиль
+                  </button>
+                </div>
+              </>
+            ) : (
+              <form onSubmit={handleSaveProfile} className="space-y-3">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div>
+                    <label className="mb-1.5 block text-xs font-semibold text-[#6B6B6B]">
+                      ФИО <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      name="full_name"
+                      value={form.full_name}
+                      onChange={handleChange}
+                      className={SV.ctl}
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1.5 block text-xs font-semibold text-[#6B6B6B]">
+                      Телефон <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      name="phone"
+                      value={form.phone}
+                      onChange={handleChange}
+                      className={SV.ctl}
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1.5 block text-xs font-semibold text-[#6B6B6B]">
+                      Email <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="email"
+                      name="email"
+                      value={form.email}
+                      onChange={handleChange}
+                      className={SV.ctl}
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1.5 block text-xs font-semibold text-[#6B6B6B]">Дата рождения</label>
+                    <input
+                      type="date"
+                      name="birth_date"
+                      value={form.birth_date}
+                      onChange={handleChange}
+                      className={SV.ctl}
+                    />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label className="mb-1.5 block text-xs font-semibold text-[#6B6B6B]">Город</label>
+                    <select
+                      name="city"
+                      value={form.city || ''}
+                      onChange={handleChange}
+                      className={SV.ctl}
+                      aria-label="Город"
+                    >
+                      <option value="" disabled hidden>
+                        Выберите город
+                      </option>
+                      {cities.map(city => (
+                        <option key={city.name} value={city.name}>
+                          {city.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                {profileFormDirty ? (
+                  <div className="flex flex-col gap-2 pt-1 sm:flex-row">
+                    <button type="submit" disabled={!form.city?.trim()} className={SV.btnPri}>
+                      Сохранить
+                    </button>
+                    <button
+                      type="button"
+                      className={SV.btnSec}
+                      onClick={() => {
+                        setEditMode(false)
+                        if (profile) {
+                          setForm(f => ({
+                            ...f,
+                            full_name: profile.user.full_name || '',
+                            phone: profile.user.phone || '',
+                            email: profile.user.email || '',
+                            birth_date: profile.user.birth_date || '',
+                            city: profile.master.city || '',
+                            timezone: profile.master.timezone || f.timezone,
+                          }))
+                        }
+                      }}
+                    >
+                      Отмена
+                    </button>
+                  </div>
+                ) : null}
+              </form>
+            )}
+          </section>
+
+          {!featuresLoading && (
+            <div className="relative overflow-hidden rounded-[16px] bg-gradient-to-br from-[#1F2B23] via-[#2D4732] to-[#4CAF50] p-3.5 text-white shadow-[0_14px_36px_-16px_rgba(61,139,66,0.42)] sm:p-4">
+              <div
+                className="pointer-events-none absolute -right-6 -top-6 h-32 w-32 rounded-full bg-[radial-gradient(circle,rgba(255,255,255,0.18),transparent_68%)]"
+                aria-hidden
+              />
+              <div className="relative text-[10px] font-semibold uppercase tracking-[0.08em] text-white/75">Текущая подписка</div>
+              <div className="relative mt-2 flex flex-col gap-2.5 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0">
+                  <div className="text-[22px] font-bold leading-[1.15] tracking-[-0.03em] sm:text-2xl">{displayPlanName()}</div>
+                  {isDemoMode ? (
+                    <div className="mt-1 text-[12px] leading-snug text-white/82">Демо-режим: показан полный функционал</div>
+                  ) : (
+                    planName &&
+                    planName !== 'Free' && (
+                      <div className="mt-1 text-[12px] leading-snug text-white/82">Доступны расширенные функции</div>
+                    )
                   )}
                 </div>
-                {!isDemoMode && planName && planName !== 'Free' && (
+                <div className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-white/14 bg-white/10 px-2 py-1 text-[10px] font-semibold text-white sm:text-[11px]">
+                  <span
+                    className="h-1.5 w-1.5 rounded-full bg-[#8EF0AA] shadow-[0_0_0_2px_rgba(142,240,170,0.12)]"
+                    aria-hidden
+                  />
+                  {subscriptionPillLabel()}
+                </div>
+              </div>
+              <div className="relative mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <div className="rounded-[12px] border border-white/12 bg-white/10 px-3 py-2 backdrop-blur-[8px]">
+                  <div className="text-[9px] font-semibold uppercase tracking-[0.06em] text-white/65">Тариф</div>
+                  <div className="mt-0.5 text-sm font-semibold leading-tight">{displayPlanName()}</div>
+                </div>
+                <div className="rounded-[12px] border border-white/12 bg-white/10 px-3 py-2 backdrop-blur-[8px]">
+                  <div className="text-[9px] font-semibold uppercase tracking-[0.06em] text-white/65">
+                    {subscriptionSecondaryMeta.label}
+                  </div>
+                  <div className="mt-0.5 text-sm font-semibold leading-tight">{subscriptionSecondaryMeta.value}</div>
+                </div>
+              </div>
+              <div className="relative mt-3">
+                {showSubscriptionDaysBar ? (
+                  <>
+                    <div className="mb-1 flex items-center justify-between text-[10px] text-white/75">
+                      <span>Дней доступа (оценка по балансу)</span>
+                      <span>{subscriptionStatus.days_remaining}</span>
+                    </div>
+                    <div className="h-1 overflow-hidden rounded-full bg-white/18">
+                      <div className="h-full max-w-[10rem] rounded-full bg-gradient-to-r from-[#DFF5EC] to-white" />
+                    </div>
+                  </>
+                ) : (
+                  <div className="h-1 overflow-hidden rounded-full bg-white/18" aria-hidden>
+                    <div className="h-full max-w-[10rem] rounded-full bg-gradient-to-r from-white/45 to-white/75 opacity-90" />
+                  </div>
+                )}
+              </div>
+              {!isDemoMode && planName && planName !== 'Free' && (
+                <div className="relative mt-3">
                   <Link
                     to="/master?tab=tariff"
-                    className="inline-flex min-h-10 items-center text-xs text-[#4CAF50] underline hover:text-[#43a047]"
+                    className="inline-flex min-h-9 w-full items-center justify-center rounded-[10px] bg-white px-4 py-2 text-center text-[13px] font-semibold text-[#3D8B42] transition-colors hover:bg-white/95 sm:w-auto"
                   >
                     Обновить подписку
                   </Link>
-                )}
-              </div>
+                </div>
+              )}
             </div>
           )}
-          
-          <div className="space-y-3">
-            <div><b>ФИО:</b> {profile.user.full_name}</div>
-            <div><b>Телефон:</b> {profile.user.phone}</div>
-            <div><b>Email:</b> {profile.user.email}</div>
-            <div><b>Дата рождения:</b> {formatDate(profile.user.birth_date)}</div>
-            <div><b>Город:</b> {profile.master.city || '—'}</div>
-            {profile.user.is_always_free && (
-              <div>
-                <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-purple-100 text-purple-800">
-                  ✨ Всегда бесплатно
-                </span>
-              </div>
-            )}
-          </div>
-          
-          <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-            <button type="button" onClick={() => setEditMode(true)} className="min-h-11 rounded bg-[#4CAF50] px-4 py-3 text-sm text-white transition-colors hover:bg-[#43a047] sm:py-2">
-              Редактировать профиль
-            </button>
-            <button type="button" onClick={() => setPasswordMode(true)} className="min-h-11 rounded bg-orange-600 px-4 py-3 text-sm text-white transition-colors hover:bg-orange-700 sm:py-2">
-              Изменить пароль
-            </button>
-          </div>
-        </div>
 
-        {/* Верхний правый угол - Настройки работы */}
-        <div className="rounded-lg border bg-white p-4 shadow-sm sm:p-6">
-          <h2 className="mb-1 text-lg font-semibold sm:text-xl">Настройки работы</h2>
-          <p className="text-xs text-gray-500 mb-4">Расписание, подтверждение записей, способы оплаты</p>
-          
+        <section className={panelShell}>
+          <div className="mb-3">
+            <h2 className="m-0 text-base font-semibold tracking-tight text-[#2D2D2D]">Настройки работы</h2>
+          </div>
+
           {!editWorkMode ? (
             <>
-              <div className="space-y-3">
+              <div className="space-y-2">
                 {isSalonFeaturesEnabled() && (
                   <>
-                    <div><b>Самостоятельная работа:</b> {profile.master.can_work_independently ? 'Да' : 'Нет'}</div>
-                    <div><b>Работа в салоне:</b> {profile.master.can_work_in_salon ? 'Да' : 'Нет'}</div>
+                    <div className="work-item flex items-start justify-between gap-3 rounded-[12px] border border-[#E7E2DF]/85 bg-[#FAFAF8] px-3 py-2.5">
+                      <span className="text-sm font-medium text-[#2D2D2D]">Самостоятельная работа</span>
+                      <span className={profile.master.can_work_independently ? workPillGreen : workPillNeutral}>
+                        {profile.master.can_work_independently ? 'Да' : 'Нет'}
+                      </span>
+                    </div>
+                    <div className="work-item flex items-start justify-between gap-3 rounded-[12px] border border-[#E7E2DF]/85 bg-[#FAFAF8] px-3 py-2.5">
+                      <span className="text-sm font-medium text-[#2D2D2D]">Работа в салоне</span>
+                      <span className={profile.master.can_work_in_salon ? workPillGreen : workPillNeutral}>
+                        {profile.master.can_work_in_salon ? 'Да' : 'Нет'}
+                      </span>
+                    </div>
                   </>
                 )}
                 {!isSalonFeaturesEnabled() && (
-                  <div className="text-sm text-gray-600">Мастер работает только индивидуально</div>
+                  <div className="rounded-[12px] border border-[#E7E2DF]/85 bg-[#FAFAF8] px-3 py-2.5 text-sm text-[#6B6B6B]">
+                    Мастер работает только индивидуально
+                  </div>
                 )}
-                <div className="text-sm text-gray-600">
-                  <b>Подтверждение записей:</b> {profile.master.auto_confirm_bookings ? 'Автоматически' : 'Вручную'}
+                <div className="work-item flex items-start justify-between gap-3 rounded-[12px] border border-[#E7E2DF]/85 bg-[#FAFAF8] px-3 py-2.5">
+                  <span className="text-sm font-medium text-[#2D2D2D]">Подтверждение записей</span>
+                  <span className={workPillGreen}>
+                    {profile.master.auto_confirm_bookings ? 'Автоматически' : 'Вручную'}
+                  </span>
                 </div>
                 {hasExtendedStatsEffective && !profile.master.auto_confirm_bookings && (
-                  <div className="text-xs text-gray-600">
+                  <div className="text-xs leading-snug text-[#6B6B6B]">
                     Подтверждение будущих записей до визита включено вместе с ручным режимом
                   </div>
                 )}
-                <div><b>Оплата при визите:</b> {profile.master.payment_on_visit !== false ? 'Да' : 'Нет'}</div>
-                <div><b>Предоплата:</b> {profile.master.payment_advance ? 'Да' : 'Нет'}</div>
+                <div className="work-item flex items-start justify-between gap-3 rounded-[12px] border border-[#E7E2DF]/85 bg-[#FAFAF8] px-3 py-2.5">
+                  <span className="text-sm font-medium text-[#2D2D2D]">Оплата при визите</span>
+                  <span className={profile.master.payment_on_visit !== false ? workPillGreen : workPillNeutral}>
+                    {profile.master.payment_on_visit !== false ? 'Да' : 'Нет'}
+                  </span>
+                </div>
+                <div className="work-item flex items-start justify-between gap-3 rounded-[12px] border border-[#E7E2DF]/85 bg-[#FAFAF8] px-3 py-2.5">
+                  <span className="text-sm font-medium text-[#2D2D2D]">Предоплата</span>
+                  <span className={profile.master.payment_advance ? workPillGreen : workPillNeutral}>
+                    {profile.master.payment_advance ? 'Да' : 'Нет'}
+                  </span>
+                </div>
               </div>
-              
-              <button type="button" onClick={() => setEditWorkMode(true)} className="mt-6 min-h-11 rounded bg-[#4CAF50] px-4 py-3 text-sm text-white transition-colors hover:bg-[#43a047] sm:py-2" data-testid="settings-edit">
-                Редактировать настройки
-              </button>
+
+              <div className="panel-actions mt-4">
+                <button type="button" onClick={() => setEditWorkMode(true)} className={SV.btnPri} data-testid="settings-edit">
+                  Редактировать настройки
+                </button>
+              </div>
             </>
           ) : (
             <form onSubmit={handleSaveWork} className="space-y-4">
               <div className="space-y-4">
                 {isSalonFeaturesEnabled() ? (
                   <>
-                    <div className="flex items-center">
-                      <input 
-                        type="checkbox" 
-                        name="can_work_independently" 
-                        checked={form.can_work_independently} 
-                        onChange={handleChange} 
-                        className="mr-3 h-4 w-4 text-[#4CAF50] focus:ring-[#4CAF50] border-gray-300 rounded"
+                    <div className="flex items-center rounded-[11px] border border-[#E7E2DF]/90 bg-[#FAFAF8] px-3 py-2.5">
+                      <input
+                        type="checkbox"
+                        name="can_work_independently"
+                        checked={form.can_work_independently}
+                        onChange={handleChange}
+                        className={`${SV.check} mr-3`}
                       />
-                      <label className="text-sm font-medium">
-                        Самостоятельная работа
-                      </label>
+                      <label className="cursor-pointer text-sm font-medium text-[#2D2D2D]">Самостоятельная работа</label>
                     </div>
-                    
-                    <div className="flex items-center">
-                      <input 
-                        type="checkbox" 
-                        name="can_work_in_salon" 
-                        checked={form.can_work_in_salon} 
-                        onChange={handleChange} 
-                        className="mr-3 h-4 w-4 text-[#4CAF50] focus:ring-[#4CAF50] border-gray-300 rounded"
+
+                    <div className="flex items-center rounded-[11px] border border-[#E7E2DF]/90 bg-[#FAFAF8] px-3 py-2.5">
+                      <input
+                        type="checkbox"
+                        name="can_work_in_salon"
+                        checked={form.can_work_in_salon}
+                        onChange={handleChange}
+                        className={`${SV.check} mr-3`}
                       />
-                      <label className="text-sm font-medium">
-                        Работа в салоне
-                      </label>
+                      <label className="cursor-pointer text-sm font-medium text-[#2D2D2D]">Работа в салоне</label>
                     </div>
                   </>
                 ) : (
-                  <div className="text-sm text-gray-600 bg-gray-50 p-3 rounded">
+                  <div className="rounded-[11px] border border-[#E7E2DF]/90 bg-[#FAFAF8] px-3 py-2.5 text-sm leading-snug text-[#6B6B6B]">
                     Мастер работает только индивидуально. Функции работы в салоне отключены в настройках администратора.
                   </div>
                 )}
-                
-                {/* Настройка автоматического подтверждения записей */}
-                <div className="border-t pt-4 mt-4">
-                  <label className="block text-sm font-medium mb-3">
+
+                <div className="mt-1 border-t border-[#E7E2DF]/80 pt-4">
+                  <label className="mb-2.5 block text-xs font-semibold uppercase tracking-wide text-[#6B6B6B]">
                     Подтверждение записей
                   </label>
-                  <div className="space-y-2">
+                  <div className="space-y-2 rounded-[11px] border border-[#E7E2DF]/90 bg-white p-3">
                     <div className="flex items-center">
-                      <input 
-                        type="radio" 
-                        name="auto_confirm_bookings" 
+                      <input
+                        type="radio"
+                        name="auto_confirm_bookings"
                         id="manual_confirm"
                         data-testid="toggle-auto-confirm"
-                        checked={!form.auto_confirm_bookings} 
-                        onChange={() => setForm({...form, auto_confirm_bookings: false})}
-                        className="mr-3 h-4 w-4 text-[#4CAF50] focus:ring-[#4CAF50] border-gray-300"
+                        checked={!form.auto_confirm_bookings}
+                        onChange={() => setForm({ ...form, auto_confirm_bookings: false })}
+                        className={`${SV.radio} mr-3`}
                       />
-                      <label htmlFor="manual_confirm" className="text-sm font-medium cursor-pointer">
+                      <label htmlFor="manual_confirm" className="cursor-pointer text-sm font-medium text-[#2D2D2D]">
                         Подтверждать каждую запись вручную
                       </label>
                     </div>
                     <div className="flex items-center">
-                      <input 
-                        type="radio" 
-                        name="auto_confirm_bookings" 
+                      <input
+                        type="radio"
+                        name="auto_confirm_bookings"
                         id="auto_confirm"
-                        checked={form.auto_confirm_bookings} 
-                        onChange={() => setForm({...form, auto_confirm_bookings: true})}
-                        className="mr-3 h-4 w-4 text-[#4CAF50] focus:ring-[#4CAF50] border-gray-300"
+                        checked={form.auto_confirm_bookings}
+                        onChange={() => setForm({ ...form, auto_confirm_bookings: true })}
+                        className={`${SV.radio} mr-3`}
                       />
-                      <label htmlFor="auto_confirm" className="text-sm font-medium cursor-pointer">
+                      <label htmlFor="auto_confirm" className="cursor-pointer text-sm font-medium text-[#2D2D2D]">
                         Автоматически подтверждать записи
                       </label>
                     </div>
-                    <p className="text-xs text-gray-500 ml-7 mt-1">
+                    <p className="ml-7 mt-1 text-xs leading-snug text-[#6B6B6B]">
                       При автоматическом подтверждении записи, которые соответствуют рабочему времени и не вызывают конфликтов, будут сразу отображаться как подтвержденные
                     </p>
                     {hasExtendedStatsEffective && (
-                      <p className="text-xs text-gray-500 ml-7 mt-2">
+                      <p className="ml-7 mt-2 text-xs leading-snug text-[#6B6B6B]">
                         В режиме ручного подтверждения доступно предварительное подтверждение будущих записей (до визита), где это поддерживает тариф
                       </p>
                     )}
                   </div>
                 </div>
 
-                {/* Способы оплаты */}
-                <div className="border-t pt-4">
-                  <h3 className="text-sm font-semibold mb-3">Способы оплаты</h3>
+                <div className="border-t border-[#E7E2DF]/80 pt-4">
+                  <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-[#6B6B6B]">Способы оплаты</h3>
                   <PaymentMethodSelector
+                    variant="settings"
                     paymentOnVisit={form.payment_on_visit}
                     paymentAdvance={form.payment_advance}
                     onPaymentMethodsChange={handlePaymentMethodsChange}
+                    rootClassName="rounded-[12px] border border-[#E7E2DF] bg-[#FAFAF8] p-3.5"
                   />
-                  
-                  {/* Настройки онлайн оплаты */}
-                  <div className="mt-4 pt-4 border-t">
-                    <h4 className="text-sm font-medium mb-3">Онлайн оплата через систему DeDato</h4>
-                    <div className="flex items-start">
+
+                  <div className="mt-4 border-t border-[#E7E2DF]/80 pt-4">
+                    <h4 className="mb-2.5 text-sm font-medium text-[#2D2D2D]">Онлайн оплата через систему DeDato</h4>
+                    <div className="flex items-start rounded-[11px] border border-[#E7E2DF]/90 bg-white px-3 py-2.5">
                       <input
                         type="checkbox"
                         id="accepts_online_payment"
                         checked={paymentSettings.accepts_online_payment}
                         disabled
-                        className="mt-1 h-4 w-4 text-[#4CAF50] focus:ring-[#4CAF50] border-gray-300 rounded opacity-60 cursor-not-allowed"
+                        className={`${SV.check} mt-0.5 cursor-not-allowed opacity-50`}
                       />
-                      <label htmlFor="accepts_online_payment" className="ml-3 text-sm text-gray-700">
+                      <label htmlFor="accepts_online_payment" className="ml-3 text-sm text-[#2D2D2D]">
                         <span className="font-medium">Принимаю оплату через систему DeDato</span>
-                        <span className="block text-xs text-amber-600 mt-1">Функция в разработке</span>
+                        <span className="mt-1 block text-xs text-amber-700">Функция в разработке</span>
                       </label>
                     </div>
                   </div>
                 </div>
               </div>
               
-              <div className="mt-6 flex flex-col gap-2 sm:flex-row">
-                <button
-                  type="submit"
-                  data-testid="settings-save"
-                  disabled={!form.city?.trim()}
-                  className="min-h-11 rounded bg-[#4CAF50] px-4 py-3 text-sm text-white transition-colors hover:bg-[#43a047] disabled:cursor-not-allowed disabled:opacity-50 sm:py-2"
-                >
+              <div className="panel-actions mt-5 flex flex-col gap-2 sm:flex-row">
+                <button type="submit" data-testid="settings-save" disabled={!form.city?.trim()} className={SV.btnPri}>
                   Сохранить
                 </button>
-                <button type="button" onClick={() => setEditWorkMode(false)} className="min-h-11 rounded bg-gray-200 px-4 py-3 text-sm text-gray-700 transition-colors hover:bg-gray-300 sm:py-2">
+                <button type="button" onClick={() => setEditWorkMode(false)} className={SV.btnSec}>
                   Отмена
                 </button>
               </div>
             </form>
           )}
+        </section>
+
+          <div
+            className="mt-3 flex w-fit max-w-full flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-start sm:gap-3 lg:mt-auto lg:shrink-0"
+            role="group"
+            aria-label="Действия с аккаунтом"
+          >
+            <button type="button" onClick={() => setPasswordMode(true)} className={SV.btnSec}>
+              Изменить пароль
+            </button>
+            <button
+              type="button"
+              onClick={openDeleteAccountModal}
+              disabled={isDemoMode}
+              className="inline-flex min-h-10 shrink-0 items-center justify-center rounded-[10px] border border-red-200 bg-white px-4 text-sm font-medium text-red-700 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+              data-testid="settings-delete-account"
+            >
+              Удалить аккаунт
+            </button>
+          </div>
+
         </div>
 
-        {/* Личная страница / публичная запись (на всю ширину) */}
         {profile.master.can_work_independently && (
-          <div className="rounded-lg border bg-white p-4 shadow-sm sm:p-6 md:col-span-2">
-            <h2 className="mb-1 text-lg font-semibold sm:text-xl">Личная страница и запись клиентов</h2>
-            <p className="text-xs text-gray-500 mb-6">Ссылка на запись, текст и оформление — то, что видит клиент</p>
-            <div className="space-y-8">
-              {/* Ссылка на страницу записи: канонический URL /m/:slug */}
+          <div className="flex min-w-0 flex-col gap-3">
+            <section className={panelShell}>
+              <div className="mb-3">
+                <h2 className="m-0 text-base font-semibold tracking-tight text-[#2D2D2D]">Личная страница</h2>
+              </div>
               <div>
-                <h3 className="text-sm font-semibold text-gray-900 mb-2">Ссылка на страницу записи</h3>
-                <div
-                  className={`bg-gray-50 border border-gray-200 rounded-lg p-4 ${
-                    slugChanged ? 'relative pb-16' : ''
-                  }`}
-                >
+                <h3 className="mb-2 text-sm font-semibold text-[#2D2D2D]">Ссылка на страницу записи</h3>
+                <div className="link-shell rounded-[12px] border border-[#E7E2DF] bg-[#FAF8F6] p-3.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.65)]">
                   {canCustomizeDomainEffective ? (
                     <div className="space-y-3">
-                      <div className="flex flex-col sm:flex-row sm:items-center gap-2">
-                        <div className="flex flex-1 flex-wrap items-center gap-1 min-w-0">
-                          <span className="text-sm text-gray-600 whitespace-nowrap">
-                            {(frontendBaseUrl || window.location.origin)}/m/
-                          </span>
-                          <input
-                            type="text"
-                            value={websiteSettings.domain || ''}
-                            onChange={(e) => {
-                              setWebsiteSettings(s => ({ ...s, domain: e.target.value }))
-                              setWebsiteSettingsChanged(true)
-                            }}
-                            placeholder="ваш-адрес"
-                            className="border rounded px-3 py-2 flex-1 min-w-[8rem] text-sm"
-                            data-testid="settings-master-domain-input"
-                          />
+                      <div className="min-w-0 space-y-2">
+                        <div className="text-xs font-semibold text-[#6B6B6B]">Адрес страницы</div>
+                        <div className="flex min-w-0 flex-col gap-2">
+                          <div className="flex min-w-0 flex-col gap-1.5 sm:flex-row sm:items-center sm:gap-2">
+                            <span className="shrink-0 break-all text-xs leading-snug text-[#6B6B6B] sm:text-sm sm:whitespace-nowrap">
+                              {(frontendBaseUrl || window.location.origin)}/m/
+                            </span>
+                            <input
+                              type="text"
+                              value={websiteSettings.domain || ''}
+                              onChange={(e) => {
+                                setWebsiteSettings(s => ({ ...s, domain: e.target.value }))
+                                setWebsiteSettingsChanged(true)
+                              }}
+                              placeholder="ваш-адрес"
+                              className={`${SV.ctl} min-h-[42px] w-full min-w-0 sm:flex-1`}
+                              data-testid="settings-master-domain-input"
+                            />
+                          </div>
+                          <div className="flex flex-row flex-wrap items-center gap-2 sm:flex-nowrap">
+                            <Tooltip compact text="Открыть страницу записи">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const u = buildPublicBookingUrl((websiteSettings.domain || profile.master.domain || '').trim())
+                                  if (u) window.open(u, '_blank', 'noopener,noreferrer')
+                                }}
+                                className={SV.btnGhost}
+                              >
+                                <ArrowTopRightOnSquareIcon className="h-5 w-5" />
+                                Открыть
+                              </button>
+                            </Tooltip>
+                            <Tooltip compact text="Копировать ссылку">
+                              <button
+                                type="button"
+                                onClick={() => copyPublicBookingUrl((websiteSettings.domain || profile.master.domain || '').trim())}
+                                className={SV.btnGhost}
+                                data-testid="settings-copy-public-url"
+                              >
+                                <ClipboardDocumentIcon className="h-5 w-5" />
+                                Копировать
+                              </button>
+                            </Tooltip>
+                          </div>
                         </div>
-                        <div className="flex items-center gap-2 flex-shrink-0">
-                          <Tooltip text="Открыть страницу записи">
+                      </div>
+                      <div>
+                        <button
+                          type="button"
+                          onClick={() => setShowFreeSlotsCardModal(true)}
+                          disabled={!(websiteSettings.domain || profile.master.domain || '').toString().trim()}
+                          className="text-sm font-medium text-[#2f7d32] underline decoration-dotted underline-offset-2 hover:text-[#4CAF50] disabled:cursor-not-allowed disabled:opacity-40"
+                          data-testid="settings-free-slots-card-open"
+                        >
+                          Создать историю
+                        </button>
+                      </div>
+                      {slugChanged ? (
+                        <div className="flex flex-wrap justify-end gap-2 border-t border-[#E7E2DF]/70 pt-3">
+                          <button
+                            type="button"
+                            onClick={handleSaveWebsiteSettings}
+                            disabled={!websiteSettingsChanged || loading}
+                            className={`${SV.btnPri} min-h-10`}
+                            data-testid="settings-save-domain-inline"
+                          >
+                            Сохранить адрес
+                          </button>
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      <div className="min-w-0">
+                        {publicBookingUrl ? (
+                          <a
+                            href={publicBookingUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="break-all text-sm font-medium text-[#4CAF50] hover:underline"
+                          >
+                            {publicBookingUrl}
+                          </a>
+                        ) : (
+                          <span className="text-sm text-[#6B6B6B]">
+                            Ссылка появится после сохранения настроек (домен генерируется автоматически)
+                          </span>
+                        )}
+                      </div>
+                      {publicBookingUrl ? (
+                        <div className="flex flex-row flex-wrap items-center gap-2 sm:flex-nowrap">
+                          <Tooltip compact text="Открыть страницу записи">
                             <button
                               type="button"
-                              onClick={() => {
-                                const u = buildPublicBookingUrl((websiteSettings.domain || profile.master.domain || '').trim())
-                                if (u) window.open(u, '_blank', 'noopener,noreferrer')
-                              }}
-                              className="inline-flex items-center gap-1 px-3 py-2 text-sm rounded-lg border border-gray-200 bg-white text-gray-700 hover:bg-green-50 hover:text-[#4CAF50]"
+                              onClick={() => window.open(publicBookingUrl, '_blank', 'noopener,noreferrer')}
+                              className={SV.btnGhost}
                             >
                               <ArrowTopRightOnSquareIcon className="h-5 w-5" />
                               Открыть
                             </button>
-                          </Tooltip>
-                          <Tooltip text="Копировать ссылку">
+                            </Tooltip>
+                          <Tooltip compact text="Копировать ссылку">
                             <button
                               type="button"
-                              onClick={() => copyPublicBookingUrl((websiteSettings.domain || profile.master.domain || '').trim())}
-                              className="inline-flex items-center gap-1 px-3 py-2 text-sm rounded-lg border border-gray-200 bg-white text-gray-700 hover:bg-green-50 hover:text-[#4CAF50]"
+                              onClick={() => copyPublicBookingUrl(profile.master.domain)}
+                              className={SV.btnGhost}
                               data-testid="settings-copy-public-url"
                             >
                               <ClipboardDocumentIcon className="h-5 w-5" />
@@ -911,109 +1296,45 @@ export default function MasterSettings({
                             </button>
                           </Tooltip>
                         </div>
-                      </div>
-                      <div className="mt-3">
-                        <button
-                          type="button"
-                          onClick={() => setShowFreeSlotsCardModal(true)}
-                          disabled={!(websiteSettings.domain || profile.master.domain || '').toString().trim()}
-                          className="text-sm font-medium text-[#2f7d32] hover:text-[#4CAF50] disabled:opacity-40 disabled:cursor-not-allowed underline decoration-dotted underline-offset-2"
-                          data-testid="settings-free-slots-card-open"
-                        >
-                          Картинка со свободными часами
-                        </button>
-                      </div>
-                      {slugChanged ? (
-                        <button
-                          type="button"
-                          onClick={handleSaveWebsiteSettings}
-                          disabled={!websiteSettingsChanged || loading}
-                          className="absolute bottom-4 right-4 inline-flex items-center gap-2 rounded-lg bg-[#4CAF50] px-3 py-2 text-sm font-semibold text-white hover:bg-[#43a047] transition-colors disabled:cursor-not-allowed disabled:opacity-60"
-                          data-testid="settings-save-domain-inline"
-                        >
-                          Сохранить адрес
-                        </button>
                       ) : null}
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
-                        <div className="flex-1 min-w-0">
-                          {publicBookingUrl ? (
-                            <a
-                              href={publicBookingUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-sm font-medium text-[#4CAF50] hover:underline break-all"
-                            >
-                              {publicBookingUrl}
-                            </a>
-                          ) : (
-                            <span className="text-sm text-gray-600">
-                              Ссылка появится после сохранения настроек (домен генерируется автоматически)
-                            </span>
-                          )}
-                        </div>
-                        {publicBookingUrl && (
-                          <div className="flex items-center gap-2 flex-shrink-0">
-                            <Tooltip text="Открыть страницу записи">
-                              <button
-                                type="button"
-                                onClick={() => window.open(publicBookingUrl, '_blank', 'noopener,noreferrer')}
-                                className="p-1.5 text-gray-600 hover:text-[#4CAF50] hover:bg-green-50 rounded transition-colors"
-                              >
-                                <ArrowTopRightOnSquareIcon className="h-5 w-5" />
-                              </button>
-                            </Tooltip>
-                            <Tooltip text="Копировать ссылку">
-                              <button
-                                type="button"
-                                onClick={() => copyPublicBookingUrl(profile.master.domain)}
-                                className="p-1.5 text-gray-600 hover:text-[#4CAF50] hover:bg-green-50 rounded transition-colors"
-                                data-testid="settings-copy-public-url"
-                              >
-                                <ClipboardDocumentIcon className="h-5 w-5" />
-                              </button>
-                            </Tooltip>
-                          </div>
-                        )}
-                      </div>
-                      <p className="text-xs text-gray-500">
+                      <p className="text-xs leading-snug text-[#6B6B6B]">
                         Это полная ссылка на онлайн-запись. Отправьте её клиентам в мессенджере или соцсетях.
                       </p>
-                      <div className="mt-3">
+                      <div>
                         <button
                           type="button"
                           onClick={() => setShowFreeSlotsCardModal(true)}
                           disabled={!profile.master.domain || !String(profile.master.domain).trim()}
-                          className="text-sm font-medium text-[#2f7d32] hover:text-[#4CAF50] disabled:opacity-40 disabled:cursor-not-allowed underline decoration-dotted underline-offset-2"
+                          className="text-sm font-medium text-[#2f7d32] underline decoration-dotted underline-offset-2 hover:text-[#4CAF50] disabled:cursor-not-allowed disabled:opacity-40"
                           data-testid="settings-free-slots-card-open"
                         >
-                          Картинка со свободными часами
+                          Создать историю
                         </button>
                       </div>
                     </div>
                   )}
                 </div>
               </div>
+            </section>
 
-              <FreeSlotsShareCardModal
-                open={showFreeSlotsCardModal}
-                onClose={() => setShowFreeSlotsCardModal(false)}
-                slug={(websiteSettings.domain || profile.master.domain || '').toString().trim()}
-                bookingUrl={buildPublicBookingUrl((websiteSettings.domain || profile.master.domain || '').toString().trim())}
-              />
+            <FreeSlotsShareCardModal
+              open={showFreeSlotsCardModal}
+              onClose={() => setShowFreeSlotsCardModal(false)}
+              slug={(websiteSettings.domain || profile.master.domain || '').toString().trim()}
+              bookingUrl={buildPublicBookingUrl((websiteSettings.domain || profile.master.domain || '').toString().trim())}
+            />
 
-              {/* Адрес на странице записи (публично + Яндекс.Карты) */}
-              <div className="border-t border-gray-100 pt-6">
-                <h3 className="text-sm font-semibold text-gray-900 mb-1">Адрес на странице записи</h3>
-                <p className="text-xs text-gray-500 mb-4">
+            <section className={panelShell}>
+              <div className="mb-2.5">
+                <h3 className="m-0 text-sm font-semibold text-[#2D2D2D]">Адрес на странице записи</h3>
+                <p className="mt-1 text-xs leading-snug text-[#6B6B6B]">
                   Видят клиенты; ссылка на карты строится по городу (профиль) и основному адресу
                 </p>
-                <form onSubmit={handleSaveAddress} className="space-y-3 max-w-2xl">
+              </div>
+              <form onSubmit={handleSaveAddress} className="space-y-3">
                   <div>
-                    <div className="flex items-center gap-1.5 mb-1">
-                      <label className="text-sm font-medium">Адрес</label>
+                    <div className="mb-1 flex items-center gap-1.5">
+                      <label className="text-sm font-medium text-[#2D2D2D]">Адрес</label>
                       <Tooltip
                         compact
                         position="top"
@@ -1027,7 +1348,7 @@ export default function MasterSettings({
                       >
                         <button
                           type="button"
-                          className="inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded-full border border-gray-300 px-1 text-[11px] font-semibold text-gray-500 hover:bg-gray-50"
+                          className="inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded-full border border-[#E7E2DF] px-1 text-[11px] font-semibold text-[#6B6B6B] hover:bg-[#F4F1EF]"
                           aria-label="Подсказка по полю адреса"
                           data-testid="settings-address-hint"
                         >
@@ -1040,7 +1361,7 @@ export default function MasterSettings({
                       value={form.address || ''}
                       onChange={handleChange}
                       rows={2}
-                      className="border rounded px-3 py-2 w-full text-sm"
+                      className={textareaLike}
                       placeholder="Улица, дом — для карты и страницы записи"
                     />
                     <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -1051,48 +1372,47 @@ export default function MasterSettings({
                           if (u) window.open(u, '_blank', 'noopener,noreferrer')
                         }}
                         disabled={!buildYandexMapsUrlFromParts(form.city, form.address)}
-                        className="px-3 py-1.5 text-sm rounded-lg border border-gray-200 bg-white text-gray-700 hover:bg-green-50 hover:text-[#4CAF50] disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-white"
+                        className="inline-flex min-h-9 items-center justify-center rounded-[10px] border border-[#E7E2DF] bg-white px-3 text-sm font-medium text-[#2D2D2D] transition-colors hover:bg-[#F4F1EF] hover:text-[#4CAF50] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-white"
                       >
                         Проверить на карте
                       </button>
-                      <span className="text-xs text-gray-500">
-                        Город задаётся в «Редактировать профиль»
+                      <span className="text-xs text-[#6B6B6B]">
+                        Город задаётся в блоке «Настройка профиля»
                       </span>
                     </div>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium mb-1">Уточнение к адресу</label>
+                    <label className="block text-sm font-medium mb-1 text-[#2D2D2D]">Уточнение к адресу</label>
                     <textarea
                       name="address_detail"
                       value={form.address_detail || ''}
                       onChange={handleChange}
                       rows={2}
-                      className="border rounded px-3 py-2 w-full text-sm"
+                      className={textareaLike}
                       placeholder="Этаж, подъезд, домофон — только текст, не в ссылку на карты"
                     />
                   </div>
                   <button
                     type="submit"
-                    className="bg-[#4CAF50] text-white px-4 py-2 rounded hover:bg-[#43a047] text-sm"
+                    className="inline-flex min-h-10 items-center justify-center rounded-[10px] bg-[#4CAF50] px-4 text-sm font-medium text-white transition-colors hover:bg-[#45A049]"
                     data-testid="settings-save-address"
                   >
                     Сохранить адрес
                   </button>
                 </form>
-              </div>
+            </section>
 
-              {/* Профиль на публичной странице */}
-              <div className="border-t border-gray-100 pt-6">
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
-                  <div>
-                    <h3 className="text-sm font-semibold text-gray-900">Профиль на странице записи</h3>
-                    <p className="text-xs text-gray-500 mt-0.5">Фото, описание и опыт — для клиентов</p>
+            <section className={panelShell}>
+                <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="panel-head min-w-0">
+                    <h3 className="m-0 text-sm font-semibold text-[#2D2D2D]">Профиль на странице записи</h3>
+                    <p className="desc mt-1 text-xs text-[#6B6B6B]">Фото, опыт и текст на странице записи — для клиентов</p>
                   </div>
                   {!editPublicPageMode && (
                     <button
                       type="button"
                       onClick={() => setEditPublicPageMode(true)}
-                      className="bg-[#4CAF50] text-white px-4 py-2 rounded hover:bg-[#43a047] transition-colors text-sm self-start"
+                      className={`${SV.btnPri} shrink-0 self-start`}
                       data-testid="settings-edit-public-profile"
                     >
                       Редактировать
@@ -1102,56 +1422,66 @@ export default function MasterSettings({
 
                 {!editPublicPageMode ? (
                   <div className="space-y-3 text-sm">
-                    <div className="flex gap-4 items-start">
+                    <div className="media-row flex gap-3 items-start rounded-[12px] border border-[#E7E2DF]/85 bg-[#FAFAF8] p-3">
                       <div className="shrink-0" data-testid="settings-public-photo-preview">
                         {profile.master.photo ? (
                           <img
                             src={getImageUrl(profile.master.photo)}
                             alt=""
-                            className="w-20 h-20 rounded-xl object-cover border border-gray-100 shadow-sm"
+                            className="h-24 w-24 rounded-2xl border border-[#E7E2DF] object-cover shadow-sm"
                           />
                         ) : (
                           <div
-                            className="w-20 h-20 rounded-xl border border-dashed border-gray-200 bg-gray-50 flex flex-col items-center justify-center text-gray-400 gap-0.5"
+                            className="flex h-24 w-24 flex-col items-center justify-center gap-0.5 rounded-2xl border border-dashed border-[#E7E2DF] bg-white text-gray-400"
                             aria-label="Фото не загружено"
                           >
-                            <UserCircleIcon className="w-9 h-9 opacity-60" />
-                            <span className="text-[10px] leading-tight px-1 text-center text-gray-400">Нет фото</span>
+                            <UserCircleIcon className="h-10 w-10 opacity-60" />
+                            <span className="px-1 text-center text-[10px] leading-tight text-gray-400">Нет фото</span>
                           </div>
                         )}
                       </div>
-                      <div className="space-y-1 min-w-0">
-                        <div><span className="text-gray-500">О себе:</span> {profile.master.bio || '—'}</div>
-                        <div><span className="text-gray-500">Опыт:</span> {profile.master.experience_years ?? 0} лет</div>
+                      <div className="min-w-0 flex-1 space-y-2">
+                        <div className="text-base font-semibold leading-snug text-[#2D2D2D]">{profile.user.full_name}</div>
+                        <div className="rounded-[12px] border border-[#E7E2DF]/80 bg-white px-3.5 py-2.5 text-sm text-[#2D2D2D]">
+                          <div className="text-xs font-semibold text-[#6B6B6B]">Опыт</div>
+                          <div className="mt-1">{profile.master.experience_years ?? 0} лет</div>
+                        </div>
+                        <div className="rounded-[12px] border border-[#E7E2DF]/80 bg-white px-3 py-2.5 text-sm text-[#2D2D2D]">
+                          <div className="text-xs font-semibold text-[#6B6B6B]">Текст на странице записи</div>
+                          <div className="mt-1 whitespace-pre-wrap break-words leading-snug">
+                            {profile.master.site_description?.trim() ? profile.master.site_description : '—'}
+                          </div>
+                        </div>
                       </div>
                     </div>
                   </div>
                 ) : (
-                  <form onSubmit={handleSavePublicProfile} className="space-y-4 max-w-2xl">
+                  <form onSubmit={handleSavePublicProfile} className="space-y-4">
                     <div>
-                      <label className="block text-sm font-medium mb-1">О себе</label>
-                      <textarea
-                        name="bio"
-                        value={form.bio}
-                        onChange={handleChange}
-                        rows={3}
-                        className="border rounded px-3 py-2 w-full text-sm"
-                        placeholder="Расскажите о себе — это увидят клиенты"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium mb-1">Опыт работы (лет)</label>
+                      <label className="mb-1 block text-sm font-medium text-[#2D2D2D]">Опыт работы (лет)</label>
                       <input
                         type="number"
                         name="experience_years"
                         value={form.experience_years}
                         onChange={handleChange}
                         min="0"
-                        className="border rounded px-3 py-2 w-full max-w-xs"
+                        className={`${SV.ctl} max-w-xs`}
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium mb-2">Фото для страницы записи</label>
+                      <label className="mb-1 block text-sm font-medium text-[#2D2D2D]">Текст на странице записи</label>
+                      <textarea
+                        value={websiteSettings.site_description || ''}
+                        onChange={e => {
+                          setWebsiteSettings(prev => ({ ...prev, site_description: e.target.value }))
+                        }}
+                        rows={4}
+                        className={textareaLike}
+                        placeholder="Кратко опишите формат приёма или что важно знать клиенту..."
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-[#2D2D2D]">Фото для страницы записи</label>
                       <div className="flex flex-col sm:flex-row gap-4 items-start">
                         <div className="shrink-0">
                           {photoFile ? (
@@ -1197,12 +1527,8 @@ export default function MasterSettings({
                         </div>
                       </div>
                     </div>
-                    <div className="flex gap-2">
-                      <button
-                        type="submit"
-                        className="bg-[#4CAF50] text-white px-4 py-2 rounded hover:bg-[#43a047] text-sm"
-                        data-testid="settings-save-public-profile"
-                      >
+                    <div className="flex flex-wrap gap-2">
+                      <button type="submit" className={SV.btnPri} data-testid="settings-save-public-profile">
                         Сохранить
                       </button>
                       <button
@@ -1210,59 +1536,98 @@ export default function MasterSettings({
                         onClick={() => {
                           setEditPublicPageMode(false)
                           setPhotoFile(null)
+                          setWebsiteSettings(s => ({
+                            ...s,
+                            site_description: profile.master.site_description || '',
+                          }))
                           loadProfile()
                         }}
-                        className="bg-gray-200 text-gray-700 px-4 py-2 rounded text-sm"
+                        className={SV.btnSec}
                       >
                         Отмена
                       </button>
                     </div>
                   </form>
                 )}
-              </div>
-
-              {/* Оформление страницы — только дополнительный текст (описание страницы записи) */}
-              <div className="border-t border-gray-100 pt-6">
-                <h3 className="text-sm font-semibold text-gray-900 mb-1">Оформление страницы</h3>
-                <p className="text-xs text-gray-500 mb-4">Дополнительный текст на странице записи</p>
-                <div>
-                  <label className="block text-sm font-medium mb-2">Текстовый блок для страницы записи</label>
-                  <textarea
-                    value={websiteSettings.site_description || ''}
-                    onChange={(e) => {
-                      setWebsiteSettings(prev => ({ ...prev, site_description: e.target.value }))
-                      setWebsiteSettingsChanged(true)
-                    }}
-                    rows={4}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                    placeholder="Кратко опишите формат приёма или что важно знать клиенту..."
-                  />
-                  <p className="text-xs text-gray-500 mt-2">
-                    Отображается на публичной странице записи вместе с профилем
-                  </p>
-                </div>
-              </div>
-
-              {/* Кнопки действий — текст страницы и домен (если меняли в блоках выше) */}
-              <div className="flex justify-end space-x-3 pt-4 border-t">
-                <button
-                  type="button"
-                  onClick={handleSaveWebsiteSettings}
-                  disabled={!websiteSettingsChanged}
-                  className={`px-4 py-2 rounded-lg font-semibold transition-colors text-sm ${
-                    websiteSettingsChanged
-                      ? 'bg-[#4CAF50] text-white hover:bg-[#43a047]'
-                      : 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                  }`}
-                >
-                  Сохранить настройки
-                </button>
-              </div>
-            </div>
+            </section>
           </div>
         )}
 
       </div>
+
+      {showDeleteAccountModal && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-0 sm:items-center sm:p-4">
+          <div
+            className="max-h-[90dvh] w-full max-w-md overflow-y-auto rounded-t-2xl bg-white p-4 shadow-xl sm:rounded-xl sm:p-6"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="master-delete-account-title"
+          >
+            <div className="mb-3 flex items-start justify-between gap-3">
+              <h3 id="master-delete-account-title" className="pr-2 text-lg font-semibold text-red-700">
+                Удаление аккаунта
+              </h3>
+              <button
+                type="button"
+                onClick={closeDeleteAccountModal}
+                className="shrink-0 text-2xl leading-none text-[#6B6B6B] hover:text-[#2D2D2D]"
+                aria-label="Закрыть"
+              >
+                ×
+              </button>
+            </div>
+            {deleteAccountPhase === 'call' ? (
+              <>
+                <p className="mb-4 text-sm leading-snug text-[#2D2D2D]">
+                  Это действие <strong>необратимо</strong>: будут удалены профиль мастера и данные аккаунта. На телефон из профиля можно запросить звонок с кодом подтверждения — тот же сценарий, что использует приложение для удаления аккаунта.
+                </p>
+                <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                  <button type="button" onClick={closeDeleteAccountModal} className={SV.btnSec}>
+                    Отмена
+                  </button>
+                  <button
+                    type="button"
+                    onClick={requestDeleteAccountCall}
+                    disabled={loading}
+                    className={`${SV.btnPri} disabled:opacity-50`}
+                  >
+                    Получить звонок с кодом
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="mb-3 text-sm text-[#6B6B6B]">
+                  Введите код из звонка. После подтверждения вы будете разлогинены.
+                </p>
+                <label className="mb-2 block text-xs font-semibold text-[#6B6B6B]">Код подтверждения</label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  value={deleteAccountCode}
+                  onChange={e => setDeleteAccountCode(e.target.value)}
+                  className={`${SV.ctl} mb-4`}
+                  placeholder="Код из звонка"
+                />
+                <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                  <button type="button" onClick={() => setDeleteAccountPhase('call')} className={SV.btnSec}>
+                    Назад
+                  </button>
+                  <button
+                    type="button"
+                    onClick={confirmDeleteAccount}
+                    disabled={loading || !deleteAccountCode.trim()}
+                    className="inline-flex min-h-10 items-center justify-center rounded-[10px] bg-red-600 px-4 text-sm font-medium text-white transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Удалить навсегда
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

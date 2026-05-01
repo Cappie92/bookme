@@ -1985,6 +1985,7 @@ export default function MasterDashboard() {
               hasClientRestrictions={hasClientRestrictions}
               hasExtendedStats={hasExtendedStats}
               planName={subscriptionPlanName}
+              subscriptionStatus={subscriptionStatus}
             />
           )}
           {activeTab === 'tariff' && (
