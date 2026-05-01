@@ -55,6 +55,18 @@ class Settings(BaseSettings):
     FRONTEND_URL: str = "http://localhost:5175"
     API_BASE_URL: str = "http://localhost:8000"
 
+    # --- Transactional email (Unisender Go и др.) ---
+    # EMAIL_ENABLED=false — без сети (stub), текущее поведение dev по умолчанию.
+    EMAIL_ENABLED: str = ""
+    EMAIL_PROVIDER: str = "unisender"
+    UNISENDER_API_KEY: str = ""
+    UNISENDER_API_BASE_URL: str = "https://goapi.unisender.ru/ru/transactional/api/v1"
+    EMAIL_FROM_ADDRESS: str = ""
+    EMAIL_FROM_NAME: str = "DeDato"
+    UNISENDER_REQUEST_TIMEOUT_SEC: str = "25"
+    # Опциональный legacy-alias (если задан и EMAIL_FROM_ADDRESS пуст).
+    MAIL_FROM_ADDRESS: str = ""
+
     # --- Demo master ---
     # Не использовать +79990000000…+79990000009: они заняты reseed_local_test_data (MASTER_PHONES).
     DEMO_MASTER_PHONE: str = "+79990009999"
@@ -201,6 +213,21 @@ class Settings(BaseSettings):
         return self.PLUSOFON_MODE.strip().lower() == "stub"
 
     @property
+    def email_enabled(self) -> bool:
+        return _parse_bool(self.EMAIL_ENABLED)
+
+    @property
+    def email_provider(self) -> str:
+        return (self.EMAIL_PROVIDER or "unisender").strip().lower()
+
+    @property
+    def email_from_address_effective(self) -> str:
+        primary = (self.EMAIL_FROM_ADDRESS or "").strip()
+        if primary:
+            return primary
+        return (self.MAIL_FROM_ADDRESS or "").strip()
+
+    @property
     def redis_port_int(self) -> int:
         try:
             return int(self.REDIS_PORT.strip())
@@ -219,6 +246,8 @@ class Settings(BaseSettings):
             "DEV_E2E": self.dev_e2e,
             "LEGACY_INDIE_MODE": _parse_bool(self.LEGACY_INDIE_MODE),
             "SALONS_ENABLED": self.salons_enabled_env,
+            "EMAIL_ENABLED": self.email_enabled,
+            "EMAIL_PROVIDER": self.email_provider,
         }
 
 

@@ -217,16 +217,19 @@ export default function PublicBookingWizard({
   const [accountEmailForCal, setAccountEmailForCal] = useState(null)
   const [googleCalLoading, setGoogleCalLoading] = useState(false)
   const [emailRemindStatus, setEmailRemindStatus] = useState('idle')
+  const [emailRemindRecipient, setEmailRemindRecipient] = useState(null)
 
   useEffect(() => {
     if (!success) {
       setAccountEmailForCal(null)
       setEmailRemindStatus('idle')
+      setEmailRemindRecipient(null)
       return
     }
     let cancelled = false
     setAccountEmailForCal(null)
     setEmailRemindStatus('idle')
+    setEmailRemindRecipient(null)
     ;(async () => {
       try {
         const me = await apiGet('/api/auth/users/me')
@@ -278,12 +281,13 @@ export default function PublicBookingWizard({
     setCalendarError(null)
     setEmailRemindStatus('loading')
     try {
-      await sendClientCalendarEmail(bookingLikeFromSuccess(success), 60)
+      const data = await sendClientCalendarEmail(bookingLikeFromSuccess(success), 60)
+      const to = data?.recipient_email || accountEmailForCal
+      setEmailRemindRecipient(to)
       setEmailRemindStatus('sent')
     } catch (e) {
-      setEmailRemindStatus('error')
-      const d = e?.response?.data?.detail
-      setCalendarError(typeof d === 'string' ? d : e?.message || 'Не удалось отправить письмо')
+      setEmailRemindStatus('idle')
+      setCalendarError('Не удалось отправить письмо. Попробуйте ещё раз')
     }
   }, [success, accountEmailForCal])
 
@@ -872,9 +876,9 @@ export default function PublicBookingWizard({
                 data-testid="calendar-email"
               >
                 {emailRemindStatus === 'loading'
-                  ? 'Отправка…'
+                  ? 'Отправляем...'
                   : emailRemindStatus === 'sent'
-                    ? 'Письмо отправлено'
+                    ? `Письмо отправлено на ${emailRemindRecipient || accountEmailForCal || ''}`
                     : 'Напоминание на e-mail'}
               </button>
             </div>

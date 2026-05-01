@@ -54,9 +54,12 @@ export function triggerIcsBlobDownload(blob, filename) {
   URL.revokeObjectURL(a.href)
 }
 
-/** Письмо уходит на email учётной записи; адрес задаётся только на backend. */
+/**
+ * Письмо уходит на email учётной записи; адрес задаётся только на backend.
+ * Возвращает тело ответа API (success, recipient_email, provider, message_id).
+ */
 export async function sendClientCalendarEmail(bookingLike, alarmMinutes = 60) {
   const seg = clientBookingCalendarPathSegment(bookingLike)
   if (!seg) throw new Error('Нет данных записи для календаря')
-  await apiPost(`/api/client/bookings/${seg}/calendar/email`, { alarm_minutes: alarmMinutes })
+  return apiPost(`/api/client/bookings/${seg}/calendar/email`, { alarm_minutes: alarmMinutes })
 }

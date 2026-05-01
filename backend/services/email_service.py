@@ -1,14 +1,9 @@
 from abc import ABC, abstractmethod
-from datetime import datetime, timedelta
+import re
 from typing import Optional
 from urllib.parse import urljoin
 
-from fastapi import HTTPException
-from sqlalchemy.orm import Session
-
-from database import get_db
-from models import User, EmailVerification, PasswordReset
-from auth import create_access_token, get_password_hash, verify_password
+from models import User
 
 
 class EmailService(ABC):
@@ -128,8 +123,76 @@ class MockEmailService(EmailService):
         return True
 
 
-# Глобальный экземпляр email сервиса
-email_service = MockEmailService()
+class ConfiguredEmailService(EmailService):
+    """
+    Реальная отправка через transactional provider (Unisender / stub по ENV).
+    Верификация и сброс пароля используют тот же канал.
+    """
+
+    async def send_email(self, to_email: str, subject: str, html_content: str) -> bool:
+        from services.email.factory import get_transactional_provider
+
+        plain = re.sub(r"<[^>]+>", " ", html_content or "")
+        plain = " ".join(plain.split())
+        if len(plain) > 9000:
+            plain = plain[:9000] + "…"
+        r = await get_transactional_provider().send_message(
+            to_email=to_email,
+            subject=subject,
+            html_body=html_content or "",
+            text_body=plain,
+            attachments=None,
+        )
+        return r.ok
+
+    async def send_verification_email(self, user: User, verification_token: str) -> bool:
+        verification_url = urljoin(self.base_url, f"/verify-email?token={verification_token}")
+
+        subject = "Подтвердите ваш email"
+        html_content = f"""
+        <html>
+        <body>
+            <h2>Добро пожаловать в DeDato!</h2>
+            <p>Здравствуйте, {user.full_name or user.email}!</p>
+            <p>Для завершения регистрации подтвердите ваш email, перейдя по ссылке:</p>
+            <p><a href="{verification_url}">Подтвердить email</a></p>
+            <p>Если ссылка не работает, скопируйте её в браузер:</p>
+            <p>{verification_url}</p>
+            <p>Ссылка действительна в течение 24 часов.</p>
+            <br>
+            <p>С уважением,<br>Команда DeDato</p>
+        </body>
+        </html>
+        """
+
+        return await self.send_email(user.email, subject, html_content)
+
+    async def send_password_reset_email(self, user: User, reset_token: str) -> bool:
+        reset_url = urljoin(self.base_url, f"/reset-password?token={reset_token}")
+
+        subject = "Сброс пароля"
+        html_content = f"""
+        <html>
+        <body>
+            <h2>Сброс пароля</h2>
+            <p>Здравствуйте, {user.full_name or user.email}!</p>
+            <p>Вы запросили сброс пароля. Для создания нового пароля перейдите по ссылке:</p>
+            <p><a href="{reset_url}">Создать новый пароль</a></p>
+            <p>Если ссылка не работает, скопируйте её в браузер:</p>
+            <p>{reset_url}</p>
+            <p>Ссылка действительна в течение 1 часа.</p>
+            <p>Если вы не запрашивали сброс пароля, проигнорируйте это письмо.</p>
+            <br>
+            <p>С уважением,<br>Команда DeDato</p>
+        </body>
+        </html>
+        """
+
+        return await self.send_email(user.email, subject, html_content)
+
+
+# Глобальный экземпляр: провайдер выбирается по EMAIL_ENABLED / UNISENDER_* (см. services.email.factory).
+email_service = ConfiguredEmailService()
 
 
 def get_email_service() -> EmailService:

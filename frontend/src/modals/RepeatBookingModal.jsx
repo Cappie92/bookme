@@ -70,6 +70,7 @@ export default function RepeatBookingModal({
   const [calendarDownloading, setCalendarDownloading] = useState(false)
   const [googleCalLoading, setGoogleCalLoading] = useState(false)
   const [emailRemindStatus, setEmailRemindStatus] = useState('idle')
+  const [emailRemindRecipient, setEmailRemindRecipient] = useState(null)
   const [availableSlots, setAvailableSlots] = useState([])
   const [selectedDate, setSelectedDate] = useState('')
   const [selectedSlot, setSelectedSlot] = useState(null)
@@ -141,6 +142,7 @@ export default function RepeatBookingModal({
       setCalendarDownloading(false)
       setGoogleCalLoading(false)
       setEmailRemindStatus('idle')
+      setEmailRemindRecipient(null)
       loadBookingDetails()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -150,11 +152,13 @@ export default function RepeatBookingModal({
     if (!submitSuccess || !createdBooking) {
       setAccountEmailForCal(null)
       setEmailRemindStatus('idle')
+      setEmailRemindRecipient(null)
       return
     }
     let cancelled = false
     setAccountEmailForCal(null)
     setEmailRemindStatus('idle')
+    setEmailRemindRecipient(null)
     ;(async () => {
       try {
         const me = await apiGet('/api/auth/users/me')
@@ -206,11 +210,12 @@ export default function RepeatBookingModal({
     setCalendarError(null)
     setEmailRemindStatus('loading')
     try {
-      await sendClientCalendarEmail(bookingLikeFromSuccess(createdBooking), 60)
+      const data = await sendClientCalendarEmail(bookingLikeFromSuccess(createdBooking), 60)
+      const to = data?.recipient_email || accountEmailForCal
+      setEmailRemindRecipient(to)
       setEmailRemindStatus('sent')
     } catch (e) {
-      const d = e?.detail
-      setCalendarError(typeof d === 'string' ? d : e?.message || 'Не удалось отправить письмо')
+      setCalendarError('Не удалось отправить письмо. Попробуйте ещё раз')
       setEmailRemindStatus('idle')
     }
   }
@@ -725,9 +730,9 @@ export default function RepeatBookingModal({
                       data-testid="calendar-email"
                     >
                       {emailRemindStatus === 'loading'
-                        ? 'Отправка…'
+                        ? 'Отправляем...'
                         : emailRemindStatus === 'sent'
-                          ? 'Письмо отправлено'
+                          ? `Письмо отправлено на ${emailRemindRecipient || accountEmailForCal || ''}`
                           : 'Напоминание на e-mail'}
                     </button>
                   </div>

@@ -4,7 +4,7 @@ import logging
 import pytz
 
 from fastapi import APIRouter, Depends, HTTPException, status, Body, Query
-from fastapi.responses import Response
+from fastapi.responses import Response, JSONResponse
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func, or_, and_
 
@@ -38,7 +38,7 @@ from utils.yandex_maps_url import (
     yandex_maps_url_for_booking,
     yandex_link_html_for_email,
 )
-from services.email_service import get_email_service
+from services.email.booking_calendar import send_client_booking_calendar_email
 from urllib.parse import quote
 
 router = APIRouter(
@@ -687,23 +687,17 @@ async def send_calendar_email_by_public_ref(
     if not email or not str(email).strip():
         raise HTTPException(status_code=422, detail="Email required")
     alarm_minutes = max(5, min(120, body.get("alarm_minutes", 60)))
-    ics = build_booking_ics(booking, master_tz, alarm_minutes=alarm_minutes)
-    service_name = booking.service.name if booking.service else "-"
-    master_name = "-"
-    if booking.master and booking.master.user:
-        master_name = booking.master.user.full_name or "-"
-    elif booking.indie_master and booking.indie_master.user:
-        master_name = booking.indie_master.user.full_name or "-"
-    subject = f"Запись: {service_name} — {master_name}"
-    email_service = get_email_service()
-    await email_service.send_ics_to_email(
-        to_email=str(email).strip(),
-        subject=subject,
-        ics_content=ics,
-        filename=_calendar_attachment_basename(booking),
-        extra_body_html=yandex_link_html_for_email(yandex_maps_url_for_booking(booking)),
+    extra = yandex_link_html_for_email(yandex_maps_url_for_booking(booking))
+    result = await send_client_booking_calendar_email(
+        booking,
+        master_tz,
+        str(email).strip(),
+        alarm_minutes,
+        extra_body_html=extra,
     )
-    return {"ok": True}
+    if not result.get("success"):
+        return JSONResponse(status_code=503, content=result)
+    return result
 
 
 @router.get("/{booking_id}/calendar.ics")
@@ -793,23 +787,17 @@ async def send_calendar_email(
     if not email or not str(email).strip():
         raise HTTPException(status_code=422, detail="Email required")
     alarm_minutes = max(5, min(120, body.get("alarm_minutes", 60)))
-    ics = build_booking_ics(booking, master_tz, alarm_minutes=alarm_minutes)
-    service_name = booking.service.name if booking.service else "-"
-    master_name = "-"
-    if booking.master and booking.master.user:
-        master_name = booking.master.user.full_name or "-"
-    elif booking.indie_master and booking.indie_master.user:
-        master_name = booking.indie_master.user.full_name or "-"
-    subject = f"Запись: {service_name} — {master_name}"
-    email_service = get_email_service()
-    await email_service.send_ics_to_email(
-        to_email=str(email).strip(),
-        subject=subject,
-        ics_content=ics,
-        filename=_calendar_attachment_basename(booking),
-        extra_body_html=yandex_link_html_for_email(yandex_maps_url_for_booking(booking)),
+    extra = yandex_link_html_for_email(yandex_maps_url_for_booking(booking))
+    result = await send_client_booking_calendar_email(
+        booking,
+        master_tz,
+        str(email).strip(),
+        alarm_minutes,
+        extra_body_html=extra,
     )
-    return {"ok": True}
+    if not result.get("success"):
+        return JSONResponse(status_code=503, content=result)
+    return result
 
 
 @router.post("/", response_model=BookingSchema)

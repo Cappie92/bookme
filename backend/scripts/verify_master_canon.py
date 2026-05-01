@@ -205,7 +205,7 @@ def _verify_calendar() -> bool:
             )
             with urllib.request.urlopen(email_req, timeout=10) as r:
                 resp = json.loads(r.read().decode())
-            if resp.get("ok") is True:
+            if resp.get("success") is True:
                 print("  [OK] POST calendar/email: 200 ok")
             else:
                 print(f"  [WARN] POST calendar/email: unexpected response {resp}")
