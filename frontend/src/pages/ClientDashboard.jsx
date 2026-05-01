@@ -4,14 +4,13 @@ import { apiGet, apiFetch } from '../utils/api'
 import { PencilIcon, TrashIcon, ArrowPathIcon, PencilSquareIcon, HandThumbDownIcon, CalendarIcon, ChevronDownIcon, XMarkIcon, HeartIcon } from "@heroicons/react/24/outline"
 import PasswordSetupModal from "../modals/PasswordSetupModal"
 import ManagerInvitations from "../components/ManagerInvitations"
-import ClientDashboardStats from "../components/ClientDashboardStats"
 import RepeatBookingModal from "../modals/RepeatBookingModal"
 import ClientNoteModal from '../modals/ClientNoteModal'
 import FavoriteButton from '../components/FavoriteButton'
 import { useFavorites } from '../contexts/FavoritesContext'
 import { useToast } from '../contexts/ToastContext'
+import { useAuth } from '../contexts/AuthContext'
 import Tooltip from '../components/Tooltip'
-import ClientLoyaltyPoints from '../components/ClientLoyaltyPoints'
 import { CalendarGrid as PublicCalendarGrid } from '../components/booking/PublicBookingCalendarGrid'
 import {
   downloadClientBookingIcsFile,
@@ -77,6 +76,20 @@ function formatTimeOnly(dateStr) {
   return `${hours}:${minutes}`
 }
 
+/** Макс. время по транзакциям типа earned (для сортировки «последнее начисление»). */
+function getLastEarnedMs(master) {
+  const txs = Array.isArray(master?.transactions) ? master.transactions : []
+  let max = 0
+  for (const t of txs) {
+    if (t.transaction_type !== 'earned') continue
+    const raw = t.earned_at ?? t.created_at
+    if (!raw) continue
+    const ms = new Date(raw).getTime()
+    if (!Number.isNaN(ms)) max = Math.max(max, ms)
+  }
+  return max
+}
+
 /** Крестик закрытия модалок: SVG, без Unicode ✕ (iOS).
  * Единый паттерн кабинета: на mobile — pill F4F1EF 32×32, на desktop — белый круг 40×40 с border + shadow.
  * Совместим со всеми клиентскими модалками страницы. */
@@ -130,6 +143,42 @@ function getBookingStatusColor(status) {
   return statusColors[status] || 'bg-gray-100 text-gray-800'
 }
 
+function phraseFutureBookingsCount(n) {
+  if (n === 0) return 'Нет будущих записей'
+  const mod100 = n % 100
+  const mod10 = n % 10
+  let tail
+  if (mod100 >= 11 && mod100 <= 14) tail = 'будущих записей'
+  else if (mod10 === 1) tail = 'будущая запись'
+  else if (mod10 >= 2 && mod10 <= 4) tail = 'будущие записи'
+  else tail = 'будущих записей'
+  return `${n} ${tail}`
+}
+
+function phraseFavoriteMastersCount(n) {
+  if (n === 0) return 'Нет избранных мастеров'
+  const mod100 = n % 100
+  const mod10 = n % 10
+  if (mod100 >= 11 && mod100 <= 14) return `${n} избранных мастеров`
+  if (mod10 === 1) return `${n} избранный мастер`
+  if (mod10 >= 2 && mod10 <= 4) return `${n} избранных мастера`
+  return `${n} избранных мастеров`
+}
+
+function dashboardWelcomeFirstName(user) {
+  if (!user) return null
+  const full = (user.full_name || '').trim()
+  if (full) return full.split(/\s+/)[0]
+  const first = (user.first_name || '').trim()
+  if (first) return first
+  const email = (user.email || '').trim()
+  if (email.includes('@')) {
+    const local = email.split('@')[0]
+    if (local) return local
+  }
+  return null
+}
+
 export default function ClientDashboard() {
   const [bookings, setBookings] = useState([])
   const [loading, setLoading] = useState(true)
@@ -144,8 +193,12 @@ export default function ClientDashboard() {
   const [managedBranches, setManagedBranches] = useState([])
   const [showEditBookingModal, setShowEditBookingModal] = useState(false)
   const [showDeleteBookingModal, setShowDeleteBookingModal] = useState(false)
-  const [dashboardStats, setDashboardStats] = useState(null)
-  const [statsLoading, setStatsLoading] = useState(true)
+  const [loyaltySummary, setLoyaltySummary] = useState({
+    loading: true,
+    totalBalance: null,
+    masters: [],
+    error: false,
+  })
   const [showTimeEditModal, setShowTimeEditModal] = useState(false)
   const [newDateTime, setNewDateTime] = useState('')
   const [timeEditLoading, setTimeEditLoading] = useState(false)
@@ -209,6 +262,7 @@ export default function ClientDashboard() {
   const [calendarAlarmMinutes, setCalendarAlarmMinutes] = useState(60)
   const [calendarEmailSending, setCalendarEmailSending] = useState(false)
   const { showToast } = useToast()
+  const { user: authUser } = useAuth()
 
   const PAGE_SIZE = 20
   const [allFuturePage, setAllFuturePage] = useState(0)
@@ -374,6 +428,20 @@ export default function ClientDashboard() {
         setSalonsEnabled(salonsEnabledFlag)
       } catch (error) {
         console.error('Ошибка при загрузке stats:', error)
+      }
+
+      setLoyaltySummary((prev) => ({ ...prev, loading: true, error: false }))
+      try {
+        const loyaltyData = await apiGet('/api/client/loyalty/points')
+        setLoyaltySummary({
+          loading: false,
+          totalBalance: Number(loyaltyData?.total_balance ?? 0),
+          masters: Array.isArray(loyaltyData?.masters) ? loyaltyData.masters : [],
+          error: false,
+        })
+      } catch (error) {
+        console.error('Ошибка при загрузке баллов:', error)
+        setLoyaltySummary({ loading: false, totalBalance: null, masters: [], error: true })
       }
       
       // Загружаем будущие записи (краткий список, до 5 — по умолчанию на бэкенде)
@@ -584,79 +652,6 @@ export default function ClientDashboard() {
       
       reloadFavorites()
     }
-  }
-
-  // Функция для отображения карточки избранного
-  const renderFavoriteCard = (favorite) => {
-    let title = 'Избранное'
-    let name = favorite.favorite_name || 'Название не указано'
-    let masterDomain = null
-    
-    if (favorite.type === 'salon' && favorite.salon) {
-      title = 'Салон'
-      name = favorite.salon.name || favorite.favorite_name || 'Салон'
-    } else if (favorite.type === 'master' && favorite.master) {
-      title = 'Мастер'
-      name = favorite.master.user?.full_name || favorite.favorite_name || 'Мастер'
-      masterDomain = favorite.master.domain || null
-    } else if (favorite.type === 'indie_master') {
-      title = 'Индивидуальный мастер'
-      // Используем данные из indie_master если есть, иначе favorite_name
-      if (favorite.indie_master && favorite.indie_master.user) {
-        name = favorite.indie_master.user.full_name || favorite.favorite_name || 'Индивидуальный мастер'
-        masterDomain = favorite.indie_master.domain || null
-      } else {
-        name = favorite.favorite_name || 'Индивидуальный мастер'
-      }
-    } else if (favorite.type === 'service' && favorite.service) {
-      title = 'Услуга'
-      name = favorite.service.name || favorite.favorite_name || 'Услуга'
-    } else {
-      title = favorite.type === 'salon' ? 'Салон' : 
-              favorite.type === 'master' ? 'Мастер' : 
-              favorite.type === 'indie_master' ? 'Индивидуальный мастер' :
-              favorite.type === 'service' ? 'Услуга' : 'Избранное'
-    }
-    
-    return (
-      <div className="bg-white border border-gray-200 rounded-lg shadow-sm p-3 hover:shadow-md transition-shadow">
-        <div className="flex items-start justify-between gap-2">
-          <div className="flex-1 min-w-0">
-            <div className="text-xs text-gray-500 mb-1">{title}</div>
-            {masterDomain ? (
-              <Link 
-                to={`/m/${masterDomain}`}
-                className="text-green-600 hover:text-green-800 hover:underline font-medium text-sm block truncate"
-              >
-                {name}
-              </Link>
-            ) : (
-              <div className="font-medium text-sm text-gray-900 truncate">{name}</div>
-            )}
-          </div>
-          <div className="flex-shrink-0">
-            {(favorite.type === 'master' && favorite.master_id) && (
-              <FavoriteButton
-                type="master"
-                itemId={favorite.master_id}
-                itemName={name}
-                size="sm"
-                onFavoriteChange={handleFavoriteChange}
-              />
-            )}
-            {(favorite.type === 'indie_master' && favorite.indie_master_id) && (
-              <FavoriteButton
-                type="indie_master"
-                itemId={favorite.indie_master_id}
-                itemName={name}
-                size="sm"
-                onFavoriteChange={handleFavoriteChange}
-              />
-            )}
-          </div>
-        </div>
-      </div>
-    )
   }
 
   // Функция для загрузки всех будущих записей
@@ -1280,39 +1275,282 @@ export default function ClientDashboard() {
   const allPastEndIdx = Math.min(allPastTotal, allPastStartIdx + PAGE_SIZE)
   const allPastPageItems = allPastBookings.slice(allPastStartIdx, allPastEndIdx)
 
+  const nextBookingHero = Array.isArray(futureBookings) && futureBookings.length > 0 ? futureBookings[0] : null
+
+  const loyaltyTopMasters = useMemo(() => {
+    const list = Array.isArray(loyaltySummary.masters) ? loyaltySummary.masters : []
+    return [...list]
+      .sort((a, b) => getLastEarnedMs(b) - getLastEarnedMs(a))
+      .slice(0, 3)
+  }, [loyaltySummary.masters])
+
+  const favoriteMastersCount = useMemo(
+    () =>
+      favorites.filter((f) => f.type === 'master' || f.type === 'indie_master').length,
+    [favorites]
+  )
+
+  const welcomeFirstName = useMemo(() => dashboardWelcomeFirstName(authUser), [authUser])
+
+  const dashboardSummaryLine = useMemo(() => {
+    const parts = []
+    parts.push(
+      futureLoading ? 'Записи…' : phraseFutureBookingsCount(Array.isArray(futureBookings) ? futureBookings.length : 0)
+    )
+    if (loyaltySummary.loading) {
+      parts.push('Баллы…')
+    } else if (loyaltySummary.error) {
+      parts.push('Баллы лояльности недоступны')
+    } else {
+      parts.push(`${loyaltySummary.totalBalance ?? 0} баллов лояльности`)
+    }
+    parts.push(
+      favoritesLoading ? 'Избранное…' : phraseFavoriteMastersCount(favoriteMastersCount)
+    )
+    return parts.join(' · ')
+  }, [
+    futureLoading,
+    futureBookings,
+    loyaltySummary.loading,
+    loyaltySummary.error,
+    loyaltySummary.totalBalance,
+    favoritesLoading,
+    favoriteMastersCount,
+  ])
+
   return (
-    <div className="py-4 lg:py-8" data-testid="client-dashboard">
-      <div className="max-w-5xl mx-auto px-3 sm:px-4 lg:px-6">
+    <div className="py-2.5 lg:py-4 max-[760px]:py-3" data-testid="client-dashboard">
+      <div className="content max-w-[1280px] mx-auto px-4 sm:px-6 lg:px-7 max-[760px]:px-[18px] pb-6 lg:pb-8">
+      <div className="content-head mb-2 max-w-[48rem]">
+        <h1 className="m-0 text-[26px] font-bold tracking-[-0.03em] text-neutral-900 sm:text-[30px]">
+          {welcomeFirstName ? (
+            <>Добро пожаловать, {welcomeFirstName}&nbsp;👋</>
+          ) : (
+            <>Добро пожаловать&nbsp;👋</>
+          )}
+        </h1>
+        <p className="sub m-0 mt-2 text-sm leading-snug text-[#6B6B6B]" data-testid="client-dashboard-summary">
+          {dashboardSummaryLine}
+        </p>
+      </div>
+
       {/* Приглашения стать управляющим филиала */}
       <ManagerInvitations />
 
-      {/* Основные секции */}
-      <div className="space-y-5 lg:space-y-6">
+      <div className="top-row mt-2 mb-6 grid grid-cols-1 gap-2.5 max-lg:gap-2 lg:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)] lg:items-stretch">
+        {/* KPI: ближайшая запись */}
+        <div className="min-w-0">
+          {futureLoading ? (
+            <div className="next-booking animate-pulse rounded-2xl bg-gradient-to-br from-[#4CAF50] to-[#43A047] p-6 min-h-[200px]" />
+          ) : nextBookingHero ? (() => {
+            const b = nextBookingHero
+            const masterKey = getMasterKey(b)
+            const isFav = masterKey !== null && favoriteMasterIds.has(masterKey)
+            return (
+              <div
+                className="next-booking relative overflow-hidden rounded-2xl border border-transparent bg-gradient-to-br from-[#4CAF50] to-[#43A047] p-[22px] text-white shadow-[0_10px_24px_-12px_rgba(76,175,80,0.45)]"
+              >
+                <h2 className="m-0 mb-1.5 text-2xl font-bold tracking-[-0.02em] text-white">Ближайшая запись</h2>
+                <div className="master mb-[18px] text-sm text-white/[0.84]">
+                  {b.master_domain ? (
+                    <Link to={`/m/${b.master_domain}`} className="text-white/[0.92] underline-offset-2 hover:underline">
+                      {b.master_name}
+                    </Link>
+                  ) : (
+                    b.master_name
+                  )}
+                </div>
+                <div className="mb-5 grid gap-3 sm:grid-cols-2">
+                  <div className="detail-item">
+                    <div className="lbl mb-1 text-[11px] font-semibold uppercase tracking-wider text-white/[0.72]">Дата и время</div>
+                    <div className="val text-[15px] font-semibold text-white tabular-nums">
+                      {b.start_time ? formatDateTimeShort(b.start_time) : formatDateTimeShort(b.date)}
+                    </div>
+                  </div>
+                  <div className="detail-item">
+                    <div className="lbl mb-1 text-[11px] font-semibold uppercase tracking-wider text-white/[0.72]">Услуга</div>
+                    <div className="val accent text-[15px] font-semibold text-white">
+                      {b.service_name ? (b.service_name.includes(' - ') ? b.service_name.split(' - ')[0] : b.service_name) : '—'}
+                    </div>
+                  </div>
+                  <div className="detail-item">
+                    <div className="lbl mb-1 text-[11px] font-semibold uppercase tracking-wider text-white/[0.72]">Стоимость</div>
+                    <div className="val text-[15px] font-semibold text-white tabular-nums">{b.price} ₽</div>
+                  </div>
+                  <div className="detail-item">
+                    <div className="lbl mb-1 text-[11px] font-semibold uppercase tracking-wider text-white/[0.72]">Статус</div>
+                    <div className="val text-[15px] font-semibold text-white">{getBookingStatusLabel(b.status)}</div>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {b.master_name && b.master_name !== '-' && (
+                    <span className="inline-flex items-center rounded-[10px] border border-white/[0.18] bg-white/[0.12] p-0.5">
+                      {b.indie_master_id ? (
+                        <FavoriteButton type="indie_master" itemId={b.indie_master_id} itemName={b.master_name} size="sm" isFavorite={isFav} onFavoriteChange={handleFavoriteChange} className="!text-white" />
+                      ) : b.master_id ? (
+                        <FavoriteButton type="master" itemId={b.master_id} itemName={b.master_name} size="sm" isFavorite={isFav} onFavoriteChange={handleFavoriteChange} className="!text-white" />
+                      ) : null}
+                    </span>
+                  )}
+                  {b.master_timezone?.trim?.() && (
+                    <button
+                      type="button"
+                      onClick={(e) => openCalendarMenu(b, e.currentTarget)}
+                      className="action-btn inline-flex items-center justify-center gap-1.5 rounded-[10px] border border-white/[0.18] bg-white/[0.12] px-3 py-2 text-[13px] font-medium text-white transition-all duration-150 hover:bg-white/[0.18] hover:border-white/[0.24] whitespace-nowrap"
+                      title="Добавить в календарь"
+                    >
+                      <CalendarIcon className="h-4 w-4" />
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => handleEditBooking(b)}
+                    className="action-btn primary inline-flex items-center gap-1.5 rounded-[10px] border border-white bg-white px-4 py-2 text-[13px] font-medium text-[#2e7d32] transition-all duration-150 hover:bg-[#f7fffa] whitespace-nowrap"
+                  >
+                    <PencilIcon className="h-4 w-4" />
+                    Изменить
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteBooking(b)}
+                    className="action-btn inline-flex items-center gap-1.5 rounded-[10px] border border-white/[0.18] bg-white/[0.12] px-4 py-2 text-[13px] font-medium text-white transition-all duration-150 hover:bg-white/[0.18] whitespace-nowrap"
+                    data-testid="client-booking-cancel-btn"
+                  >
+                    <TrashIcon className="h-4 w-4" />
+                    Отменить
+                  </button>
+                </div>
+              </div>
+            )
+          })() : (
+            <div className="next-booking flex min-h-[180px] flex-col justify-center rounded-2xl border border-transparent bg-gradient-to-br from-[#4CAF50] to-[#43A047] p-[22px] text-center text-white/90 shadow-[0_10px_24px_-12px_rgba(76,175,80,0.45)]">
+              <p className="m-0 text-sm font-medium">Нет предстоящих записей</p>
+            </div>
+          )}
+        </div>
+
+        <div className="loyalty-card flex min-h-0 min-w-0 flex-col rounded-2xl border border-[#E7E2DF] bg-white p-[18px] shadow-sm">
+          <div className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Мои баллы</div>
+          <div className="points mt-2 text-[28px] font-bold leading-tight tracking-[-0.02em] text-neutral-900 tabular-nums min-h-[2.25rem] sm:text-[30px]">
+            {loyaltySummary.loading ? (
+              <span className="inline-block h-9 w-20 animate-pulse rounded-lg bg-neutral-100" aria-hidden />
+            ) : loyaltySummary.error ? (
+              <span className="text-lg font-semibold text-neutral-400">—</span>
+            ) : (
+              loyaltySummary.totalBalance
+            )}
+          </div>
+          {!loyaltySummary.loading && !loyaltySummary.error && (
+            <p className="mt-1 text-[11px] text-neutral-500 leading-snug">Сумма баллов по всем мастерам</p>
+          )}
+          {loyaltySummary.error && (
+            <p className="mt-1 text-[11px] text-neutral-500">Баланс временно недоступен</p>
+          )}
+
+          {!loyaltySummary.loading && !loyaltySummary.error && loyaltyTopMasters.length > 0 && (
+            <ul className="mt-3 max-h-[200px] space-y-2 overflow-y-auto border-t border-[#EFEBE8] pt-3">
+              {loyaltyTopMasters.map((m) => {
+                const lastMs = getLastEarnedMs(m)
+                const lastLabel =
+                  lastMs > 0 ? formatDateTimeShort(new Date(lastMs).toISOString()) : null
+                return (
+                  <li
+                    key={m.master_id}
+                    className="flex items-start justify-between gap-2 border-b border-[#F4F1EF] pb-2 last:border-b-0 last:pb-0"
+                  >
+                    <div className="min-w-0 flex-1">
+                      {m.master_domain ? (
+                        <Link
+                          to={`/m/${m.master_domain}`}
+                          className="block truncate text-[12px] font-semibold text-neutral-900 hover:text-[#2e7d32]"
+                        >
+                          {m.master_name}
+                        </Link>
+                      ) : (
+                        <span className="block truncate text-[12px] font-semibold text-neutral-900">
+                          {m.master_name}
+                        </span>
+                      )}
+                      {lastLabel ? (
+                        <span className="mt-0.5 block text-[10px] text-neutral-500">
+                          Последнее начисление: {lastLabel}
+                        </span>
+                      ) : null}
+                    </div>
+                    <span className="shrink-0 text-[12px] font-bold tabular-nums text-neutral-900">
+                      {m.balance}
+                    </span>
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+
+          {!loyaltySummary.loading &&
+            !loyaltySummary.error &&
+            loyaltySummary.totalBalance === 0 &&
+            loyaltyTopMasters.length === 0 && (
+              <p className="mt-3 border-t border-[#EFEBE8] pt-3 text-[11px] leading-snug text-neutral-500">
+                Нет активных баллов по мастерам
+              </p>
+            )}
+
+          <div className="mt-auto flex flex-wrap gap-1.5 border-t border-[#EFEBE8] pt-3">
+            <button
+              type="button"
+              onClick={handleShowLoyaltyHistory}
+              className="text-xs font-medium text-[#2e7d32] hover:text-[#1b5e20] px-2.5 py-1 rounded-lg hover:bg-green-50 transition-colors border border-green-200 min-h-[32px]"
+              data-testid="client-loyalty-history"
+            >
+              История
+            </button>
+            <button
+              type="button"
+              onClick={handleShowLoyaltyHistory}
+              className="text-xs font-medium text-[#2e7d32] hover:text-[#1b5e20] px-2.5 py-1 rounded-lg hover:bg-green-50 transition-colors border border-green-200 min-h-[32px]"
+              data-testid="client-loyalty-view-all"
+            >
+              Все
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Крупные секции: явные mt между блоками (не через space-y) */}
+      <div>
 
         {/* ══ БУДУЩИЕ ЗАПИСИ ══ */}
-        <section className="bg-white rounded-2xl border border-gray-100 shadow-sm" data-testid="client-future-bookings-section">
-          <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
-            <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 bg-green-50 rounded-xl flex items-center justify-center shrink-0">
-                <CalendarIcon className="w-[18px] h-[18px] text-green-600" />
+        <section className="min-w-0" data-testid="client-future-bookings-section">
+          <div className="section-head mb-1 flex flex-wrap items-center justify-between gap-2 sm:gap-3">
+            <div className="flex min-w-0 items-center gap-2.5">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#E8F5E9] ring-1 ring-[#C8E6C9]/60">
+                <CalendarIcon className="w-[18px] h-[18px] text-[#2e7d32]" strokeWidth={2} />
               </div>
-              <h2 className="font-semibold text-gray-900" data-testid="client-bookings-title">Будущие записи</h2>
-              {!futureLoading && futureBookings.length > 0 && (
-                <span className="px-2 py-0.5 rounded-full bg-green-100 text-green-700 text-xs font-semibold tabular-nums">
-                  {futureBookings.length}
-                </span>
-              )}
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="m-0 text-base font-bold leading-tight tracking-[-0.01em] text-neutral-900" data-testid="client-bookings-title">
+                    Будущие записи
+                  </h3>
+                  {!futureLoading && futureBookings.length > 0 && (
+                    <span className="inline-flex items-center rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold tabular-nums leading-none text-green-800">
+                      {futureBookings.length}
+                    </span>
+                  )}
+                </div>
+                <p className="m-0 mt-0.5 hidden text-xs leading-snug text-neutral-500 sm:block">Запланированные визиты и быстрые действия</p>
+              </div>
             </div>
             {futureBookings.length > 3 && (
               <button
                 type="button"
                 onClick={() => { loadAllFutureBookings(); setShowAllFutureBookingsModal(true) }}
-                className="text-sm text-green-600 hover:text-green-800 font-medium px-3 py-1.5 rounded-lg hover:bg-green-50 transition-colors border border-green-200 min-h-[36px]"
+                className="shrink-0 text-sm text-[#2e7d32] hover:text-[#1b5e20] font-semibold px-3 py-1.5 rounded-lg hover:bg-[#E8F5E9] transition-colors border border-[#C8E6C9] min-h-[36px]"
               >
                 Все записи
               </button>
             )}
           </div>
+          <div className="table-wrap overflow-hidden rounded-2xl border border-[#E7E2DF] bg-white shadow-sm">
           {futureLoading ? (
             <div className="px-5 py-6 space-y-3">
               {[1, 2].map(i => (
@@ -1330,21 +1568,28 @@ export default function ClientDashboard() {
               <p className="text-sm text-red-600" role="alert" data-testid="client-bookings-error">{futureBookingsError}</p>
             </div>
           ) : futureBookings.length === 0 ? (
-            <div className="px-5 py-10 text-center" data-testid="client-bookings-empty">
-              <div className="text-4xl mb-2 select-none">{"📅"}</div>
-              <p className="text-sm text-gray-400">Нет предстоящих записей</p>
+            <div className="px-5 py-12 text-center" data-testid="client-bookings-empty">
+              <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-[#F7F4F2] text-[#6B6B6B]">
+                <CalendarIcon className="h-6 w-6" strokeWidth={1.5} />
+              </div>
+              <p className="text-sm font-medium text-neutral-700 m-0">Нет предстоящих записей</p>
+              <p className="text-xs text-neutral-500 mt-1 m-0">Новые визиты появятся здесь после бронирования</p>
             </div>
           ) : (
             <div data-testid="client-bookings-list">
               {/* Mobile cards */}
-              <div className="lg:hidden divide-y divide-gray-100">
+              <div className="lg:hidden space-y-3 p-4">
                 {(Array.isArray(futureBookings) ? futureBookings : []).slice(0, 3).map((b, idx) => {
                   const masterKey = getMasterKey(b)
                   const isFav = masterKey !== null && favoriteMasterIds.has(masterKey)
                   return (
-                    <div key={b.id} className="px-4 py-3.5" data-testid={`client-booking-item-${idx}`}>
-                      <div className="flex items-center justify-between gap-2 mb-1.5">
-                        <span className="text-[13px] font-semibold text-gray-900 tabular-nums">
+                    <div
+                      key={b.id}
+                      className="rounded-xl border border-[#E7E2DF] bg-[#FAFAF9] p-4 shadow-[0_1px_0_rgba(0,0,0,0.04)]"
+                      data-testid={`client-booking-item-${idx}`}
+                    >
+                      <div className="flex items-start justify-between gap-2 mb-2">
+                        <span className="text-[13px] font-semibold text-neutral-900 tabular-nums">
                           {b.start_time ? formatDateTimeShort(b.start_time) : formatDateTimeShort(b.date)}
                         </span>
                         <span className={`shrink-0 px-2 py-0.5 rounded-full text-[10px] font-semibold leading-tight ${getBookingStatusColor(b.status)}`}>
@@ -1352,26 +1597,26 @@ export default function ClientDashboard() {
                         </span>
                       </div>
                       {salonsEnabled && b.salon_name && (
-                        <p className="text-[11px] text-gray-400 truncate mb-0.5">{b.salon_name}</p>
+                        <p className="text-[11px] text-neutral-500 truncate mb-0.5">{b.salon_name}</p>
                       )}
                       {salonsEnabled && (b.branch_name || b.branch_address) && (
-                        <p className="text-[11px] text-gray-400 line-clamp-1 mb-0.5">
+                        <p className="text-[11px] text-neutral-500 line-clamp-1 mb-0.5">
                           {b.branch_name || 'Основной'}{b.branch_address ? ` · ${b.branch_address}` : ''}
                         </p>
                       )}
-                      <div className="text-[13px] font-medium text-gray-900 mb-0.5">
+                      <div className="text-[13px] font-medium text-neutral-900 mb-1">
                         {b.master_domain ? (
                           <Link to={`/m/${b.master_domain}`} className="text-[#2e7d32] hover:underline">{b.master_name}</Link>
                         ) : (b.master_name)}
                       </div>
-                      <p className="text-xs text-gray-500 mb-2.5 leading-snug">
+                      <p className="text-xs text-neutral-600 mb-3 leading-snug">
                         {b.service_name ? (b.service_name.includes(' - ') ? b.service_name.split(' - ')[0] : b.service_name) : '—'}
-                        <span className="text-gray-300 mx-1">·</span>
+                        <span className="text-neutral-300 mx-1">·</span>
                         <span className="tabular-nums">{b.price} ₽</span>
-                        <span className="text-gray-300 mx-1">·</span>
+                        <span className="text-neutral-300 mx-1">·</span>
                         <span>{b.duration} мин</span>
                       </p>
-                      <div className="flex items-center gap-0.5">
+                      <div className="flex flex-wrap items-center gap-1 pt-1 border-t border-[#E7E2DF]/80">
                         <div className="inline-flex items-center justify-center w-9 h-9 min-w-[36px] min-h-[36px]">
                           {b.master_name && b.master_name !== '-' && (
                             <>
@@ -1388,7 +1633,7 @@ export default function ClientDashboard() {
                             <button
                               type="button"
                               onClick={(e) => openCalendarMenu(b, e.currentTarget)}
-                              className="inline-flex items-center justify-center w-8 h-8 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+                              className="inline-flex items-center justify-center w-8 h-8 rounded-[10px] text-neutral-500 hover:text-[#1565C0] hover:bg-blue-50 transition-colors ring-1 ring-transparent hover:ring-blue-100"
                               title="Добавить в календарь"
                             >
                               <CalendarIcon className="w-4 h-4" />
@@ -1398,7 +1643,7 @@ export default function ClientDashboard() {
                         <button
                           type="button"
                           onClick={() => handleEditBooking(b)}
-                          className="inline-flex items-center justify-center w-9 h-9 min-w-[36px] min-h-[36px] rounded-lg text-slate-400 hover:text-green-600 hover:bg-green-50 transition-colors"
+                          className="inline-flex items-center justify-center w-9 h-9 min-w-[36px] min-h-[36px] rounded-[10px] text-neutral-500 hover:text-[#2e7d32] hover:bg-[#E8F5E9] transition-colors ring-1 ring-transparent hover:ring-[#C8E6C9]"
                           title="Редактировать"
                         >
                           <PencilIcon className="w-4 h-4" />
@@ -1406,9 +1651,9 @@ export default function ClientDashboard() {
                         <button
                           type="button"
                           onClick={() => handleDeleteBooking(b)}
-                          className="inline-flex items-center justify-center w-9 h-9 min-w-[36px] min-h-[36px] rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                          className="inline-flex items-center justify-center w-9 h-9 min-w-[36px] min-h-[36px] rounded-[10px] text-neutral-500 hover:text-red-700 hover:bg-red-50 transition-colors ring-1 ring-transparent hover:ring-red-100"
                           title="Отменить"
-                          data-testid="client-booking-cancel-btn"
+                          data-testid={nextBookingHero && b.id === nextBookingHero.id ? undefined : 'client-booking-cancel-btn'}
                         >
                           <TrashIcon className="w-4 h-4" />
                         </button>
@@ -1419,25 +1664,25 @@ export default function ClientDashboard() {
               </div>
               {/* Desktop table */}
               <div className="hidden lg:block overflow-x-auto overflow-y-visible">
-                <table className="w-full text-sm min-w-[640px]">
+                <table className="tbl w-full text-sm min-w-[640px]">
                   <thead>
-                    <tr className="border-b border-gray-100">
-                      {salonsEnabled && <th className="py-3 px-4 text-left text-xs font-semibold text-gray-400 uppercase tracking-wide">Салон</th>}
-                      {salonsEnabled && <th className="py-3 px-4 text-left text-xs font-semibold text-gray-400 uppercase tracking-wide">Филиал</th>}
-                      <th className="py-3 px-4 text-left text-xs font-semibold text-gray-400 uppercase tracking-wide">Мастер</th>
-                      <th className="py-3 px-4 text-left text-xs font-semibold text-gray-400 uppercase tracking-wide">Услуга</th>
-                      <th className="py-3 px-4 text-left text-xs font-semibold text-gray-400 uppercase tracking-wide">Стоимость</th>
-                      <th className="py-3 px-4 text-left text-xs font-semibold text-gray-400 uppercase tracking-wide">Дата и время</th>
-                      <th className="py-3 px-4 text-left text-xs font-semibold text-gray-400 uppercase tracking-wide">Статус</th>
-                      <th className="py-3 px-4 text-right text-xs font-semibold text-gray-400 uppercase tracking-wide w-[120px]">Действия</th>
+                    <tr>
+                      {salonsEnabled && <th className="border-b border-[#E7E2DF] bg-[#F4F1EF] py-3.5 px-4 text-left text-[11px] font-semibold uppercase tracking-wider text-[#5C5C5C]">Салон</th>}
+                      {salonsEnabled && <th className="border-b border-[#E7E2DF] bg-[#F4F1EF] py-3.5 px-4 text-left text-[11px] font-semibold uppercase tracking-wider text-[#5C5C5C]">Филиал</th>}
+                      <th className="border-b border-[#E7E2DF] bg-[#F4F1EF] py-3.5 px-4 text-left text-[11px] font-semibold uppercase tracking-wider text-[#5C5C5C]">Мастер</th>
+                      <th className="border-b border-[#E7E2DF] bg-[#F4F1EF] py-3.5 px-4 text-left text-[11px] font-semibold uppercase tracking-wider text-[#5C5C5C]">Услуга</th>
+                      <th className="border-b border-[#E7E2DF] bg-[#F4F1EF] py-3.5 px-4 text-left text-[11px] font-semibold uppercase tracking-wider text-[#5C5C5C]">Стоимость</th>
+                      <th className="border-b border-[#E7E2DF] bg-[#F4F1EF] py-3.5 px-4 text-left text-[11px] font-semibold uppercase tracking-wider text-[#5C5C5C]">Дата и время</th>
+                      <th className="border-b border-[#E7E2DF] bg-[#F4F1EF] py-3.5 px-4 text-left text-[11px] font-semibold uppercase tracking-wider text-[#5C5C5C]">Статус</th>
+                      <th className="border-b border-[#E7E2DF] bg-[#F4F1EF] py-3.5 px-4 text-right text-[11px] font-semibold uppercase tracking-wider text-[#5C5C5C] w-[128px]">Действия</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-gray-100">
+                  <tbody className="divide-y divide-[#EFEBE8]">
                     {(Array.isArray(futureBookings) ? futureBookings : []).slice(0, 3).map((b, idx) => {
                       const masterKey = getMasterKey(b)
                       const isFav = masterKey !== null && favoriteMasterIds.has(masterKey)
                       return (
-                        <tr key={b.id} className="hover:bg-gray-50/60 transition-colors" data-testid={`client-booking-item-${idx}`}>
+                        <tr key={b.id} className="hover:bg-[#FAFAF9] transition-colors" data-testid={`client-booking-item-${idx}`}>
                           {salonsEnabled && <td className="py-3.5 px-4 text-gray-600">{b.salon_name}</td>}
                           {salonsEnabled && (
                             <td className="py-3.5 px-4">
@@ -1509,7 +1754,7 @@ export default function ClientDashboard() {
                                   onClick={() => handleDeleteBooking(b)}
                                   className="inline-flex items-center justify-center w-7 h-7 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors"
                                   title="Отменить"
-                                  data-testid="client-booking-cancel-btn"
+                                  data-testid={nextBookingHero && b.id === nextBookingHero.id ? undefined : 'client-booking-cancel-btn'}
                                 >
                                   <TrashIcon className="w-4 h-4" />
                                 </button>
@@ -1524,29 +1769,120 @@ export default function ClientDashboard() {
               </div>
             </div>
           )}
+          </div>
+        </section>
+
+        {/* ══ ИЗБРАННОЕ ══ */}
+        <section className="mt-6 min-w-0" data-testid="client-dashboard-favorites-section">
+          <div className="section-head mb-1 flex flex-wrap items-center justify-between gap-2 sm:gap-3">
+            <div className="flex min-w-0 items-center gap-2.5">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#FFF8E7] ring-1 ring-[#F5D99C]/50">
+                <HeartIcon className="w-[18px] h-[18px] text-[#C98817]" strokeWidth={2} />
+              </div>
+              <div className="min-w-0">
+                <h3 className="m-0 text-base font-bold leading-tight tracking-[-0.01em] text-neutral-900">Избранные</h3>
+                <p className="m-0 mt-0.5 hidden text-xs leading-snug text-neutral-500 sm:block">Салоны, мастера и услуги в одном месте</p>
+              </div>
+            </div>
+            {favorites.length > 3 && (
+              <button
+                type="button"
+                onClick={() => navigate('/client/favorites')}
+                className="shrink-0 text-sm text-[#2e7d32] hover:text-[#1b5e20] font-semibold px-3 py-1.5 rounded-lg hover:bg-[#E8F5E9] transition-colors border border-[#C8E6C9] min-h-[36px]"
+              >
+                Все избранное
+              </button>
+            )}
+          </div>
+          <div className="table-wrap overflow-hidden rounded-2xl border border-[#E7E2DF] bg-white shadow-sm">
+            {favoritesLoading ? (
+              <div className="p-4 space-y-3">
+                {[1, 2, 3].map(i => (
+                  <div key={i} className="animate-pulse h-[88px] rounded-xl bg-[#F4F1EF]" />
+                ))}
+              </div>
+            ) : favorites.length === 0 ? (
+              <div className="px-4 py-3 text-center sm:px-5 sm:py-3.5">
+                <div className="mx-auto mb-1.5 flex h-9 w-9 items-center justify-center rounded-lg bg-[#F7F4F2] text-neutral-400">
+                  <HeartIcon className="h-4 w-4" strokeWidth={1.5} />
+                </div>
+                <p className="text-sm font-medium text-neutral-700 m-0">Пока нет избранного</p>
+                <p className="text-xs text-neutral-500 mt-0.5 m-0 max-w-sm mx-auto leading-snug">Добавляйте мастеров и услуги в избранное при бронировании — они появятся здесь</p>
+              </div>
+            ) : (
+              <div className="p-4">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                  {favorites.slice(0, 6).map((favorite, index) => {
+                    let title = 'Избранное'
+                    let name = favorite.favorite_name || 'Название не указано'
+                    let masterDomain = null
+                    if (favorite.type === 'salon' && favorite.salon) {
+                      title = 'Салон'; name = favorite.salon.name || favorite.favorite_name || 'Салон'
+                    } else if (favorite.type === 'master' && favorite.master) {
+                      title = 'Мастер'; name = favorite.master.user?.full_name || favorite.favorite_name || 'Мастер'; masterDomain = favorite.master.domain || null
+                    } else if (favorite.type === 'indie_master') {
+                      title = 'Мастер'
+                      if (favorite.indie_master && favorite.indie_master.user) {
+                        name = favorite.indie_master.user.full_name || favorite.favorite_name || 'Мастер'; masterDomain = favorite.indie_master.domain || null
+                      } else { name = favorite.favorite_name || 'Мастер' }
+                    } else if (favorite.type === 'service' && favorite.service) {
+                      title = 'Услуга'; name = favorite.service.name || favorite.favorite_name || 'Услуга'
+                    } else {
+                      title = favorite.type === 'salon' ? 'Салон' : favorite.type === 'master' ? 'Мастер' : favorite.type === 'indie_master' ? 'Мастер' : favorite.type === 'service' ? 'Услуга' : 'Избранное'
+                    }
+                    return (
+                      <div
+                        key={favorite.client_favorite_id || favorite.id || index}
+                        className="flex min-h-[92px] items-stretch justify-between gap-3 rounded-xl border border-[#E7E2DF] bg-[#FAFAF9] p-4 shadow-[0_1px_0_rgba(0,0,0,0.04)] transition-colors hover:border-[#81C784]/70 hover:bg-white"
+                        data-testid={`client-dashboard-favorite-card-${index}`}
+                      >
+                        <div className="min-w-0 flex-1">
+                          <div className="text-[10px] font-semibold text-neutral-500 uppercase tracking-wider mb-1">{title}</div>
+                          {masterDomain ? (
+                            <Link to={`/m/${masterDomain}`} className="text-sm font-semibold text-[#2e7d32] hover:underline line-clamp-2">{name}</Link>
+                          ) : (
+                            <div className="text-sm font-semibold text-neutral-900 line-clamp-2">{name}</div>
+                          )}
+                        </div>
+                        <div className="shrink-0 flex items-start pt-0.5">
+                          {(favorite.type === 'master' && favorite.master_id) && (
+                            <FavoriteButton type="master" itemId={favorite.master_id} itemName={name} size="sm" onFavoriteChange={handleFavoriteChange} />
+                          )}
+                          {(favorite.type === 'indie_master' && favorite.indie_master_id) && (
+                            <FavoriteButton type="indie_master" itemId={favorite.indie_master_id} itemName={name} size="sm" onFavoriteChange={handleFavoriteChange} />
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
         </section>
 
         {/* ══ ПРОШЕДШИЕ ЗАПИСИ ══ */}
-        <section className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-          <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
-            <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 bg-gray-50 rounded-xl flex items-center justify-center shrink-0">
+        <section className="mt-6 min-w-0">
+          <div className="section-head mb-1 flex flex-wrap items-center justify-between gap-2 sm:gap-3">
+            <div className="flex min-w-0 items-center gap-2.5">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gray-50">
                 <svg className="w-[18px] h-[18px] text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
                 </svg>
               </div>
-              <h2 className="font-semibold text-gray-900">Прошедшие записи</h2>
+              <h3 className="m-0 text-base font-bold leading-tight tracking-[-0.01em] text-neutral-900">Прошедшие записи</h3>
             </div>
             {bookings.length > 3 && (
               <button
                 type="button"
                 onClick={() => { loadAllPastBookings(); setShowAllPastBookingsModal(true) }}
-                className="text-sm text-green-600 hover:text-green-800 font-medium px-3 py-1.5 rounded-lg hover:bg-green-50 transition-colors border border-green-200 min-h-[36px]"
+                className="shrink-0 text-sm text-green-600 hover:text-green-800 font-medium px-3 py-1.5 rounded-lg hover:bg-green-50 transition-colors border border-green-200 min-h-[36px]"
               >
                 Все записи
               </button>
             )}
           </div>
+          <div className="table-wrap overflow-hidden rounded-2xl border border-[#E7E2DF] bg-white shadow-sm">
           {loading ? (
             <div className="px-5 py-6 space-y-3">
               {[1, 2].map(i => (
@@ -1563,14 +1899,19 @@ export default function ClientDashboard() {
               <p className="text-sm text-red-600" role="alert">{pastBookingsError}</p>
             </div>
           ) : bookings.length === 0 ? (
-            <div className="px-5 py-10 text-center">
-              <div className="text-4xl mb-2 select-none">{"📋"}</div>
-              <p className="text-sm text-gray-400">Нет прошедших записей</p>
+            <div className="px-5 py-12 text-center">
+              <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-[#F7F4F2] text-neutral-400">
+                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                </svg>
+              </div>
+              <p className="text-sm font-medium text-neutral-700 m-0">Нет прошедших записей</p>
+              <p className="text-xs text-neutral-500 mt-1 m-0">История появится после завершённых визитов</p>
             </div>
           ) : (
             <>
               {/* Mobile */}
-              <div className="lg:hidden divide-y divide-gray-100" data-testid="client-past-bookings-list-mobile">
+              <div className="lg:hidden py-1" data-testid="client-past-bookings-list-mobile">
                 {(Array.isArray(bookings) ? bookings : []).slice(0, 3).map((b) => {
                   const masterKey = getMasterKey(b)
                   const isFav = masterKey !== null && favoriteMasterIds.has(masterKey)
@@ -1599,7 +1940,8 @@ export default function ClientDashboard() {
                       <span className="text-[12px] text-gray-400">—</span>
                     )
                   return (
-                    <div key={b.id} className="px-4 py-3.5">
+                    <div key={b.id} className="past-card mx-3 mb-2.5 flex flex-col gap-2 rounded-xl border border-[#E7E2DF] bg-white p-4 shadow-sm first:mt-3 last:mb-3">
+                      <div className="min-w-0 w-full">
                       <div className="text-[13px] font-semibold text-gray-900 tabular-nums mb-1.5">{formatDateShort(b.date)}</div>
                       <div className="mb-1">{masterSalonBlock}</div>
                       <p className="text-xs text-gray-500 mb-2.5">
@@ -1651,20 +1993,21 @@ export default function ClientDashboard() {
                           </button>
                         </Tooltip>
                       </div>
+                      </div>
                     </div>
                   )
                 })}
               </div>
               {/* Desktop */}
               <div className="hidden lg:block overflow-x-auto">
-                <table className="w-full text-sm min-w-[520px]">
+                <table className="tbl w-full text-sm min-w-[520px]">
                   <thead>
-                    <tr className="border-b border-gray-100">
-                      <th className="py-3 px-4 text-left text-xs font-semibold text-gray-400 uppercase tracking-wide">{salonsEnabled ? 'Салон / Мастер' : 'Мастер'}</th>
-                      <th className="py-3 px-4 text-left text-xs font-semibold text-gray-400 uppercase tracking-wide">Услуга</th>
-                      <th className="py-3 px-4 text-left text-xs font-semibold text-gray-400 uppercase tracking-wide">Стоимость</th>
-                      <th className="py-3 px-4 text-left text-xs font-semibold text-gray-400 uppercase tracking-wide">Дата</th>
-                      <th className="py-3 px-4 text-right text-xs font-semibold text-gray-400 uppercase tracking-wide w-[112px]">Действия</th>
+                    <tr>
+                      <th className="border-b border-[#E7E2DF] bg-[#F7F4F2] py-3 px-4 text-left text-[11px] font-semibold uppercase tracking-wider text-[#6B6B6B]">{salonsEnabled ? 'Салон / Мастер' : 'Мастер'}</th>
+                      <th className="border-b border-[#E7E2DF] bg-[#F7F4F2] py-3 px-4 text-left text-[11px] font-semibold uppercase tracking-wider text-[#6B6B6B]">Услуга</th>
+                      <th className="border-b border-[#E7E2DF] bg-[#F7F4F2] py-3 px-4 text-left text-[11px] font-semibold uppercase tracking-wider text-[#6B6B6B]">Стоимость</th>
+                      <th className="border-b border-[#E7E2DF] bg-[#F7F4F2] py-3 px-4 text-left text-[11px] font-semibold uppercase tracking-wider text-[#6B6B6B]">Дата</th>
+                      <th className="border-b border-[#E7E2DF] bg-[#F7F4F2] py-3 px-4 text-right text-[11px] font-semibold uppercase tracking-wider text-[#6B6B6B] w-[112px]">Действия</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
@@ -1738,125 +2081,10 @@ export default function ClientDashboard() {
               </div>
             </>
           )}
+          </div>
         </section>
 
-        {/* ══ НИЖНЯЯ СТРОКА: Избранные + Баллы ══ */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 lg:gap-6">
-
-          {/* Избранные */}
-          <section className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 bg-amber-50 rounded-xl flex items-center justify-center shrink-0">
-                  <HeartIcon className="w-[18px] h-[18px] text-amber-500" strokeWidth={2} />
-                </div>
-                <h2 className="font-semibold text-gray-900">Избранные</h2>
-              </div>
-              {favorites.length > 3 && (
-                <button
-                  type="button"
-                  onClick={() => navigate('/client/favorites')}
-                  className="text-sm text-green-600 hover:text-green-800 font-medium px-3 py-1.5 rounded-lg hover:bg-green-50 transition-colors border border-green-200"
-                >
-                  Все
-                </button>
-              )}
-            </div>
-            <div className="p-4">
-              {favoritesLoading ? (
-                <div className="space-y-2.5">
-                  {[1, 2].map(i => (
-                    <div key={i} className="animate-pulse h-12 bg-gray-100 rounded-xl" />
-                  ))}
-                </div>
-              ) : favorites.length === 0 ? (
-                <div className="py-8 text-center">
-                  <HeartIcon className="w-10 h-10 mx-auto mb-2 text-gray-300" strokeWidth={1.5} aria-hidden />
-                  <p className="text-sm text-gray-400">Нет избранных</p>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {favorites.slice(0, 3).map((favorite, index) => {
-                    let title = 'Избранное'
-                    let name = favorite.favorite_name || 'Название не указано'
-                    let masterDomain = null
-                    if (favorite.type === 'salon' && favorite.salon) {
-                      title = 'Салон'; name = favorite.salon.name || favorite.favorite_name || 'Салон'
-                    } else if (favorite.type === 'master' && favorite.master) {
-                      title = 'Мастер'; name = favorite.master.user?.full_name || favorite.favorite_name || 'Мастер'; masterDomain = favorite.master.domain || null
-                    } else if (favorite.type === 'indie_master') {
-                      title = 'Мастер'
-                      if (favorite.indie_master && favorite.indie_master.user) {
-                        name = favorite.indie_master.user.full_name || favorite.favorite_name || 'Мастер'; masterDomain = favorite.indie_master.domain || null
-                      } else { name = favorite.favorite_name || 'Мастер' }
-                    } else if (favorite.type === 'service' && favorite.service) {
-                      title = 'Услуга'; name = favorite.service.name || favorite.favorite_name || 'Услуга'
-                    } else {
-                      title = favorite.type === 'salon' ? 'Салон' : favorite.type === 'master' ? 'Мастер' : favorite.type === 'indie_master' ? 'Мастер' : favorite.type === 'service' ? 'Услуга' : 'Избранное'
-                    }
-                    return (
-                      <div key={favorite.client_favorite_id || favorite.id || index} className="flex items-center justify-between gap-2 p-3 rounded-xl border border-gray-100 hover:border-gray-200 hover:bg-gray-50/60 transition-colors">
-                        <div className="min-w-0 flex-1">
-                          <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-0.5">{title}</div>
-                          {masterDomain ? (
-                            <Link to={`/m/${masterDomain}`} className="text-sm font-medium text-[#2e7d32] hover:underline truncate block">{name}</Link>
-                          ) : (
-                            <div className="text-sm font-medium text-gray-800 truncate">{name}</div>
-                          )}
-                        </div>
-                        <div className="shrink-0">
-                          {(favorite.type === 'master' && favorite.master_id) && (
-                            <FavoriteButton type="master" itemId={favorite.master_id} itemName={name} size="sm" onFavoriteChange={handleFavoriteChange} />
-                          )}
-                          {(favorite.type === 'indie_master' && favorite.indie_master_id) && (
-                            <FavoriteButton type="indie_master" itemId={favorite.indie_master_id} itemName={name} size="sm" onFavoriteChange={handleFavoriteChange} />
-                          )}
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
-              )}
-            </div>
-          </section>
-
-          {/* Мои баллы */}
-          <section className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 bg-violet-50 rounded-xl flex items-center justify-center shrink-0">
-                  <svg className="w-[18px] h-[18px] text-violet-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                </div>
-                <h2 className="font-semibold text-gray-900">Мои баллы</h2>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handleShowLoyaltyHistory}
-                  className="text-sm text-green-600 hover:text-green-800 font-medium px-3 py-1.5 rounded-lg hover:bg-green-50 transition-colors border border-green-200 min-h-[36px]"
-                  data-testid="client-loyalty-history"
-                >
-                  История
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {/* TODO: navigate to loyalty history page */}}
-                  className="text-sm text-green-600 hover:text-green-800 font-medium px-3 py-1.5 rounded-lg hover:bg-green-50 transition-colors border border-green-200 min-h-[36px]"
-                  data-testid="client-loyalty-view-all"
-                >
-                  Все
-                </button>
-              </div>
-            </div>
-            <div className="p-4">
-              <ClientLoyaltyPoints />
-            </div>
-          </section>
-
-        </div>
-
+      </div>
       </div>
       {/* Модальное окно для установки пароля */}
       <PasswordSetupModal
@@ -2998,7 +3226,6 @@ export default function ClientDashboard() {
           </div>
         </div>
       )}
-      </div>
     </div>
   )
 }

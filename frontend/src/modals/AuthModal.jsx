@@ -73,6 +73,20 @@ function validateDob(dob) {
 const AUTH_PASSWORD_INPUT_CLASS =
   'border rounded px-3 py-2 w-full min-h-[44px] text-[15px] leading-5 tracking-normal sm:text-sm sm:leading-normal'
 
+const LOGIN_REQUEST_TIMEOUT_MS = 25000
+const LOGIN_ME_TIMEOUT_MS = 15000
+
+/** fetch с таймаутом: иначе зависший login или /users/me оставляет кнопку в «Вход...» без выхода из async-функции и без finally. */
+async function fetchWithTimeout(resource, options = {}, timeoutMs = 20000) {
+  const controller = new AbortController()
+  const id = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    return await fetch(resource, { ...options, signal: controller.signal })
+  } finally {
+    clearTimeout(id)
+  }
+}
+
 export default function AuthModal() {
   const {
     login,
@@ -409,14 +423,18 @@ export default function AuthModal() {
     if (Object.keys(errs).length > 0) return
     setLoginLoading(true)
     try {
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          phone: normalizeRussianPhoneForApi(loginForm.phone),
-          password: loginForm.password,
-        }),
-      })
+      const res = await fetchWithTimeout(
+        '/api/auth/login',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            phone: normalizeRussianPhoneForApi(loginForm.phone),
+            password: loginForm.password,
+          }),
+        },
+        LOGIN_REQUEST_TIMEOUT_MS
+      )
       if (res.ok) {
         const data = await res.json()
         let role = null
@@ -430,12 +448,16 @@ export default function AuthModal() {
 
         let userData = null
         try {
-          const userResponse = await fetch('/api/auth/users/me', {
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${data.access_token}`,
+          const userResponse = await fetchWithTimeout(
+            '/api/auth/users/me',
+            {
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${data.access_token}`,
+              },
             },
-          })
+            LOGIN_ME_TIMEOUT_MS
+          )
           if (userResponse.ok) {
             userData = await userResponse.json()
             if (userData.role) {
@@ -444,9 +466,15 @@ export default function AuthModal() {
             }
           }
         } catch (err) {
-          console.error('Ошибка получения данных пользователя:', err)
-          setLoginErrors({ general: 'Не удалось загрузить профиль. Попробуйте обновить страницу.' })
-          return
+          const aborted = err?.name === 'AbortError'
+          if (aborted) {
+            // Таймаут / отмена /me после успешного login — не блокируем вход (роль уже из JWT при наличии)
+            console.warn('[auth] GET /api/auth/users/me aborted (timeout); continuing login with JWT')
+          } else {
+            console.error('Ошибка получения данных пользователя:', err)
+            setLoginErrors({ general: 'Не удалось загрузить профиль. Попробуйте обновить страницу.' })
+            return
+          }
         }
 
         login(userData || data)
@@ -454,29 +482,46 @@ export default function AuthModal() {
         setLoginForm({ phone: '+7', password: '' })
         onClose()
         const stayOrReturn = authModalRedirectMode === 'stay' || authModalRedirectMode === 'returnTo'
+        let postLoginRoute = ''
         if (stayOrReturn) {
           setAuthModalRedirectMode('default')
           setAuthModalReturnToPath(null)
           if (authModalReturnToPath) {
             const current = window.location.pathname + window.location.search
-            if (current !== authModalReturnToPath) navigate(authModalReturnToPath)
+            if (current !== authModalReturnToPath) {
+              postLoginRoute = authModalReturnToPath
+              navigate(authModalReturnToPath)
+            } else {
+              postLoginRoute = 'stay (already on return path)'
+            }
+          } else {
+            postLoginRoute = 'stay'
           }
         } else {
           setAuthModalRedirectMode('default')
           setAuthModalReturnToPath(null)
           const r = (role || '').toString().toLowerCase()
-          if (r === 'admin' || r === 'moderator') navigate('/admin')
-          else if (r === 'client') navigate('/client')
-          else if (r === 'master' || r === 'indie') navigate('/master')
-          else if (r === 'salon') navigate('/salon')
-          else navigate('/')
+          if (r === 'admin' || r === 'moderator') postLoginRoute = '/admin'
+          else if (r === 'client') postLoginRoute = '/client'
+          else if (r === 'master' || r === 'indie') postLoginRoute = '/master'
+          else if (r === 'salon') postLoginRoute = '/salon'
+          else postLoginRoute = '/'
+          navigate(postLoginRoute)
         }
+        console.warn('[auth] post-login route:', postLoginRoute)
       } else {
         const err = await res.json()
         setLoginErrors({ general: err.detail || 'Не удалось войти' })
       }
     } catch (err) {
-      setLoginErrors({ general: 'Ошибка сети или сервера' })
+      if (err?.name === 'AbortError') {
+        console.warn('[auth] POST /api/auth/login aborted (timeout)')
+        setLoginErrors({
+          general: 'Превышено время ожидания ответа сервера. Проверьте сеть и попробуйте снова.',
+        })
+      } else {
+        setLoginErrors({ general: 'Ошибка сети или сервера' })
+      }
     } finally {
       setLoginLoading(false)
     }

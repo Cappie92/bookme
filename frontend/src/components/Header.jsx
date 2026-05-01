@@ -1,16 +1,21 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
+import { UserCircleIcon } from '@heroicons/react/24/outline'
 import { Button, Logo } from './ui'
 import { useAuth } from '../contexts/AuthContext'
 
-export default function Header({ compactPublicBooking = false }) {
+export default function Header({ compactPublicBooking = false, clientManagedBranches = [] }) {
   const [isMenuOpen, setIsMenuOpen] = useState(false)
+  const [clientCabinetMenuOpen, setClientCabinetMenuOpen] = useState(false)
+  const clientCabinetMenuDesktopRef = useRef(null)
+  const clientCabinetMenuMobileRef = useRef(null)
   const { isAuthenticated, logout, openAuthModal, user } = useAuth()
   const navigate = useNavigate()
   const { pathname } = useLocation()
   const isPublicBooking = pathname.startsWith('/m/')
   const isClientUser =
     ((user?.role || localStorage.getItem('user_role') || '') + '').toLowerCase() === 'client'
+  const isClientCabinet = pathname.startsWith('/client')
 
   const handleLoginClick = () => {
     openAuthModal('client', 'login', { redirectMode: isPublicBooking ? 'stay' : 'default', flow: 'default' })
@@ -21,7 +26,28 @@ export default function Header({ compactPublicBooking = false }) {
   }
 
   const handleLogoutClick = () => {
+    setClientCabinetMenuOpen(false)
     logout()
+  }
+
+  useEffect(() => {
+    if (!clientCabinetMenuOpen) return
+    const onDoc = (e) => {
+      const t = e.target
+      if (clientCabinetMenuDesktopRef.current?.contains(t)) return
+      if (clientCabinetMenuMobileRef.current?.contains(t)) return
+      setClientCabinetMenuOpen(false)
+    }
+    document.addEventListener('mousedown', onDoc)
+    return () => document.removeEventListener('mousedown', onDoc)
+  }, [clientCabinetMenuOpen])
+
+  const clientCabinetInitial =
+    (user?.full_name || user?.email || '?').trim().charAt(0).toUpperCase() || '?'
+
+  const goClient = (path) => {
+    setClientCabinetMenuOpen(false)
+    navigate(path)
   }
 
   const handleDashboardClick = async () => {
@@ -121,17 +147,101 @@ export default function Header({ compactPublicBooking = false }) {
             </Link>
           </nav>
 
-          {/* Кнопки для десктопа */}
-          <div className="flex items-center space-x-4">
+          {/* Кнопки для десктопа — в кабинете клиента отделяем от маркетинг-навигации, как у мастера */}
+          <div
+            className={
+              isClientCabinet
+                ? 'right flex items-center space-x-4 border-l border-neutral-200 pl-3.5'
+                : 'right flex items-center space-x-4'
+            }
+          >
             {isAuthenticated ? (
-              <div className="flex items-center space-x-4">
-                <Button variant="secondary" size="sm" onClick={handleDashboardClick}>
-                  Личный кабинет
-                </Button>
-                <Button variant="primary" size="sm" onClick={handleLogoutClick}>
-                  Выйти
-                </Button>
-              </div>
+              isClientCabinet && isClientUser ? (
+                <div className="relative" ref={clientCabinetMenuDesktopRef}>
+                  <button
+                    type="button"
+                    onClick={() => setClientCabinetMenuOpen((o) => !o)}
+                    className="flex h-10 w-10 items-center justify-center rounded-full border border-neutral-200 bg-white text-neutral-700 shadow-sm transition hover:border-neutral-300 hover:bg-neutral-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4CAF50]/40"
+                    aria-expanded={clientCabinetMenuOpen}
+                    aria-haspopup="menu"
+                    aria-label="Меню кабинета"
+                  >
+                    <span className="flex h-9 w-9 items-center justify-center rounded-full bg-[#E8F5E9] text-sm font-semibold text-[#2e7d32]">
+                      {clientCabinetInitial}
+                    </span>
+                  </button>
+                  {clientCabinetMenuOpen && (
+                    <div
+                      role="menu"
+                      className="absolute right-0 top-full z-[60] mt-2 w-56 overflow-hidden rounded-xl border border-neutral-200 bg-white py-1 shadow-lg ring-1 ring-black/5"
+                    >
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => goClient('/client/dashboard')}
+                        className="flex w-full px-4 py-2.5 text-left text-sm font-medium text-neutral-800 hover:bg-neutral-50"
+                        data-testid="client-nav-dashboard"
+                      >
+                        Дашборд
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => goClient('/client/master-notes')}
+                        className="flex w-full px-4 py-2.5 text-left text-sm font-medium text-neutral-800 hover:bg-neutral-50"
+                      >
+                        Мои заметки
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => goClient('/client/profile')}
+                        className="flex w-full px-4 py-2.5 text-left text-sm font-medium text-neutral-800 hover:bg-neutral-50"
+                      >
+                        Настройки
+                      </button>
+                      {Array.isArray(clientManagedBranches) &&
+                        clientManagedBranches.length > 0 && (
+                          <div className="border-t border-neutral-100 py-1">
+                            <div className="px-4 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-neutral-400">
+                              Управление
+                            </div>
+                            {clientManagedBranches.map((branch) => (
+                              <button
+                                key={branch.id}
+                                type="button"
+                                role="menuitem"
+                                onClick={() => goClient(`/branch/manage/${branch.id}`)}
+                                className="flex w-full px-4 py-2 text-left text-sm text-neutral-700 hover:bg-neutral-50"
+                              >
+                                {branch.name}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      <div className="border-t border-neutral-100" />
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={handleLogoutClick}
+                        className="flex w-full px-4 py-2.5 text-left text-sm font-medium text-red-600 hover:bg-red-50"
+                        data-testid="header-client-logout"
+                      >
+                        Выход
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="flex items-center space-x-4">
+                  <Button variant="secondary" size="sm" onClick={handleDashboardClick}>
+                    Личный кабинет
+                  </Button>
+                  <Button variant="primary" size="sm" onClick={handleLogoutClick}>
+                    Выйти
+                  </Button>
+                </div>
+              )
             ) : (
               <>
                 <Button variant="secondary" size="sm" onClick={handleLoginClick} data-testid="header-login">
@@ -210,23 +320,103 @@ export default function Header({ compactPublicBooking = false }) {
               </div>
             )}
             {isAuthenticated && (
-              <div className="flex items-center gap-1.5">
-                <button
-                  type="button"
-                  onClick={handleDashboardClick}
-                  className="bg-[#4CAF50] text-white hover:bg-[#45A049] transition-colors text-xs font-semibold px-2.5 py-1.5 rounded-lg shadow-sm active:scale-[0.98]"
-                >
-                  Кабинет
-                </button>
-                <button
-                  type="button"
-                  onClick={handleLogoutClick}
-                  className="text-neutral-600 hover:text-neutral-900 hover:bg-neutral-100/80 transition-colors text-xs font-medium px-2 py-1.5 rounded-md"
-                  data-testid={isClientUser ? 'header-client-logout' : 'header-mobile-logout'}
-                >
-                  Выйти
-                </button>
-              </div>
+              <>
+                {isClientCabinet && isClientUser ? (
+                  <div className="relative flex justify-end" ref={clientCabinetMenuMobileRef}>
+                    <button
+                      type="button"
+                      onClick={() => setClientCabinetMenuOpen((o) => !o)}
+                      className="flex h-10 w-10 items-center justify-center rounded-full border border-neutral-200 bg-white text-neutral-700 shadow-sm active:scale-[0.98]"
+                      aria-expanded={clientCabinetMenuOpen}
+                      aria-haspopup="menu"
+                      aria-label="Меню кабинета"
+                    >
+                      <UserCircleIcon className="h-7 w-7 text-[#2e7d32]" strokeWidth={1.5} />
+                    </button>
+                    {clientCabinetMenuOpen && (
+                      <div
+                        role="menu"
+                        className="absolute right-0 top-full z-[60] mt-2 w-[min(18rem,calc(100vw-1.5rem))] overflow-hidden rounded-xl border border-neutral-200 bg-white py-1 shadow-lg ring-1 ring-black/5"
+                      >
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={() => goClient('/client/dashboard')}
+                          className="flex w-full px-4 py-2.5 text-left text-sm font-medium text-neutral-800 hover:bg-neutral-50"
+                          data-testid="client-nav-dashboard"
+                        >
+                          Дашборд
+                        </button>
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={() => goClient('/client/master-notes')}
+                          className="flex w-full px-4 py-2.5 text-left text-sm font-medium text-neutral-800 hover:bg-neutral-50"
+                        >
+                          Мои заметки
+                        </button>
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={() => goClient('/client/profile')}
+                          className="flex w-full px-4 py-2.5 text-left text-sm font-medium text-neutral-800 hover:bg-neutral-50"
+                        >
+                          Настройки
+                        </button>
+                        {Array.isArray(clientManagedBranches) &&
+                          clientManagedBranches.length > 0 && (
+                            <div className="border-t border-neutral-100 py-1">
+                              <div className="px-4 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-neutral-400">
+                                Управление
+                              </div>
+                              {clientManagedBranches.map((branch) => (
+                                <button
+                                  key={branch.id}
+                                  type="button"
+                                  role="menuitem"
+                                  onClick={() => goClient(`/branch/manage/${branch.id}`)}
+                                  className="flex w-full px-4 py-2 text-left text-sm text-neutral-700 hover:bg-neutral-50"
+                                >
+                                  {branch.name.length > 18
+                                    ? `${branch.name.slice(0, 17)}…`
+                                    : branch.name}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        <div className="border-t border-neutral-100" />
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={handleLogoutClick}
+                          className="flex w-full px-4 py-2.5 text-left text-sm font-medium text-red-600 hover:bg-red-50"
+                          data-testid="header-client-logout"
+                        >
+                          Выход
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={handleDashboardClick}
+                      className="bg-[#4CAF50] text-white hover:bg-[#45A049] transition-colors text-xs font-semibold px-2.5 py-1.5 rounded-lg shadow-sm active:scale-[0.98]"
+                    >
+                      Кабинет
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleLogoutClick}
+                      className="text-neutral-600 hover:text-neutral-900 hover:bg-neutral-100/80 transition-colors text-xs font-medium px-2 py-1.5 rounded-md"
+                      data-testid={isClientUser ? 'header-client-logout' : 'header-mobile-logout'}
+                    >
+                      Выйти
+                    </button>
+                  </div>
+                )}
+              </>
             )}
           </div>
         </div>
