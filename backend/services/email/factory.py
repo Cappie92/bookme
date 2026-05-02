@@ -41,12 +41,21 @@ def build_transactional_provider() -> TransactionalEmailProvider:
 
     key = (settings.UNISENDER_API_KEY or "").strip()
     from_addr = settings.email_from_address_effective
+    list_id = (settings.UNISENDER_LIST_ID or "").strip()
     if not key or not from_addr:
         logger.error(
             "Unisender включён (EMAIL_ENABLED=true), но не заданы UNISENDER_API_KEY или EMAIL_FROM_ADDRESS"
         )
         return FailingTransactionalProvider(
             error_message="Почта не настроена на сервере (Unisender)",
+        )
+    if not list_id:
+        logger.error(
+            "Unisender включён (EMAIL_ENABLED=true), но не задан UNISENDER_LIST_ID "
+            "(классический API sendEmail требует list_id)"
+        )
+        return FailingTransactionalProvider(
+            error_message="Почта не настроена на сервере: задайте UNISENDER_LIST_ID для Unisender sendEmail",
         )
 
     timeout = float(settings.UNISENDER_REQUEST_TIMEOUT_SEC or "25")
@@ -55,12 +64,14 @@ def build_transactional_provider() -> TransactionalEmailProvider:
         api_base_url=settings.UNISENDER_API_BASE_URL,
         from_email=from_addr,
         from_name=settings.EMAIL_FROM_NAME,
+        list_id=list_id,
         timeout_sec=timeout,
     )
     logger.info(
-        "transactional email provider: unisender (base_url=%s from=%s)",
+        "transactional email provider: unisender classic api (base_url=%s from=%s list_id=%s)",
         (settings.UNISENDER_API_BASE_URL or "").split("?")[0][:60],
         from_addr,
+        list_id,
     )
     return p
 

@@ -55,12 +55,14 @@ class Settings(BaseSettings):
     FRONTEND_URL: str = "http://localhost:5175"
     API_BASE_URL: str = "http://localhost:8000"
 
-    # --- Transactional email (Unisender Go и др.) ---
+    # --- Transactional email (классический Unisender API sendEmail; см. services/email/unisender_provider) ---
     # EMAIL_ENABLED=false — без сети (stub), текущее поведение dev по умолчанию.
     EMAIL_ENABLED: str = ""
     EMAIL_PROVIDER: str = "unisender"
     UNISENDER_API_KEY: str = ""
-    UNISENDER_API_BASE_URL: str = "https://goapi.unisender.ru/ru/transactional/api/v1"
+    UNISENDER_API_BASE_URL: str = "https://api.unisender.com/ru/api"
+    # Обязателен для sendEmail: код списка из кабинета (getLists / настройки списка).
+    UNISENDER_LIST_ID: str = ""
     EMAIL_FROM_ADDRESS: str = ""
     EMAIL_FROM_NAME: str = "DeDato"
     UNISENDER_REQUEST_TIMEOUT_SEC: str = "25"

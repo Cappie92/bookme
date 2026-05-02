@@ -40,5 +40,5 @@ class TransactionalEmailProvider(Protocol):
         text_body: str,
         attachments: Optional[list[dict[str, Any]]] = None,
     ) -> EmailSendResult:
-        """attachments — формат Unisender Go: type, name, content (base64)."""
+        """attachments — type, name, content (base64); провайдер декодирует во вложение sendEmail."""
         ...

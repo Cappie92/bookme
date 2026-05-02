@@ -44,7 +44,7 @@ def build_booking_calendar_email_bodies(
     alarm_minutes: int = 60,
 ) -> tuple[str, str, str, str, list[dict]]:
     """
-    Возвращает subject, html, plaintext, ics_filename, attachments (Unisender формат).
+    Возвращает subject, html, plaintext, ics_filename, attachments (type/name/content base64 для провайдера).
     """
     service_name = booking.service.name if booking.service else "-"
     master_name = "-"
