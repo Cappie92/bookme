@@ -188,7 +188,22 @@ function readLastBookingSuccess(slug) {
   }
 }
 
-function writeLastBookingSuccess({ slug, id, public_reference, service_id, start_time, end_time }) {
+function writeLastBookingSuccess(payload) {
+  const {
+    slug,
+    id,
+    public_reference,
+    service_id,
+    start_time,
+    end_time,
+    service_name,
+    base_price,
+    discount_percent,
+    discount_amount,
+    final_price,
+    rule_name,
+    condition_type,
+  } = payload
   try {
     sessionStorage.setItem(
       LAST_BOOKING_SUCCESS_KEY,
@@ -199,6 +214,13 @@ function writeLastBookingSuccess({ slug, id, public_reference, service_id, start
         service_id,
         start_time,
         end_time,
+        service_name: service_name ?? null,
+        base_price: base_price ?? null,
+        discount_percent: discount_percent ?? null,
+        discount_amount: discount_amount ?? 0,
+        final_price: final_price ?? null,
+        rule_name: rule_name ?? null,
+        condition_type: condition_type ?? null,
         saved_at: Date.now(),
       })
     )
@@ -228,6 +250,148 @@ const LOYALTY_HINT_TITLE_BY_TYPE = {
   service_discount: 'Скидка на выбранную услугу',
   personal: 'Персональная скидка',
   happy_hours: 'Скидка в счастливые часы',
+}
+
+function formatSuccessBookingDateRu(iso) {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return '—'
+  return d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' })
+}
+
+function unwrapPublicBookingCreatePayload(raw) {
+  if (!raw || typeof raw !== 'object') return raw
+  const d = raw.data
+  if (d != null && typeof d === 'object' && !Array.isArray(d)) return d
+  return raw
+}
+
+function toFiniteNumberOrNull(v) {
+  if (v == null || v === '') return null
+  const n = Number(v)
+  return Number.isFinite(n) ? n : null
+}
+
+/** Ответ POST /bookings: единый вид полей (snake_case + camelCase из прокси/старых клиентов). */
+function normalizePublicBookingCreateResponse(raw) {
+  if (!raw || typeof raw !== 'object') return raw
+  const src = unwrapPublicBookingCreatePayload(raw)
+  const sn = src.service_name ?? src.serviceName
+  const st = src.start_time ?? src.startTime
+  const et = src.end_time ?? src.endTime
+  const fp = src.final_price ?? src.finalPrice
+  const bp = src.base_price ?? src.basePrice
+  const dpct = src.discount_percent ?? src.discountPercent
+  const damt = src.discount_amount ?? src.discountAmount
+  const rn = src.rule_name ?? src.ruleName
+  const ct = src.condition_type ?? src.conditionType
+  const finalPrice = toFiniteNumberOrNull(fp)
+  const basePrice = toFiniteNumberOrNull(bp)
+  const discPct = dpct == null || dpct === '' ? null : toFiniteNumberOrNull(dpct)
+  const discAmtRaw = damt == null || damt === '' ? 0 : toFiniteNumberOrNull(damt)
+  const discAmt = discAmtRaw == null ? 0 : discAmtRaw
+  return {
+    ...src,
+    service_name: sn != null ? String(sn) : null,
+    start_time: st ?? null,
+    end_time: et ?? null,
+    final_price: finalPrice,
+    base_price: basePrice,
+    discount_percent: discPct,
+    discount_amount: discAmt,
+    rule_name: rn != null ? String(rn) : null,
+    condition_type: ct != null ? String(ct) : null,
+  }
+}
+
+/** Дополняет ответ POST только если в нём не хватает полей для сводки (источник истины — POST; UI — запасной слой). */
+function fillPublicBookingCreateSummaryGaps(normalized, clientCtx) {
+  const n = normalizePublicBookingCreateResponse(normalized)
+  if (!clientCtx || !n || typeof n !== 'object') return n
+  const out = { ...n }
+  if (!String(out.service_name ?? '').trim() && clientCtx.serviceName) {
+    out.service_name = String(clientCtx.serviceName)
+  }
+  if ((!out.start_time || !String(out.start_time).trim()) && clientCtx.startTime) {
+    out.start_time = clientCtx.startTime
+  }
+  if (!out.end_time && clientCtx.endTime) {
+    out.end_time = clientCtx.endTime
+  }
+  const pv = clientCtx.preview
+  if (pv && typeof pv === 'object') {
+    if (out.final_price == null || !Number.isFinite(Number(out.final_price))) {
+      const fp = toFiniteNumberOrNull(pv.final_price ?? pv.finalPrice)
+      if (fp != null) out.final_price = fp
+    }
+    if (out.base_price == null || !Number.isFinite(Number(out.base_price))) {
+      const bp = toFiniteNumberOrNull(pv.base_price ?? pv.basePrice)
+      if (bp != null) out.base_price = bp
+    }
+    if (out.discount_percent == null || !Number.isFinite(Number(out.discount_percent))) {
+      const dp = toFiniteNumberOrNull(pv.discount_percent ?? pv.discountPercent)
+      if (dp != null) out.discount_percent = dp
+    }
+    if (!(Number(out.discount_amount) > 0) && Number(pv.discount_amount ?? pv.discountAmount) > 0) {
+      const da = toFiniteNumberOrNull(pv.discount_amount ?? pv.discountAmount)
+      if (da != null) out.discount_amount = da
+    }
+    if (!String(out.rule_name ?? '').trim() && (pv.rule_name ?? pv.ruleName)) {
+      out.rule_name = String(pv.rule_name ?? pv.ruleName)
+    }
+    if (!String(out.condition_type ?? '').trim() && (pv.condition_type ?? pv.conditionType)) {
+      out.condition_type = String(pv.condition_type ?? pv.conditionType)
+    }
+  }
+  return normalizePublicBookingCreateResponse(out)
+}
+
+function hasPublicBookingSuccessSummary(s) {
+  if (!s || typeof s !== 'object') return false
+  const n = normalizePublicBookingCreateResponse(s)
+  const nameOk = String(n.service_name ?? '').trim().length > 0
+  const timeOk = n.start_time != null && String(n.start_time).trim() !== ''
+  const priceOk = n.final_price != null && Number.isFinite(Number(n.final_price))
+  return nameOk && timeOk && priceOk
+}
+
+function devLogPublicBookingCreateSuccess(label, rawBody, normalized) {
+  if (!import.meta.env.DEV) return
+  const sum = normalizePublicBookingCreateResponse(normalized)
+  console.debug(`[public-booking] create success (${label})`, {
+    raw: rawBody,
+    normalized: sum,
+    hasPublicBookingSuccessSummary: hasPublicBookingSuccessSummary(sum),
+  })
+}
+
+function successDiscountRuleLabel(s) {
+  const n = normalizePublicBookingCreateResponse(s)
+  const r = String(n.rule_name ?? '').trim()
+  if (r) return r
+  const ct = String(n.condition_type ?? '').trim()
+  if (ct && LOYALTY_HINT_TITLE_BY_TYPE[ct]) return LOYALTY_HINT_TITLE_BY_TYPE[ct]
+  return ct || ''
+}
+
+/** Для sessionStorage после POST: слот + нормализованные поля цены из ответа API. */
+function bookingSuccessPayloadForStorage(slug, rawResult, slotMeta) {
+  const n = normalizePublicBookingCreateResponse(rawResult)
+  return {
+    slug,
+    id: n.id,
+    public_reference: n.public_reference,
+    service_id: slotMeta.service_id,
+    start_time: slotMeta.start_time ?? n.start_time,
+    end_time: slotMeta.end_time ?? n.end_time,
+    service_name: n.service_name,
+    base_price: n.base_price,
+    discount_percent: n.discount_percent,
+    discount_amount: n.discount_amount,
+    final_price: n.final_price,
+    rule_name: n.rule_name,
+    condition_type: n.condition_type,
+  }
 }
 
 function buildLoyaltyHintCopy(hint) {
@@ -311,6 +475,7 @@ export default function PublicBookingWizard({
   const [pricePreview, setPricePreview] = useState(null)
   const [pricePreviewLoading, setPricePreviewLoading] = useState(false)
   const [pricePreviewError, setPricePreviewError] = useState(null)
+  const pricePreviewRef = useRef(null)
   const [showAuthPrompt, setShowAuthPrompt] = useState(false)
   const [showLoggedInConfirmModal, setShowLoggedInConfirmModal] = useState(false)
   const [slots, setSlots] = useState([])
@@ -517,23 +682,21 @@ export default function PublicBookingWizard({
   }, [selectedService, loadAvailability])
 
   useEffect(() => {
-    if (!slug || !selectedService || !selectedSlot || !currentUser) {
+    if (!slug || !selectedService || !selectedSlot) {
       setPricePreview(null)
       setPricePreviewError(null)
       setPricePreviewLoading(false)
       return
     }
-    const token = localStorage.getItem('access_token')
-    if (!token) {
-      setPricePreview(null)
-      return
-    }
+    const token = typeof localStorage !== 'undefined' ? localStorage.getItem('access_token') : null
     let cancelled = false
     const st = encodeURIComponent(selectedSlot.start_time)
     const url = `/api/public/masters/${encodeURIComponent(slug)}/booking-price-preview?service_id=${selectedService.id}&start_time=${st}`
     setPricePreviewLoading(true)
     setPricePreviewError(null)
-    fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+    const headers = {}
+    if (token) headers.Authorization = `Bearer ${token}`
+    fetch(url, { headers })
       .then(async (res) => {
         if (!res.ok) {
           const err = await res.json().catch(() => ({}))
@@ -556,7 +719,21 @@ export default function PublicBookingWizard({
     return () => {
       cancelled = true
     }
-  }, [slug, selectedService, selectedSlot, currentUser])
+  }, [slug, selectedService, selectedSlot, currentUser?.id])
+
+  useEffect(() => {
+    pricePreviewRef.current = pricePreview
+  }, [pricePreview])
+
+  useEffect(() => {
+    if (!import.meta.env.DEV || !success) return
+    const sum = normalizePublicBookingCreateResponse(success)
+    console.debug('[public-booking] success state', {
+      rawSuccess: success,
+      normalized: sum,
+      hasPublicBookingSuccessSummary: hasPublicBookingSuccessSummary(sum),
+    })
+  }, [success])
 
   useEffect(() => {
     setCalendarExpanded(true)
@@ -635,10 +812,23 @@ export default function PublicBookingWizard({
     }
     if (draft.status === 'done' && (draft.created_booking_id || draft.created_public_reference)) {
       clearDraft()
-      setSuccess({
-        id: draft.created_booking_id,
-        public_reference: draft.created_public_reference,
-      })
+      const last = readLastBookingSuccess(slug)
+      const idMatch =
+        last &&
+        draft.created_booking_id != null &&
+        Number(last.id) === Number(draft.created_booking_id)
+      const refMatch =
+        last &&
+        String(draft.created_public_reference || '').trim() !== '' &&
+        String(last.public_reference || '').trim() === String(draft.created_public_reference || '').trim()
+      const mergedFromStorage = idMatch || refMatch ? last : {}
+      setSuccess(
+        normalizePublicBookingCreateResponse({
+          id: draft.created_booking_id,
+          public_reference: draft.created_public_reference || '',
+          ...mergedFromStorage,
+        })
+      )
       setSelectedService(null)
       setSelectedDate(null)
       setSelectedSlot(null)
@@ -713,14 +903,23 @@ export default function PublicBookingWizard({
         } catch (e) {
           throw new Error('Сервер вернул 200, но ответ не удалось прочитать. Обновите страницу и попробуйте ещё раз.')
         }
-        writeLastBookingSuccess({
-          slug,
-          id: result.id,
-          public_reference: result.public_reference,
-          service_id: payload.service_id,
-          start_time: payload.start_time,
-          end_time: payload.end_time,
-        })
+        const normalizedResult = fillPublicBookingCreateSummaryGaps(
+          normalizePublicBookingCreateResponse(result),
+          {
+            serviceName: svc?.name,
+            startTime: payload.start_time,
+            endTime: payload.end_time,
+            preview: pricePreviewRef.current,
+          }
+        )
+        devLogPublicBookingCreateSuccess('post_login_auto_submit', result, normalizedResult)
+        writeLastBookingSuccess(
+          bookingSuccessPayloadForStorage(slug, normalizedResult, {
+            service_id: payload.service_id,
+            start_time: payload.start_time,
+            end_time: payload.end_time,
+          })
+        )
         {
           // Успех на сервере не должен теряться из‑за гонки isActive: снимаем «submitted» с draft,
           // если в storage всё ещё тот же create_after_auth payload.
@@ -738,11 +937,11 @@ export default function PublicBookingWizard({
         }
         if (mountedRef.current) {
           setPostLoginRestoreNotice(false)
-          setSuccess(result)
+          setSuccess(normalizedResult)
           setSelectedService(null)
           setSelectedDate(null)
           setSelectedSlot(null)
-          onBookingSuccess?.(result)
+          onBookingSuccess?.(normalizedResult)
           // Если effect уже rerun'нулся, finally не снимет submitting — снимаем вручную.
           if (!isActive()) setSubmitting(false)
         }
@@ -766,7 +965,19 @@ export default function PublicBookingWizard({
         ) {
           clearDraft()
           setSubmitError(null)
-          const restored = { id: last.id, public_reference: last.public_reference || '' }
+          const restored = normalizePublicBookingCreateResponse({
+            id: last.id,
+            public_reference: last.public_reference || '',
+            service_name: last.service_name,
+            start_time: last.start_time,
+            end_time: last.end_time,
+            base_price: last.base_price,
+            discount_percent: last.discount_percent,
+            discount_amount: last.discount_amount,
+            final_price: last.final_price,
+            rule_name: last.rule_name,
+            condition_type: last.condition_type,
+          })
           setSuccess(restored)
           setSelectedService(null)
           setSelectedDate(null)
@@ -798,7 +1009,19 @@ export default function PublicBookingWizard({
     clearDraft()
     setPostLoginRestoreNotice(false)
     setSubmitError(null)
-    const restored = { id: r.id, public_reference: r.public_reference || '' }
+    const restored = normalizePublicBookingCreateResponse({
+      id: r.id,
+      public_reference: r.public_reference || '',
+      service_name: r.service_name,
+      start_time: r.start_time,
+      end_time: r.end_time,
+      base_price: r.base_price,
+      discount_percent: r.discount_percent,
+      discount_amount: r.discount_amount,
+      final_price: r.final_price,
+      rule_name: r.rule_name,
+      condition_type: r.condition_type,
+    })
     setSuccess(restored)
     setSelectedService(null)
     setSelectedDate(null)
@@ -897,21 +1120,30 @@ export default function PublicBookingWizard({
       } catch {
         throw new Error('Сервер вернул 200, но ответ не удалось прочитать. Обновите страницу и попробуйте ещё раз.')
       }
-      writeLastBookingSuccess({
-        slug,
-        id: result.id,
-        public_reference: result.public_reference,
-        service_id: selectedService.id,
-        start_time: selectedSlot.start_time,
-        end_time: selectedSlot.end_time,
-      })
+      const normalizedResult = fillPublicBookingCreateSummaryGaps(
+        normalizePublicBookingCreateResponse(result),
+        {
+          serviceName: selectedService?.name,
+          startTime: selectedSlot?.start_time,
+          endTime: selectedSlot?.end_time,
+          preview: pricePreviewRef.current,
+        }
+      )
+      devLogPublicBookingCreateSuccess('wizard_submit', result, normalizedResult)
+      writeLastBookingSuccess(
+        bookingSuccessPayloadForStorage(slug, normalizedResult, {
+          service_id: selectedService.id,
+          start_time: selectedSlot.start_time,
+          end_time: selectedSlot.end_time,
+        })
+      )
       clearDraft()
       setPostLoginRestoreNotice(false)
-      setSuccess(result)
+      setSuccess(normalizedResult)
       setSelectedService(null)
       setSelectedDate(null)
       setSelectedSlot(null)
-      onBookingSuccess?.(result)
+      onBookingSuccess?.(normalizedResult)
     } catch (err) {
       const msg = (err.message || '').toString()
       const busy =
@@ -929,7 +1161,19 @@ export default function PublicBookingWizard({
       ) {
         clearDraft()
         setSubmitError(null)
-        const restored = { id: last.id, public_reference: last.public_reference || '' }
+        const restored = normalizePublicBookingCreateResponse({
+          id: last.id,
+          public_reference: last.public_reference || '',
+          service_name: last.service_name,
+          start_time: last.start_time,
+          end_time: last.end_time,
+          base_price: last.base_price,
+          discount_percent: last.discount_percent,
+          discount_amount: last.discount_amount,
+          final_price: last.final_price,
+          rule_name: last.rule_name,
+          condition_type: last.condition_type,
+        })
         setSuccess(restored)
         setSelectedService(null)
         setSelectedDate(null)
@@ -991,6 +1235,8 @@ export default function PublicBookingWizard({
   }
 
   if (success) {
+    const sum = normalizePublicBookingCreateResponse(success)
+    const discountRuleLabel = successDiscountRuleLabel(sum)
     const role = (
       currentUser?.role ??
       (typeof localStorage !== 'undefined' ? localStorage.getItem('user_role') : '') ??
@@ -1002,10 +1248,10 @@ export default function PublicBookingWizard({
     if (role === 'master' || role === 'indie') goToMyBookingsHref = '/master'
     else if (role === 'salon') goToMyBookingsHref = '/salon'
     const btnBase =
-      'inline-flex items-center justify-center gap-2 font-medium rounded-lg transition-colors min-h-[44px] px-5 py-3 w-full sm:w-auto'
+      'inline-flex items-center justify-center gap-2 font-medium rounded-lg transition-colors min-h-[44px] px-5 py-3 w-full max-w-md'
     return (
       <div
-        className="bg-white rounded-2xl shadow-sm border border-emerald-200/50 p-6 sm:p-8 text-center"
+        className="bg-white rounded-2xl shadow-sm border border-emerald-200/50 p-6 sm:p-8 flex flex-col items-center text-center"
         data-testid="success-screen"
       >
         <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-emerald-100 text-[#4CAF50] mb-4">
@@ -1019,20 +1265,48 @@ export default function PublicBookingWizard({
             ? `Номер записи: ${success.public_reference}`
             : 'Запись создана — номер доступен в личном кабинете.'}
         </p>
-        <p className="text-gray-600 text-sm mb-6">Мастер подтвердит запись. Вы можете посмотреть её в личном кабинете.</p>
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-start justify-center gap-3 sm:gap-4">
-          <button
-            type="button"
-            onClick={() => navigate(goToMyBookingsHref)}
-            className={`${btnBase} bg-[#4CAF50] text-white hover:bg-[#45a049]`}
-            data-testid="go-to-my-bookings"
-          >
-            Перейти в личный кабинет
-          </button>
+        <p className="text-gray-600 text-sm mb-5 max-w-md">
+          Мастер подтвердит запись. Вы можете посмотреть её в личном кабинете.
+        </p>
+        {hasPublicBookingSuccessSummary(sum) ? (
           <div
-            className="flex w-full sm:w-auto flex-col gap-2 sm:min-w-[14rem] border border-gray-200 rounded-lg bg-white overflow-hidden text-left"
-            data-testid="calendar-actions"
+            className="w-full max-w-md mb-5 rounded-xl border border-[#BDE6CC] bg-[#EAF9EE] px-[18px] py-3.5 text-left text-[15px] leading-relaxed text-[#2F6F44]"
+            data-testid="public-booking-success-summary"
           >
+            <div className="mb-1.5">
+              <strong className="font-semibold">Услуга:</strong> {sum.service_name}
+            </div>
+            <div className="mb-1.5">
+              <strong className="font-semibold">Дата:</strong> {formatSuccessBookingDateRu(sum.start_time)}
+            </div>
+            <div className="mb-1.5">
+              <strong className="font-semibold">Время:</strong>{' '}
+              {sum.end_time
+                ? `${formatTimeShort(sum.start_time)}–${formatTimeShort(sum.end_time)}`
+                : formatTimeShort(sum.start_time)}
+            </div>
+            {Number(sum.discount_amount) > 0 ? (
+              <div className="mb-1.5">
+                <strong className="font-semibold">Скидка:</strong> {'\u2212'}
+                {Number(sum.discount_amount).toLocaleString('ru-RU')} ₽
+                {sum.discount_percent != null ? (
+                  <>
+                    {' / \u2212'}
+                    {Number(sum.discount_percent)}%
+                  </>
+                ) : null}
+                {discountRuleLabel ? ` — ${discountRuleLabel}` : ''}
+              </div>
+            ) : null}
+            <div className="font-semibold">
+              К оплате: {Number(sum.final_price).toLocaleString('ru-RU')} ₽
+            </div>
+          </div>
+        ) : null}
+        <div
+          className="w-full max-w-md flex flex-col border border-gray-200 rounded-lg bg-white overflow-hidden text-left"
+          data-testid="calendar-actions"
+        >
             <div className="px-3 py-2 text-xs font-medium text-gray-500 bg-gray-50 border-b border-gray-100">
               Календарь
             </div>
@@ -1086,9 +1360,16 @@ export default function PublicBookingWizard({
               </button>
             </div>
           </div>
-        </div>
+        <button
+          type="button"
+          onClick={() => navigate(goToMyBookingsHref)}
+          className={`${btnBase} mt-5 bg-[#4CAF50] text-white hover:bg-[#45a049] shrink-0`}
+          data-testid="go-to-my-bookings"
+        >
+          Перейти в личный кабинет
+        </button>
         {calendarError ? (
-          <p className="mt-4 text-sm text-rose-700" data-testid="calendar-error">
+          <p className="mt-4 text-sm text-rose-700 max-w-md" data-testid="calendar-error">
             {calendarError}
           </p>
         ) : null}
@@ -1400,8 +1681,7 @@ export default function PublicBookingWizard({
           data-testid="public-booking-summary"
         >
           <div className="text-[15px] leading-relaxed mb-1.5 last:mb-0">
-            <strong className="font-semibold">Услуга:</strong>{' '}
-            {selectedService.name} — {selectedService.price} ₽, {selectedService.duration} мин
+            <strong className="font-semibold">Услуга:</strong> {selectedService.name}
           </div>
           <div className="text-[15px] leading-relaxed mb-1.5 last:mb-0">
             <strong className="font-semibold">Дата:</strong>{' '}
@@ -1430,26 +1710,29 @@ export default function PublicBookingWizard({
           {pricePreview && !pricePreviewLoading && (
             <>
               <div className="h-px bg-[#CDE8D7] my-2.5" aria-hidden="true" />
-              <div className="text-[15px] leading-relaxed mb-1.5 text-[#2F6F44]">
+              <div className="text-[15px] leading-relaxed mb-1.5 text-[#2F6F44] space-y-1.5">
                 {Number(pricePreview.discount_amount) > 0 ? (
-                  <>
-                    <div>
-                      Базовая цена: {Number(pricePreview.base_price).toLocaleString('ru-RU')} ₽
-                    </div>
-                    <div>
-                      Скидка: −{Number(pricePreview.discount_amount).toLocaleString('ru-RU')} ₽
-                      {pricePreview.discount_percent != null
-                        ? ` (${Number(pricePreview.discount_percent)}%)`
-                        : ''}
-                      {pricePreview.rule_name ? ` · ${pricePreview.rule_name}` : ''}
-                    </div>
-                    <div className="font-semibold mt-1">
-                      К оплате: {Number(pricePreview.final_price).toLocaleString('ru-RU')} ₽
-                    </div>
-                  </>
-                ) : (
-                  <div className="font-semibold">К оплате: {Number(pricePreview.base_price).toLocaleString('ru-RU')} ₽</div>
-                )}
+                  <div>
+                    Скидка: {'\u2212'}
+                    {Number(pricePreview.discount_amount).toLocaleString('ru-RU')} ₽
+                    {pricePreview.discount_percent != null ? (
+                      <>
+                        {' / \u2212'}
+                        {Number(pricePreview.discount_percent)}%
+                      </>
+                    ) : null}
+                    {pricePreview.rule_name ? ` (${pricePreview.rule_name})` : ''}
+                  </div>
+                ) : null}
+                <div className="font-semibold">
+                  К оплате:{' '}
+                  {Number(
+                    Number(pricePreview.discount_amount) > 0
+                      ? pricePreview.final_price
+                      : pricePreview.base_price
+                  ).toLocaleString('ru-RU')}{' '}
+                  ₽
+                </div>
               </div>
             </>
           )}
@@ -1518,6 +1801,7 @@ export default function PublicBookingWizard({
         }}
         profile={profile}
         summary={authPromptSummary}
+        pricePreview={pricePreviewLoading ? null : pricePreview}
         selectedSlotHhLabel={selectedSlotHhLabel}
         submitting={submitting}
       />
@@ -1527,6 +1811,7 @@ export default function PublicBookingWizard({
         onClose={() => setShowAuthPrompt(false)}
         profile={profile}
         summary={authPromptSummary}
+        pricePreview={pricePreviewLoading ? null : pricePreview}
         onLogin={() => {
           metrikaGoal(M.PUBLIC_BOOKING_AUTH_CHOICE, { choice: 'login' })
           openAuthModal('client', 'login', { redirectMode: 'stay', returnToPath: typeof window !== 'undefined' ? window.location.pathname + window.location.search : '', flow: 'publicBookingConfirm' })

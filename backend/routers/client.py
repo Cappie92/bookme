@@ -110,6 +110,19 @@ def get_current_time_in_timezone(timezone_str: str) -> datetime:
     return datetime.now(tz)
 
 
+def _booking_list_display_price(booking: Booking) -> float:
+    """
+    Стоимость записи для списков ЛК: `payment_amount` (уже со скидкой при создании),
+    иначе прайс услуги из справочника.
+    """
+    pa = getattr(booking, "payment_amount", None)
+    if pa is not None:
+        return float(pa)
+    if booking.service is not None and booking.service.price is not None:
+        return float(booking.service.price)
+    return 0.0
+
+
 # Всегда canon schema (без indie_master_id). Резолв indie→master на read-path.
 _FutureResponse = List[BookingFutureShortCanon]
 _PastResponse = List[BookingPastShortCanon]
@@ -196,7 +209,7 @@ def get_future_bookings(
             # быть выставлен — но клиент его не должен видеть).
             salon_name = None
             service_name = b.service.name if b.service else "-"
-            price = float(b.service.price) if b.service and b.service.price is not None else 0.0
+            price = _booking_list_display_price(b)
             duration = int(b.service.duration) if b.service and b.service.duration is not None else 0
             date = b.start_time
             branch_name = None
@@ -345,7 +358,7 @@ def get_past_bookings(
             # их в этом виде больше не получает.
             salon_name = None
             service_name = b.service.name if b.service else "-"
-            price = float(b.service.price) if b.service and b.service.price is not None else 0.0
+            price = _booking_list_display_price(b)
             duration = int(b.service.duration) if b.service and b.service.duration is not None else 0
             date = b.start_time
             branch_name = None

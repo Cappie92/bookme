@@ -481,10 +481,23 @@ def create_public_booking(
     db.commit()
     db.refresh(booking)
     status_val = getattr(booking.status, "value", str(booking.status))
+    disc_amt = float(applied_discount_data.get("discount_amount") or 0) if applied_discount_data else 0.0
+    disc_pct = applied_discount_data.get("discount_percent") if applied_discount_data else None
     return PublicBookingCreateOut(
         id=booking.id,
         status=status_val,
         public_reference=booking.public_reference or "",
+        start_time=body.start_time,
+        end_time=body.end_time,
+        service_name=master_svc.name,
+        base_price=base_price,
+        discount_percent=float(disc_pct) if disc_pct is not None else None,
+        discount_amount=disc_amt,
+        final_price=float(payment_amount),
+        rule_name=_sanitize_public_loyalty_rule_name(
+            applied_discount_data.get("rule_name") if applied_discount_data else None
+        ),
+        condition_type=applied_discount_data.get("condition_type") if applied_discount_data else None,
     )
 
 
@@ -566,7 +579,10 @@ def get_booking_price_preview(
     db: Session = Depends(get_db),
     current_user: Optional[User] = Depends(get_current_user_optional),
 ) -> Any:
-    """Для авторизованного клиента — та же скидка, что при POST /bookings. Без токена — только базовая цена."""
+    """
+    Расчёт скидки как при создании записи: без токена — только правила, не требующие клиента
+    (например service_discount, happy_hours); персональные / первая запись — при наличии клиента в токене.
+    """
     master = _get_master_by_slug(db, slug)
     if not master:
         raise HTTPException(status_code=404, detail="Мастер не найден")
@@ -582,21 +598,17 @@ def get_booking_price_preview(
     service = _resolve_canonical_service_for_master_service(db, master, master_svc)
     base_price = float(service.price or 0)
 
-    if not current_user or current_user.role != UserRole.CLIENT or not current_user.id:
-        return BookingPricePreviewOut(
-            base_price=base_price,
-            discount_percent=None,
-            discount_amount=0.0,
-            final_price=base_price,
-            rule_name=None,
-            condition_type=None,
-        )
+    client_id: Optional[int] = None
+    client_phone: Optional[str] = None
+    if current_user and current_user.role == UserRole.CLIENT and current_user.id:
+        client_id = current_user.id
+        client_phone = current_user.phone or ""
 
     try:
         discounted_amount, applied = evaluate_and_prepare_applied_discount(
             master_id=master.id,
-            client_id=current_user.id,
-            client_phone=current_user.phone or "",
+            client_id=client_id,
+            client_phone=client_phone,
             booking_start=start_time,
             service_id=service.id,
             db=db,
@@ -607,8 +619,8 @@ def get_booking_price_preview(
             "master_service_id=%s canonical_service_id=%s start_time=%r",
             slug,
             master.id,
-            current_user.id,
-            (current_user.phone or "")[:32],
+            client_id,
+            ((current_user.phone or "")[:32] if current_user else None),
             service_id,
             service.id,
             start_time,

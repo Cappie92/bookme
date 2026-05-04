@@ -1132,6 +1132,112 @@ def test_build_public_loyalty_visual_hints_service_discount_reseed_style_sid(db,
     assert out["service_discounts"][0]["master_service_id"] == ms.id
 
 
+def test_evaluate_and_prepare_service_discount_alternate_rule_service_id(db, master, client_user):
+    """
+    Публичный preview/create передают canonical Service.id; правило может хранить другой id
+    той же услуги (reseed) — скидка должна применяться (как loyalty_visual).
+    """
+    from utils.loyalty_discounts import evaluate_and_prepare_applied_discount
+
+    s_canon = Service(name="Мужская", price=1000.0, duration=30, salon_id=None, indie_master_id=None)
+    db.add(s_canon)
+    db.flush()
+    s_rule = Service(name="Мужская", price=1000.0, duration=30, salon_id=None, indie_master_id=None)
+    db.add(s_rule)
+    db.commit()
+
+    rule = LoyaltyDiscount(
+        master_id=master.id,
+        discount_type=LoyaltyDiscountType.QUICK,
+        name="SD alt id",
+        discount_percent=9.0,
+        is_active=True,
+        priority=1,
+        conditions={
+            "condition_type": "service_discount",
+            "parameters": {"service_id": s_rule.id},
+        },
+    )
+    db.add(rule)
+    db.commit()
+
+    start = datetime(2030, 6, 15, 10, 0, 0)
+    pay, applied = evaluate_and_prepare_applied_discount(
+        master_id=master.id,
+        client_id=client_user.id,
+        client_phone=client_user.phone,
+        booking_start=start,
+        service_id=s_canon.id,
+        db=db,
+    )
+    assert applied is not None
+    assert pay == pytest.approx(910.0)
+    assert applied["discount_percent"] == 9.0
+    assert applied["discount_amount"] == pytest.approx(90.0)
+
+
+def test_evaluate_best_discount_percent_birthday_beats_service_discount(db, master, client_user, service):
+    """
+    Несколько активных правил: побеждает больший discount_percent (здесь birthday 12% vs service_discount 9%).
+    Объясняет расхождение «гостевой preview (без клиента) vs запись после логина».
+    """
+    from utils.loyalty_discounts import evaluate_and_prepare_applied_discount
+    from models import LoyaltyConditionType
+
+    master.timezone = "Europe/Moscow"
+    master.timezone_confirmed = True
+    db.add(master)
+    db.commit()
+
+    client_user.birth_date = date(1990, 6, 15)
+    db.add(client_user)
+    db.commit()
+
+    db.add(
+        LoyaltyDiscount(
+            master_id=master.id,
+            discount_type=LoyaltyDiscountType.QUICK,
+            name="SD 9",
+            discount_percent=9.0,
+            is_active=True,
+            priority=1,
+            conditions={
+                "condition_type": LoyaltyConditionType.SERVICE_DISCOUNT.value,
+                "parameters": {"service_id": service.id},
+            },
+        )
+    )
+    db.add(
+        LoyaltyDiscount(
+            master_id=master.id,
+            discount_type=LoyaltyDiscountType.QUICK,
+            name="BD 12",
+            discount_percent=12.0,
+            is_active=True,
+            priority=1,
+            conditions={
+                "condition_type": LoyaltyConditionType.BIRTHDAY.value,
+                "parameters": {"days_before": 7, "days_after": 7},
+            },
+        )
+    )
+    db.commit()
+
+    start = datetime(2030, 6, 15, 12, 0, 0)
+    pay, applied = evaluate_and_prepare_applied_discount(
+        master_id=master.id,
+        client_id=client_user.id,
+        client_phone=client_user.phone,
+        booking_start=start,
+        service_id=service.id,
+        db=db,
+    )
+    assert applied is not None
+    assert pay == pytest.approx(880.0)
+    assert applied["condition_type"] == "birthday"
+    assert applied["discount_percent"] == 12.0
+
+
 def test_build_public_loyalty_visual_hints_skips_inactive(db, master):
     from utils.loyalty_discounts import build_public_loyalty_visual_hints
 

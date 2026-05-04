@@ -8,6 +8,7 @@ export default function PublicBookingAuthPrompt({
   onClose,
   profile,
   summary,
+  pricePreview,
   onLogin,
   onRegister,
 }) {
@@ -17,7 +18,6 @@ export default function PublicBookingAuthPrompt({
   const {
     serviceName = '',
     price = '',
-    duration = '',
     dateLabel = '',
     timeLabel = '',
     timezoneOrCity = '',
@@ -49,19 +49,38 @@ export default function PublicBookingAuthPrompt({
           <div className="mt-[18px] rounded-2xl border border-[#BFE9D1] bg-[#EEF9F0] px-[18px] py-4 text-[#2D6E43]">
             <div className="text-[15px] leading-[1.55] mb-1.5 last:mb-0">Мастер: {masterName}</div>
             {serviceName ? (
-              <div className="text-[15px] leading-[1.55] mb-1.5 last:mb-0">
-                Услуга: {serviceName}
-                {price ? ` — ${price} ₽` : ''}
-                {duration ? `, ${duration} мин` : ''}
-              </div>
+              <div className="text-[15px] leading-[1.55] mb-1.5 last:mb-0">Услуга: {serviceName}</div>
             ) : null}
             {dateLabel ? (
               <div className="text-[15px] leading-[1.55] mb-1.5 last:mb-0">Дата: {dateLabel}</div>
             ) : null}
             {timeLabel ? <div className="text-[15px] leading-[1.55] mb-1.5 last:mb-0">Время: {timeLabel}</div> : null}
             {timezoneOrCity ? (
-              <div className="text-[15px] leading-[1.55] mb-0">Время записи: {timezoneOrCity}</div>
+              <div className="text-[15px] leading-[1.55] mb-1.5">Время записи: {timezoneOrCity}</div>
             ) : null}
+            {pricePreview && Number(pricePreview.discount_amount) > 0 ? (
+              <div className="text-[15px] leading-[1.55] mb-1.5">
+                Скидка: {'\u2212'}
+                {Number(pricePreview.discount_amount).toLocaleString('ru-RU')} ₽
+                {pricePreview.discount_percent != null ? (
+                  <>
+                    {' / \u2212'}
+                    {Number(pricePreview.discount_percent)}%
+                  </>
+                ) : null}
+              </div>
+            ) : null}
+            <div className="text-[15px] font-semibold leading-[1.55] mb-0">
+              К оплате:{' '}
+              {pricePreview
+                ? Number(
+                    Number(pricePreview.discount_amount) > 0 ? pricePreview.final_price : pricePreview.base_price
+                  ).toLocaleString('ru-RU')
+                : price
+                  ? Number(price).toLocaleString('ru-RU')
+                  : '—'}{' '}
+              ₽
+            </div>
           </div>
 
           <div className="flex flex-col gap-3.5 mt-5">

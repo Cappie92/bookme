@@ -146,6 +146,28 @@ def _count_completed_visits(
     return query.count()
 
 
+def _canonical_service_id_matches_rule_service_id(
+    db: Session,
+    booking_canonical_service_id: int,
+    rule_service_id: int,
+) -> bool:
+    """
+    Правило service_discount может ссылаться на другой Service.id (салонный/reseed),
+    а booking/preview передают канонический standalone Service.id — та же услуга по name/duration/price.
+    """
+    if int(booking_canonical_service_id) == int(rule_service_id):
+        return True
+    canon = db.query(Service).filter(Service.id == int(booking_canonical_service_id)).first()
+    alt = db.query(Service).filter(Service.id == int(rule_service_id)).first()
+    if not canon or not alt:
+        return False
+    return (
+        canon.name == alt.name
+        and (canon.duration or 0) == (alt.duration or 0)
+        and float(canon.price or 0) == float(alt.price or 0)
+    )
+
+
 def _get_last_completed_visit(
     db: Session,
     master_id: int,
@@ -475,8 +497,9 @@ def evaluate_discount_candidates(
                 sid = parameters.get("service_id")
                 cid = parameters.get("category_id")
                 matched = False
-                if sid is not None and service_id is not None and int(sid) == int(service_id):
-                    matched = True
+                if sid is not None and service_id is not None:
+                    if _canonical_service_id_matches_rule_service_id(db, int(service_id), int(sid)):
+                        matched = True
                 if not matched and cid is not None and resolved_category_id is not None and int(cid) == int(resolved_category_id):
                     matched = True
                 candidate["match"] = matched

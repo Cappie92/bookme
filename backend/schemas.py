@@ -659,6 +659,15 @@ class PublicBookingCreateOut(BaseModel):
     id: int
     status: str
     public_reference: str
+    start_time: Optional[datetime] = None
+    end_time: Optional[datetime] = None
+    service_name: Optional[str] = None
+    base_price: Optional[float] = None
+    discount_percent: Optional[float] = None
+    discount_amount: float = 0.0
+    final_price: Optional[float] = None
+    rule_name: Optional[str] = None
+    condition_type: Optional[str] = None
 
 
 class AvailableSlotOut(BaseModel):

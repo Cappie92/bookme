@@ -4,7 +4,16 @@ import pytest
 from datetime import date, timedelta
 
 from auth import get_password_hash
-from models import Master, MasterService, User, UserRole
+from models import (
+    LoyaltyDiscount,
+    LoyaltyDiscountType,
+    Master,
+    MasterService,
+    PersonalDiscount,
+    Service,
+    User,
+    UserRole,
+)
 
 
 @pytest.fixture
@@ -115,7 +124,7 @@ def test_get_public_eligibility_anonymous_includes_loyalty_hint(client, public_m
 
 
 def test_booking_price_preview_guest_no_discount(client, public_master, public_master_service):
-    """GET booking-price-preview без авторизации — базовая цена, без скидки."""
+    """GET booking-price-preview без правил скидки — полная цена."""
     r = client.get(
         "/api/public/masters/test-slug/booking-price-preview",
         params={
@@ -129,3 +138,136 @@ def test_booking_price_preview_guest_no_discount(client, public_master, public_m
     assert data["discount_amount"] == 0.0
     assert data["final_price"] == 1500.0
     assert data["discount_percent"] is None
+
+
+def test_booking_price_preview_guest_service_discount_alt_service_id(client, db, public_master, public_master_service):
+    """Гость: service_discount с service_id «дубликата» услуги — preview как у клиента с токеном."""
+    master_service_id = public_master_service.id
+    s_canon = Service(
+        name="Стрижка",
+        duration=60,
+        price=1500.0,
+        salon_id=None,
+        indie_master_id=None,
+    )
+    db.add(s_canon)
+    db.flush()
+    s_rule = Service(
+        name="Стрижка",
+        duration=60,
+        price=1500.0,
+        salon_id=None,
+        indie_master_id=None,
+    )
+    db.add(s_rule)
+    db.commit()
+
+    rule = LoyaltyDiscount(
+        master_id=public_master.id,
+        discount_type=LoyaltyDiscountType.QUICK,
+        name="SD guest",
+        discount_percent=9.0,
+        is_active=True,
+        priority=1,
+        conditions={
+            "condition_type": "service_discount",
+            "parameters": {"service_id": s_rule.id},
+        },
+    )
+    db.add(rule)
+    db.commit()
+
+    params = {
+        "service_id": master_service_id,
+        "start_time": "2030-06-15T10:00:00+03:00",
+    }
+    r_guest = client.get("/api/public/masters/test-slug/booking-price-preview", params=params)
+    assert r_guest.status_code == 200, r_guest.text
+    g = r_guest.json()
+    assert g["base_price"] == 1500.0
+    assert g["discount_percent"] == 9.0
+    assert abs(g["discount_amount"] - 135.0) < 0.01
+    assert abs(g["final_price"] - 1365.0) < 0.01
+
+
+def test_booking_price_preview_guest_personal_discount_not_applied(client, db, public_master, public_master_service):
+    """Гость: только персональная скидка по телефону — preview без скидки."""
+    master_service_id = public_master_service.id
+    db.add(
+        PersonalDiscount(
+            master_id=public_master.id,
+            client_phone="+79991112233",
+            discount_percent=25.0,
+            is_active=True,
+        )
+    )
+    db.commit()
+    r = client.get(
+        "/api/public/masters/test-slug/booking-price-preview",
+        params={
+            "service_id": master_service_id,
+            "start_time": "2030-06-15T10:00:00+03:00",
+        },
+    )
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["final_price"] == 1500.0
+    assert d["discount_amount"] == 0.0
+
+
+def test_booking_price_preview_logged_in_service_discount_still_applies(
+    client, db, public_master, public_master_service, test_user
+):
+    """Клиент с токеном: service_discount (alt service id) по-прежнему применяется."""
+    master_service_id = public_master_service.id
+    s_canon = Service(
+        name="Стрижка",
+        duration=60,
+        price=1500.0,
+        salon_id=None,
+        indie_master_id=None,
+    )
+    db.add(s_canon)
+    db.flush()
+    s_rule = Service(
+        name="Стрижка",
+        duration=60,
+        price=1500.0,
+        salon_id=None,
+        indie_master_id=None,
+    )
+    db.add(s_rule)
+    db.commit()
+    db.add(
+        LoyaltyDiscount(
+            master_id=public_master.id,
+            discount_type=LoyaltyDiscountType.QUICK,
+            name="SD logged",
+            discount_percent=9.0,
+            is_active=True,
+            priority=1,
+            conditions={
+                "condition_type": "service_discount",
+                "parameters": {"service_id": s_rule.id},
+            },
+        )
+    )
+    db.commit()
+
+    login = client.post(
+        "/api/auth/login",
+        json={"phone": test_user.phone, "password": "testpassword"},
+    )
+    assert login.status_code == 200, login.text
+    token = login.json()["access_token"]
+    r = client.get(
+        "/api/public/masters/test-slug/booking-price-preview",
+        params={
+            "service_id": master_service_id,
+            "start_time": "2030-06-15T10:00:00+03:00",
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert abs(d["final_price"] - 1365.0) < 0.01
