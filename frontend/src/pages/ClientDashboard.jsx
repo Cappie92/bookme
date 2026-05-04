@@ -876,8 +876,6 @@ export default function ClientDashboard() {
 
   const handlePasswordSuccess = () => {
     // Обновляем данные после успешной установки/проверки пароля
-    console.log('Пароль успешно установлен/проверен, обновляем данные')
-    
     // Удаляем обработчик beforeunload
     removeBeforeUnloadHandler()
     
@@ -1129,9 +1127,6 @@ export default function ClientDashboard() {
   }, [showCalendar])
 
   const handleDateChange = async (date) => {
-    console.log('🔍 ОТЛАДКА: handleDateChange вызван для даты:', date)
-    console.log('🔍 ОТЛАДКА: Текущий selectedDate:', selectedDate)
-    
     setSelectedDate(date)
     setNewDateTime('')
     
@@ -1139,7 +1134,6 @@ export default function ClientDashboard() {
     setLoadingDates(prev => new Set(prev).add(date))
     
     try {
-      console.log('🔍 ОТЛАДКА: Вызываем loadAvailableSlots для даты:', date)
       await loadAvailableSlots(date)
     } finally {
       // Убираем индикатор загрузки
@@ -1224,9 +1218,8 @@ export default function ClientDashboard() {
     setSelectedNoteBooking(null)
   }
 
-  const handleNoteSaved = (note) => {
+  const handleNoteSaved = () => {
     // Заметка была сохранена или удалена
-    console.log('Заметка обновлена:', note)
   }
 
   const handleShowLoyaltyHistory = async () => {

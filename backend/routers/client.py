@@ -1,4 +1,4 @@
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, date as date_type
 from typing import Any, List, Optional
 import logging
 import pytz
@@ -9,6 +9,22 @@ from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func, or_, and_
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_optional_client_birth_date(raw: Any) -> Optional[date_type]:
+    """Парсит дату рождения из тела PUT /profile (строка YYYY-MM-DD, пустая — сброс)."""
+    if raw is None:
+        return None
+    if isinstance(raw, date_type):
+        return raw
+    s = str(raw).strip()
+    if not s:
+        return None
+    try:
+        return date_type.fromisoformat(s[:10])
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Некорректная дата рождения")
+
 
 from auth import get_current_active_user, require_client
 from database import get_db
@@ -115,8 +131,7 @@ def get_future_bookings(
     По умолчанию возвращается не более 5 записей для главной страницы; full=true — без лимита.
     """
     _client_id = client_id if client_id is not None else current_user.id
-    print(f"🔍 ОТЛАДКА get_future_bookings: client_id={_client_id}, current_user.id={current_user.id}")
-    
+
     # Получаем ВСЕ записи (без limit), чтобы правильно отфильтровать по времени
     all_bookings = (
         db.query(Booking)
@@ -134,11 +149,8 @@ def get_future_bookings(
         .order_by(Booking.start_time.asc())
         .all()
     )
-    
-    print(f"🔍 ОТЛАДКА: Найдено {len(all_bookings)} записей в базе (все)")
-    
+
     if len(all_bookings) == 0:
-        print("⚠️ ВНИМАНИЕ: Нет записей в базе для клиента!")
         return []
     
     result = []
@@ -148,8 +160,9 @@ def get_future_bookings(
     n_with_indie, n_resolved, n_failed = 0, 0, 0
     
     for b in all_bookings:
-        print(f"🔍 ОТЛАДКА: Обрабатываем запись {b.id}: start_time={b.start_time}, status={b.status}")
-        
+        if not b.start_time:
+            logger.warning("booking %s: skip (start_time is None)", b.id)
+            continue
         # Получаем часовой пояс — только из master.timezone, без fallback
         master_timezone = get_master_timezone(b)
         if not master_timezone or not master_timezone.strip():
@@ -161,29 +174,21 @@ def get_future_bookings(
             logger.warning("booking %s: skip (master timezone empty, master_id=%s)", b.id, b.master_id)
             continue
         current_time_in_master_tz = get_current_time_in_timezone(master_timezone)
-        
-        print(f"🔍 ОТЛАДКА: Мастер timezone={master_timezone}, текущее время в timezone={current_time_in_master_tz}")
-        
+
         # Приводим start_time к часовому поясу мастера для корректного сравнения
-        if b.start_time and b.start_time.tzinfo is None:
+        if b.start_time.tzinfo is None:
             # Если start_time не имеет часового пояса, считаем что это UTC
             start_time_in_master_tz = pytz.UTC.localize(b.start_time).astimezone(pytz.timezone(master_timezone))
         else:
             start_time_in_master_tz = b.start_time.astimezone(pytz.timezone(master_timezone))
-        
-        print(f"🔍 ОТЛАДКА: start_time в timezone мастера={start_time_in_master_tz}")
-        
+
         # Проверяем, является ли запись будущей в часовом поясе мастера
         if start_time_in_master_tz <= current_time_in_master_tz:
             past_count += 1
-            if past_count <= 3:  # Логируем только первые 3
-                print(f"🔍 ОТЛАДКА: Запись {b.id} ПРОПУЩЕНА (уже прошла): {start_time_in_master_tz} <= {current_time_in_master_tz}")
             continue  # Пропускаем записи, которые уже прошли в часовом поясе мастера
-        
+
         future_count += 1
-        if future_count <= 3:  # Логируем только первые 3
-            print(f"🔍 ОТЛАДКА: Запись {b.id} ДОБАВЛЕНА (будущая): {start_time_in_master_tz} > {current_time_in_master_tz}")
-        
+
         try:
             # Сущность «салонный мастер» удалена из продукта.
             # Все salon_*/branch_* поля в клиентском ответе принудительно None,
@@ -245,11 +250,9 @@ def get_future_bookings(
             ))
         except Exception as e:
             error_count += 1
-            print(f"❌ ОШИБКА при обработке записи {b.id}: {str(e)}")
-            import traceback
-            traceback.print_exc()
+            logger.exception("get_future_bookings: booking %s processing failed: %s", b.id, e)
             continue
-    
+
     if not full:
         result = result[:5]
     if MASTER_CANON_DEBUG:
@@ -257,9 +260,6 @@ def get_future_bookings(
             "get_future_bookings: with_indie=%s resolved=%s failed=%s",
             n_with_indie, n_resolved, n_failed
         )
-    print(f"🔍 ОТЛАДКА ИТОГО: Всего записей={len(all_bookings)}, Будущих={future_count}, Прошедших={past_count}, Ошибок={error_count}")
-    print(f"🔍 ОТЛАДКА: Возвращаем {len(result)} будущих записей (после фильтрации), full={full}")
-    print(f"🔍 ОТЛАДКА: Первая запись в результате: {result[0].id if result else 'нет'}")
     return result
 
 
@@ -279,8 +279,7 @@ def get_past_bookings(
     По умолчанию не более 5 записей; full=true — без лимита.
     """
     _client_id = client_id if client_id is not None else current_user.id
-    print(f"🔍 ОТЛАДКА get_past_bookings: client_id={_client_id}, current_user.id={current_user.id}")
-    
+
     # Получаем ВСЕ записи (без limit), чтобы правильно отфильтровать по времени
     all_bookings = (
         db.query(Booking)
@@ -298,11 +297,8 @@ def get_past_bookings(
         .order_by(Booking.start_time.desc())
         .all()
     )
-    
-    print(f"🔍 ОТЛАДКА get_past_bookings: Найдено {len(all_bookings)} записей в базе (все)")
-    
+
     if len(all_bookings) == 0:
-        print("⚠️ ВНИМАНИЕ: Нет записей в базе для клиента!")
         return []
     
     result = []
@@ -312,8 +308,6 @@ def get_past_bookings(
     n_with_indie, n_resolved, n_failed = 0, 0, 0
     
     for b in all_bookings:
-        print(f"🔍 ОТЛАДКА get_past_bookings: Обрабатываем запись {b.id}: start_time={b.start_time}, status={b.status}")
-        
         if not b.start_time or not b.end_time:
             logger.warning("booking %s: skip (start_time or end_time is None)", b.id)
             continue
@@ -328,9 +322,7 @@ def get_past_bookings(
             logger.warning("booking %s: skip (master timezone empty, master_id=%s)", b.id, b.master_id)
             continue
         current_time_in_master_tz = get_current_time_in_timezone(master_timezone)
-        
-        print(f"🔍 ОТЛАДКА get_past_bookings: Мастер timezone={master_timezone}, текущее время в timezone={current_time_in_master_tz}")
-        
+
         try:
             if b.start_time.tzinfo is None:
                 start_time_in_master_tz = pytz.UTC.localize(b.start_time).astimezone(pytz.timezone(master_timezone))
@@ -339,19 +331,14 @@ def get_past_bookings(
         except Exception as e:
             logger.warning("booking %s: skip (timezone conversion failed): %s", b.id, e)
             continue
-        print(f"🔍 ОТЛАДКА get_past_bookings: start_time в timezone мастера={start_time_in_master_tz}")
-        
+
         # Проверяем, является ли запись прошедшей в часовом поясе мастера
         if start_time_in_master_tz > current_time_in_master_tz:
             future_count += 1
-            if future_count <= 3:  # Логируем только первые 3
-                print(f"🔍 ОТЛАДКА get_past_bookings: Запись {b.id} ПРОПУЩЕНА (еще не прошла): {start_time_in_master_tz} > {current_time_in_master_tz}")
             continue  # Пропускаем записи, которые еще не наступили в часовом поясе мастера
-        
+
         past_count += 1
-        if past_count <= 3:  # Логируем только первые 3
-            print(f"🔍 ОТЛАДКА get_past_bookings: Запись {b.id} ДОБАВЛЕНА (прошедшая): {start_time_in_master_tz} <= {current_time_in_master_tz}")
-        
+
         try:
             # «Салонный мастер» удалён из продукта: salon_*/branch_* в клиентском
             # ответе всегда None. Legacy-bookings с salon_id в БД остаются, но клиент
@@ -412,11 +399,9 @@ def get_past_bookings(
             ))
         except Exception as e:
             error_count += 1
-            print(f"❌ ОШИБКА при обработке прошедшей записи {b.id}: {str(e)}")
-            import traceback
-            traceback.print_exc()
+            logger.exception("get_past_bookings: booking %s processing failed: %s", b.id, e)
             continue
-    
+
     if not full:
         result = result[:5]
     if MASTER_CANON_DEBUG:
@@ -424,8 +409,6 @@ def get_past_bookings(
             "get_past_bookings: with_indie=%s resolved=%s failed=%s",
             n_with_indie, n_resolved, n_failed
         )
-    print(f"🔍 ОТЛАДКА get_past_bookings ИТОГО: Всего записей={len(all_bookings)}, Будущих={future_count}, Прошедших={past_count}, Ошибок={error_count}")
-    print(f"🔍 ОТЛАДКА get_past_bookings: Возвращаем {len(result)} прошедших записей (после фильтрации), full={full}")
     return result
 
 
@@ -1478,7 +1461,7 @@ def get_client_profile(
             "created_at": client.created_at
         }
     except Exception as e:
-        print(f"Ошибка при получении профиля клиента: {e}")
+        logger.exception("get_client_profile: %s", e)
         raise HTTPException(status_code=500, detail="Внутренняя ошибка сервера")
 
 
@@ -1518,14 +1501,23 @@ def update_client_profile(
             if existing_user:
                 raise HTTPException(status_code=400, detail="Телефон уже используется")
             client.phone = profile_data["phone"]
-        
+
+        if "name" in profile_data:
+            name_val = profile_data.get("name")
+            if name_val is not None:
+                stripped = str(name_val).strip()
+                client.full_name = stripped if stripped else None
+
+        if "birth_date" in profile_data:
+            client.birth_date = _parse_optional_client_birth_date(profile_data.get("birth_date"))
+
         db.commit()
         
         return {"message": "Профиль успешно обновлен"}
     except HTTPException:
         raise
     except Exception as e:
-        print(f"Ошибка при обновлении профиля клиента: {e}")
+        logger.exception("update_client_profile: %s", e)
         db.rollback()
         raise HTTPException(status_code=500, detail="Внутренняя ошибка сервера")
 
@@ -1562,14 +1554,14 @@ def change_client_password(
     except HTTPException:
         raise
     except Exception as e:
-        print(f"Ошибка при смене пароля клиента: {e}")
+        logger.exception("change_client_password: %s", e)
         db.rollback()
         raise HTTPException(status_code=500, detail="Внутренняя ошибка сервера")
 
 
 @profile_router.delete("/account")
 def delete_client_account(
-    password_data: dict,
+    password_data: dict = Body(...),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ) -> Any:
@@ -1599,7 +1591,7 @@ def delete_client_account(
     except HTTPException:
         raise
     except Exception as e:
-        print(f"Ошибка при удалении аккаунта клиента: {e}")
+        logger.exception("delete_client_account: %s", e)
         db.rollback()
         raise HTTPException(status_code=500, detail="Внутренняя ошибка сервера")
 
@@ -1920,8 +1912,6 @@ def get_client_dashboard_stats(
     Получение статистики для клиентского дашборда.
     """
     try:
-        print(f"🔍 ОТЛАДКА get_client_dashboard_stats: client_id={current_user.id}")
-        
         # Прошедшие записи - записи, которые уже прошли по времени, независимо от статуса
         past_bookings = (
             db.query(Booking)
@@ -1931,12 +1921,13 @@ def get_client_dashboard_stats(
             )
             .all()
         )
-        
-        print(f"🔍 ОТЛАДКА: Найдено {len(past_bookings)} записей в базе для подсчета")
-        
+
         # Подсчитываем прошедшие записи с учетом timezone мастера
         past_bookings_count = 0
         for booking in past_bookings:
+            if not booking.start_time:
+                logger.warning("booking %s: skip in stats (start_time is None)", booking.id)
+                continue
             master_timezone = get_master_timezone(booking)
             if not master_timezone or not master_timezone.strip():
                 if MASTER_CANON_DEBUG:
@@ -1947,22 +1938,17 @@ def get_client_dashboard_stats(
                 logger.warning("booking %s: skip in stats (master timezone empty)", booking.id)
                 continue
             current_time_in_master_tz = get_current_time_in_timezone(master_timezone)
-            
+
             # Приводим start_time к часовому поясу мастера для корректного сравнения
-            if booking.start_time and booking.start_time.tzinfo is None:
+            if booking.start_time.tzinfo is None:
                 # Если start_time не имеет часового пояса, считаем что это UTC
                 start_time_in_master_tz = pytz.UTC.localize(booking.start_time).astimezone(pytz.timezone(master_timezone))
             else:
                 start_time_in_master_tz = booking.start_time.astimezone(pytz.timezone(master_timezone))
-            
-            print(f"🔍 ОТЛАДКА: Запись {booking.id}: start_time={booking.start_time}, timezone={master_timezone}, start_time_in_tz={start_time_in_master_tz}, current_time={current_time_in_master_tz}")
-            
+
             # Проверяем, является ли запись прошедшей в часовом поясе мастера
             if start_time_in_master_tz <= current_time_in_master_tz:
                 past_bookings_count += 1
-                print(f"🔍 ОТЛАДКА: Запись {booking.id} ДОБАВЛЕНА к прошедшим")
-            else:
-                print(f"🔍 ОТЛАДКА: Запись {booking.id} НЕ добавлена (еще не прошла)")
         
         # Будущие записи - записи, которые еще не прошли по времени
         # Получаем все записи (не cancelled) для подсчета будущих
@@ -1978,6 +1964,9 @@ def get_client_dashboard_stats(
         # Подсчитываем будущие записи с учетом timezone мастера
         future_bookings_count = 0
         for booking in all_bookings:
+            if not booking.start_time:
+                logger.warning("booking %s: skip in stats (start_time is None)", booking.id)
+                continue
             master_timezone = get_master_timezone(booking)
             if not master_timezone or not master_timezone.strip():
                 if MASTER_CANON_DEBUG:
@@ -1988,20 +1977,18 @@ def get_client_dashboard_stats(
                 logger.warning("booking %s: skip in stats (master timezone empty)", booking.id)
                 continue
             current_time_in_master_tz = get_current_time_in_timezone(master_timezone)
-            
+
             # Приводим start_time к часовому поясу мастера для корректного сравнения
-            if booking.start_time and booking.start_time.tzinfo is None:
+            if booking.start_time.tzinfo is None:
                 # Если start_time не имеет часового пояса, считаем что это UTC
                 start_time_in_master_tz = pytz.UTC.localize(booking.start_time).astimezone(pytz.timezone(master_timezone))
             else:
                 start_time_in_master_tz = booking.start_time.astimezone(pytz.timezone(master_timezone))
-            
+
             # Проверяем, является ли запись будущей в часовом поясе мастера
             if start_time_in_master_tz > current_time_in_master_tz:
                 future_bookings_count += 1
-        
-        print(f"🔍 ОТЛАДКА: Итого: прошедших={past_bookings_count}, будущих={future_bookings_count}")
-        
+
         # Топ салонов по частоте записи
         top_salons = (
             db.query(
@@ -2734,7 +2721,7 @@ def get_client_note(
         
         return note
     except Exception as e:
-        print(f"Ошибка при получении заметки: {e}")
+        logger.warning("get_client_note: %s", e)
         return None
 
 @router.post("/notes", response_model=ClientNoteResponse)
@@ -2780,7 +2767,7 @@ def create_or_update_client_note(
             
     except Exception as e:
         db.rollback()
-        print(f"Ошибка при создании/обновлении заметки: {e}")
+        logger.exception("create_or_update_client_note: %s", e)
         raise HTTPException(status_code=500, detail="Ошибка при сохранении заметки")
 
 @router.delete("/notes/{note_type}/{target_id}")
@@ -2811,7 +2798,7 @@ def delete_client_note(
         raise
     except Exception as e:
         db.rollback()
-        print(f"Ошибка при удалении заметки: {e}")
+        logger.exception("delete_client_note: %s", e)
         raise HTTPException(status_code=500, detail="Ошибка при удалении заметки")
 
 
