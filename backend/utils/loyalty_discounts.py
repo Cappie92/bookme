@@ -12,6 +12,7 @@ from sqlalchemy import desc
 
 from models import (
     LoyaltyDiscount,
+    LoyaltyDiscountType,
     PersonalDiscount,
     LoyaltyConditionType,
     Booking,
@@ -20,6 +21,7 @@ from models import (
     Service,
     AppliedDiscount,
     Master,
+    MasterService,
 )
 from utils.loyalty_params import normalize_parameters
 
@@ -33,6 +35,8 @@ CONDITION_TYPE_PRIORITY: Dict[str, int] = {
     "service_discount": 6,
 }
 PERSONAL_PRIORITY = 7
+# Для кандидата personal в ответах API (hint/preview) — тот же числовой приоритет, что и PERSONAL_PRIORITY
+CONDITION_TYPE_PRIORITY["personal"] = PERSONAL_PRIORITY
 
 # Whitelist поддерживаемых condition_type (реально обрабатываются в evaluate_discount_candidates)
 SUPPORTED_CONDITION_TYPES = {
@@ -75,6 +79,14 @@ def to_master_local(dt_utc: datetime, master_id: int, db: Session) -> datetime:
         utc = dt_utc.astimezone(pytz.UTC)
     local = utc.astimezone(tz)
     return local.replace(tzinfo=None)
+
+
+def _coerce_booking_start_utc_naive(booking_start: datetime) -> datetime:
+    """Единый naive UTC для арифметики с Booking.start_time из БД (naive UTC)."""
+    if booking_start.tzinfo is None:
+        return booking_start
+    utc = booking_start.astimezone(pytz.UTC)
+    return utc.replace(tzinfo=None)
 
 
 def _master_local_to_utc(local_naive: datetime, master_id: int, db: Session) -> datetime:
@@ -243,6 +255,8 @@ def evaluate_and_prepare_applied_discount(
         "rule_id": best_candidate["rule_id"],
         "discount_percent": float(best_candidate["discount_percent"]),
         "discount_amount": float(discount_amount),
+        "rule_name": best_candidate.get("name"),
+        "condition_type": best_candidate.get("condition_type"),
     }
 
     return discounted_payment_amount, applied_discount_data
@@ -306,6 +320,10 @@ def evaluate_discount_candidates(
     booking_start: Optional[datetime] = booking_payload.get("start_time")
     service_id: Optional[int] = booking_payload.get("service_id")
     category_id: Optional[int] = booking_payload.get("category_id")
+
+    if booking_start is not None:
+        booking_start = _coerce_booking_start_utc_naive(booking_start)
+        booking_payload["start_time"] = booking_start
 
     _, resolved_phone, birth_date = _get_client_data(db, client_id, client_phone)
     _, resolved_price, resolved_category_id = _get_service_context(
@@ -377,7 +395,9 @@ def evaluate_discount_candidates(
                 if not last_visit or not isinstance(min_days, (int, float)):
                     candidate["reason"] = "insufficient_data"
                 else:
-                    delta_days = (booking_start - last_visit).days
+                    # last_visit из БД может быть aware (PostgreSQL); booking_start уже naive UTC
+                    last_naive = _coerce_booking_start_utc_naive(last_visit)
+                    delta_days = (booking_start - last_naive).days
                     min_ok = delta_days >= int(min_days)
                     max_ok = True
                     if max_days is not None:
@@ -474,7 +494,7 @@ def evaluate_discount_candidates(
             "rule_id": rule.id,
             "rule_type": "personal",
             "name": "Персональная скидка",
-            "condition_type": None,
+            "condition_type": "personal",
             "parameters": {},
             "priority": 1,
             "is_active": rule.is_active,
@@ -508,3 +528,144 @@ def evaluate_discount_candidates(
     best_candidate = applicable[0] if applicable else None
 
     return candidates, best_candidate
+
+
+def _public_pct_label(pct: float) -> str:
+    """Короткая метка для публичного UI (Unicode minus)."""
+    x = float(pct)
+    if abs(x - round(x)) < 1e-6:
+        return f"\u2212{int(round(x))}%"
+    return f"\u2212{x:g}%"
+
+
+def _canonical_service_for_master_service_row(db: Session, ms: MasterService) -> Optional[Service]:
+    """Тот же резолв канонического Service, что в публичной записи (по имени/длительности/цене)."""
+    return (
+        db.query(Service)
+        .filter(
+            Service.salon_id.is_(None),
+            Service.indie_master_id.is_(None),
+            Service.name == ms.name,
+            Service.duration == ms.duration,
+            Service.price == ms.price,
+        )
+        .first()
+    )
+
+
+def _master_service_matches_rule_service_id(db: Session, ms: MasterService, sid: int) -> bool:
+    """
+    service_discount в правиле может хранить:
+    - id канонического Service (как в preview), или
+    - id салонного/другого Service из reseed (create_service_and_link_master), совпадающего по услуге с MasterService.
+    """
+    canon = _canonical_service_for_master_service_row(db, ms)
+    if canon is not None and int(canon.id) == int(sid):
+        return True
+    row = db.query(Service).filter(Service.id == int(sid)).first()
+    if not row:
+        return False
+    return (
+        row.name == ms.name
+        and (row.duration or 0) == (ms.duration or 0)
+        and float(row.price or 0) == float(ms.price or 0)
+    )
+
+
+def build_public_loyalty_visual_hints(db: Session, master: Master) -> Dict[str, Any]:
+    """
+    Подсказки для публичного UI (без расчёта персональных/исторических скидок).
+    Только активные quick-правила happy_hours и service_discount.
+    """
+    hh_best: Dict[Tuple[int, str, str], float] = {}
+    sd_best: Dict[int, float] = {}
+
+    rules = (
+        db.query(LoyaltyDiscount)
+        .filter(
+            LoyaltyDiscount.master_id == master.id,
+            LoyaltyDiscount.discount_type == LoyaltyDiscountType.QUICK,
+            LoyaltyDiscount.is_active.is_(True),
+        )
+        .all()
+    )
+
+    for rule in rules:
+        cond = rule.conditions or {}
+        if not isinstance(cond, dict):
+            continue
+        condition_type = cond.get("condition_type")
+        raw_params = cond.get("parameters", {}) if isinstance(cond.get("parameters"), dict) else {}
+        pct = float(rule.discount_percent or 0)
+        parameters = normalize_parameters(
+            condition_type or "",
+            raw_params,
+            rule_discount_percent=float(rule.discount_percent) if rule.discount_percent is not None else None,
+        )
+
+        if condition_type == LoyaltyConditionType.HAPPY_HOURS.value:
+            days_list = parameters.get("days") or []
+            intervals = parameters.get("intervals") or []
+            if not isinstance(days_list, list) or not isinstance(intervals, list):
+                continue
+            for d in days_list:
+                try:
+                    wd = int(d)
+                except (TypeError, ValueError):
+                    continue
+                if wd < 1 or wd > 7:
+                    continue
+                for iv in intervals:
+                    if not isinstance(iv, dict):
+                        continue
+                    st = iv.get("start")
+                    et = iv.get("end")
+                    if not st or not et:
+                        continue
+                    st_s, et_s = str(st).strip(), str(et).strip()
+                    key = (wd, st_s, et_s)
+                    hh_best[key] = max(hh_best.get(key, 0.0), pct)
+
+        elif condition_type == LoyaltyConditionType.SERVICE_DISCOUNT.value:
+            if parameters.get("_invalid"):
+                continue
+            sid = parameters.get("service_id")
+            cid = parameters.get("category_id")
+            master_svcs = db.query(MasterService).filter(MasterService.master_id == master.id).all()
+            for ms in master_svcs:
+                matched = False
+                if sid is not None and _master_service_matches_rule_service_id(db, ms, int(sid)):
+                    matched = True
+                if (
+                    not matched
+                    and cid is not None
+                    and ms.category_id is not None
+                    and int(cid) == int(ms.category_id)
+                ):
+                    matched = True
+                if matched:
+                    sd_best[ms.id] = max(sd_best.get(ms.id, 0.0), pct)
+
+    happy_hours_out: List[Dict[str, Any]] = []
+    for (wd, st_s, et_s), p in sorted(hh_best.items(), key=lambda x: (x[0][0], x[0][1], x[0][2])):
+        happy_hours_out.append(
+            {
+                "weekday": wd,
+                "start_time": st_s,
+                "end_time": et_s,
+                "discount_percent": p,
+                "label": _public_pct_label(p),
+            }
+        )
+
+    service_discounts_out: List[Dict[str, Any]] = []
+    for ms_id, p in sorted(sd_best.items(), key=lambda x: x[0]):
+        service_discounts_out.append(
+            {
+                "master_service_id": ms_id,
+                "discount_percent": p,
+                "label": _public_pct_label(p),
+            }
+        )
+
+    return {"happy_hours": happy_hours_out, "service_discounts": service_discounts_out}

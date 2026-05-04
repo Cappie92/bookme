@@ -1,7 +1,5 @@
 /**
- * Промпт «Подтвердите запись» на публичной странице /m/:slug.
- * Показывается при клике «Записаться» без авторизации; после выбора «Войти»/«Зарегистрироваться»
- * открывается стандартная AuthModal с нужной вкладкой.
+ * Промпт «Подтвердите запись» — визуал .modal-preview из dedato-public-master-page-preview-v2.
  */
 import React from 'react'
 
@@ -27,7 +25,7 @@ export default function PublicBookingAuthPrompt({
 
   return (
     <div
-      className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4"
+      className="fixed inset-0 z-40 flex items-end sm:items-center justify-center bg-black/35 p-0 sm:p-6"
       data-testid="public-auth-prompt"
       onClick={(e) => e.target === e.currentTarget && onClose?.()}
       role="dialog"
@@ -35,30 +33,42 @@ export default function PublicBookingAuthPrompt({
       aria-labelledby="public-auth-prompt-title"
     >
       <div
-        className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden"
+        className="bg-white rounded-t-[18px] sm:rounded-[18px] w-full max-w-[480px] overflow-hidden border border-[#E8E2DD]"
+        style={{ boxShadow: '0 24px 50px -28px rgba(24,24,24,.26)' }}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="p-6">
-          <h2 id="public-auth-prompt-title" className="text-xl font-semibold text-gray-900 mb-2">
+        <div className="p-6 sm:p-7 max-sm:px-5 max-sm:py-6">
+          <h2 id="public-auth-prompt-title" className="m-0 text-[22px] font-bold text-[#222222] tracking-tight">
             Подтвердите запись
           </h2>
-          <p className="text-gray-600 text-sm mb-4">
-            Чтобы завершить бронирование, войдите или зарегистрируйтесь. Это нужно, чтобы отправить подтверждение и вы могли управлять записью.
+          <p className="mt-3.5 text-base leading-[1.55] text-[#4A4E57]">
+            Чтобы завершить бронирование, войдите или зарегистрируйтесь. Это нужно, чтобы отправить подтверждение и вы
+            могли управлять записью.
           </p>
 
-          <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-sm text-green-800 space-y-1 mb-5">
-            <div>Мастер: {masterName}</div>
-            {serviceName && <div>Услуга: {serviceName}{price ? ` — ${price} ₽` : ''}{duration ? `, ${duration} мин` : ''}</div>}
-            {dateLabel && <div>Дата: {dateLabel}</div>}
-            {timeLabel && <div>Время: {timeLabel}</div>}
-            {timezoneOrCity && <div>Время записи: {timezoneOrCity}</div>}
+          <div className="mt-[18px] rounded-2xl border border-[#BFE9D1] bg-[#EEF9F0] px-[18px] py-4 text-[#2D6E43]">
+            <div className="text-[15px] leading-[1.55] mb-1.5 last:mb-0">Мастер: {masterName}</div>
+            {serviceName ? (
+              <div className="text-[15px] leading-[1.55] mb-1.5 last:mb-0">
+                Услуга: {serviceName}
+                {price ? ` — ${price} ₽` : ''}
+                {duration ? `, ${duration} мин` : ''}
+              </div>
+            ) : null}
+            {dateLabel ? (
+              <div className="text-[15px] leading-[1.55] mb-1.5 last:mb-0">Дата: {dateLabel}</div>
+            ) : null}
+            {timeLabel ? <div className="text-[15px] leading-[1.55] mb-1.5 last:mb-0">Время: {timeLabel}</div> : null}
+            {timezoneOrCity ? (
+              <div className="text-[15px] leading-[1.55] mb-0">Время записи: {timezoneOrCity}</div>
+            ) : null}
           </div>
 
-          <div className="flex flex-col gap-2">
+          <div className="flex flex-col gap-3.5 mt-5">
             <button
               type="button"
               onClick={onLogin}
-              className="w-full py-3 rounded-lg font-semibold text-white bg-[#4CAF50] hover:bg-[#45a049]"
+              className="w-full min-h-[54px] rounded-xl text-lg font-bold text-white bg-[#4CAF50] hover:bg-[#45A049] shadow-[0_1px_0_#2F7C43,0_6px_16px_-8px_rgba(76,175,80,0.45)]"
               data-testid="public-auth-login"
             >
               Войти
@@ -66,20 +76,20 @@ export default function PublicBookingAuthPrompt({
             <button
               type="button"
               onClick={onRegister}
-              className="w-full py-3 rounded-lg font-semibold text-[#4CAF50] bg-green-50 border border-[#4CAF50] hover:bg-green-100"
+              className="w-full min-h-[54px] rounded-xl text-lg font-bold bg-[#F7FFFA] text-[#45A049] border-2 border-[#62BC6A] hover:bg-[#EEF9F0]"
               data-testid="public-auth-register"
             >
               Зарегистрироваться
             </button>
-            <button
-              type="button"
-              onClick={onClose}
-              className="w-full py-2.5 rounded-lg font-medium text-gray-600 hover:bg-gray-100"
-              data-testid="public-auth-cancel"
-            >
-              Отмена
-            </button>
           </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="w-full mt-2.5 flex items-center justify-center text-base font-medium text-[#555A64] hover:text-[#222] py-2"
+            data-testid="public-auth-cancel"
+          >
+            Отмена
+          </button>
         </div>
       </div>
     </div>

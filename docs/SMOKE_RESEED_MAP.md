@@ -59,7 +59,7 @@ python backend/scripts/reseed_local_test_data.py --base-url http://localhost:800
 |----------|------------|
 | `PUT /api/master/loyalty/settings` — баллы ON (**M8**), OFF (**M9**) — только мастера с `has_loyalty_access` (Premium) | `smoke_reseed_layer.py` |
 | `POST` quick-discounts с маркером `[QA SMOKE]` | то же |
-| `POST` personal-discount (**M8** → клиент **`+79998000035`**) | то же |
+| `POST` personal-discount (**M8** → клиент **`+79991500107`**, изолированный loyalty smoke) | то же |
 | `PATCH` клиент M4: заметка + имя для поиска | то же |
 | `GET` features/settings + проверка `GET /api/public/masters/{domain}` | то же |
 

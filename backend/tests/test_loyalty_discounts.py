@@ -9,6 +9,7 @@ from models import (
     User,
     UserRole,
     Master,
+    MasterService,
     Service,
     Booking,
     BookingStatus,
@@ -475,6 +476,51 @@ def test_returning_client_min_max(db, master, client_user, service):
     booking_start = now + timedelta(days=1)
     payload = {"start_time": booking_start, "service_id": service.id, "category_id": None}
     candidates, best = evaluate_discount_candidates(master.id, client_user.id, None, payload, db)
+    ret = next((c for c in candidates if c.get("condition_type") == "returning_client"), None)
+    assert ret is not None
+    assert ret["match"] is True
+
+
+def test_returning_client_aware_last_visit_with_offset_booking_start(db, master, client_user, service, monkeypatch):
+    """PostgreSQL может отдавать last_visit aware; booking_start из query — offset-aware → после coerce naive−aware давал TypeError."""
+    import pytz
+
+    from utils import loyalty_discounts
+
+    master.timezone = "Europe/Moscow"
+    db.add(master)
+    db.commit()
+
+    _insert_master_service(db, master.id, service.id)
+    rule = LoyaltyDiscount(
+        master_id=master.id,
+        discount_type=LoyaltyDiscountType.QUICK,
+        name="Возврат",
+        discount_percent=20.0,
+        is_active=True,
+        priority=1,
+        conditions={
+            "condition_type": "returning_client",
+            "parameters": {"min_days_since_last_visit": 14, "max_days_since_last_visit": 60},
+        },
+    )
+    db.add(rule)
+    db.commit()
+
+    monkeypatch.setattr(
+        loyalty_discounts,
+        "_get_last_completed_visit",
+        lambda _db, _mid, _cid: datetime(2025, 1, 5, 9, 0, 0, tzinfo=pytz.UTC),
+    )
+
+    payload = {
+        "start_time": datetime.fromisoformat("2025-02-10T12:00:00+03:00"),
+        "service_id": service.id,
+        "category_id": None,
+    }
+    candidates, _ = loyalty_discounts.evaluate_discount_candidates(
+        master.id, client_user.id, None, payload, db
+    )
     ret = next((c for c in candidates if c.get("condition_type") == "returning_client"), None)
     assert ret is not None
     assert ret["match"] is True
@@ -974,3 +1020,135 @@ def test_applied_discount_unchanged_after_rule_deactivation(db, master, client_u
     assert row.discount_id == rule.id
     assert row.discount_percent == 15.0
     assert row.discount_amount == 150.0
+
+
+def test_build_public_loyalty_visual_hints_happy_hours(db, master):
+    from utils.loyalty_discounts import build_public_loyalty_visual_hints
+
+    rule = LoyaltyDiscount(
+        master_id=master.id,
+        discount_type=LoyaltyDiscountType.QUICK,
+        name="HH visual",
+        discount_percent=13.0,
+        is_active=True,
+        priority=1,
+        conditions={
+            "condition_type": "happy_hours",
+            "parameters": {"days": [2], "intervals": [{"start": "09:00", "end": "12:00"}]},
+        },
+    )
+    db.add(rule)
+    db.commit()
+
+    master.timezone = "Europe/Moscow"
+    db.add(master)
+    db.commit()
+
+    out = build_public_loyalty_visual_hints(db, master)
+    assert len(out["happy_hours"]) == 1
+    assert out["happy_hours"][0]["weekday"] == 2
+    assert out["happy_hours"][0]["start_time"] == "09:00"
+    assert out["happy_hours"][0]["end_time"] == "12:00"
+    assert out["happy_hours"][0]["discount_percent"] == 13.0
+    assert "\u2212" in out["happy_hours"][0]["label"] or "-" in out["happy_hours"][0]["label"]
+
+
+def test_build_public_loyalty_visual_hints_service_discount(db, master):
+    from utils.loyalty_discounts import build_public_loyalty_visual_hints
+
+    s = Service(name="Мужская", price=1000.0, duration=30, salon_id=None, indie_master_id=None)
+    db.add(s)
+    db.commit()
+
+    ms = MasterService(
+        master_id=master.id,
+        category_id=None,
+        name="Мужская",
+        duration=30,
+        price=1000.0,
+    )
+    db.add(ms)
+    db.commit()
+
+    rule = LoyaltyDiscount(
+        master_id=master.id,
+        discount_type=LoyaltyDiscountType.QUICK,
+        name="SD visual",
+        discount_percent=9.0,
+        is_active=True,
+        priority=1,
+        conditions={
+            "condition_type": "service_discount",
+            "parameters": {"items": [{"service_id": s.id}], "category_ids": []},
+        },
+    )
+    db.add(rule)
+    db.commit()
+
+    out = build_public_loyalty_visual_hints(db, master)
+    assert len(out["service_discounts"]) == 1
+    assert out["service_discounts"][0]["master_service_id"] == ms.id
+    assert out["service_discounts"][0]["discount_percent"] == 9.0
+
+
+def test_build_public_loyalty_visual_hints_service_discount_reseed_style_sid(db, master):
+    """В правиле id другого Service с тем же name/duration/price (как salon id в smoke) — всё равно матчится MasterService."""
+    from utils.loyalty_discounts import build_public_loyalty_visual_hints
+
+    s_alias = Service(name="Мужская", price=1000.0, duration=30, salon_id=None, indie_master_id=None)
+    db.add(s_alias)
+    db.flush()
+    s_other = Service(name="Мужская", price=1000.0, duration=30, salon_id=None, indie_master_id=None)
+    db.add(s_other)
+    db.commit()
+
+    ms = MasterService(
+        master_id=master.id,
+        category_id=None,
+        name="Мужская",
+        duration=30,
+        price=1000.0,
+    )
+    db.add(ms)
+    db.commit()
+
+    rule = LoyaltyDiscount(
+        master_id=master.id,
+        discount_type=LoyaltyDiscountType.QUICK,
+        name="SD reseed-style",
+        discount_percent=9.0,
+        is_active=True,
+        priority=1,
+        conditions={
+            "condition_type": "service_discount",
+            "parameters": {"service_id": s_other.id},
+        },
+    )
+    db.add(rule)
+    db.commit()
+
+    out = build_public_loyalty_visual_hints(db, master)
+    assert len(out["service_discounts"]) == 1
+    assert out["service_discounts"][0]["master_service_id"] == ms.id
+
+
+def test_build_public_loyalty_visual_hints_skips_inactive(db, master):
+    from utils.loyalty_discounts import build_public_loyalty_visual_hints
+
+    rule = LoyaltyDiscount(
+        master_id=master.id,
+        discount_type=LoyaltyDiscountType.QUICK,
+        name="HH off",
+        discount_percent=13.0,
+        is_active=False,
+        priority=1,
+        conditions={
+            "condition_type": "happy_hours",
+            "parameters": {"days": [2], "intervals": [{"start": "09:00", "end": "12:00"}]},
+        },
+    )
+    db.add(rule)
+    db.commit()
+
+    out = build_public_loyalty_visual_hints(db, master)
+    assert out["happy_hours"] == []

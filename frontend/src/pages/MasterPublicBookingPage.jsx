@@ -128,7 +128,7 @@ export default function MasterPublicBookingPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#F9F7F6] flex items-center justify-center">
+      <div className="min-h-screen bg-[#FCFBFA] flex items-center justify-center">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#4CAF50] mx-auto mb-4" />
           <p className="text-gray-600">Загрузка...</p>
@@ -178,7 +178,7 @@ export default function MasterPublicBookingPage() {
   const publicAddressLine = formatPublicAddressLine(profile.city, profile.address)
 
   return (
-    <div className="min-h-screen flex flex-col bg-white">
+    <div className="min-h-screen flex flex-col bg-[#FCFBFA]">
       <Helmet>
         <title>{title}</title>
         <meta name="description" content={description} />
@@ -228,14 +228,14 @@ export default function MasterPublicBookingPage() {
       {/* main: desktop pt-32; mobile — компактный header 3rem + зазор / баннер */}
       <main
         className={
-          'flex-grow pt-32 ' +
+          'flex-grow flex flex-col pt-32 ' +
           (showAppBanner
             ? 'max-md:pt-[calc(7.5rem+env(safe-area-inset-top,0px))]'
             : 'max-md:pt-[calc(4rem+env(safe-area-inset-top,0px))]')
         }
       >
-        <div className="max-w-5xl mx-auto w-full px-4 pt-2 sm:pt-3 pb-10">
-          <div className="grid md:grid-cols-[320px_minmax(0,1fr)] md:gap-6 items-start">
+        <div className="max-w-[1280px] mx-auto w-full flex-1 px-4 sm:px-7 pt-6 sm:pt-[34px] pb-14 sm:pb-16">
+          <div className="grid md:grid-cols-[320px_minmax(0,1fr)] md:gap-9 items-start md:min-h-[min(72vh,880px)]">
             <PublicBookingSidebar
               ownerInfo={{
                 name: profile.master_name,
@@ -251,12 +251,13 @@ export default function MasterPublicBookingPage() {
               masterTimezone={profile.master_timezone}
             />
 
-            <div className="min-w-0 py-5 md:py-6">
-              <div className="max-w-2xl">
+            <div className="min-w-0 w-full py-5 md:py-2 md:pl-0">
+              <div className="w-full max-w-none">
               {/* Mobile web: компактный блок контактов/адреса (sidebar скрыт на md-) */}
               {(profile.phone || profile.address || profile.address_detail || profile.city || profile.yandex_maps_url) && (
                 <div
-                  className="md:hidden mb-3 rounded-xl border border-neutral-200 bg-white p-3"
+                  className="md:hidden mb-6 rounded-[18px] border border-[#E8E2DD] bg-white p-[22px]"
+                  style={{ boxShadow: '0 12px 28px -18px rgba(24,24,24,.12)' }}
                   data-testid="public-master-contacts-mobile"
                 >
                   <div className="flex flex-col gap-2">
@@ -299,7 +300,7 @@ export default function MasterPublicBookingPage() {
                         href={profile.yandex_maps_url}
                         target="_blank"
                         rel="noreferrer"
-                        className="inline-flex items-center justify-center rounded-lg px-3 py-2 text-sm font-medium bg-[#4CAF50]/10 text-[#2f7d32] hover:bg-[#4CAF50]/15"
+                        className="inline-flex items-center justify-center rounded-xl px-3 py-2.5 text-sm font-medium text-neutral-700 bg-white border border-neutral-200 hover:bg-neutral-50 hover:border-neutral-300 w-full transition-colors"
                       >
                         Открыть в Яндекс Картах
                       </a>
@@ -322,8 +323,9 @@ export default function MasterPublicBookingPage() {
                     </div>
                   )}
                   {currentUser && eligibility.points != null && eligibility.points > 0 && (
-                    <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-green-800 text-sm">
-                      Доступно баллов: {eligibility.points}
+                    <div className="rounded-xl border border-emerald-200/50 bg-emerald-50/50 px-3 py-2.5 text-sm text-neutral-800">
+                      <span className="font-medium text-neutral-900">Баллы: </span>
+                      {eligibility.points}
                     </div>
                   )}
                 </div>
@@ -373,7 +375,7 @@ export default function MasterPublicBookingPage() {
         </div>
       </main>
 
-      <div className="hidden md:block">
+      <div className="hidden md:block mt-auto pt-10 border-t border-[#E8E2DD]/60 bg-[#FCFBFA]">
         <Footer compact />
       </div>
     </div>

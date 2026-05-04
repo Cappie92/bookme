@@ -42,7 +42,7 @@ test.describe('public booking wizard', () => {
     const firstSlot = page.locator('[data-testid^="slot-"]').first()
     await expect(firstSlot).toBeVisible({ timeout: 10000 })
     await firstSlot.click()
-    await expect(page.locator('.bg-green-50.border-green-200')).toBeVisible()
+    await expect(page.getByTestId('public-booking-summary')).toBeVisible()
     await page.getByTestId('header-login').first().click()
     await expect(page.locator('[data-testid="auth-modal"]')).toBeVisible({ timeout: 5000 })
     await page.locator('[data-testid="auth-modal"] input[name="phone"]').fill(CLIENT_PHONE)
@@ -50,7 +50,7 @@ test.describe('public booking wizard', () => {
     await page.locator('[data-testid="auth-login-submit"]').click()
     await expect(page.locator('[data-testid="auth-modal"]')).not.toBeVisible({ timeout: 10000 })
     await expect(page).toHaveURL(expect.stringContaining(`/m/${SLUG}`))
-    await expect(page.locator('.bg-green-50.border-green-200')).toBeVisible()
+    await expect(page.getByTestId('public-booking-summary')).toBeVisible()
     expect(postBookingsCount, 'При логине из шапки POST /bookings быть не должно').toBe(0)
   })
 

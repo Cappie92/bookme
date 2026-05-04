@@ -40,6 +40,308 @@ SMOKE_TRACE_PHONE_AUTO = "+79991230101"
 SMOKE_TRACE_PHONE_MANUAL = "+79991230102"
 PUBLIC_SMOKE_DOMAIN = "qa-smoke-public"
 
+# Изолированные клиенты loyalty smoke на M8: один телефон = один сценарий (без конкурирующих правил).
+# Не пересекаются с +7999{mi}{cccccc} и trace +79991231… — не попадают в 7b.
+LOYALTY_SMOKE_PASSWORD = "test123"
+LOYALTY_SMOKE_PHONE_BIRTHDAY = "+79991500101"
+LOYALTY_SMOKE_PHONE_FIRST_VISIT = "+79991500102"
+LOYALTY_SMOKE_PHONE_RETURNING = "+79991500103"
+LOYALTY_SMOKE_PHONE_REGULAR = "+79991500104"
+LOYALTY_SMOKE_PHONE_HH_INACTIVE = "+79991500105"
+LOYALTY_SMOKE_PHONE_HH_ACTIVE = "+79991500109"
+LOYALTY_SMOKE_PHONE_SERVICE_DISCOUNT = "+79991500106"
+LOYALTY_SMOKE_PHONE_PERSONAL = "+79991500107"
+LOYALTY_SMOKE_PHONE_CONFLICT = "+79991500108"
+LOYALTY_SMOKE_PHONES_ALL: tuple[str, ...] = (
+    LOYALTY_SMOKE_PHONE_BIRTHDAY,
+    LOYALTY_SMOKE_PHONE_FIRST_VISIT,
+    LOYALTY_SMOKE_PHONE_RETURNING,
+    LOYALTY_SMOKE_PHONE_REGULAR,
+        LOYALTY_SMOKE_PHONE_HH_INACTIVE,
+        LOYALTY_SMOKE_PHONE_HH_ACTIVE,
+        LOYALTY_SMOKE_PHONE_SERVICE_DISCOUNT,
+    LOYALTY_SMOKE_PHONE_PERSONAL,
+    LOYALTY_SMOKE_PHONE_CONFLICT,
+)
+
+
+def _loyalty_smoke_birth_same_calendar_day(today: date) -> str:
+    """ДР в текущем месяце/дне (год в прошлом) — окно birthday ±7 всегда включает «сегодня»."""
+    y = today.year - 28
+    d = min(max(today.day, 1), 28)
+    return date(y, today.month, d).isoformat()
+
+
+def _loyalty_smoke_birth_outside_window(today: date) -> str:
+    """ДР ~на 6 календарных месяцев вперёд от текущего месяца — вне ±7 относительно сегодня."""
+    m = (today.month + 5 - 1) % 12 + 1
+    d = min(max(today.day, 1), 28)
+    return date(1990, m, d).isoformat()
+
+
+def _login_client_token(client: httpx.Client, base: str, phone: str, password: str) -> str:
+    r = client.post(f"{base}/api/auth/login", json={"phone": phone, "password": password})
+    r.raise_for_status()
+    tok = r.json().get("access_token")
+    if not tok:
+        raise RuntimeError("login: no access_token")
+    return tok
+
+
+HH_INACTIVE_CLONE_MARKER = f"{QA_MARK} HH_INACTIVE_CLONE"
+
+
+def _ensure_hh_inactive_clone_quick_discount(client: httpx.Client, base: str, hub_token: str) -> None:
+    """Дубль happy_hours (вт 09–12) с is_active=false — негатив «выключенное правило»; основное HH остаётся активным."""
+    try:
+        r = client.get(f"{base}/api/loyalty/quick-discounts", headers=_auth_headers(hub_token))
+        r.raise_for_status()
+        lst = r.json() if isinstance(r.json(), list) else []
+    except Exception as e:
+        print(f"  [WARN] HH inactive clone: list {e}")
+        return
+    for d in lst:
+        if HH_INACTIVE_CLONE_MARKER in (d.get("description") or ""):
+            print("  (skip) quick happy_hours inactive-clone: уже есть")
+            return
+    body: dict[str, Any] = {
+        "discount_type": "quick",
+        "name": f"QA happy hours OFF mirror {QA_MARK}",
+        "description": f"{HH_INACTIVE_CLONE_MARKER} duplicate Tue 09-12, is_active=false",
+        "discount_percent": 13.0,
+        "conditions": {
+            "condition_type": "happy_hours",
+            "parameters": {"days": [2], "intervals": [{"start": "09:00", "end": "12:00"}]},
+        },
+        "is_active": False,
+        "priority": 2,
+    }
+    try:
+        r = client.post(
+            f"{base}/api/loyalty/quick-discounts",
+            headers=_auth_headers(hub_token),
+            json=body,
+        )
+        r.raise_for_status()
+        print(f"  ✓ quick happy_hours inactive-clone id={r.json().get('id')}")
+    except Exception as e:
+        print(f"  [WARN] quick happy_hours inactive-clone: {e}")
+
+
+def _register_or_sync_loyalty_smoke_client(
+    client: httpx.Client,
+    base: str,
+    phone: str,
+    email: str,
+    full_name: str,
+    birth_iso: str,
+) -> None:
+    body = {
+        "phone": phone,
+        "password": LOYALTY_SMOKE_PASSWORD,
+        "role": "client",
+        "email": email,
+        "full_name": full_name,
+        "birth_date": birth_iso,
+    }
+    r = client.post(f"{base}/api/auth/register", json=body)
+    if r.status_code == 200:
+        return
+    low = (r.text or "").lower()
+    if r.status_code == 400 and ("already" in low or "registered" in low or "занят" in low):
+        tok = _login_client_token(client, base, phone, LOYALTY_SMOKE_PASSWORD)
+        pr = client.put(
+            f"{base}/api/client/profile",
+            headers=_auth_headers(tok),
+            json={"birth_date": birth_iso},
+        )
+        pr.raise_for_status()
+        return
+    r.raise_for_status()
+
+
+def _cleanup_qa_personal_discounts(
+    client: httpx.Client,
+    base: str,
+    hub_token: str,
+    phones_to_strip: tuple[str, ...],
+) -> None:
+    """Удалить персоналки с [QA SMOKE] на указанных телефонах (идемпотентность / смена телефона personal)."""
+    try:
+        r = client.get(f"{base}/api/loyalty/personal-discounts", headers=_auth_headers(hub_token))
+        r.raise_for_status()
+        lst = r.json() if isinstance(r.json(), list) else []
+    except Exception:
+        return
+    targets = {p.replace(" ", "") for p in phones_to_strip}
+    for p in lst:
+        phone = (p.get("client_phone") or "").replace(" ", "")
+        if phone not in targets:
+            continue
+        if QA_MARK not in (p.get("description") or "") and QA_MARK not in (p.get("name") or ""):
+            continue
+        pid = p.get("id")
+        if not pid:
+            continue
+        try:
+            dr = client.delete(
+                f"{base}/api/loyalty/personal-discounts/{pid}",
+                headers=_auth_headers(hub_token),
+            )
+            if dr.status_code in (200, 204):
+                print(f"  ✓ removed stale personal-discount id={pid} phone={phone}")
+        except Exception:
+            pass
+
+
+def _apply_loyalty_smoke_isolated_clients(
+    client: httpx.Client,
+    base: str,
+    admin_headers: dict[str, str],
+    hub_mid: int,
+    first_service_id: int,
+    today: date,
+) -> None:
+    """
+    Отдельные QA-клиенты под каждый loyalty-сценарий на M8 (qa-smoke-public).
+    Идемпотентно: delete_smoke_trace_bookings → sync birth_date → create_completed_bookings.
+    """
+    print("\n  --- 7d-loyalty) Изолированные клиенты под smoke loyalty (M8) ---")
+    if not first_service_id:
+        print("  [WARN] loyalty smoke: нет first_service_id — пропуск")
+        return
+    try:
+        r = client.post(
+            f"{base}/api/dev/testdata/delete_smoke_trace_bookings",
+            headers=admin_headers,
+            json={"master_id": hub_mid, "client_phones": list(LOYALTY_SMOKE_PHONES_ALL)},
+        )
+        r.raise_for_status()
+        print(f"  ✓ delete_smoke_trace_bookings M8 loyalty phones ({len(LOYALTY_SMOKE_PHONES_ALL)} шт.)")
+    except Exception as e:
+        print(f"  [WARN] delete loyalty smoke bookings: {e}")
+
+    b_in = _loyalty_smoke_birth_same_calendar_day(today)
+    b_out = _loyalty_smoke_birth_outside_window(today)
+
+    clients_spec: list[tuple[str, str, str, str]] = [
+        (LOYALTY_SMOKE_PHONE_BIRTHDAY, "loyalty.sm.birthday@example.com", f"{QA_MARK} LOYALTY birthday-only", b_in),
+        (LOYALTY_SMOKE_PHONE_FIRST_VISIT, "loyalty.sm.first@example.com", f"{QA_MARK} LOYALTY first-visit", b_out),
+        (LOYALTY_SMOKE_PHONE_RETURNING, "loyalty.sm.returning@example.com", f"{QA_MARK} LOYALTY returning", b_out),
+        (LOYALTY_SMOKE_PHONE_REGULAR, "loyalty.sm.regular@example.com", f"{QA_MARK} LOYALTY regular-visits", b_out),
+        (LOYALTY_SMOKE_PHONE_HH_INACTIVE, "loyalty.sm.hh@example.com", f"{QA_MARK} LOYALTY hh-outside-window", b_out),
+        (LOYALTY_SMOKE_PHONE_HH_ACTIVE, "loyalty.sm.hhactive@example.com", f"{QA_MARK} LOYALTY hh-active-slot", b_out),
+        (LOYALTY_SMOKE_PHONE_SERVICE_DISCOUNT, "loyalty.sm.sd@example.com", f"{QA_MARK} LOYALTY service-discount", b_out),
+        (LOYALTY_SMOKE_PHONE_PERSONAL, "loyalty.sm.personal@example.com", f"{QA_MARK} LOYALTY personal", b_out),
+        (LOYALTY_SMOKE_PHONE_CONFLICT, "loyalty.sm.conflict@example.com", f"{QA_MARK} LOYALTY conflict-maxpct", b_in),
+    ]
+    for phone, em, fn, bd in clients_spec:
+        try:
+            _register_or_sync_loyalty_smoke_client(client, base, phone, em, fn, bd)
+        except Exception as e:
+            print(f"  [WARN] register/sync {phone}: {e}")
+
+    sid = first_service_id
+    bookings: list[dict[str, Any]] = [
+        # returning: ровно 1 completed >30 дней назад
+        {
+            "client_phone": LOYALTY_SMOKE_PHONE_RETURNING,
+            "service_id": sid,
+            "days_ago": 35,
+            "hour": 11,
+            "minute": 0,
+            "status": "completed",
+            "notes": f"{QA_MARK} LOYALTY returning 35d",
+        },
+        # regular: 2 completed в последние 60 дней
+        {
+            "client_phone": LOYALTY_SMOKE_PHONE_REGULAR,
+            "service_id": sid,
+            "days_ago": 25,
+            "hour": 10,
+            "minute": 0,
+            "status": "completed",
+            "notes": f"{QA_MARK} LOYALTY regular A",
+        },
+        {
+            "client_phone": LOYALTY_SMOKE_PHONE_REGULAR,
+            "service_id": sid,
+            "days_ago": 15,
+            "hour": 14,
+            "minute": 0,
+            "status": "completed",
+            "notes": f"{QA_MARK} LOYALTY regular B",
+        },
+        # HH inactive: 1 completed ~17d — нет first_visit; HH rule off → в HH-слоте 0% на услуге без SD
+        {
+            "client_phone": LOYALTY_SMOKE_PHONE_HH_INACTIVE,
+            "service_id": sid,
+            "days_ago": 17,
+            "hour": 10,
+            "minute": 30,
+            "status": "completed",
+            "notes": f"{QA_MARK} LOYALTY hh-inactive clean 17d",
+        },
+        # service_discount: 1 completed 12–20д — нет first_visit, нет returning (17<30), нет regular (1<2)
+        {
+            "client_phone": LOYALTY_SMOKE_PHONE_SERVICE_DISCOUNT,
+            "service_id": sid,
+            "days_ago": 17,
+            "hour": 12,
+            "minute": 0,
+            "status": "completed",
+            "notes": f"{QA_MARK} LOYALTY sd 17d",
+        },
+        # personal: то же — first_visit off; personal 12% по телефону
+        {
+            "client_phone": LOYALTY_SMOKE_PHONE_PERSONAL,
+            "service_id": sid,
+            "days_ago": 17,
+            "hour": 13,
+            "minute": 0,
+            "status": "completed",
+            "notes": f"{QA_MARK} LOYALTY personal 17d",
+        },
+        # conflict: ДР в окне + 2 completed за 60д → regular 14% > birthday 12%
+        {
+            "client_phone": LOYALTY_SMOKE_PHONE_CONFLICT,
+            "service_id": sid,
+            "days_ago": 20,
+            "hour": 15,
+            "minute": 0,
+            "status": "completed",
+            "notes": f"{QA_MARK} LOYALTY conflict A",
+        },
+        {
+            "client_phone": LOYALTY_SMOKE_PHONE_CONFLICT,
+            "service_id": sid,
+            "days_ago": 11,
+            "hour": 16,
+            "minute": 0,
+            "status": "completed",
+            "notes": f"{QA_MARK} LOYALTY conflict B",
+        },
+    ]
+    try:
+        r = client.post(
+            f"{base}/api/dev/testdata/create_completed_bookings",
+            headers=admin_headers,
+            json={"master_id": hub_mid, "bookings": bookings},
+        )
+        r.raise_for_status()
+        print(f"  ✓ loyalty smoke bookings created={r.json().get('created')}")
+    except Exception as e:
+        print(f"  [WARN] loyalty smoke create_completed_bookings: {e}")
+
+    print(
+        "  ℹ Телефоны loyalty smoke (пароль test123): "
+        f"birthday={LOYALTY_SMOKE_PHONE_BIRTHDAY}, first_visit={LOYALTY_SMOKE_PHONE_FIRST_VISIT}, "
+        f"returning={LOYALTY_SMOKE_PHONE_RETURNING}, regular={LOYALTY_SMOKE_PHONE_REGULAR}, "
+        f"hh_outside_window={LOYALTY_SMOKE_PHONE_HH_INACTIVE}, hh_active_slot={LOYALTY_SMOKE_PHONE_HH_ACTIVE}, "
+        f"service_discount={LOYALTY_SMOKE_PHONE_SERVICE_DISCOUNT}, "
+        f"personal={LOYALTY_SMOKE_PHONE_PERSONAL}, conflict={LOYALTY_SMOKE_PHONE_CONFLICT}"
+    )
+
 
 def _auth_headers(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
@@ -554,7 +856,7 @@ def run_smoke_reseed_extensions(
             "body": {
                 "discount_type": "quick",
                 "name": f"QA happy hours {QA_MARK}",
-                "description": f"{QA_MARK} happy_hours (активно; выключаем вторым шагом для inactive-сэмпла)",
+                "description": f"{QA_MARK} happy_hours (active Tue 09-12; см. inactive-clone отдельным правилом)",
                 "discount_percent": 13.0,
                 "conditions": {
                     "condition_type": "happy_hours",
@@ -619,34 +921,27 @@ def run_smoke_reseed_extensions(
         except Exception as e:
             print(f"  [WARN] quick {tid}: {e}")
 
-    # Один явный «inactive» сэмпл: деактивируем happy_hours после создания
-    hh_id = None
-    try:
-        r2 = client.get(f"{base}/api/loyalty/quick-discounts", headers=_auth_headers(hub_token))
-        r2.raise_for_status()
-        for d in r2.json():
-            desc = (d.get("description") or "") + (d.get("name") or "")
-            if QA_MARK in desc and _get_quick_condition_type(d.get("conditions")) == "happy_hours":
-                hh_id = d.get("id")
-                break
-    except Exception:
-        pass
-    if hh_id:
+    _ensure_hh_inactive_clone_quick_discount(client, base, hub_token)
+
+    # --- Изолированные QA-клиенты loyalty (1 сценарий = 1 телефон) на M8 ---
+    if admin_headers and first_service_id:
         try:
-            r = client.put(
-                f"{base}/api/loyalty/quick-discounts/{hh_id}",
-                headers=_auth_headers(hub_token),
-                json={"is_active": False},
+            _apply_loyalty_smoke_isolated_clients(
+                client, base, admin_headers, hub_mid, int(first_service_id), today
             )
-            r.raise_for_status()
-            print(f"  ✓ quick happy_hours id={hh_id} → is_active=False (inactive sample)")
         except Exception as e:
-            print(f"  [WARN] deactivate happy_hours: {e}")
+            print(f"  [WARN] loyalty smoke isolated clients: {e}")
+    elif not admin_headers:
+        print("  [WARN] loyalty smoke isolated clients: admin_headers отсутствует — пропуск")
 
-    # Вернуть активным «основной» сценарий happy_hours пользователь может вручную; для inactive используем returning_client (уже False)
-
-    # --- Personal discount на hub: один клиент с персональной скидкой ---
-    pers_phone = client_phone_for_master(IDX_LOYALTY_HUB, 35)
+    # --- Personal discount на hub: только выделенный loyalty-smoke телефон ---
+    _cleanup_qa_personal_discounts(
+        client,
+        base,
+        hub_token,
+        (client_phone_for_master(IDX_LOYALTY_HUB, 35), LOYALTY_SMOKE_PHONE_PERSONAL),
+    )
+    pers_phone = LOYALTY_SMOKE_PHONE_PERSONAL
     try:
         r = client.get(
             f"{base}/api/loyalty/personal-discounts",

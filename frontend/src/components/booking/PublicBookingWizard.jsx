@@ -8,6 +8,7 @@ import { ChevronDownIcon, ChevronUpIcon, MagnifyingGlassIcon, CalendarIcon, Chev
 import { formatTimeShort, formatTimezoneLabel } from '../../utils/dateFormat'
 import { useAuth } from '../../contexts/AuthContext'
 import PublicBookingAuthPrompt from './PublicBookingAuthPrompt'
+import PublicBookingLoggedInConfirmModal from './PublicBookingLoggedInConfirmModal'
 import { metrikaGoal } from '../../analytics/metrika'
 import { M } from '../../analytics/metrikaEvents'
 import { apiGet } from '../../utils/api'
@@ -34,6 +35,89 @@ const DRAFT_TTL_MS = 20 * 60 * 1000
 const AUTO_SUBMIT_MAX_AGE_MS = 3 * 60 * 1000
 
 const DRAFT_SOURCE_PUBLIC_BOOKING = 'public_booking'
+
+/** en-US short weekday → Python isoweekday (Пн=1 … Вс=7), как в backend happy_hours. */
+const WEEKDAY_SHORT_TO_ISO = { Sun: 7, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 }
+
+function getMasterLocalWeekdayAndMinutes(isoString, timeZone) {
+  const d = new Date(isoString)
+  if (Number.isNaN(d.getTime())) return null
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    weekday: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(d)
+  let weekday
+  let hour = 0
+  let minute = 0
+  for (const p of parts) {
+    if (p.type === 'weekday') weekday = WEEKDAY_SHORT_TO_ISO[p.value]
+    if (p.type === 'hour') hour = parseInt(p.value, 10) || 0
+    if (p.type === 'minute') minute = parseInt(p.value, 10) || 0
+  }
+  if (weekday == null) return null
+  return { weekday, minutes: hour * 60 + minute }
+}
+
+function hhmmToMinutes(hhmm) {
+  const parts = String(hhmm).split(':')
+  if (parts.length < 2) return null
+  const h = parseInt(parts[0], 10)
+  const m = parseInt(parts[1], 10)
+  if (Number.isNaN(h) || Number.isNaN(m)) return null
+  return h * 60 + m
+}
+
+/** Единый числовой id для сопоставления услуги из профиля с loyalty_visual.service_discounts[].master_service_id. */
+function normalizeMasterServiceId(raw) {
+  if (raw === null || raw === undefined) return null
+  const n = typeof raw === 'string' ? parseInt(raw, 10) : Number(raw)
+  return Number.isFinite(n) ? n : null
+}
+
+/** Карта master_service_id → запись скидки (ключи только number — без string/number рассинхрона). */
+function buildServiceDiscountMap(loyaltyVisual) {
+  const m = new Map()
+  for (const x of loyaltyVisual?.service_discounts || []) {
+    const raw = x.master_service_id ?? x.masterServiceId
+    const id = normalizeMasterServiceId(raw)
+    if (id != null) m.set(id, x)
+  }
+  return m
+}
+
+function serviceDiscountBadgeForService(svc, discountMap) {
+  if (!svc || !discountMap?.size) return null
+  for (const key of [svc.id, svc.service_id, svc.master_service_id]) {
+    const id = normalizeMasterServiceId(key)
+    if (id == null) continue
+    const hit = discountMap.get(id)
+    if (hit) return hit
+  }
+  return null
+}
+
+/** Совпадение с правилами happy_hours: start включительно, end исключительно (как evaluate_discount_candidates). */
+function happyHoursSlotLabel(slotStartIso, timeZone, rules) {
+  const loc = getMasterLocalWeekdayAndMinutes(slotStartIso, timeZone)
+  if (!loc || !rules?.length) return null
+  let best = 0
+  for (const r of rules) {
+    if (r.weekday !== loc.weekday) continue
+    const s = hhmmToMinutes(r.start_time)
+    const e = hhmmToMinutes(r.end_time)
+    if (s == null || e == null) continue
+    if (loc.minutes >= s && loc.minutes < e) {
+      const p = Number(r.discount_percent) || 0
+      if (p > best) best = p
+    }
+  }
+  if (best <= 0) return null
+  if (Math.abs(best - Math.round(best)) < 1e-6) return `\u2212${Math.round(best)}%`
+  return `\u2212${best}%`
+}
 
 /** Статусы draft для идемпотентности: pending — можно создавать; submitted — запрос ушёл; done — создано. */
 function readDraftRaw() {
@@ -136,6 +220,33 @@ function lastBookingSuccessMatchesSlot(rec, serviceId, slot) {
   return rec.service_id === serviceId && rec.start_time === slot.start_time && rec.end_time === slot.end_time
 }
 
+const LOYALTY_HINT_TITLE_BY_TYPE = {
+  birthday: 'Скидка ко дню рождения',
+  first_visit: 'Скидка на первый визит',
+  returning_client: 'Скидка для возвращающегося клиента',
+  regular_visits: 'Скидка для постоянного клиента',
+  service_discount: 'Скидка на выбранную услугу',
+  personal: 'Персональная скидка',
+  happy_hours: 'Скидка в счастливые часы',
+}
+
+function buildLoyaltyHintCopy(hint) {
+  if (!hint?.active) return null
+  const pct = hint.discount_percent != null ? Math.round(Number(hint.discount_percent)) : null
+  const pctPart = pct != null && pct > 0 ? ` — ${pct}%` : ''
+  const baseTitle =
+    LOYALTY_HINT_TITLE_BY_TYPE[hint.condition_type] || 'Доступна скидка'
+  const title =
+    hint.condition_type === 'birthday'
+      ? `${baseTitle} активна${pctPart}`
+      : `${baseTitle}${pctPart}`
+  const sub =
+    hint.condition_type === 'birthday'
+      ? 'Размер будет учтён при выборе услуги и времени визита.'
+      : 'Итоговая сумма — после выбора услуги и времени.'
+  return { title, sub }
+}
+
 function groupByCategory(services) {
   const map = new Map()
   for (const s of services) {
@@ -197,7 +308,11 @@ export default function PublicBookingWizard({
   const [selectedService, setSelectedService] = useState(null)
   const [selectedDate, setSelectedDate] = useState(null)
   const [selectedSlot, setSelectedSlot] = useState(null)
+  const [pricePreview, setPricePreview] = useState(null)
+  const [pricePreviewLoading, setPricePreviewLoading] = useState(false)
+  const [pricePreviewError, setPricePreviewError] = useState(null)
   const [showAuthPrompt, setShowAuthPrompt] = useState(false)
+  const [showLoggedInConfirmModal, setShowLoggedInConfirmModal] = useState(false)
   const [slots, setSlots] = useState([])
   const [slotsLoading, setSlotsLoading] = useState(false)
   const [slotsError, setSlotsError] = useState(null)
@@ -305,11 +420,15 @@ export default function PublicBookingWizard({
     return groupByCategory(list)
   }, [services, serviceSearch])
 
+  /** Dropdown: по умолчанию все категории свернуты; при поиске — раскрыть все группы с результатами. */
   useEffect(() => {
-    if (groups.length > 0 && expandedCategories.size === 0) {
-      setExpandedCategories(new Set([groups[0].name]))
+    if (!showServiceDropdown) return
+    if (serviceSearch.trim()) {
+      setExpandedCategories(new Set(groups.map((g) => g.name)))
+    } else {
+      setExpandedCategories(new Set())
     }
-  }, [groups])
+  }, [showServiceDropdown, serviceSearch, groups])
 
   const dateOptions = useMemo(() => buildDateOptionsFromSlots(slots), [slots])
   const availableDateSet = useMemo(() => new Set(dateOptions.map((o) => o.dateStr)), [dateOptions])
@@ -346,6 +465,24 @@ export default function PublicBookingWizard({
       .sort((a, b) => (a.start_time || '').localeCompare(b.start_time || ''))
   }, [slots, selectedDate])
 
+  const masterTz = profile?.master_timezone || 'Europe/Moscow'
+  const hhVisualRules = profile?.loyalty_visual?.happy_hours || []
+
+  const serviceDiscountByMasterServiceId = useMemo(
+    () => buildServiceDiscountMap(profile?.loyalty_visual),
+    [profile?.loyalty_visual],
+  )
+
+  const selectedServiceSdBadge = useMemo(
+    () => serviceDiscountBadgeForService(selectedService, serviceDiscountByMasterServiceId),
+    [selectedService, serviceDiscountByMasterServiceId],
+  )
+
+  const selectedSlotHhLabel = useMemo(
+    () => (selectedSlot ? happyHoursSlotLabel(selectedSlot.start_time, masterTz, hhVisualRules) : null),
+    [selectedSlot, masterTz, hhVisualRules],
+  )
+
   const loadAvailability = useCallback(async () => {
     if (!slug || !selectedService) return
     setSlotsLoading(true)
@@ -378,6 +515,48 @@ export default function PublicBookingWizard({
       setSlotsError(null)
     }
   }, [selectedService, loadAvailability])
+
+  useEffect(() => {
+    if (!slug || !selectedService || !selectedSlot || !currentUser) {
+      setPricePreview(null)
+      setPricePreviewError(null)
+      setPricePreviewLoading(false)
+      return
+    }
+    const token = localStorage.getItem('access_token')
+    if (!token) {
+      setPricePreview(null)
+      return
+    }
+    let cancelled = false
+    const st = encodeURIComponent(selectedSlot.start_time)
+    const url = `/api/public/masters/${encodeURIComponent(slug)}/booking-price-preview?service_id=${selectedService.id}&start_time=${st}`
+    setPricePreviewLoading(true)
+    setPricePreviewError(null)
+    fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+      .then(async (res) => {
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}))
+          throw new Error(err?.detail || err?.message || res.statusText)
+        }
+        return res.json()
+      })
+      .then((data) => {
+        if (!cancelled) setPricePreview(data)
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setPricePreview(null)
+          setPricePreviewError('Не удалось загрузить расчёт скидки')
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setPricePreviewLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [slug, selectedService, selectedSlot, currentUser])
 
   useEffect(() => {
     setCalendarExpanded(true)
@@ -414,6 +593,10 @@ export default function PublicBookingWizard({
   useEffect(() => {
     if (currentUser) setShowAuthPrompt(false)
   }, [currentUser])
+
+  useEffect(() => {
+    setShowLoggedInConfirmModal(false)
+  }, [selectedService?.id, selectedDate, selectedSlot?.start_time, selectedSlot?.end_time])
 
   useEffect(() => {
     mountedRef.current = true
@@ -651,29 +834,11 @@ export default function PublicBookingWizard({
   const canSubmit = !!selectedService && !!selectedDate && !!selectedSlot
   const bookingBlocked = profile?.booking_blocked === true || eligibility?.booking_blocked === true
   const requiresAdvancePayment = profile?.requires_advance_payment === true || eligibility?.requires_advance_payment === true
+  const loyaltyHintCopy = useMemo(() => buildLoyaltyHintCopy(eligibility?.loyalty_hint), [eligibility?.loyalty_hint])
 
-  const handleSubmit = async () => {
+  const performPublicBookingCreate = useCallback(async () => {
     if (!canSubmit || bookingBlocked) return
-    setSubmitError(null)
-    if (!currentUser) {
-      const attemptId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
-      saveDraft({
-        slug,
-        service_id: selectedService.id,
-        start_time: selectedSlot.start_time,
-        end_time: selectedSlot.end_time,
-        status: 'pending',
-        attempt_id: attemptId,
-        intent: 'create_after_auth',
-        source: DRAFT_SOURCE_PUBLIC_BOOKING,
-      })
-      if (typeof __DEV__ !== 'undefined' && __DEV__) {
-        console.debug('[public-booking] No user: opening auth prompt', { intent: 'create_after_auth' })
-      }
-      metrikaGoal(M.PUBLIC_BOOKING_WIZARD_NEED_AUTH, { slug })
-      setShowAuthPrompt(true)
-      return
-    }
+    if (!currentUser) return
     if (success) return
     if (publicBookingCreateInFlightRef.current) return
     const dBlock = getDraft()
@@ -683,14 +848,18 @@ export default function PublicBookingWizard({
       dBlock.intent === 'create_after_auth' &&
       dBlock.status === 'submitted'
     ) {
-      // Идёт post-login auto-submit; повторный ручной POST на тот же слот даст 400 и сломает storage
       return
     }
+    setSubmitError(null)
     publicBookingCreateInFlightRef.current = true
     setSubmitting(true)
     metrikaGoal(M.PUBLIC_BOOKING_FORM_SUBMIT, { slug, context: 'public_wizard' })
     const url = `/api/public/masters/${encodeURIComponent(slug)}/bookings`
-    const payload = { service_id: selectedService.id, start_time: selectedSlot.start_time, end_time: selectedSlot.end_time }
+    const payload = {
+      service_id: selectedService.id,
+      start_time: selectedSlot.start_time,
+      end_time: selectedSlot.end_time,
+    }
     if (typeof __DEV__ !== 'undefined' && __DEV__) {
       console.debug('[public-booking] POST booking', { url, payload })
     }
@@ -714,7 +883,7 @@ export default function PublicBookingWizard({
         const errData = await res.json().catch(() => ({}))
         const msg = errData.detail || errData.message
         if (typeof __DEV__ !== 'undefined' && __DEV__) {
-          console.debug('[public-booking] handleSubmit POST error', { status: res.status, body: errData })
+          console.debug('[public-booking] POST booking error', { status: res.status, body: errData })
         }
         throw new Error(
           typeof msg === 'string' && msg.trim()
@@ -776,7 +945,41 @@ export default function PublicBookingWizard({
       publicBookingCreateInFlightRef.current = false
       setSubmitting(false)
     }
-  }
+  }, [
+    slug,
+    canSubmit,
+    bookingBlocked,
+    currentUser,
+    success,
+    selectedService,
+    selectedSlot,
+    onBookingSuccess,
+    onBookingError,
+  ])
+
+  const handleGuestBookingIntent = useCallback(() => {
+    if (!canSubmit || bookingBlocked) return
+    setSubmitError(null)
+    const attemptId =
+      typeof crypto !== 'undefined' && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+    saveDraft({
+      slug,
+      service_id: selectedService.id,
+      start_time: selectedSlot.start_time,
+      end_time: selectedSlot.end_time,
+      status: 'pending',
+      attempt_id: attemptId,
+      intent: 'create_after_auth',
+      source: DRAFT_SOURCE_PUBLIC_BOOKING,
+    })
+    if (typeof __DEV__ !== 'undefined' && __DEV__) {
+      console.debug('[public-booking] No user: opening auth prompt', { intent: 'create_after_auth' })
+    }
+    metrikaGoal(M.PUBLIC_BOOKING_WIZARD_NEED_AUTH, { slug })
+    setShowAuthPrompt(true)
+  }, [slug, canSubmit, bookingBlocked, selectedService, selectedSlot])
 
   const toggleCategory = (name) => {
     setExpandedCategories((prev) => {
@@ -802,10 +1005,10 @@ export default function PublicBookingWizard({
       'inline-flex items-center justify-center gap-2 font-medium rounded-lg transition-colors min-h-[44px] px-5 py-3 w-full sm:w-auto'
     return (
       <div
-        className="bg-white rounded-xl shadow-sm border border-green-200 p-6 sm:p-8 text-center"
+        className="bg-white rounded-2xl shadow-sm border border-emerald-200/50 p-6 sm:p-8 text-center"
         data-testid="success-screen"
       >
-        <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-green-100 text-green-600 mb-4">
+        <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-emerald-100 text-[#4CAF50] mb-4">
           <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
           </svg>
@@ -894,10 +1097,19 @@ export default function PublicBookingWizard({
   }
 
   return (
-    <div className="space-y-6">
+    <div className="w-full max-w-none space-y-[18px] pb-2">
+      {currentUser && loyaltyHintCopy && (
+        <div
+          className="rounded-[14px] border border-[#BFE9D1] bg-[#DFF5EC] px-[18px] py-4 mb-1"
+          data-testid="public-loyalty-hint-banner"
+        >
+          <p className="text-base font-semibold text-[#2F7C43] leading-snug">{loyaltyHintCopy.title}</p>
+          <p className="mt-1 text-[13px] text-[#4E7C60] leading-relaxed">{loyaltyHintCopy.sub}</p>
+        </div>
+      )}
       {postLoginRestoreNotice && (
         <div
-          className="bg-sky-50 border border-sky-200 rounded-lg p-3 text-sky-900 text-sm flex gap-2 justify-between items-start"
+          className="bg-sky-50/90 border border-sky-200/80 rounded-xl p-3.5 text-sky-900 text-sm flex gap-2 justify-between items-start"
           role="status"
           data-testid="public-booking-restore-notice"
         >
@@ -914,22 +1126,22 @@ export default function PublicBookingWizard({
         </div>
       )}
       {bookingBlocked && (
-        <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-amber-800 text-sm">
+        <div className="bg-amber-50/90 border border-amber-200/80 rounded-xl p-3 text-amber-900 text-sm">
           Запись недоступна
         </div>
       )}
       {requiresAdvancePayment && (
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-blue-800 text-sm">
+        <div className="bg-sky-50/90 border border-sky-200/70 rounded-xl p-3 text-sky-900 text-sm">
           Требуется предоплата для подтверждения записи
         </div>
       )}
 
-      {/* Step 1: Service */}
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">1. Услуга</label>
+      {/* Step 1: Услуга — .step + .select-shell */}
+      <div className="mb-0">
+        <label className="block text-[15px] font-medium text-[#4B4F59] mb-2.5">1. Услуга</label>
         <div className="relative">
           {services.length === 0 ? (
-            <div className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg text-center text-gray-500 text-sm">
+            <div className="w-full min-h-[60px] px-[18px] flex items-center justify-center bg-[#FAFAFB] border border-[#E8E2DD] rounded-[14px] text-center text-base text-[#6A6E76]">
               У мастера пока нет услуг
             </div>
           ) : (
@@ -937,18 +1149,32 @@ export default function PublicBookingWizard({
           <button
             type="button"
             onClick={() => setShowServiceDropdown(!showServiceDropdown)}
-            className="w-full flex items-center justify-between gap-2 px-4 py-3 bg-white border border-gray-200 rounded-lg text-left hover:border-gray-300 focus:ring-2 focus:ring-[#4CAF50] focus:border-[#4CAF50]"
+            className="w-full min-h-[60px] flex items-center justify-between gap-3 px-[18px] bg-white border border-[#E8E2DD] rounded-[14px] text-left shadow-[0_1px_2px_rgba(45,45,45,0.03)] hover:border-[#D8D2CD] focus:outline-none focus:ring-2 focus:ring-[#4CAF50]/25 focus:border-[#4CAF50]"
             data-testid="service-picker-button"
           >
-            <span className={selectedService ? 'text-gray-900' : 'text-gray-500'}>
-              {selectedService
-                ? `${selectedService.name} — ${selectedService.price} ₽, ${selectedService.duration} мин`
-                : 'Выберите услугу'}
+            <span className="flex items-center gap-2.5 flex-wrap min-w-0">
+              {selectedService ? (
+                <>
+                  <span className="min-w-0 text-base font-normal text-[#30323A] leading-snug">
+                    {selectedService.name} — {selectedService.price} ₽, {selectedService.duration} мин
+                  </span>
+                  {selectedServiceSdBadge?.label ? (
+                    <span
+                      className="shrink-0 inline-flex items-center justify-center min-w-[38px] h-7 px-2 rounded-lg bg-[#E8F8EE] text-[13px] font-bold text-[#2F7C43] border border-[#B8E7C9] tabular-nums"
+                      title="Скидка на услугу"
+                    >
+                      {selectedServiceSdBadge.label}
+                    </span>
+                  ) : null}
+                </>
+              ) : (
+                <span className="text-base text-[#A1A4AD]">Выберите услугу</span>
+              )}
             </span>
             {showServiceDropdown ? (
-              <ChevronUpIcon className="w-5 h-5 text-gray-400 shrink-0" />
+              <ChevronUpIcon className="w-5 h-5 text-[#B6B9C2] shrink-0" />
             ) : (
-              <ChevronDownIcon className="w-5 h-5 text-gray-400 shrink-0" />
+              <ChevronDownIcon className="w-5 h-5 text-[#B6B9C2] shrink-0" />
             )}
           </button>
           {showServiceDropdown && (
@@ -960,25 +1186,26 @@ export default function PublicBookingWizard({
               />
               <div
                 className="
-                  z-[45] md:z-20 bg-white border border-gray-200 shadow-lg flex flex-col min-h-0 overflow-hidden
+                  z-[45] md:z-20 bg-white border border-[#E8E2DD] flex flex-col min-h-0 overflow-hidden
                   max-md:fixed max-md:left-0 max-md:right-0 max-md:bottom-0 max-md:rounded-t-2xl max-md:border-b-0 max-md:shadow-2xl
                   max-md:h-[calc(100svh-10px)] max-md:max-h-[calc(100svh-10px)] max-md:pb-[env(safe-area-inset-bottom,0px)]
-                  md:absolute md:top-full md:left-0 md:right-0 md:mt-1 md:h-auto md:rounded-lg md:max-h-80
+                  md:absolute md:top-full md:left-0 md:right-0 md:mt-2 md:h-auto md:rounded-2xl md:max-h-[min(70vh,520px)]
                 "
+                style={{ boxShadow: '0 18px 40px -22px rgba(35,35,35,.35)' }}
                 role="dialog"
                 aria-modal="true"
                 aria-label="Выбор услуги"
               >
-                <div className="shrink-0 bg-white border-b border-gray-200 max-md:pt-[max(env(safe-area-inset-top),0.5rem)]">
+                <div className="shrink-0 border-b border-[#E8E2DD] max-md:pt-[max(env(safe-area-inset-top),0.5rem)] bg-white">
                   <div className="flex md:hidden justify-center pt-1 pb-2" aria-hidden="true">
-                    <span className="h-1 w-11 rounded-full bg-gray-300" />
+                    <span className="h-1 w-11 rounded-full bg-neutral-300" />
                   </div>
-                  <div className="flex items-center justify-between gap-3 px-3 pb-2 md:py-2 md:px-2">
-                    <span className="text-base md:text-sm font-semibold text-gray-900">Услуга</span>
-                    <div className="flex items-center gap-2 shrink-0">
+                  <div className="flex items-center justify-between gap-3 py-3.5 px-4 md:px-4">
+                    <h3 className="m-0 text-[15px] font-semibold text-[#222222]">Услуга</h3>
+                    <div className="flex items-center gap-3 shrink-0">
                       <button
                         type="button"
-                        className="inline-flex items-center justify-center min-h-[44px] min-w-[44px] rounded-full text-gray-600 hover:bg-gray-100 active:bg-gray-200"
+                        className="inline-flex items-center justify-center min-h-[44px] min-w-[44px] rounded-full text-[#7F838D] hover:bg-neutral-100 active:bg-neutral-200 text-2xl leading-none font-light"
                         aria-label="Закрыть без выбора"
                         onClick={() => setShowServiceDropdown(false)}
                       >
@@ -986,7 +1213,7 @@ export default function PublicBookingWizard({
                       </button>
                       <button
                         type="button"
-                        className="min-h-[44px] px-4 rounded-xl bg-[#4CAF50] text-white text-sm font-semibold shadow-sm active:opacity-90"
+                        className="min-h-[40px] px-4 rounded-xl bg-[#4CAF50] text-white text-sm font-semibold hover:bg-[#45A049] active:opacity-95"
                         onClick={() => setShowServiceDropdown(false)}
                       >
                         Готово
@@ -994,72 +1221,69 @@ export default function PublicBookingWizard({
                     </div>
                   </div>
                 </div>
-                <div className="p-2 border-b border-gray-100 flex items-center gap-2 shrink-0">
-                  <MagnifyingGlassIcon className="w-4 h-4 text-gray-400 shrink-0" />
+                <div className="py-3 px-4 border-b border-[#E8E2DD] shrink-0 bg-white">
                   <input
                     type="text"
                     value={serviceSearch}
                     onChange={(e) => setServiceSearch(e.target.value)}
-                    placeholder="Поиск по названию..."
-                    className="flex-1 min-w-0 py-1.5 text-sm border-0 focus:ring-0 focus:outline-none"
+                    placeholder="Поиск по названию…"
+                    className="w-full h-[42px] rounded-xl border border-[#E8E2DD] px-3.5 text-sm text-[#444444] placeholder:text-[#8C8E96] outline-none focus:border-[#4CAF50] focus:ring-1 focus:ring-[#4CAF50]/30"
                   />
-                  <button
-                    type="button"
-                    className="shrink-0 py-2 px-2 text-sm font-semibold text-[#4CAF50] md:hidden"
-                    onClick={() => setShowServiceDropdown(false)}
-                  >
-                    Закрыть
-                  </button>
                 </div>
-                <div className="overflow-y-auto overscroll-contain p-1.5 space-y-1 flex-1 min-h-0" role="listbox">
+                <div className="overflow-y-auto overscroll-contain flex-1 min-h-0 bg-white" role="listbox">
                   {groups.map((g) => (
-                    <div
-                      key={g.name}
-                      className="rounded-lg border border-gray-100 bg-white overflow-hidden shadow-sm"
-                    >
-                      <button
-                        type="button"
-                        onClick={() => toggleCategory(g.name)}
-                        className="w-full flex items-center justify-between gap-2 px-2.5 py-2 text-left bg-gray-50/95 hover:bg-gray-100 transition-colors"
-                        aria-expanded={expandedCategories.has(g.name)}
-                      >
-                        <span className="flex items-center gap-2 min-w-0">
-                          <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 truncate">
-                            {g.name}
+                    <div key={g.name} className="border-t border-[#E8E2DD] first:border-t-0">
+                      <div className="px-3 pt-3 pb-2">
+                        <button
+                          type="button"
+                          onClick={() => toggleCategory(g.name)}
+                          className="w-full h-[30px] rounded-md border border-[#BFE9D1] border-l-[3px] border-l-[#4CAF50] bg-[#F3FBF5] flex items-center justify-between px-3 text-[13px] font-bold hover:bg-[#E8F8EE] transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4CAF50]/35"
+                          aria-expanded={expandedCategories.has(g.name)}
+                        >
+                          <span className="flex items-center gap-1.5 min-w-0 uppercase tracking-wide">
+                            <span className="truncate text-[#222222]">{g.name}</span>
+                            <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] rounded-full bg-[#D4F1DE] text-[11px] font-bold text-[#2F7C43] px-1.5 shrink-0">
+                              {g.services.length}
+                            </span>
                           </span>
-                          <span
-                            className="inline-flex shrink-0 items-center justify-center min-w-[1.25rem] h-5 px-1 rounded-md bg-gray-200/90 text-[10px] font-medium text-gray-600 tabular-nums"
-                            title="Количество услуг в категории"
-                          >
-                            {g.services.length}
-                          </span>
-                        </span>
-                        {expandedCategories.has(g.name) ? (
-                          <ChevronUpIcon className="w-4 h-4 shrink-0 text-gray-500" />
-                        ) : (
-                          <ChevronDownIcon className="w-4 h-4 shrink-0 text-gray-500" />
-                        )}
-                      </button>
+                          {expandedCategories.has(g.name) ? (
+                            <ChevronUpIcon className="w-4 h-4 shrink-0 text-[#5A8F6A]" />
+                          ) : (
+                            <ChevronDownIcon className="w-4 h-4 shrink-0 text-[#5A8F6A]" />
+                          )}
+                        </button>
+                      </div>
                       {expandedCategories.has(g.name) && (
-                        <div className="border-t border-gray-100 bg-white px-1 py-1 space-y-0.5">
-                          {g.services.map((s) => (
-                            <button
-                              key={s.id}
-                              type="button"
-                              onClick={() => handleSelectService(s)}
-                              className={`w-full text-left rounded-md px-3 py-2 text-sm transition-colors ${
-                                selectedService?.id === s.id
-                                  ? 'bg-green-50 ring-1 ring-inset ring-[#4CAF50] text-gray-900'
-                                  : 'hover:bg-gray-50 ring-1 ring-inset ring-transparent text-gray-900'
-                              }`}
-                              data-testid={`service-option-${s.id}`}
-                            >
-                              <div className="font-medium leading-snug">{s.name}</div>
-                              <div className="text-gray-500 text-xs mt-0.5 tabular-nums">
-                                {s.price} ₽ · {s.duration} мин
-                              </div>
-                            </button>
-                          ))}
+                        <div className="pb-2">
+                          {g.services.map((s) => {
+                            const sdBadge = serviceDiscountBadgeForService(s, serviceDiscountByMasterServiceId)
+                            return (
+                              <button
+                                key={s.id}
+                                type="button"
+                                onClick={() => handleSelectService(s)}
+                                className={`w-full text-left py-2 px-4 pb-3 flex items-start justify-between gap-3 transition-colors ${
+                                  selectedService?.id === s.id ? 'bg-[#F6FFFA]' : 'hover:bg-[#FBFBFC]'
+                                }`}
+                                data-testid={`service-option-${s.id}`}
+                              >
+                                <div className="min-w-0">
+                                  <div className="text-[15px] font-medium text-[#2D313A] leading-snug">{s.name}</div>
+                                  <div className="text-[13px] text-[#8B9098] mt-0.5 tabular-nums">
+                                    {s.price} ₽ · {s.duration} мин
+                                  </div>
+                                </div>
+                                {sdBadge?.label ? (
+                                  <span
+                                    className="shrink-0 inline-flex items-center justify-center min-w-[38px] h-7 px-2 rounded-lg bg-[#E8F8EE] text-[13px] font-bold text-[#2F7C43] border border-[#B8E7C9] tabular-nums self-center"
+                                    title="Скидка на услугу"
+                                  >
+                                    {sdBadge.label}
+                                  </span>
+                                ) : null}
+                              </button>
+                            )
+                          })}
                         </div>
                       )}
                     </div>
@@ -1073,34 +1297,34 @@ export default function PublicBookingWizard({
         </div>
       </div>
 
-      {/* Step 2: Дата — календарь-сетка */}
+      {/* Step 2: Дата — .date-shell / ghost-shell */}
       <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">2. Дата</label>
+        <label className="block text-[15px] font-medium text-[#4B4F59] mb-2.5">2. Дата</label>
         {!canSelectDate ? (
-          <div className="py-4 px-4 bg-gray-50 border border-gray-200 rounded-lg text-gray-500 text-sm text-center">
+          <div className="min-h-[60px] flex items-center justify-center px-[18px] bg-[#FAFAFB] border border-[#E8E2DD] rounded-[14px] text-base text-[#6A6E76] text-center shadow-[0_1px_2px_rgba(45,45,45,0.03)]">
             Сначала выберите услугу
           </div>
         ) : slotsLoading ? (
-          <div className="py-8 text-center text-gray-500 text-sm">Загрузка дат...</div>
+          <div className="py-10 text-center text-[#66686F] text-base">Загрузка дат...</div>
         ) : slotsError ? (
           <div className="py-4 text-center text-red-600 text-sm">{slotsError}</div>
         ) : dateOptions.length === 0 ? (
-          <div className="py-8 text-center text-gray-500 text-sm" data-testid="date-empty-state">
+          <div className="py-10 text-center text-[#66686F] text-base" data-testid="date-empty-state">
             Нет свободных дат на ближайшие 14 дней. Попробуйте выбрать другую услугу или загляните позже.
           </div>
         ) : (
           <>
             {selectedDate && !calendarExpanded && (
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between rounded-lg border border-gray-200 bg-gray-50/80 px-3 py-2.5 mb-2">
-                <p className="text-sm text-gray-800">
-                  <span className="text-gray-500">Выбрано: </span>
-                  <span className="font-medium">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between min-h-[60px] rounded-[14px] border border-[#E8E2DD] bg-white pl-[18px] pr-3.5 py-2 shadow-[0_1px_2px_rgba(45,45,45,0.03)] mb-2.5">
+                <p className="text-[15px] text-[#858994] flex items-center gap-2 min-h-[44px] sm:min-h-0">
+                  <span>Выбрано: </span>
+                  <span className="font-semibold text-[#373A41]">
                     {dateOptions.find((d) => d.dateStr === selectedDate)?.displayLabel || selectedDate}
                   </span>
                 </p>
                 <button
                   type="button"
-                  className="text-sm font-semibold text-[#4CAF50] py-1 px-2 -ml-2 sm:ml-0 rounded-lg hover:bg-green-50 min-h-[44px] sm:min-h-0 text-left sm:text-right"
+                  className="text-[15px] font-semibold text-[#4CAF50] py-2 px-1 rounded-lg hover:bg-[#F0FFF4] min-h-[44px] sm:min-h-0 text-left sm:text-right shrink-0"
                   onClick={() => setCalendarExpanded(true)}
                 >
                   Изменить дату
@@ -1120,34 +1344,47 @@ export default function PublicBookingWizard({
         )}
       </div>
 
-      {/* Step 3: Time */}
+      {/* Step 3: Время — .slots / .slot */}
       {selectedDate && (
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">3. Время</label>
+          <label className="block text-[15px] font-medium text-[#4B4F59] mb-2.5">3. Время</label>
           {slotsLoading ? (
-            <p className="text-gray-500 text-sm">Загрузка слотов...</p>
+            <p className="text-[#66686F] text-base">Загрузка слотов...</p>
           ) : slotsForDate.length === 0 ? (
-            <p className="text-gray-500 text-sm">На выбранную дату нет свободного времени. Выберите другую дату.</p>
+            <p className="text-[#66686F] text-base">На выбранную дату нет свободного времени. Выберите другую дату.</p>
           ) : (
-            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2.5">
               {slotsForDate.map((slot, i) => {
                 const isSelected =
                   selectedSlot?.start_time === slot.start_time &&
                   selectedSlot?.end_time === slot.end_time
                 const slotStartId = (slot.start_time || '').replace(/[:.]/g, '-')
+                const hhLabel = happyHoursSlotLabel(slot.start_time, masterTz, hhVisualRules)
                 return (
                   <button
                     key={`${slot.start_time}-${i}`}
                     type="button"
                     onClick={() => handleSelectSlot(slot)}
-                    className={`w-full min-h-[44px] inline-flex items-center justify-center px-1.5 py-2 sm:px-2 sm:py-2 rounded-lg text-xs sm:text-sm font-medium tabular-nums leading-tight text-center border-2 ${
+                    className={`h-[52px] min-h-[52px] w-full inline-flex flex-col items-center justify-center rounded-xl text-sm font-medium tabular-nums leading-tight text-center border shadow-[0_1px_2px_rgba(45,45,45,0.03)] transition-shadow ${
                       isSelected
-                        ? 'bg-[#4CAF50] border-[#4CAF50] text-white'
-                        : 'bg-white border-gray-200 text-gray-700 hover:border-gray-300'
+                        ? 'bg-[#4CAF50] border-[#4CAF50] text-white shadow-[0_8px_18px_-10px_rgba(76,175,80,0.6)]'
+                        : 'bg-white border-[#E8E2DD] text-[#3B3F47] hover:border-[#D0CAC4]'
                     }`}
                     data-testid={slotStartId ? `slot-${slotStartId}` : undefined}
+                    title={hhLabel ? `Счастливые часы ${hhLabel}` : undefined}
                   >
-                    {formatTimeShort(slot.start_time)}–{formatTimeShort(slot.end_time)}
+                    <span className={`time ${isSelected ? 'font-semibold' : 'font-medium'}`}>
+                      {formatTimeShort(slot.start_time)}–{formatTimeShort(slot.end_time)}
+                    </span>
+                    {hhLabel ? (
+                      <span
+                        className={`badge text-xs font-medium mt-0.5 leading-none ${
+                          isSelected ? 'text-[#E9FFEF]' : 'text-[#45A049]'
+                        }`}
+                      >
+                        {hhLabel}
+                      </span>
+                    ) : null}
                   </button>
                 )
               })}
@@ -1156,24 +1393,79 @@ export default function PublicBookingWizard({
         </div>
       )}
 
-      {/* Сводка выбора */}
+      {/* Сводка — .summary */}
       {selectedService && selectedDate && selectedSlot && (
-        <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-sm text-green-800 space-y-1">
-          <div>Услуга: {selectedService.name} — {selectedService.price} ₽, {selectedService.duration} мин</div>
-          <div>Дата: {dateOptions.find((d) => d.dateStr === selectedDate)?.displayLabel || selectedDate}</div>
-          <div>Время: {formatTimeShort(selectedSlot.start_time)}–{formatTimeShort(selectedSlot.end_time)}</div>
+        <div
+          className="mt-5 rounded-[14px] border border-[#BDE6CC] bg-[#EAF9EE] px-[18px] py-4 text-[#2F6F44]"
+          data-testid="public-booking-summary"
+        >
+          <div className="text-[15px] leading-relaxed mb-1.5 last:mb-0">
+            <strong className="font-semibold">Услуга:</strong>{' '}
+            {selectedService.name} — {selectedService.price} ₽, {selectedService.duration} мин
+          </div>
+          <div className="text-[15px] leading-relaxed mb-1.5 last:mb-0">
+            <strong className="font-semibold">Дата:</strong>{' '}
+            {dateOptions.find((d) => d.dateStr === selectedDate)?.displayLabel || selectedDate}
+          </div>
+          <div className="text-[15px] leading-relaxed mb-1.5 flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span>
+              <strong className="font-semibold">Время:</strong>{' '}
+              {formatTimeShort(selectedSlot.start_time)}–{formatTimeShort(selectedSlot.end_time)}
+            </span>
+            {selectedSlotHhLabel ? (
+              <span
+                className="inline-flex items-center h-[26px] px-2.5 rounded-lg bg-[#F3FFF6] border border-[#CAEAD4] text-xs font-bold text-[#2F7C43] tabular-nums"
+                title="Счастливые часы"
+              >
+                Счастливые часы {selectedSlotHhLabel}
+              </span>
+            ) : null}
+          </div>
+          {pricePreviewLoading && (
+            <div className="text-sm text-[#4E7C60] pt-2 mt-2 border-t border-[#CDE8D7]">Считаем скидку…</div>
+          )}
+          {pricePreviewError && (
+            <div className="text-sm text-amber-900 pt-2 mt-2 border-t border-[#CDE8D7]">{pricePreviewError}</div>
+          )}
+          {pricePreview && !pricePreviewLoading && (
+            <>
+              <div className="h-px bg-[#CDE8D7] my-2.5" aria-hidden="true" />
+              <div className="text-[15px] leading-relaxed mb-1.5 text-[#2F6F44]">
+                {Number(pricePreview.discount_amount) > 0 ? (
+                  <>
+                    <div>
+                      Базовая цена: {Number(pricePreview.base_price).toLocaleString('ru-RU')} ₽
+                    </div>
+                    <div>
+                      Скидка: −{Number(pricePreview.discount_amount).toLocaleString('ru-RU')} ₽
+                      {pricePreview.discount_percent != null
+                        ? ` (${Number(pricePreview.discount_percent)}%)`
+                        : ''}
+                      {pricePreview.rule_name ? ` · ${pricePreview.rule_name}` : ''}
+                    </div>
+                    <div className="font-semibold mt-1">
+                      К оплате: {Number(pricePreview.final_price).toLocaleString('ru-RU')} ₽
+                    </div>
+                  </>
+                ) : (
+                  <div className="font-semibold">К оплате: {Number(pricePreview.base_price).toLocaleString('ru-RU')} ₽</div>
+                )}
+              </div>
+            </>
+          )}
         </div>
       )}
 
       {/* CTA */}
       {submitError && (
-        <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-red-800 text-sm">
+        <div className="bg-red-50/90 border border-red-200/80 rounded-xl p-3.5 text-red-900 text-sm">
           {submitError}
         </div>
       )}
 
       {canSubmit && (
-        <button
+        <div className="mt-4">
+          <button
           type="button"
           onClick={(e) => {
             e.preventDefault()
@@ -1194,19 +1486,41 @@ export default function PublicBookingWizard({
             if (typeof __DEV__ !== 'undefined' && __DEV__) {
               console.debug('[public-booking] CTA click', payload)
             }
-            handleSubmit()
+            if (!currentUser) {
+              handleGuestBookingIntent()
+              return
+            }
+            setShowLoggedInConfirmModal(true)
           }}
           disabled={submitting || bookingBlocked}
-          className={`w-full py-3.5 rounded-lg font-semibold text-white ${
+          className={`w-full min-h-[52px] rounded-xl text-lg font-bold text-white transition-colors ${
             submitting || bookingBlocked
-              ? 'bg-gray-400 cursor-not-allowed'
-              : 'bg-[#4CAF50] hover:bg-[#45a049]'
+              ? 'bg-neutral-300 cursor-not-allowed shadow-none'
+              : 'bg-[#4CAF50] hover:bg-[#45A049] shadow-[0_1px_0_#2F7C43,0_6px_16px_-8px_rgba(76,175,80,0.45)]'
           }`}
           data-testid="cta-book"
         >
           {submitting ? 'Создание записи...' : bookingBlocked ? 'Запись недоступна' : 'Записаться'}
-        </button>
+          </button>
+        </div>
       )}
+
+      <PublicBookingLoggedInConfirmModal
+        open={showLoggedInConfirmModal}
+        onClose={() => !submitting && setShowLoggedInConfirmModal(false)}
+        onConfirm={() => {
+          setShowLoggedInConfirmModal(false)
+          void performPublicBookingCreate()
+        }}
+        onChangeTime={() => {
+          setShowLoggedInConfirmModal(false)
+          setSelectedSlot(null)
+        }}
+        profile={profile}
+        summary={authPromptSummary}
+        selectedSlotHhLabel={selectedSlotHhLabel}
+        submitting={submitting}
+      />
 
       <PublicBookingAuthPrompt
         open={showAuthPrompt}

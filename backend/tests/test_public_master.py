@@ -103,3 +103,29 @@ def test_get_public_client_note_without_auth(client, public_master):
     data = r.json()
     assert "note_text" in data
     assert data["note_text"] is None
+
+
+def test_get_public_eligibility_anonymous_includes_loyalty_hint(client, public_master):
+    """GET /api/public/masters/{slug}/eligibility без токена — loyalty_hint отсутствует или null."""
+    r = client.get("/api/public/masters/test-slug/eligibility")
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert "loyalty_hint" in data
+    assert data["loyalty_hint"] is None
+
+
+def test_booking_price_preview_guest_no_discount(client, public_master, public_master_service):
+    """GET booking-price-preview без авторизации — базовая цена, без скидки."""
+    r = client.get(
+        "/api/public/masters/test-slug/booking-price-preview",
+        params={
+            "service_id": public_master_service.id,
+            "start_time": "2030-06-15T10:00:00+03:00",
+        },
+    )
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["base_price"] == 1500.0
+    assert data["discount_amount"] == 0.0
+    assert data["final_price"] == 1500.0
+    assert data["discount_percent"] is None

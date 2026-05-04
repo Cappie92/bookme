@@ -1,7 +1,7 @@
 /**
  * Сетка календаря на месяц — точная копия из PublicBookingWizard.
  * Вынесена в отдельный модуль, чтобы переиспользовать в клиентских модалках
- * (RepeatBookingModal, TimeEdit) без дублирования и без визуальных отличий.
+ * (RepeatBookingModal, TimeEdit) без дублирования разметки.
  *
  * Контракт исходных пропсов из /m/:slug сохранён без изменений:
  *   - availableDateSet: Set<string>  доступные даты в формате YYYY-MM-DD
@@ -80,8 +80,8 @@ export function CalendarGrid({
   const monthLabel = `${new Date(viewYear, viewMonth).toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' })}`
 
   return (
-    <div className="border border-gray-200 rounded-lg overflow-hidden bg-white">
-      <div className="flex items-center justify-between border-b border-gray-200 px-3 py-2">
+    <div className="border border-[#E8E2DD] rounded-[14px] overflow-hidden bg-white shadow-[0_1px_2px_rgba(45,45,45,0.03)]">
+      <div className="flex items-center justify-between border-b border-[#E8E2DD] px-3 py-2.5 bg-[#FAFAFB]">
         <button
           type="button"
           onClick={() => {
@@ -100,7 +100,7 @@ export function CalendarGrid({
         >
           <ChevronLeftIcon className="w-5 h-5" />
         </button>
-        <span className="text-sm font-medium text-gray-700 capitalize">{monthLabel}</span>
+        <span className="text-sm font-semibold text-neutral-800 capitalize tracking-tight">{monthLabel}</span>
         <button
           type="button"
           onClick={() => {
@@ -122,7 +122,7 @@ export function CalendarGrid({
       </div>
       <div className="grid grid-cols-7 text-center text-sm">
         {WEEKDAYS.map((wd) => (
-          <div key={wd} className="py-1.5 text-gray-500 font-medium">
+          <div key={wd} className="py-2 text-neutral-400 text-xs font-semibold uppercase tracking-wide">
             {wd}
           </div>
         ))}
@@ -136,12 +136,12 @@ export function CalendarGrid({
               type="button"
               disabled={!available}
               onClick={() => available && onSelectDate(dateStr)}
-              className={`py-2 rounded ${
+              className={`py-2.5 rounded-lg mx-0.5 text-[15px] transition-colors ${
                 available
                   ? selected
-                    ? 'bg-[#4CAF50] text-white font-medium'
-                    : 'hover:bg-green-50 text-gray-900'
-                  : 'text-gray-300 cursor-not-allowed'
+                    ? 'bg-[#DFF5EC] text-[#1B5E20] font-semibold ring-1 ring-inset ring-[#4CAF50]/50'
+                    : 'hover:bg-[#F4FBF6] text-[#373A41] font-medium'
+                  : 'text-[#C5C8CE] cursor-not-allowed'
               }`}
               data-testid={available ? `date-cell-${dateStr}` : undefined}
             >
