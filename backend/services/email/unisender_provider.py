@@ -216,6 +216,10 @@ class UnisenderTransactionalProvider:
         try:
             async with httpx.AsyncClient(timeout=self._timeout) as client:
                 if file_tuples:
+                    logger.info(
+                        "unisender classic api: using multipart files attachments=%s",
+                        len(file_tuples),
+                    )
                     response = await client.post(
                         self._send_url,
                         data=form,

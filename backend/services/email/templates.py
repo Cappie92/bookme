@@ -115,9 +115,6 @@ def build_booking_calendar_email_bodies(
 
 
 def _calendar_attachment_filename(booking) -> str:
-    pr = (getattr(booking, "public_reference", None) or "").strip()
-    if pr:
-        return f"booking-{pr}.ics"
     bid = getattr(booking, "id", None)
     if bid is not None:
         return f"booking-{bid}.ics"
