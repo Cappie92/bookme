@@ -3844,6 +3844,14 @@ def get_master_dashboard_stats(
             agg_end = current_week_monday + timedelta(days=6)
 
         logger.debug("dashboard/stats: top services")
+        # Топ услуг: учитываем "живые" статусы (создано/ожидает/подтверждено/завершено),
+        # не учитываем отменённые. Должно совпадать для "по записям" и "по доходу".
+        TOP_SERVICE_STATUSES = [
+            BookingStatus.CREATED.value,
+            BookingStatus.AWAITING_CONFIRMATION.value,
+            BookingStatus.CONFIRMED.value,
+            BookingStatus.COMPLETED.value,
+        ]
         # Определим профиль независимого мастера (если есть)
         indie_master = db.query(IndieMaster).filter(IndieMaster.user_id == current_user.id).first()
         
@@ -3868,12 +3876,12 @@ def get_master_dashboard_stats(
         if indie_master is not None:
             q_bookings = q_bookings.filter(
                 or_(Booking.master_id == master.id, Booking.indie_master_id == indie_master.id),
-                Booking.status.in_([BookingStatus.COMPLETED.value, BookingStatus.CANCELLED.value])
+                Booking.status.in_(TOP_SERVICE_STATUSES),
             )
         else:
             q_bookings = q_bookings.filter(
                 Booking.master_id == master.id,
-                Booking.status.in_([BookingStatus.COMPLETED.value, BookingStatus.CANCELLED.value])
+                Booking.status.in_(TOP_SERVICE_STATUSES),
             )
         # Фильтр по периоду (конвертируем date в datetime)
         if agg_start and agg_end:
@@ -3915,6 +3923,7 @@ def get_master_dashboard_stats(
                 func.sum(Income.master_earnings).label("total_earnings")
             ).join(Income, Income.booking_id == Booking.id).filter(
                 Income.indie_master_id == indie_master.id,
+                Booking.status.in_(TOP_SERVICE_STATUSES),
             )
             if agg_start and agg_end:
                 agg_start_dt = datetime.combine(agg_start, datetime.min.time()) if isinstance(agg_start, date) else agg_start
@@ -3931,6 +3940,7 @@ def get_master_dashboard_stats(
                     func.sum(Booking.payment_amount).label("total_earnings")
                 ).filter(
                     or_(Booking.master_id == master.id, Booking.indie_master_id == indie_master.id),
+                    Booking.status.in_(TOP_SERVICE_STATUSES),
                 )
             else:
                 earnings_query = db.query(
@@ -3938,6 +3948,7 @@ def get_master_dashboard_stats(
                     func.sum(Booking.payment_amount).label("total_earnings")
                 ).filter(
                     Booking.master_id == master.id,
+                    Booking.status.in_(TOP_SERVICE_STATUSES),
                 )
             if agg_start and agg_end:
                 agg_start_dt = datetime.combine(agg_start, datetime.min.time()) if isinstance(agg_start, date) else agg_start
@@ -3958,6 +3969,7 @@ def get_master_dashboard_stats(
                     func.sum(Booking.payment_amount).label("total_earnings")
                 ).filter(
                     or_(Booking.master_id == master.id, Booking.indie_master_id == indie_master.id),
+                    Booking.status.in_(TOP_SERVICE_STATUSES),
                 )
             else:
                 q_fallback = db.query(
@@ -3965,6 +3977,7 @@ def get_master_dashboard_stats(
                     func.sum(Booking.payment_amount).label("total_earnings")
                 ).filter(
                     Booking.master_id == master.id,
+                    Booking.status.in_(TOP_SERVICE_STATUSES),
                 )
             if agg_start and agg_end:
                 agg_start_dt = datetime.combine(agg_start, datetime.min.time()) if isinstance(agg_start, date) else agg_start

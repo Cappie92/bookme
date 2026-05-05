@@ -66,6 +66,8 @@ class Settings(BaseSettings):
     EMAIL_FROM_ADDRESS: str = ""
     EMAIL_FROM_NAME: str = "DeDato"
     UNISENDER_REQUEST_TIMEOUT_SEC: str = "25"
+    # multipart (по умолчанию): httpx data+files; form_data: вложения в теле application/x-www-form-urlencoded (диагностика Unisender).
+    UNISENDER_ATTACHMENTS_MODE: str = "multipart"
     # Опциональный legacy-alias (если задан и EMAIL_FROM_ADDRESS пуст).
     MAIL_FROM_ADDRESS: str = ""
 

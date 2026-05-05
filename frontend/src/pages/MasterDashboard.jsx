@@ -49,6 +49,7 @@ import DemoAccessBanner from '../components/DemoAccessBanner'
 import LockedNavItem from '../components/LockedNavItem'
 import { useToast } from '../contexts/ToastContext'
 import { getWeekDates } from '../utils/calendarUtils'
+import FreeSlotsShareCardModal from '../components/FreeSlotsShareCardModal'
 import MasterNavTabIcon from '../components/master/MasterNavTabIcon'
 import MasterMobileBottomNav from '../components/master/mobile/MasterMobileBottomNav'
 import MasterMobileMenu from '../components/master/mobile/MasterMobileMenu'
@@ -929,6 +930,51 @@ export default function MasterDashboard() {
   const [masterMenuOpen, setMasterMenuOpen] = useState(false)
   /** Инкремент при тапе «Дашборд» в bottom bar — закрыть модалки дашборда (все записи и т.п.) */
   const [dashboardOverlayResetKey, setDashboardOverlayResetKey] = useState(0)
+  const [isStoryModalOpen, setIsStoryModalOpen] = useState(false)
+
+  const masterPublicDomain =
+    (masterSettingsPayload?.master?.domain || masterSettings?.domain || '').toString().trim()
+
+  const buildMasterPublicBookingUrl = () => {
+    if (!masterPublicDomain) return ''
+    const origin = typeof window !== 'undefined' ? window.location.origin : ''
+    return `${origin}/m/${encodeURIComponent(masterPublicDomain)}`
+  }
+
+  const copyTextToClipboard = async (text) => {
+    const t = (text || '').toString()
+    if (!t) throw new Error('empty')
+    if (navigator?.clipboard?.writeText && window?.isSecureContext) {
+      await navigator.clipboard.writeText(t)
+      return
+    }
+    const el = document.createElement('textarea')
+    el.value = t
+    el.setAttribute('readonly', 'true')
+    el.style.position = 'fixed'
+    el.style.left = '-9999px'
+    el.style.top = '0'
+    document.body.appendChild(el)
+    el.focus()
+    el.select()
+    const ok = document.execCommand && document.execCommand('copy')
+    document.body.removeChild(el)
+    if (!ok) throw new Error('copy_failed')
+  }
+
+  const handleCopyPublicLink = async () => {
+    const url = buildMasterPublicBookingUrl()
+    if (!url) {
+      showToast('Не удалось найти домен публичной страницы', 'error')
+      return
+    }
+    try {
+      await copyTextToClipboard(url)
+      showToast('Ссылка скопирована', 'success')
+    } catch {
+      showToast('Не удалось скопировать ссылку', 'error')
+    }
+  }
 
   const profileWarningsSignature = useMemo(() => {
     if (!profileWarnings.length) return ''
@@ -1777,10 +1823,18 @@ export default function MasterDashboard() {
                   setClientsUpdateTrigger((t) => t + 1);
                 }}
                 onOpenSubscriptionModal={() => setShowSubscriptionModal(true)}
-                onOpenSchedule={() => handleTabChange('schedule')}
+                onOpenSchedule={handleCopyPublicLink}
                 onOpenServices={() => handleTabChange('services')}
                 onOpenTariff={() => handleTabChange('tariff')}
+                onOpenStoryImage={() => setIsStoryModalOpen(true)}
                 onOpenSettings={() => handleTabChange('settings')}
+              />
+
+              <FreeSlotsShareCardModal
+                open={isStoryModalOpen}
+                onClose={() => setIsStoryModalOpen(false)}
+                slug={masterPublicDomain}
+                bookingUrl={buildMasterPublicBookingUrl()}
               />
             </div>
           )}

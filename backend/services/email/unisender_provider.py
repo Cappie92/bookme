@@ -5,6 +5,7 @@ import base64
 import json
 import logging
 from typing import Any, Optional
+from urllib.parse import quote_plus, urlencode
 
 import httpx
 
@@ -102,6 +103,20 @@ def parse_unisender_classic_send_email_response(
     return False, None, "Некорректная структура result"
 
 
+def _urlencoded_body_with_binary_attachments(
+    form: dict[str, str],
+    attachment_fields: list[tuple[str, bytes]],
+) -> tuple[bytes, dict[str, str]]:
+    """
+    Тело как у requests.post(..., data=dict) с бинарными вложениями: urlencode полей + quote_plus(bytes) для файлов.
+    httpx с data={{key: bytes}} кодирует неверно; обходим явной сборкой тела.
+    """
+    body = urlencode(list(form.items()), doseq=True)
+    for field_name, raw in attachment_fields:
+        body += "&" + quote_plus(field_name, safe="") + "=" + quote_plus(raw)
+    return body.encode("ascii"), {"Content-Type": "application/x-www-form-urlencoded"}
+
+
 class UnisenderTransactionalProvider:
     name = "unisender"
 
@@ -114,6 +129,7 @@ class UnisenderTransactionalProvider:
         from_name: str,
         list_id: str,
         timeout_sec: float = 25.0,
+        attachments_mode: str = "multipart",
     ) -> None:
         self._api_key = api_key
         base = (api_base_url or "").strip().rstrip("/")
@@ -122,6 +138,8 @@ class UnisenderTransactionalProvider:
         self._from_name = (from_name or "DeDato").strip() or "DeDato"
         self._list_id = str(list_id).strip()
         self._timeout = timeout_sec
+        m = (attachments_mode or "multipart").strip().lower()
+        self.attachments_mode: str = "form_data" if m == "form_data" else "multipart"
 
     def _build_form_data(
         self,
@@ -148,11 +166,11 @@ class UnisenderTransactionalProvider:
             "error_checking": "1",
         }
 
-    def _attachment_file_tuples(
+    def _decoded_attachments(
         self, attachments: Optional[list[dict[str, Any]]]
-    ) -> list[tuple[str, tuple[Optional[str], bytes, Optional[str]]]]:
-        """Вложения для multipart: имя поля attachments[filename], бинарное содержимое (не base64)."""
-        out: list[tuple[str, tuple[Optional[str], bytes, Optional[str]]]] = []
+    ) -> list[tuple[str, bytes, str]]:
+        """(filename, raw_bytes, content_type) из base64-полей входа."""
+        out: list[tuple[str, bytes, str]] = []
         if not attachments:
             return out
         for att in attachments:
@@ -169,8 +187,7 @@ class UnisenderTransactionalProvider:
                 continue
             ctype = att.get("type")
             ct = str(ctype).strip() if ctype else "application/octet-stream"
-            field_name = f"attachments[{fn}]"
-            out.append((field_name, (fn, raw, ct)))
+            out.append((fn, raw, ct))
         if attachments:
             if not out:
                 logger.warning(
@@ -179,12 +196,21 @@ class UnisenderTransactionalProvider:
                     len(attachments),
                 )
             else:
-                prepared = [(t[1][0], len(t[1][1])) for t in out]
                 logger.info(
                     "unisender classic: prepared %s attachment(s) name_and_bytes=%s",
                     len(out),
-                    prepared,
+                    [(fn, len(raw)) for fn, raw, _ in out],
                 )
+        return out
+
+    def _attachment_file_tuples(
+        self, attachments: Optional[list[dict[str, Any]]]
+    ) -> list[tuple[str, tuple[Optional[str], bytes, Optional[str]]]]:
+        """Вложения для multipart: имя поля attachments[filename], бинарное содержимое (не base64)."""
+        out: list[tuple[str, tuple[Optional[str], bytes, Optional[str]]]] = []
+        for fn, raw, ct in self._decoded_attachments(attachments):
+            field_name = f"attachments[{fn}]"
+            out.append((field_name, (fn, raw, ct)))
         return out
 
     async def send_message(
@@ -204,18 +230,36 @@ class UnisenderTransactionalProvider:
             text_body=text_body,
         )
 
-        file_tuples = self._attachment_file_tuples(attachments)
+        decoded = self._decoded_attachments(attachments)
+        file_tuples = [
+            (f"attachments[{fn}]", (fn, raw, ct)) for fn, raw, ct in decoded
+        ]
+        endpoint = self._send_url.split("?")[0]
         logger.info(
-            "unisender classic sendEmail: endpoint=%s to=%s subject=%s attachments=%s",
-            self._send_url.split("?")[0],
+            "unisender classic sendEmail: attachments_mode=%s endpoint=%s to=%s subject_snip=%s attachments_count=%s attachment_meta=%s",
+            self.attachments_mode,
+            endpoint,
             recipient,
             subject[:100],
-            len(file_tuples),
+            len(decoded),
+            [(fn, len(raw)) for fn, raw, _ in decoded],
         )
 
         try:
             async with httpx.AsyncClient(timeout=self._timeout) as client:
-                if file_tuples:
+                if decoded and self.attachments_mode == "form_data":
+                    att_fields = [(f"attachments[{fn}]", raw) for fn, raw, _ in decoded]
+                    body_bytes, hdrs = _urlencoded_body_with_binary_attachments(form, att_fields)
+                    logger.info(
+                        "unisender classic api: using form-urlencoded attachment fields attachments=%s",
+                        len(decoded),
+                    )
+                    response = await client.post(
+                        self._send_url,
+                        content=body_bytes,
+                        headers=hdrs,
+                    )
+                elif file_tuples:
                     logger.info(
                         "unisender classic api: using multipart files attachments=%s",
                         len(file_tuples),
@@ -234,7 +278,7 @@ class UnisenderTransactionalProvider:
             err = "Превышено время ожидания ответа от почтового провайдера"
             logger.error(
                 "unisender classic api: timeout endpoint=%s to=%s",
-                self._send_url.split("?")[0],
+                endpoint,
                 recipient,
             )
             return EmailSendResult(
@@ -248,7 +292,7 @@ class UnisenderTransactionalProvider:
             err = "Ошибка сети при обращении к почтовому провайдеру"
             logger.error(
                 "unisender classic api: request error endpoint=%s to=%s detail=%s",
-                self._send_url.split("?")[0],
+                endpoint,
                 recipient,
                 e,
             )
@@ -266,7 +310,7 @@ class UnisenderTransactionalProvider:
             logger.error(
                 "unisender classic api: non-json status=%s endpoint=%s to=%s body_snip=%s",
                 response.status_code,
-                self._send_url.split("?")[0],
+                endpoint,
                 recipient,
                 response.text[:500],
             )
@@ -292,7 +336,7 @@ class UnisenderTransactionalProvider:
             logger.error(
                 "unisender classic api: http_error status=%s endpoint=%s to=%s subject_snip=%s error=%s",
                 response.status_code,
-                self._send_url.split("?")[0],
+                endpoint,
                 recipient,
                 subject[:80],
                 msg,
@@ -308,7 +352,7 @@ class UnisenderTransactionalProvider:
         if not ok_parsed:
             logger.error(
                 "unisender classic api: logical_error endpoint=%s to=%s subject_snip=%s error=%s",
-                self._send_url.split("?")[0],
+                endpoint,
                 recipient,
                 subject[:80],
                 err_parsed or "unknown",
@@ -323,7 +367,7 @@ class UnisenderTransactionalProvider:
 
         logger.info(
             "unisender classic api: ok endpoint=%s to=%s message_id=%s",
-            self._send_url.split("?")[0],
+            endpoint,
             recipient,
             mid,
         )

@@ -4,8 +4,12 @@
 
 Без БД, без booking. Только сеть к Unisender и env как у приложения (settings / .env).
 
+Режим вложений (как в приложении):
+  UNISENDER_ATTACHMENTS_MODE=multipart | form_data
+
 Запуск (из каталога backend):
   EMAIL_ENABLED=true EMAIL_PROVIDER=unisender python3 scripts/smoke_send_unisender_ics_attachment.py --to you@example.com
+  UNISENDER_ATTACHMENTS_MODE=form_data EMAIL_ENABLED=true EMAIL_PROVIDER=unisender python3 scripts/smoke_send_unisender_ics_attachment.py --to you@example.com
 """
 from __future__ import annotations
 
@@ -24,6 +28,7 @@ if str(_BACKEND_ROOT) not in sys.path:
 from services.email.factory import build_transactional_provider
 from services.email.stub_provider import FailingTransactionalProvider, StubTransactionalProvider
 from services.email.unisender_provider import UnisenderTransactionalProvider
+from settings import get_settings
 
 ICS_SMOKE = """BEGIN:VCALENDAR
 VERSION:2.0
@@ -63,8 +68,15 @@ def _main_sync() -> int:
     ics_bytes = ICS_SMOKE.encode("utf-8")
     b64 = base64.standard_b64encode(ics_bytes).decode("ascii")
 
+    settings = get_settings()
+    print(
+        "UNISENDER_ATTACHMENTS_MODE (env):",
+        (settings.UNISENDER_ATTACHMENTS_MODE or "multipart").strip().lower(),
+    )
     provider = build_transactional_provider()
     print("provider_class:", type(provider).__name__)
+    if hasattr(provider, "attachments_mode"):
+        print("provider.attachments_mode:", getattr(provider, "attachments_mode"))
     print("to:", to_email)
     print("attachment_name: test.ics")
     print("ics_raw_bytes_length:", len(ics_bytes))
@@ -105,10 +117,10 @@ def _main_sync() -> int:
         )
     )
 
-    print("send_message.ok:", result.ok)
+    print("success:", result.ok)
     print("send_message.provider:", result.provider)
-    print("send_message.message_id:", result.message_id)
-    print("send_message.error:", result.error)
+    print("message_id:", result.message_id)
+    print("error:", result.error)
 
     return 0 if result.ok else 2
 

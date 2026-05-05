@@ -59,6 +59,7 @@ def build_transactional_provider() -> TransactionalEmailProvider:
         )
 
     timeout = float(settings.UNISENDER_REQUEST_TIMEOUT_SEC or "25")
+    att_mode = (settings.UNISENDER_ATTACHMENTS_MODE or "multipart").strip().lower()
     p = UnisenderTransactionalProvider(
         api_key=key,
         api_base_url=settings.UNISENDER_API_BASE_URL,
@@ -66,6 +67,7 @@ def build_transactional_provider() -> TransactionalEmailProvider:
         from_name=settings.EMAIL_FROM_NAME,
         list_id=list_id,
         timeout_sec=timeout,
+        attachments_mode=att_mode,
     )
     logger.info(
         "transactional email provider: unisender classic api (base_url=%s from=%s list_id=%s)",

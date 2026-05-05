@@ -117,9 +117,11 @@ export default function MasterDashboardStats({
   onOpenSchedule,
   onOpenServices,
   onOpenTariff,
+  onOpenStoryImage,
   onOpenSettings,
 }) {
   const { showToast } = useToast();
+  const DASHBOARD_LAYOUT_DEBUG = false;
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -907,7 +909,17 @@ export default function MasterDashboardStats({
   );
 
   const topServicesSectionDesktop = (
-    <section className="overflow-hidden rounded-[20px] border border-[#E7E2DF] bg-white shadow-[0_24px_60px_-22px_rgba(45,45,45,0.18)] ring-1 ring-[#2D2D2D]/[0.04]">
+    <section
+      className={`relative overflow-hidden rounded-[20px] border border-[#E7E2DF] bg-white shadow-[0_24px_60px_-22px_rgba(45,45,45,0.18)] ring-1 ring-[#2D2D2D]/[0.04] lg:h-[560px] lg:flex lg:flex-col ${
+        DASHBOARD_LAYOUT_DEBUG ? 'ring-2 ring-fuchsia-500' : ''
+      }`}
+    >
+      {DASHBOARD_LAYOUT_DEBUG ? (
+        <>
+          <div className="pointer-events-none absolute inset-x-0 top-0 z-50 h-px bg-fuchsia-500" aria-hidden />
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 z-50 h-px bg-fuchsia-500" aria-hidden />
+        </>
+      ) : null}
       <div className="border-b border-[#E7E2DF]/70 bg-[linear-gradient(180deg,#FFFFFF_0%,#FAF8F6_100%)] px-6 py-4">
         <div className="flex items-center justify-between gap-4">
           <div className="min-w-0">
@@ -922,7 +934,7 @@ export default function MasterDashboardStats({
         </div>
       </div>
 
-      <div className="px-6 py-5">
+      <div className="min-h-0 px-6 pt-4 pb-3 lg:flex-1 lg:overflow-y-auto">
       <div className="mb-4 flex w-full gap-0.5 rounded-[10px] border border-[#E7E2DF] bg-[#F4F1EF] p-[3px] shadow-[inset_0_1px_0_rgba(255,255,255,0.55)]">
         <button
           type="button"
@@ -1043,7 +1055,17 @@ export default function MasterDashboardStats({
   );
 
   const desktopBookingHub = (
-    <section className="hidden min-w-0 overflow-hidden rounded-[22px] border border-[#E7E2DF] bg-white shadow-[0_28px_72px_-26px_rgba(45,45,45,0.22)] ring-1 ring-[#2D2D2D]/[0.045] lg:block">
+    <section
+      className={`relative hidden min-w-0 overflow-hidden rounded-[22px] border border-[#E7E2DF] bg-white shadow-[0_28px_72px_-26px_rgba(45,45,45,0.22)] ring-1 ring-[#2D2D2D]/[0.045] lg:block lg:h-[560px] lg:flex lg:flex-col ${
+        DASHBOARD_LAYOUT_DEBUG ? 'ring-2 ring-cyan-500' : ''
+      }`}
+    >
+      {DASHBOARD_LAYOUT_DEBUG ? (
+        <>
+          <div className="pointer-events-none absolute inset-x-0 top-0 z-50 h-px bg-cyan-500" aria-hidden />
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 z-50 h-px bg-cyan-500" aria-hidden />
+        </>
+      ) : null}
       <div className="relative border-b border-[#E7E2DF]/75 bg-[linear-gradient(180deg,#FFFFFF_0%,#FAF8F6_100%)] px-6 py-5">
         <div className="pointer-events-none absolute -right-24 -top-24 h-56 w-56 rounded-full bg-[#4CAF50]/10 blur-3xl" aria-hidden />
         <div className="flex items-center justify-between gap-6">
@@ -1140,7 +1162,7 @@ export default function MasterDashboardStats({
         </div>
       </div>
 
-      <div className="bg-gradient-to-b from-[#F9F7F4] to-[#F3EEEA]/90 px-6 py-5">
+      <div className="min-h-0 flex-1 overflow-y-auto bg-gradient-to-b from-[#F9F7F4] to-[#F3EEEA]/90 px-6 py-4">
         {desktopBookingTab === 'future' ? (
           desktopFutureTop3.length > 0 ? (
             <ul className="m-0 list-none space-y-2.5 p-0">
@@ -1211,7 +1233,7 @@ export default function MasterDashboardStats({
   return (
     <div className="space-y-4 lg:space-y-5">
       {currentStatsBucket && (
-        <div className="lg:contents">
+        <div>
           {/* Mobile KPI mini row — 2 compact cards; hidden on desktop */}
           <div className="grid grid-cols-2 gap-2 lg:hidden">
             <div className="relative overflow-hidden rounded-[10px] bg-gradient-to-br from-[#4CAF50] to-[#45A049] p-3 text-white shadow-[0_1px_2px_rgba(45,45,45,0.06)] after:pointer-events-none after:absolute after:-right-5 after:-top-5 after:h-20 after:w-20 after:rounded-full after:bg-white/10 after:content-['']">
@@ -1376,13 +1398,13 @@ export default function MasterDashboardStats({
       <section className="mb-0 hidden min-w-0 flex-col overflow-hidden rounded-[20px] border border-[#E7E2DF] bg-white shadow-[0_24px_60px_-20px_rgba(45,45,45,0.18)] ring-1 ring-[#2D2D2D]/[0.04] lg:mb-0 lg:flex">
         {/* Head */}
         <div className="border-b border-[#E7E2DF] bg-[linear-gradient(180deg,#FFFFFF_0%,#FAF8F6_100%)] px-6 py-4">
-          <div className="flex items-end justify-between gap-5">
+          <div className="flex items-center justify-between gap-5">
             <div className="min-w-0 flex-1">
               <h2 className="text-[18px] font-semibold leading-tight tracking-tight text-[#2D2D2D]">
                 Активность за неделю
               </h2>
             </div>
-            <div className="flex shrink-0 items-end gap-3">
+            <div className="flex shrink-0 items-center gap-3">
               <div className="flex w-[17rem] gap-0.5 rounded-[10px] border border-[#E7E2DF] bg-[#F4F1EF] p-[3px] shadow-[inset_0_1px_0_rgba(255,255,255,0.55)]" role="group" aria-label="Показатель на графике">
                 <button
                   type="button"
@@ -1440,7 +1462,7 @@ export default function MasterDashboardStats({
             </div>
           )}
           {stats.weeks_data && stats.weeks_data.length > 0 ? (
-            <div className="relative h-[min(17.5rem,44vw)] w-full min-h-[13.25rem] lg:max-h-[18rem] lg:min-w-0" data-master-activity-chart="1">
+            <div className="relative h-[min(20.58rem,51.8616vw)] w-full min-h-[16.20675rem] lg:max-h-[20.58rem] lg:min-w-0" data-master-activity-chart="1">
               {isLg ? (
               <ResponsiveContainer width="100%" height="100%" minWidth={0}>
                 {activityChartKind === 'bookings' ? (
@@ -1525,7 +1547,7 @@ export default function MasterDashboardStats({
           )}
         </div>
       </section>
-      {/* Desktop: booking hub сразу под Активностью — возвращено в col-span-8 */}
+      {/* Desktop: booking hub сразу под Активностью */}
       {desktopBookingHub}
       {/* Mobile booking hub: светлая карточка, согласованная с desktop */}
       <section
@@ -2015,7 +2037,7 @@ export default function MasterDashboardStats({
         </div>
       )}
         </div>
-        <aside className="min-w-0 space-y-4 max-lg:order-2 lg:col-span-4 lg:space-y-4">
+        <aside className="min-w-0 space-y-4 max-lg:order-2 lg:col-span-4 lg:space-y-5">
           {(balance || subscriptionStatus) && (() => {
             const planTitle =
               subscriptionStatus?.plan_display_name ||
@@ -2116,7 +2138,7 @@ export default function MasterDashboardStats({
               </div>
             );
           })()}
-          {(onOpenSchedule || onOpenTariff || onOpenSettings) && (
+          {(onOpenSchedule || onOpenTariff || onOpenStoryImage || onOpenSettings) && (
             <div className="hidden overflow-hidden rounded-[22px] border-2 border-[#E7E2DF] bg-gradient-to-b from-white to-[#F0EBE7] p-4 shadow-[0_20px_44px_-28px_rgba(28,25,23,0.4)] ring-2 ring-[#4CAF50]/15">
               <div className="mb-3 flex items-end justify-between gap-2">
                 <div>
@@ -2134,28 +2156,28 @@ export default function MasterDashboardStats({
                     <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-[#DFF5EC] to-[#B8E8D0] text-[#14532D] shadow-inner ring-2 ring-[#4CAF50]/25">
                       <CalendarDaysIcon className="h-7 w-7" strokeWidth={2} aria-hidden />
                     </span>
-                    <span className="text-[13px] font-extrabold leading-tight text-[#1C1917]">Расписание</span>
-                    <span className="text-[10px] font-medium leading-snug text-[#78716C]">Неделя и записи</span>
+                    <span className="text-[13px] font-extrabold leading-tight text-[#1C1917]">Скопировать ссылку</span>
+                    <span className="text-[10px] font-medium leading-snug text-[#78716C]">Публичная страница</span>
                   </button>
                 )}
-                {onOpenTariff && (
+                {onOpenStoryImage && (
                   <button
                     type="button"
-                    onClick={onOpenTariff}
+                    onClick={onOpenStoryImage}
                     className="flex flex-col items-center gap-2 rounded-2xl border-2 border-[#E7E2DF] bg-white px-2 py-4 text-center shadow-[0_8px_20px_-12px_rgba(45,45,45,0.2)] transition active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4CAF50] focus-visible:ring-offset-2"
                   >
                     <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-[#E8F5E9] to-[#C8E6C9] text-[#14532D] shadow-inner ring-2 ring-[#4CAF50]/25">
                       <BanknotesIcon className="h-7 w-7" strokeWidth={2} aria-hidden />
                     </span>
-                    <span className="text-[13px] font-extrabold leading-tight text-[#1C1917]">Тарифы</span>
-                    <span className="text-[10px] font-medium leading-snug text-[#78716C]">Подписка и лимиты</span>
+                    <span className="text-[13px] font-extrabold leading-tight text-[#1C1917]">Картинка для сторис</span>
+                    <span className="text-[10px] font-medium leading-snug text-[#78716C]">Свободные часы</span>
                   </button>
                 )}
                 {onOpenSettings && (
                   <button
                     type="button"
                     onClick={onOpenSettings}
-                    className={`flex flex-col items-center gap-2 rounded-2xl border-2 border-[#E7E2DF] bg-white px-2 py-4 text-center shadow-[0_8px_20px_-12px_rgba(45,45,45,0.2)] transition active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4CAF50] focus-visible:ring-offset-2 ${onOpenSchedule && onOpenTariff && onOpenSettings ? 'col-span-2' : ''}`}
+                    className={`flex flex-col items-center gap-2 rounded-2xl border-2 border-[#E7E2DF] bg-white px-2 py-4 text-center shadow-[0_8px_20px_-12px_rgba(45,45,45,0.2)] transition active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4CAF50] focus-visible:ring-offset-2 ${onOpenSchedule && onOpenStoryImage && onOpenSettings ? 'col-span-2' : ''}`}
                   >
                     <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-[#F5F5F4] to-[#E7E5E4] text-[#44403C] shadow-inner ring-2 ring-[#A8A29E]/30">
                       <Cog6ToothIcon className="h-7 w-7" strokeWidth={2} aria-hidden />
@@ -2167,7 +2189,7 @@ export default function MasterDashboardStats({
               </nav>
             </div>
           )}
-          {(onOpenSchedule || onOpenTariff || onOpenSettings) && (
+          {(onOpenSchedule || onOpenStoryImage || onOpenSettings) && (
             <div className="hidden overflow-hidden rounded-[18px] border border-[#E7E2DF] bg-white px-4 py-3 shadow-[0_24px_60px_-22px_rgba(45,45,45,0.18)] ring-1 ring-[#2D2D2D]/[0.04] lg:block">
               <div className="mb-2 flex items-end justify-between gap-3 border-b border-[#E7E2DF]/70 pb-2">
                 <div>
@@ -2185,9 +2207,7 @@ export default function MasterDashboardStats({
                     <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-[#DFF5EC] text-[#3D8B42] ring-1 ring-[#4CAF50]/12 transition-colors group-hover:bg-[#C8E8D8]">
                       <CalendarDaysIcon className="h-5 w-5" strokeWidth={2} aria-hidden />
                     </span>
-                    <span className="min-w-0 flex-1 text-[13.5px] font-semibold text-[#2D2D2D]">
-                      Расписание
-                    </span>
+                    <span className="min-w-0 flex-1 text-[13.5px] font-semibold text-[#2D2D2D]">Скопировать ссылку</span>
                     <ChevronRightIcon
                       className="h-4 w-4 shrink-0 text-[#A0A0A0] transition-all group-hover:translate-x-0.5 group-hover:text-[#3D8B42]"
                       strokeWidth={2}
@@ -2195,18 +2215,16 @@ export default function MasterDashboardStats({
                     />
                   </button>
                 )}
-                {onOpenTariff && (
+                {onOpenStoryImage && (
                   <button
                     type="button"
-                    onClick={onOpenTariff}
+                    onClick={onOpenStoryImage}
                     className="group flex w-full items-center gap-3 rounded-[12px] border border-[#E7E2DF]/70 bg-gradient-to-b from-white to-[#FDFCFB] px-3 py-2 text-left shadow-[0_6px_20px_-16px_rgba(45,45,45,0.14)] transition hover:bg-[#F4F1EF] active:scale-[0.99] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4CAF50]/30 focus-visible:ring-offset-2"
                   >
                     <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-[#DFF5EC] text-[#3D8B42] ring-1 ring-[#4CAF50]/12 transition-colors group-hover:bg-[#C8E8D8]">
                       <BanknotesIcon className="h-5 w-5" strokeWidth={2} aria-hidden />
                     </span>
-                    <span className="min-w-0 flex-1 text-[13.5px] font-semibold text-[#2D2D2D]">
-                      Тарифы
-                    </span>
+                    <span className="min-w-0 flex-1 text-[13.5px] font-semibold text-[#2D2D2D]">Картинка для сторис</span>
                     <ChevronRightIcon
                       className="h-4 w-4 shrink-0 text-[#A0A0A0] transition-all group-hover:translate-x-0.5 group-hover:text-[#3D8B42]"
                       strokeWidth={2}
@@ -2236,7 +2254,7 @@ export default function MasterDashboardStats({
               </nav>
             </div>
           )}
-          {/* Desktop: топ услуг в правом rail — возвращено на стабильное место */}
+          {/* Desktop: топ услуг в правом rail — стабильное место */}
           <div className="hidden lg:block">
             {topServicesSectionDesktop}
           </div>
