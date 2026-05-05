@@ -171,6 +171,20 @@ class UnisenderTransactionalProvider:
             ct = str(ctype).strip() if ctype else "application/octet-stream"
             field_name = f"attachments[{fn}]"
             out.append((field_name, (fn, raw, ct)))
+        if attachments:
+            if not out:
+                logger.warning(
+                    "unisender classic: attachments requested count=%s but prepared 0 "
+                    "(invalid base64 or empty content?)",
+                    len(attachments),
+                )
+            else:
+                prepared = [(t[1][0], len(t[1][1])) for t in out]
+                logger.info(
+                    "unisender classic: prepared %s attachment(s) name_and_bytes=%s",
+                    len(out),
+                    prepared,
+                )
         return out
 
     async def send_message(
