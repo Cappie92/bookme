@@ -10,6 +10,7 @@ import {
 } from '@heroicons/react/24/outline'
 import { ArrowRightIcon, CheckIcon } from '@heroicons/react/24/solid'
 import { Button } from '../components/ui'
+import HomeFeatureShowreel from '../components/home/HomeFeatureShowreel'
 import { useAuth } from '../contexts/AuthContext'
 import { useNavigate } from 'react-router-dom'
 import { metrikaGoal } from '../analytics/metrika'
@@ -99,11 +100,7 @@ export default function Home() {
           }}
         >
           <div className="lg:col-span-5">
-            <div className="inline-flex items-center gap-2 rounded-full border border-[#C8E8D8] bg-[#DFF5EC] px-3 py-1 text-xs font-semibold text-[#3D8B42]">
-              <span className="h-1.5 w-1.5 rounded-full bg-[#4CAF50] shadow-[0_0_0_4px_rgba(76,175,80,0.20)]" />
-              Для частных мастеров услуг
-            </div>
-            <h1 className="mt-4 text-3xl md:text-5xl font-bold text-neutral-900 leading-[1.08] tracking-[-0.02em] max-w-xl">
+            <h1 className="text-3xl md:text-5xl font-bold text-neutral-900 leading-[1.08] tracking-[-0.02em] max-w-xl">
               Онлайн-запись и&nbsp;клиенты&nbsp;— в&nbsp;одном{' '}
               <span className="text-[#45A049] relative">
                 сервисе
@@ -275,6 +272,8 @@ export default function Home() {
             </div>
           </div>
         </section>
+
+        <HomeFeatureShowreel />
 
         {/* Features */}
         <section id="features" className="scroll-mt-28 py-6 md:py-8">
