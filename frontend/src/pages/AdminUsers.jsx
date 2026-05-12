@@ -43,6 +43,17 @@ export default function AdminUsers() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters, page])
 
+  useEffect(() => {
+    if (showDeleteModal && !selectedUser) {
+      setShowDeleteModal(false)
+    }
+  }, [showDeleteModal, selectedUser])
+
+  const {
+    handleBackdropClick: deleteModalBackdropClick,
+    handleMouseDown: deleteModalMouseDown,
+  } = useModal(() => setShowDeleteModal(false))
+
   const fetchUsers = async () => {
     try {
       setLoading(true)
@@ -254,6 +265,33 @@ export default function AdminUsers() {
     return '—'
   }
 
+  /** JSON: строго true или число 1 (иначе в JS `1 === true` ложно — плашка «Тел.» краснеет). */
+  const adminJsonTruthy = (v) => v === true || v === 1
+
+  /** В таблице только компактные индикаторы тел. / email (активность — в карточке просмотра). */
+  const renderTableStatusBadges = (user) => (
+    <div className="flex flex-nowrap items-center gap-1 whitespace-nowrap">
+      <span
+        className={`inline-flex px-1.5 py-0.5 text-[11px] font-semibold leading-none rounded ${
+          adminJsonTruthy(user.is_phone_verified)
+            ? 'bg-green-100 text-green-800'
+            : 'bg-rose-100 text-rose-700'
+        }`}
+        title={adminJsonTruthy(user.is_phone_verified) ? 'Телефон подтверждён' : 'Телефон не подтверждён'}
+      >
+        Тел.
+      </span>
+      <span
+        className={`inline-flex px-1.5 py-0.5 text-[11px] font-semibold leading-none rounded ${
+          adminJsonTruthy(user.is_verified) ? 'bg-green-100 text-green-800' : 'bg-rose-100 text-rose-700'
+        }`}
+        title={adminJsonTruthy(user.is_verified) ? 'Email подтверждён' : 'Email не подтверждён'}
+      >
+        Email
+      </span>
+    </div>
+  )
+
   /** Общий блок пагинации списка (шапка таблицы и подвал) — один state/handlers */
   const renderUserListPagination = (placement) => {
     if (loading || totalCount <= 0) return null
@@ -297,7 +335,7 @@ export default function AdminUsers() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 min-w-0 max-w-full">
       {/* Заголовок */}
       <div className="border-b border-gray-200 pb-4">
         <h1 className="text-3xl font-bold text-gray-900">Управление пользователями</h1>
@@ -378,7 +416,7 @@ export default function AdminUsers() {
       </div>
 
       {/* Статистика */}
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-6 min-w-0">
         <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
           <div className="flex items-center">
             <div className="p-2 bg-blue-100 rounded-lg">
@@ -452,7 +490,7 @@ export default function AdminUsers() {
       </div>
 
       {/* Таблица пользователей */}
-      <div className="bg-white rounded-lg shadow-sm border border-gray-200">
+      <div className="bg-white rounded-lg shadow-sm border border-gray-200 min-w-0 overflow-hidden">
         <div className="px-6 py-4 border-b border-gray-200">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between lg:gap-4">
             <h2 className="text-lg font-semibold text-gray-900 shrink-0">Список пользователей</h2>
@@ -464,50 +502,42 @@ export default function AdminUsers() {
           <div className="p-6">
             <div className="animate-pulse space-y-4">
               {[...Array(5)].map((_, i) => (
-                <div key={i} className="flex items-center space-x-4">
-                  <div className="h-4 bg-gray-200 rounded w-16"></div>
-                  <div className="h-4 bg-gray-200 rounded w-32"></div>
-                  <div className="h-4 bg-gray-200 rounded w-24"></div>
-                  <div className="h-4 bg-gray-200 rounded w-32"></div>
-                  <div className="h-4 bg-gray-200 rounded w-24"></div>
+                <div key={i} className="flex items-center space-x-3">
+                  <div className="h-4 bg-gray-200 rounded w-12"></div>
                   <div className="h-4 bg-gray-200 rounded w-28"></div>
+                  <div className="h-4 bg-gray-200 rounded w-20"></div>
+                  <div className="h-4 bg-gray-200 rounded w-24"></div>
+                  <div className="h-4 bg-gray-200 rounded w-36"></div>
+                  <div className="h-4 bg-gray-200 rounded w-16"></div>
+                  <div className="h-4 bg-gray-200 rounded w-20"></div>
                 </div>
               ))}
             </div>
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
+          <div className="min-w-0 overflow-x-auto">
+            <table className="min-w-[720px] w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     ID
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Имя
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Email
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Телефон
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Роль
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    План подписки
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-[7.5rem] max-w-[7.5rem]">
+                    План
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Статус
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Дата регистрации
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Всегда бесплатно
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Действия
                   </th>
                 </tr>
@@ -515,50 +545,26 @@ export default function AdminUsers() {
               <tbody className="bg-white divide-y divide-gray-200">
                 {users.map((user) => (
                   <tr key={user.id} className="hover:bg-gray-50">
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                    <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900">
                       #{user.id}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm font-medium text-gray-900">
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      <div className="text-sm font-medium text-gray-900 max-w-[12rem] truncate" title={user.full_name || ''}>
                         {user.full_name || 'Не указано'}
                       </div>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm text-gray-900">
-                        {user.email || 'Не указано'}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm text-gray-900">
-                        {user.phone || 'Не указано'}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
+                    <td className="px-4 py-3 whitespace-nowrap">
                       <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${getRoleColor(user.role)}`}>
                         {getRoleLabel(user.role)}
                       </span>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 max-w-[10rem] truncate" title={formatSubscriptionPlanLabel(user)}>
+                    <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-700 max-w-[7.5rem] truncate" title={formatSubscriptionPlanLabel(user)}>
                       {formatSubscriptionPlanLabel(user)}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="flex items-center space-x-2">
-                        <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                          user.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-                        }`}>
-                          {user.is_active ? 'Активен' : 'Неактивен'}
-                        </span>
-                        {user.is_verified && (
-                          <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
-                            Верифицирован
-                          </span>
-                        )}
-                      </div>
+                    <td className="px-4 py-3 whitespace-nowrap align-middle">
+                      {renderTableStatusBadges(user)}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {formatDate(user.created_at)}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
+                    <td className="px-4 py-3 whitespace-nowrap">
                       {user.is_always_free ? (
                         <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-purple-100 text-purple-800">
                           Да
@@ -569,7 +575,7 @@ export default function AdminUsers() {
                         </span>
                       )}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                    <td className="px-4 py-3 whitespace-nowrap text-sm font-medium">
                       <div className="flex space-x-2">
                         <button 
                           onClick={() => handleViewUser(user)}
@@ -655,24 +661,29 @@ export default function AdminUsers() {
                 <p className="text-xs text-gray-500">Активная подписка на момент загрузки списка</p>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700">Статус</label>
-                <div className="flex space-x-2">
-                  <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                    selectedUser.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-                  }`}>
-                    {selectedUser.is_active ? 'Активен' : 'Неактивен'}
+                <label className="block text-sm font-medium text-gray-700">Статус аккаунта</label>
+                <div className="mt-1 flex flex-wrap gap-1">
+                  <span
+                    className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                      selectedUser.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                    }`}
+                  >
+                    {selectedUser.is_active ? 'Активен' : 'Отключен'}
                   </span>
-                  {selectedUser.is_verified && (
-                    <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
-                      Верифицирован
-                    </span>
-                  )}
-                  {selectedUser.is_always_free && (
+                  {selectedUser.is_always_free ? (
                     <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-purple-100 text-purple-800">
                       Всегда бесплатно
                     </span>
-                  )}
+                  ) : null}
                 </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Email подтверждён</label>
+                <p className="text-sm text-gray-900">{adminJsonTruthy(selectedUser.is_verified) ? 'Да' : 'Нет'}</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Телефон подтверждён</label>
+                <p className="text-sm text-gray-900">{adminJsonTruthy(selectedUser.is_phone_verified) ? 'Да' : 'Нет'}</p>
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700">Дата регистрации</label>
@@ -792,8 +803,11 @@ export default function AdminUsers() {
                       defaultChecked={selectedUser.is_verified}
                       className="mr-2"
                     />
-                    <span className="text-sm font-medium text-gray-700">Верифицирован</span>
+                    <span className="text-sm font-medium text-gray-700">Email подтверждён</span>
                   </label>
+                  <p className="text-xs text-gray-500 mt-1 pl-6">
+                    Телефон подтверждён: {adminJsonTruthy(selectedUser.is_phone_verified) ? 'да' : 'нет'} (меняется при верификации телефона пользователем)
+                  </p>
                 </div>
                 <div>
                   <label className="flex items-center">
@@ -856,25 +870,23 @@ export default function AdminUsers() {
       )}
 
       {/* Модальное окно подтверждения удаления */}
-      {showDeleteModal && selectedUser && (() => {
-        const { handleBackdropClick, handleMouseDown } = useModal(() => setShowDeleteModal(false));
-        return (
-        <div 
+      {showDeleteModal && selectedUser ? (
+        <div
           className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
-          onClick={handleBackdropClick}
-          onMouseDown={handleMouseDown}
+          onClick={deleteModalBackdropClick}
+          onMouseDown={deleteModalMouseDown}
         >
           <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
             <div className="flex justify-between items-center mb-4">
               <h2 className="text-xl font-bold text-red-600">Удаление пользователя</h2>
-              <button 
+              <button
                 onClick={() => setShowDeleteModal(false)}
                 className="text-gray-400 hover:text-gray-600"
               >
                 ✕
               </button>
             </div>
-            
+
             <div className="mb-6">
               <p className="text-gray-700">
                 Вы действительно хотите удалить пользователя <strong>{selectedUser.full_name || selectedUser.phone}</strong>?
@@ -883,7 +895,7 @@ export default function AdminUsers() {
                 Это действие нельзя отменить. Все данные пользователя будут удалены безвозвратно.
               </p>
             </div>
-            
+
             <div className="flex justify-end space-x-3">
               <button
                 onClick={() => setShowDeleteModal(false)}
@@ -900,8 +912,7 @@ export default function AdminUsers() {
             </div>
           </div>
         </div>
-        );
-      })()}
+      ) : null}
     </div>
   )
 } 

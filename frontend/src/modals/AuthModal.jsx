@@ -706,7 +706,11 @@ export default function AuthModal() {
       console.log('📨 Получен ответ:', response.status, response.statusText)
       const result = await response.json()
       console.log('📋 Данные ответа:', result)
-      
+
+      if (import.meta.env.DEV && result?.verification_number) {
+        console.info('[dev] verification_number (stub):', result.verification_number)
+      }
+
       if (result.success) {
         console.log('✅ Звонок успешно инициирован, call_id:', result.call_id)
         setPhoneVerificationData({
@@ -1223,7 +1227,7 @@ export default function AuthModal() {
                   />
                   <label htmlFor="agreeTerms" className="text-xs text-gray-700 select-none">
                     Я принимаю{' '}
-                    <a href="/terms" target="_blank" rel="noopener noreferrer" className="underline text-[#4CAF50]">
+                    <a href="/user-agreement" target="_blank" rel="noopener noreferrer" className="underline text-[#4CAF50]">
                       пользовательское соглашение
                     </a>{' '}
                     <span className="text-red-500">*</span>

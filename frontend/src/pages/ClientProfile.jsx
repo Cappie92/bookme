@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { apiGet, apiPut, apiRequest } from '../utils/api'
+import { apiGet, apiPut, apiRequest, getAuthHeaders } from '../utils/api'
 import { PencilIcon, TrashIcon, EyeIcon, EyeSlashIcon, ChevronRightIcon } from "@heroicons/react/24/outline"
 import {
   getClientNotificationPreferences,
@@ -78,6 +78,13 @@ export default function ClientProfile() {
   const [notifEditing, setNotifEditing] = useState(false)
   const [notifDraft, setNotifDraft] = useState(null)
 
+  // Pending phone/email подтверждения (минимально, без редизайна)
+  const [phoneChangeStep, setPhoneChangeStep] = useState('none') // none | enter_digits
+  const [phoneChangeCallId, setPhoneChangeCallId] = useState('')
+  const [phoneChangeDigits, setPhoneChangeDigits] = useState('')
+  const [phoneChangeError, setPhoneChangeError] = useState('')
+  const [emailChangeInfo, setEmailChangeInfo] = useState('')
+
   // Загружаем профиль клиента
   useEffect(() => {
     loadProfile()
@@ -119,24 +126,108 @@ export default function ClientProfile() {
     }))
   }
 
-  // Сохранение изменений профиля
+  const normPhone = (v) => String(v || '').trim()
+  const normEmail = (v) => String(v || '').trim().toLowerCase()
+
+  // Сохранение изменений профиля (phone/email не уходит прямым PUT — только name/birth_date + отдельные auth-флоу)
   const handleSaveProfile = async () => {
     try {
       setError('')
       setSuccess('')
+      setPhoneChangeError('')
+      setEmailChangeInfo('')
       
+      const prevPhone = normPhone(profile?.phone)
+      const prevEmail = normEmail(profile?.email)
+      const nextPhone = normPhone(editForm.phone)
+      const nextEmail = normEmail(editForm.email)
+      const phoneChanged = nextPhone !== prevPhone
+      const emailChanged = nextEmail !== prevEmail
+
       await apiPut('/api/client/profile', {
-        email: editForm.email,
-        phone: editForm.phone,
         name: editForm.name,
         birth_date: editForm.birth_date?.trim() ? editForm.birth_date.trim() : null
       })
-      setSuccess('Профиль успешно обновлен')
+
+      const authJsonHeaders = { ...getAuthHeaders(), 'Content-Type': 'application/json' }
+
+      // Если меняли телефон — только через request-phone-change (не через PUT profile)
+      if (phoneChanged && nextPhone) {
+        const res = await fetch('/api/auth/request-phone-change', {
+          method: 'POST',
+          headers: authJsonHeaders,
+          body: JSON.stringify({ phone: nextPhone }),
+        })
+        const data = await res.json().catch(() => ({}))
+        if (res.ok && data?.success && data?.call_id) {
+          setPhoneChangeCallId(data.call_id)
+          setPhoneChangeStep('enter_digits')
+          setSuccess(data?.message || 'Подтвердите новый телефон: введите 4 цифры из звонка.')
+        } else {
+          setPhoneChangeError(data?.message || data?.detail || 'Не удалось инициировать подтверждение телефона')
+        }
+      }
+
+      // Если меняли email — только через request-email-change
+      if (emailChanged && nextEmail) {
+        const res = await fetch('/api/auth/request-email-change', {
+          method: 'POST',
+          headers: authJsonHeaders,
+          body: JSON.stringify({ email: nextEmail }),
+        })
+        const data = await res.json().catch(() => ({}))
+        if (res.ok && data?.success) {
+          setEmailChangeInfo(data?.message || 'Письмо отправлено на новый email. Перейдите по ссылке из письма.')
+        } else {
+          setEmailChangeInfo(data?.message || data?.detail || 'Не удалось отправить письмо подтверждения.')
+        }
+      }
+
+      if (!phoneChanged && !emailChanged) {
+        setSuccess('Профиль успешно обновлен')
+      } else if (!phoneChanged && emailChanged) {
+        setSuccess((s) => s || 'Данные сохранены. Подтвердите новый email по ссылке из письма.')
+      } else if (phoneChanged && !emailChanged) {
+        setSuccess((s) => s || 'Данные сохранены. Подтвердите новый телефон.')
+      } else {
+        setSuccess((s) => s || 'Данные сохранены. Завершите подтверждение телефона и email.')
+      }
       setIsEditing(false)
       loadProfile() // Перезагружаем профиль
     } catch (error) {
       console.error('Ошибка обновления профиля:', error)
       setError('Не удалось обновить профиль')
+    }
+  }
+
+  const confirmPhoneChange = async () => {
+    setPhoneChangeError('')
+    if (!phoneChangeDigits || phoneChangeDigits.length !== 4) {
+      setPhoneChangeError('Введите 4 цифры')
+      return
+    }
+    try {
+      const res = await fetch('/api/auth/confirm-phone-change', {
+        method: 'POST',
+        headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          phone: normPhone(editForm.phone),
+          call_id: phoneChangeCallId,
+          phone_digits: phoneChangeDigits,
+        }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (res.ok && data?.success) {
+        setSuccess(data?.message || 'Телефон подтверждён')
+        setPhoneChangeStep('none')
+        setPhoneChangeCallId('')
+        setPhoneChangeDigits('')
+        loadProfile()
+      } else {
+        setPhoneChangeError(data?.message || data?.detail || 'Неверный код')
+      }
+    } catch {
+      setPhoneChangeError('Ошибка сети')
     }
   }
 
@@ -280,6 +371,76 @@ export default function ClientProfile() {
           {success && (
             <div className="mb-4 lg:mb-6 p-3 lg:p-4 bg-[#DFF5EC] border border-[#4CAF50] rounded-lg text-sm">
               <p className="text-[#2e7d32] font-medium">{success}</p>
+            </div>
+          )}
+
+          {emailChangeInfo && (
+            <div className="mb-4 lg:mb-6 p-3 lg:p-4 bg-blue-50 border border-blue-200 rounded-lg text-sm">
+              <p className="text-blue-900">{emailChangeInfo}</p>
+            </div>
+          )}
+
+          {phoneChangeStep === 'enter_digits' && (
+            <div className="fixed inset-0 z-50 bg-black/40 flex items-end sm:items-center justify-center p-0 sm:p-4">
+              <div
+                className="w-full max-w-md bg-white rounded-t-2xl sm:rounded-xl shadow-xl p-4 sm:p-6 max-h-[90dvh] overflow-y-auto"
+                role="dialog"
+                aria-modal="true"
+              >
+                <div className="flex items-start justify-between gap-3 mb-3">
+                  <h3 className="text-lg font-semibold text-gray-900 pr-2">Подтверждение телефона</h3>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPhoneChangeStep('none')
+                      setPhoneChangeCallId('')
+                      setPhoneChangeDigits('')
+                      setPhoneChangeError('')
+                    }}
+                    className="text-gray-400 hover:text-gray-600 text-2xl leading-none shrink-0"
+                    aria-label="Закрыть"
+                  >
+                    ×
+                  </button>
+                </div>
+                <p className="text-sm text-gray-700 mb-4">
+                  Введите последние 4 цифры номера, с которого вам звонят.
+                </p>
+                <label className="block text-sm font-medium text-gray-700 mb-2">4 цифры</label>
+                <input
+                  value={phoneChangeDigits}
+                  onChange={(e) => setPhoneChangeDigits((e.target.value || '').replace(/\D/g, '').slice(0, 4))}
+                  inputMode="numeric"
+                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#4CAF50] focus:border-[#4CAF50] text-base min-h-[44px]"
+                  placeholder="1234"
+                />
+                {phoneChangeError && (
+                  <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-lg text-sm">
+                    <p className="text-red-800">{phoneChangeError}</p>
+                  </div>
+                )}
+                <div className="mt-4 flex flex-col-reverse sm:flex-row justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPhoneChangeStep('none')
+                      setPhoneChangeCallId('')
+                      setPhoneChangeDigits('')
+                      setPhoneChangeError('')
+                    }}
+                    className="w-full sm:w-auto px-4 py-2.5 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 text-sm font-medium min-h-[44px]"
+                  >
+                    Отмена
+                  </button>
+                  <button
+                    type="button"
+                    onClick={confirmPhoneChange}
+                    className="w-full sm:w-auto px-4 py-2.5 bg-[#4CAF50] text-white rounded-lg hover:bg-[#43A047] text-sm font-medium min-h-[44px]"
+                  >
+                    Подтвердить
+                  </button>
+                </div>
+              </div>
             </div>
           )}
 

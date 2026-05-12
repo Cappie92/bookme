@@ -106,6 +106,13 @@ export default function MasterSettings({
   const [deleteAccountPhase, setDeleteAccountPhase] = useState('call')
   const [deleteAccountCode, setDeleteAccountCode] = useState('')
 
+  // Pending phone/email подтверждения (минимально, без редизайна)
+  const [phoneChangeStep, setPhoneChangeStep] = useState('none') // none | enter_digits
+  const [phoneChangeCallId, setPhoneChangeCallId] = useState('')
+  const [phoneChangeDigits, setPhoneChangeDigits] = useState('')
+  const [phoneChangeError, setPhoneChangeError] = useState('')
+  const [emailChangeInfo, setEmailChangeInfo] = useState('')
+
   const navigate = useNavigate()
   const frontendBaseUrl = getFrontendBaseUrl()
 
@@ -389,9 +396,17 @@ export default function MasterSettings({
     setLoading(true)
     setError('')
     setSuccess('')
+    setPhoneChangeError('')
+    setEmailChangeInfo('')
     try {
+      const prevPhone = profile?.user?.phone || ''
+      const prevEmail = profile?.user?.email || ''
+      const nextPhone = form.phone || ''
+      const nextEmail = form.email || ''
+
       const formData = new FormData()
-      const profileKeys = ['full_name', 'phone', 'email', 'birth_date', 'city', 'timezone']
+      // phone/email не отправляем через PUT /master/profile — только pending + auth-эндпоинты
+      const profileKeys = ['full_name', 'birth_date', 'city', 'timezone']
       profileKeys.forEach(key => {
         const v = form[key]
         if (v === undefined || v === '') return
@@ -411,6 +426,41 @@ export default function MasterSettings({
         if (onSettingsUpdate) {
           onSettingsUpdate()
         }
+
+        const token = localStorage.getItem('access_token')
+        const authHeaders = token ? { Authorization: `Bearer ${token}` } : {}
+
+        // Если меняли телефон — инициируем pending flow (звонок + 4 цифры)
+        if (nextPhone && nextPhone !== prevPhone) {
+          const r = await fetch(`/api/auth/request-phone-change`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...authHeaders },
+            body: JSON.stringify({ phone: nextPhone }),
+          })
+          const data = await r.json().catch(() => ({}))
+          if (r.ok && data?.success && data?.call_id) {
+            setPhoneChangeCallId(data.call_id)
+            setPhoneChangeStep('enter_digits')
+            setSuccess(data?.message || 'Подтвердите новый телефон: введите 4 цифры из звонка.')
+          } else {
+            setPhoneChangeError(data?.message || data?.detail || 'Не удалось инициировать подтверждение телефона')
+          }
+        }
+
+        // Если меняли email — инициируем pending flow (письмо со ссылкой)
+        if (nextEmail && nextEmail !== prevEmail) {
+          const r = await fetch(`/api/auth/request-email-change`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...authHeaders },
+            body: JSON.stringify({ email: nextEmail }),
+          })
+          const data = await r.json().catch(() => ({}))
+          setEmailChangeInfo(
+            (r.ok && data?.success)
+              ? (data?.message || 'Письмо отправлено на новый email. Перейдите по ссылке из письма.')
+              : (data?.message || data?.detail || 'Не удалось отправить письмо подтверждения.')
+          )
+        }
       } else {
         const data = await res.json()
         setError(data.detail || 'Ошибка обновления профиля')
@@ -419,6 +469,39 @@ export default function MasterSettings({
       setError('Ошибка сети')
     } finally {
       setLoading(false)
+    }
+  }
+
+  const confirmPhoneChange = async () => {
+    setPhoneChangeError('')
+    if (!phoneChangeDigits || phoneChangeDigits.length !== 4) {
+      setPhoneChangeError('Введите 4 цифры')
+      return
+    }
+    try {
+      const token = localStorage.getItem('access_token')
+      const authHeaders = token ? { Authorization: `Bearer ${token}` } : {}
+      const r = await fetch(`/api/auth/confirm-phone-change`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
+        body: JSON.stringify({
+          phone: form.phone,
+          call_id: phoneChangeCallId,
+          phone_digits: phoneChangeDigits,
+        }),
+      })
+      const data = await r.json().catch(() => ({}))
+      if (r.ok && data?.success) {
+        setSuccess(data?.message || 'Телефон подтверждён')
+        setPhoneChangeStep('none')
+        setPhoneChangeCallId('')
+        setPhoneChangeDigits('')
+        loadProfile()
+      } else {
+        setPhoneChangeError(data?.message || data?.detail || 'Неверный код')
+      }
+    } catch {
+      setPhoneChangeError('Ошибка сети')
     }
   }
 
@@ -443,7 +526,7 @@ export default function MasterSettings({
     }
 
     try {
-      const res = await fetch(`${API_BASE_URL}/auth/change-password`, {
+      const res = await fetch(`/api/auth/change-password`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -747,6 +830,71 @@ export default function MasterSettings({
       {saveSuccessForE2E && <span data-testid="settings-save-success" aria-hidden="true" className="sr-only" />}
       {success && <div className="mb-3 rounded-[11px] border border-green-200 bg-green-50 p-3 text-sm text-green-800">{success}</div>}
       {error && <div className="mb-3 rounded-[11px] border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
+      {emailChangeInfo && (
+        <div className="mb-3 rounded-[11px] border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
+          {emailChangeInfo}
+        </div>
+      )}
+
+      {phoneChangeStep === 'enter_digits' && (
+        <div className="fixed inset-0 z-[60] bg-black/40 flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div
+            className="w-full max-w-md bg-white rounded-t-2xl sm:rounded-xl shadow-xl p-4 sm:p-6 max-h-[90dvh] overflow-y-auto"
+            role="dialog"
+            aria-modal="true"
+          >
+            <div className="flex items-start justify-between gap-3 mb-3">
+              <h3 className="text-lg font-semibold text-gray-900 pr-2">Подтверждение телефона</h3>
+              <button
+                type="button"
+                onClick={() => {
+                  setPhoneChangeStep('none')
+                  setPhoneChangeCallId('')
+                  setPhoneChangeDigits('')
+                  setPhoneChangeError('')
+                }}
+                className="text-gray-400 hover:text-gray-600 text-2xl leading-none shrink-0"
+                aria-label="Закрыть"
+              >
+                ×
+              </button>
+            </div>
+            <p className="text-sm text-gray-700 mb-4">
+              Введите последние 4 цифры номера, с которого вам звонят.
+            </p>
+            <label className="mb-2 block text-sm font-medium text-gray-700">4 цифры</label>
+            <input
+              value={phoneChangeDigits}
+              onChange={(e) => setPhoneChangeDigits((e.target.value || '').replace(/\D/g, '').slice(0, 4))}
+              inputMode="numeric"
+              className={SV.ctl}
+              placeholder="1234"
+            />
+            {phoneChangeError && (
+              <div className="mt-3 rounded-[11px] border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                {phoneChangeError}
+              </div>
+            )}
+            <div className="mt-4 flex flex-col-reverse sm:flex-row justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setPhoneChangeStep('none')
+                  setPhoneChangeCallId('')
+                  setPhoneChangeDigits('')
+                  setPhoneChangeError('')
+                }}
+                className={SV.btnSec}
+              >
+                Отмена
+              </button>
+              <button type="button" onClick={confirmPhoneChange} className={SV.btnPri}>
+                Подтвердить
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <header className="mb-2 flex flex-row flex-wrap items-center gap-3 sm:mb-3">
         <h1 className="m-0 text-2xl font-bold leading-tight tracking-[-0.03em] text-[#2D2D2D] sm:text-[28px]">Настройки</h1>

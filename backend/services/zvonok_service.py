@@ -21,8 +21,12 @@ class ZvonokService:
         self.api_key = s.ZVONOK_API_KEY
         self.base_url = "https://zvonok.com/manager/cabapi_external/api/v1"
         self.campaign_id = None  # Будет создан при первом использовании
-        self._stub_mode = s.zvonok_stub
-        
+
+    def _is_stub(self) -> bool:
+        """Режим читается при каждом вызове (не кэшируем в __init__ — singleton на импорте)."""
+        from settings import get_settings
+        return get_settings().zvonok_stub
+
     def generate_verification_code(self, length: int = 4) -> str:
         """Генерирует код верификации"""
         return ''.join(random.choices(string.digits, k=length))
@@ -74,7 +78,7 @@ class ZvonokService:
             Dict с результатом операции
         """
         try:
-            if self._stub_mode:
+            if self._is_stub():
                 clean_phone = self._clean_phone_number(phone_number)
                 if not clean_phone:
                     return {"success": False, "error": "Неверный формат номера телефона"}
@@ -82,6 +86,9 @@ class ZvonokService:
                 return {
                     "success": True,
                     "call_id": ZVONOK_STUB_CALL_ID,
+                    "pincode": ZVONOK_STUB_DIGITS,
+                    # для UI/smoke (совместимо с полем verification_number в ответах API)
+                    "verification_number": ZVONOK_STUB_DIGITS,
                     "message": f"Stub: введите код {ZVONOK_STUB_DIGITS} для верификации",
                 }
             # Если кампания не создана, создаем её
@@ -214,26 +221,20 @@ class ZvonokService:
             Dict с результатом проверки
         """
         try:
-            if self._stub_mode:
+            if self._is_stub():
                 ok = call_id == ZVONOK_STUB_CALL_ID and phone_digits == ZVONOK_STUB_DIGITS
                 logger.info(f"[ZVONOK_STUB] verify_phone_digits call_id={call_id} digits={phone_digits} -> {ok}")
                 return {"success": True, "verified": ok, "message": "Stub: верификация пройдена" if ok else "Stub: неверный код"}
-            logger.info(f"Проверка цифр {phone_digits} для звонка {call_id}")
-            
-            # В mock-режиме принимаем любые 4 цифры как правильные
-            # В реальном API здесь будет сравнение с pincode из ответа send_verification_call
-            if len(phone_digits) == 4 and phone_digits.isdigit():
-                return {
-                    "success": True,
-                    "verified": True,
-                    "message": "Номер телефона успешно верифицирован"
-                }
-            else:
-                return {
-                    "success": False,
-                    "verified": False,
-                    "message": "Неверные цифры номера телефона"
-                }
+            # В live-режиме нельзя подтверждать «любые 4 цифры».
+            # Если серверная проверка pincode не реализована, возвращаем явный отказ.
+            # Актуальная web-верификация должна сравнивать введённые цифры с pincode,
+            # сохранённым на backend при инициации flashcall.
+            logger.info("ZVONOK live verify_phone_digits: server-side pincode check is not configured")
+            return {
+                "success": False,
+                "verified": False,
+                "message": "Серверная проверка кода звонка не настроена. Повторите попытку позже."
+            }
                 
         except Exception as e:
             logger.error(f"Ошибка при проверке цифр номера: {str(e)}")
@@ -246,7 +247,7 @@ class ZvonokService:
     def check_call_status(self, call_id: str) -> Dict[str, Any]:
         """Проверяет статус звонка"""
         try:
-            if self._stub_mode:
+            if self._is_stub():
                 ok = call_id == ZVONOK_STUB_CALL_ID
                 return {"success": True, "status": "completed", "verified": ok, "details": {"call_id": call_id}}
             logger.info(f"Проверка статуса звонка {call_id}")

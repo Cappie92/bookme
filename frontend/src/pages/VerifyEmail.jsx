@@ -73,6 +73,23 @@ export default function VerifyEmail() {
             В кабинет
           </Link>
         </div>
+        {import.meta.env.DEV && (
+          <details className="mt-6 rounded-lg border border-dashed border-gray-200 bg-gray-50/80 p-3 text-left text-xs text-gray-600">
+            <summary className="cursor-pointer font-medium text-gray-700">Локальный smoke: откуда взять token</summary>
+            <p className="mt-2">
+              После смены email или регистрации токен лежит в таблице{' '}
+              <code className="rounded bg-gray-100 px-1">email_verifications</code> (поле{' '}
+              <code className="rounded bg-gray-100 px-1">token</code>
+              ). В SQLite:{' '}
+              <code className="mt-1 block whitespace-pre-wrap break-all rounded bg-gray-100 p-1">
+                sqlite3 &lt;путь_к_БД&gt; &quot;SELECT token, purpose, expires_at FROM email_verifications ORDER BY id DESC LIMIT 5;&quot;
+              </code>
+              Затем откройте{' '}
+              <code className="rounded bg-gray-100 px-1">/verify-email?token=…</code> в этом же origin, что и фронт
+              (прокси на <code className="rounded bg-gray-100 px-1">/api</code>).
+            </p>
+          </details>
+        )}
       </div>
     </div>
   )

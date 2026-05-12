@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
 from sqlalchemy.orm import Session
-from sqlalchemy import func, or_, and_
+from sqlalchemy import func, or_, and_, select
 
 from auth import get_current_active_user, require_admin, require_admin_or_moderator, require_moderator_permission
 from utils.blog_import import parse_blog_import_markdown
@@ -14,12 +14,11 @@ from models import (
     BlogPost as BlogPostModel,
     User,
     UserRole,
-    Salon,
     Master,
+    IndieMaster,
     Booking,
     BookingStatus,
     BlogPostStatus,
-    salon_masters,
     Payment,
     Subscription,
     SubscriptionPlan,
@@ -29,6 +28,18 @@ from models import (
     SubscriptionPriceSnapshot,
     UserBalance,
     GlobalSettings,
+    EmailVerification,
+    PasswordReset,
+    ModeratorPermissions,
+    ClientFavorite,
+    ClientMasterNote,
+    ClientSalonNote,
+    LoyaltyTransaction,
+    MissedRevenue,
+    AdminOperation,
+    AlwaysFreeLog,
+    PromoCodeActivation,
+    BalanceTransaction,
 )
 from constants import duration_months_to_days
 from utils.balance_utils import move_available_to_reserve
@@ -237,6 +248,39 @@ def retry_subscription_apply(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Ошибка ретрая apply: {e}")
 
 
+def _admin_json_bool(v: Any) -> bool:
+    """
+    Сериализация флагов в JSON как строгие true/false.
+    Некоторые драйверы/SQLite отдают 0/1 вместо bool — в JSON это число, а в JS `1 === true` ложно.
+    """
+    if v is True:
+        return True
+    if v is False or v is None:
+        return False
+    if isinstance(v, (int, float)):
+        return int(v) != 0
+    return bool(v)
+
+
+def _admin_user_public_dict(user: User, subscription_plan_label: Optional[str]) -> dict:
+    """Единый словарь пользователя для GET list/detail и PUT (без салонных JOIN)."""
+    return {
+        "id": user.id,
+        "phone": user.phone,
+        "email": user.email,
+        "full_name": user.full_name,
+        "role": user.role,
+        "birth_date": user.birth_date,
+        "is_active": user.is_active,
+        "is_verified": bool(user.is_verified),
+        "is_phone_verified": bool(user.is_phone_verified),
+        "is_always_free": user.is_always_free,
+        "created_at": user.created_at,
+        "updated_at": user.updated_at,
+        "subscription_plan_label": subscription_plan_label,
+    }
+
+
 def _admin_subscription_plan_label(
     user: User,
     plan_id_by_user: dict,
@@ -353,20 +397,14 @@ def get_users(
     # Ручная сериализация для избежания проблем с Pydantic
     result = []
     for user in users:
-        result.append({
-            "id": user.id,
-            "phone": user.phone,
-            "email": user.email,
-            "full_name": user.full_name,
-            "role": user.role,
-            "birth_date": user.birth_date,
-            "is_active": user.is_active,
-            "is_verified": user.is_verified,
-            "is_always_free": user.is_always_free,
-            "created_at": user.created_at,
-            "updated_at": user.updated_at,
-            "subscription_plan_label": _admin_subscription_plan_label(user, plan_id_by_user, plans_by_id),
-        })
+        row = _admin_user_public_dict(
+            user,
+            _admin_subscription_plan_label(user, plan_id_by_user, plans_by_id),
+        )
+        # Контракт списка: флаги верификации всегда в JSON как boolean (email / телефон)
+        row["is_verified"] = bool(user.is_verified)
+        row["is_phone_verified"] = bool(user.is_phone_verified)
+        result.append(row)
 
     return {
         "items": result,
@@ -396,20 +434,7 @@ def get_user(
     plan_id_by_user, plans_by_id = _batch_plan_ids_for_users(db, [user], now)
     subscription_plan_label = _admin_subscription_plan_label(user, plan_id_by_user, plans_by_id)
 
-    return {
-        "id": user.id,
-        "phone": user.phone,
-        "email": user.email,
-        "full_name": user.full_name,
-        "role": user.role,
-        "birth_date": user.birth_date,
-        "is_active": user.is_active,
-        "is_verified": user.is_verified,
-        "is_always_free": user.is_always_free,
-        "created_at": user.created_at,
-        "updated_at": user.updated_at,
-        "subscription_plan_label": subscription_plan_label,
-    }
+    return _admin_user_public_dict(user, subscription_plan_label)
 
 
 @router.put("/users/{user_id}")
@@ -538,20 +563,7 @@ def update_user(
         plan_id_by_user, plans_by_id = _batch_plan_ids_for_users(db, [user], now)
         subscription_plan_label = _admin_subscription_plan_label(user, plan_id_by_user, plans_by_id)
 
-        return {
-            "id": user.id,
-            "phone": user.phone,
-            "email": user.email,
-            "full_name": user.full_name,
-            "role": user.role,
-            "birth_date": user.birth_date,
-            "is_active": user.is_active,
-            "is_verified": user.is_verified,
-            "is_always_free": user.is_always_free,
-            "created_at": user.created_at,
-            "updated_at": user.updated_at,
-            "subscription_plan_label": subscription_plan_label,
-        }
+        return _admin_user_public_dict(user, subscription_plan_label)
         
     except Exception as e:
         db.rollback()
@@ -569,62 +581,87 @@ def delete_user(
 ) -> Any:
     """
     Удаление пользователя.
+    Без загрузки ORM User цели — иначе при autoflush/commit lazy-load salon_profile тянет salons.*.
     """
-    # Проверяем, что пользователь существует
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
+    ut = User.__table__
+    target = db.execute(select(ut.c.id, ut.c.role).where(ut.c.id == user_id)).mappings().first()
+    if not target:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Пользователь не найден"
+            detail="Пользователь не найден",
         )
-    
-    # Нельзя удалить самого себя
-    if user.id == current_user.id:
+
+    uid = int(target["id"])
+    role_raw = target["role"]
+    if isinstance(role_raw, UserRole):
+        target_role = role_raw
+    else:
+        target_role = UserRole(str(role_raw))
+
+    if uid == current_user.id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Нельзя удалить самого себя"
+            detail="Нельзя удалить самого себя",
         )
-    
-    # Нельзя удалить другого администратора (только суперадмин может)
-    if user.role == UserRole.ADMIN and current_user.role != UserRole.ADMIN:
+
+    if target_role == UserRole.ADMIN and current_user.role != UserRole.ADMIN:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Недостаточно прав для удаления администратора"
+            detail="Недостаточно прав для удаления администратора",
         )
-    
+
     try:
-        # Удаляем все связанные данные пользователя
-        # Бронирования
-        bookings = db.query(Booking).filter(Booking.client_id == user.id).all()
-        for booking in bookings:
-            db.delete(booking)
-        
-        # Профили мастера/салона
-        if user.master_profile:
-            db.delete(user.master_profile)
-        if user.salon_profile:
-            db.delete(user.salon_profile)
-        if user.indie_profile:
-            db.delete(user.indie_profile)
-        
-        # Права модератора
-        from models import ModeratorPermissions
-        permissions = db.query(ModeratorPermissions).filter(ModeratorPermissions.user_id == user.id).first()
-        if permissions:
-            db.delete(permissions)
-        
-        # Удаляем самого пользователя
-        db.delete(user)
+        with db.no_autoflush:
+            db.query(Booking).filter(Booking.client_id == uid).delete(synchronize_session=False)
+            db.query(ClientFavorite).filter(ClientFavorite.client_id == uid).delete(synchronize_session=False)
+            db.query(ClientMasterNote).filter(ClientMasterNote.client_id == uid).delete(synchronize_session=False)
+            db.query(ClientSalonNote).filter(ClientSalonNote.client_id == uid).delete(synchronize_session=False)
+            db.query(LoyaltyTransaction).filter(LoyaltyTransaction.client_id == uid).delete(synchronize_session=False)
+            db.query(MissedRevenue).filter(MissedRevenue.client_id == uid).delete(synchronize_session=False)
+
+            db.query(EmailVerification).filter(EmailVerification.user_id == uid).delete(synchronize_session=False)
+            db.query(PasswordReset).filter(PasswordReset.user_id == uid).delete(synchronize_session=False)
+
+            db.query(Payment).filter(Payment.user_id == uid).delete(synchronize_session=False)
+            db.query(SubscriptionReservation).filter(SubscriptionReservation.user_id == uid).delete(synchronize_session=False)
+            db.query(SubscriptionPriceSnapshot).filter(SubscriptionPriceSnapshot.user_id == uid).delete(synchronize_session=False)
+            db.query(Subscription).filter(Subscription.user_id == uid).delete(synchronize_session=False)
+
+            db.query(BalanceTransaction).filter(BalanceTransaction.user_id == uid).delete(synchronize_session=False)
+            db.query(UserBalance).filter(UserBalance.user_id == uid).delete(synchronize_session=False)
+
+            db.query(PromoCodeActivation).filter(PromoCodeActivation.user_id == uid).delete(synchronize_session=False)
+            db.query(AdminOperation).filter(
+                or_(AdminOperation.admin_user_id == uid, AdminOperation.from_user_id == uid)
+            ).delete(synchronize_session=False)
+            db.query(AlwaysFreeLog).filter(
+                or_(AlwaysFreeLog.user_id == uid, AlwaysFreeLog.admin_user_id == uid)
+            ).delete(synchronize_session=False)
+
+            db.query(IndieMaster).filter(IndieMaster.user_id == uid).delete(synchronize_session=False)
+            db.query(Master).filter(Master.user_id == uid).delete(synchronize_session=False)
+
+            db.query(ModeratorPermissions).filter(ModeratorPermissions.user_id == uid).delete(synchronize_session=False)
+
+            deleted = db.query(User).filter(User.id == uid).delete(synchronize_session=False)
+            if deleted != 1:
+                raise RuntimeError(f"bulk delete user: expected 1 row, got {deleted}")
+
         db.commit()
-        
+
         return {"message": "Пользователь успешно удален"}
-        
-    except Exception as e:
+
+    except Exception:
         db.rollback()
+        logger.exception(
+            "DELETE /api/admin/users/%s failed (actor user_id=%s)",
+            user_id,
+            getattr(current_user, "id", None),
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Ошибка при удалении пользователя: {str(e)}"
-        )
+            detail="Ошибка при удалении пользователя. Подробности в логах сервера.",
+        ) from None
 
 
 @router.get("/stats/users", response_model=UserStats)
@@ -689,7 +726,9 @@ def get_admin_stats(
 
     # Общая статистика
     total_users = db.query(User).count()
-    total_salons = db.query(Salon).filter(Salon.is_active == True).count()
+    # Салонный контур заморожен: не дергаем ORM Salon (несовпадение схемы salons → 500 на SQLite).
+    total_salons = 0
+    top_salons: List[dict] = []
     total_masters = db.query(Master).count()
     total_bookings = db.query(Booking).count()
     total_blog_posts = db.query(BlogPostModel).filter(BlogPostModel.status == BlogPostStatus.PUBLISHED).count()
@@ -762,22 +801,6 @@ def get_admin_stats(
     
     # Разворачиваем массив, чтобы показать неделю в правильном порядке
     weekly_activity.reverse()
-
-    # Топ салонов по активности
-    top_salons_query = db.query(
-        Salon.name,
-        func.count(Booking.id).label('bookings'),
-        func.count(salon_masters.c.master_id).label('masters')
-    ).outerjoin(Booking, Salon.id == Booking.salon_id).outerjoin(salon_masters, Salon.id == salon_masters.c.salon_id).group_by(Salon.id, Salon.name).order_by(func.count(Booking.id).desc()).limit(5).all()
-
-    top_salons = []
-    for salon in top_salons_query:
-        top_salons.append({
-            'name': salon.name,
-            'bookings': salon.bookings,
-            'masters': salon.masters,
-            'rating': 4.5  # Пока статичное значение, можно добавить реальный рейтинг
-        })
 
     return {
         "total_users": total_users,
@@ -814,7 +837,9 @@ def get_dashboard_stats(
 
     # Общая статистика
     total_users = db.query(User).count()
-    total_salons = db.query(Salon).filter(Salon.is_active == True).count()
+    # Салонный контур заморожен: не дергаем ORM Salon (несовпадение схемы salons → 500 на SQLite).
+    total_salons = 0
+    top_salons: List[dict] = []
     total_masters = db.query(Master).count()
     total_bookings = db.query(Booking).count()
     total_blog_posts = db.query(BlogPostModel).filter(BlogPostModel.status == BlogPostStatus.PUBLISHED).count()
@@ -887,22 +912,6 @@ def get_dashboard_stats(
     
     # Разворачиваем массив, чтобы показать неделю в правильном порядке
     weekly_activity.reverse()
-
-    # Топ салонов по активности
-    top_salons_query = db.query(
-        Salon.name,
-        func.count(Booking.id).label('bookings'),
-        func.count(salon_masters.c.master_id).label('masters')
-    ).outerjoin(Booking, Salon.id == Booking.salon_id).outerjoin(salon_masters, Salon.id == salon_masters.c.salon_id).group_by(Salon.id, Salon.name).order_by(func.count(Booking.id).desc()).limit(5).all()
-
-    top_salons = []
-    for salon in top_salons_query:
-        top_salons.append({
-            'name': salon.name,
-            'bookings': salon.bookings,
-            'masters': salon.masters,
-            'rating': 4.5  # Пока статичное значение, можно добавить реальный рейтинг
-        })
 
     return {
         "total_users": total_users,

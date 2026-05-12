@@ -29,7 +29,7 @@ def _parse_optional_client_birth_date(raw: Any) -> Optional[date_type]:
 from auth import get_current_active_user, require_client
 from database import get_db
 from models import (
-    User, Salon, Master, IndieMaster, Service, SalonBranch, Booking, 
+    User, Salon, Master, IndieMaster, Service, Booking, 
     BookingStatus, ClientNote, ClientMasterNote, ClientSalonNote, UserRole, ClientFavorite,
     TemporaryBooking, MasterPaymentSettings, AppliedDiscount, GlobalSettings, OwnerType
 )
@@ -80,8 +80,7 @@ def get_master_timezone(booking: Booking) -> Optional[str]:
             tz = getattr(booking.indie_master, "timezone", None)
         elif booking.master:
             tz = getattr(booking.master, "timezone", None)
-        elif booking.salon:
-            tz = getattr(booking.salon, "timezone", None)
+        # Не обращаемся к booking.salon: ORM подтянет полный Salon (на частичных БД/заморозке salon — 500).
         else:
             tz = None
         if tz is not None and str(tz).strip():
@@ -149,11 +148,9 @@ def get_future_bookings(
     all_bookings = (
         db.query(Booking)
         .options(
-            joinedload(Booking.salon),
             joinedload(Booking.master).joinedload(Master.user),
             joinedload(Booking.indie_master).joinedload(IndieMaster.user),
             joinedload(Booking.service),
-            joinedload(Booking.branch)
         )
         .filter(
             Booking.client_id == _client_id,
@@ -165,7 +162,7 @@ def get_future_bookings(
 
     if len(all_bookings) == 0:
         return []
-    
+
     result = []
     future_count = 0
     past_count = 0
@@ -297,11 +294,9 @@ def get_past_bookings(
     all_bookings = (
         db.query(Booking)
         .options(
-            joinedload(Booking.salon),
             joinedload(Booking.master).joinedload(Master.user),
             joinedload(Booking.indie_master).joinedload(IndieMaster.user),
             joinedload(Booking.service),
-            joinedload(Booking.branch)
         )
         .filter(
             Booking.client_id == _client_id,
@@ -313,7 +308,7 @@ def get_past_bookings(
 
     if len(all_bookings) == 0:
         return []
-    
+
     result = []
     future_count = 0
     past_count = 0
@@ -533,7 +528,8 @@ def _calendar_booking_query(db: Session):
             joinedload(Booking.service),
             joinedload(Booking.master).joinedload(Master.user),
             joinedload(Booking.indie_master).joinedload(IndieMaster.user),
-            joinedload(Booking.branch).joinedload(SalonBranch.salon),
+            # branch без salon: город для Яндекс.Карт — с мастера/indie (см. yandex_maps_url).
+            joinedload(Booking.branch),
         )
     )
 
@@ -1494,26 +1490,34 @@ def update_client_profile(
         if not client:
             raise HTTPException(status_code=404, detail="Клиент не найден")
         
-        # Обновляем разрешенные поля
+        # Обновляем разрешенные поля.
+        # Важно: смена email/phone идёт через pending_* и требует подтверждения.
+        # Обновляем email/phone только непустыми значениями (null в JSON не должен давать ложный «занят»)
         if "email" in profile_data:
-            # Проверяем, что email уникален
-            existing_user = db.query(User).filter(
-                User.email == profile_data["email"],
-                User.id != current_user.id
-            ).first()
-            if existing_user:
-                raise HTTPException(status_code=400, detail="Email уже используется")
-            client.email = profile_data["email"]
-        
+            raw_email = profile_data.get("email")
+            if raw_email is not None and str(raw_email).strip():
+                new_email = str(raw_email).strip()
+                existing_user = db.query(User).filter(
+                    User.email == new_email,
+                    User.id != current_user.id
+                ).first()
+                if existing_user:
+                    raise HTTPException(status_code=400, detail="Email уже используется")
+                if new_email != client.email:
+                    client.pending_email = new_email
+
         if "phone" in profile_data:
-            # Проверяем, что телефон уникален
-            existing_user = db.query(User).filter(
-                User.phone == profile_data["phone"],
-                User.id != current_user.id
-            ).first()
-            if existing_user:
-                raise HTTPException(status_code=400, detail="Телефон уже используется")
-            client.phone = profile_data["phone"]
+            raw_phone = profile_data.get("phone")
+            if raw_phone is not None and str(raw_phone).strip():
+                new_phone = str(raw_phone).strip()
+                existing_user = db.query(User).filter(
+                    User.phone == new_phone,
+                    User.id != current_user.id
+                ).first()
+                if existing_user:
+                    raise HTTPException(status_code=400, detail="Телефон уже используется")
+                if new_phone != client.phone:
+                    client.pending_phone = new_phone
 
         if "name" in profile_data:
             name_val = profile_data.get("name")
@@ -2453,53 +2457,10 @@ def get_favorite_salons(
     current_user: User = Depends(get_current_active_user)
 ) -> Any:
     """
-    Получение списка избранных салонов.
+    Избранные салоны: салонный функционал заморожен — не грузим Salon ORM (частичная схема salons → 500).
+    Возвращаем пустой список для совместимости с клиентом; без SELECT к salons.
     """
-    try:
-        favorites = (
-            db.query(ClientFavorite)
-            .options(joinedload(ClientFavorite.salon))
-            .filter(
-                ClientFavorite.client_id == current_user.id,
-                ClientFavorite.favorite_type == 'salon'
-            )
-            .all()
-        )
-        # Преобразуем вложенные объекты в словари для сериализации
-        result = []
-        for fav in favorites:
-            fav_dict = {
-                "client_favorite_id": fav.client_favorite_id,
-                "client_id": fav.client_id,
-                "favorite_type": fav.favorite_type,
-                "salon_id": fav.salon_id,
-                "master_id": fav.master_id,
-                "indie_master_id": fav.indie_master_id,
-                "service_id": fav.service_id,
-                "favorite_name": fav.favorite_name,
-                "salon": None,
-                "master": None,
-                "indie_master": None,
-                "service": None
-            }
-            if fav.salon:
-                fav_dict["salon"] = {
-                    "id": fav.salon.id,
-                    "name": fav.salon.name,
-                    "domain": fav.salon.domain,
-                    "description": fav.salon.description,
-                    "phone": fav.salon.phone,
-                    "email": fav.salon.email
-                }
-            result.append(fav_dict)
-        return result
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Ошибка при получении избранных салонов: {str(e)}"
-        )
+    return []
 
 
 @profile_router.get("/favorites/masters")
@@ -2591,8 +2552,7 @@ def get_favorite_services(
             db.query(ClientFavorite)
             .options(
                 joinedload(ClientFavorite.service),
-                joinedload(ClientFavorite.salon),
-                joinedload(ClientFavorite.indie_master)
+                joinedload(ClientFavorite.indie_master),
             )
             .filter(
                 ClientFavorite.client_id == current_user.id,
@@ -2625,12 +2585,7 @@ def get_favorite_services(
                     "price": float(fav.service.price) if fav.service.price else 0.0,
                     "duration": int(fav.service.duration) if fav.service.duration else 0
                 }
-            if fav.salon:
-                fav_dict["salon"] = {
-                    "id": fav.salon.id,
-                    "name": fav.salon.name,
-                    "domain": fav.salon.domain
-                }
+            # salon не подгружаем — избегаем ORM Salon при замороженном salon-функционале
             if fav.indie_master:
                 fav_dict["indie_master"] = {
                     "id": fav.indie_master.id,

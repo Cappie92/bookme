@@ -16,7 +16,7 @@ from auth import (
     verify_password,
 )
 from database import get_db
-from models import User, Master, Booking, UserRole
+from models import User, Master, Booking, UserRole, EmailVerification
 from schemas import LoginRequest, Token, ChangePasswordRequest, SetPasswordRequest, MessageOut
 from schemas import User as UserSchema
 from schemas import UserCreate, VerifyRequest
@@ -33,6 +33,10 @@ from schemas import (
     ResendVerificationRequest, ResendVerificationResponse,
     PhoneVerificationRequest, PhoneVerificationResponse,
     VerifyPhoneRequest, VerifyPhoneResponse
+    , RequestPhoneChangeRequest, RequestPhoneChangeResponse,
+    ConfirmPhoneChangeRequest, ConfirmPhoneChangeResponse,
+    RequestEmailChangeRequest, RequestEmailChangeResponse,
+    ConfirmEmailChangeRequest, ConfirmEmailChangeResponse
 )
 
 
@@ -41,6 +45,169 @@ router = APIRouter(
     tags=["auth"],
     responses={401: {"description": "Unauthorized"}},
 )
+
+# --- Контракты смены контактов (pending) ---
+
+
+@router.post("/request-phone-change", response_model=RequestPhoneChangeResponse)
+async def request_phone_change(
+    request: RequestPhoneChangeRequest,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> Any:
+    """Запрос на смену телефона: сохраняет pending_phone и инициирует flashcall."""
+    new_phone = request.phone
+
+    # Uniqueness
+    existing = db.query(User).filter(User.phone == new_phone, User.id != current_user.id).first()
+    if existing:
+        return RequestPhoneChangeResponse(message="Телефон уже используется", success=False)
+
+    current_user.pending_phone = new_phone
+    current_user.pending_phone_expires_at = datetime.utcnow() + timedelta(minutes=10)
+    current_user.phone_verification_attempts = 0
+    current_user.phone_verification_purpose = "phone_change"
+
+    call_result = zvonok_service.send_verification_call(new_phone)
+    if not call_result.get("success"):
+        return RequestPhoneChangeResponse(
+            message=call_result.get("error") or "Ошибка инициации звонка",
+            success=False,
+        )
+
+    current_user.phone_verification_code = str(
+        call_result.get("pincode") or call_result.get("verification_number") or ""
+    ).strip() or None
+    current_user.phone_verification_call_id = str(call_result.get("call_id") or "").strip() or None
+    current_user.phone_verification_expires = datetime.utcnow() + timedelta(minutes=5)
+    current_user.phone_verification_target_phone = new_phone
+    db.commit()
+
+    return RequestPhoneChangeResponse(
+        message="Звонок для подтверждения нового телефона инициирован. Введите последние 4 цифры номера, с которого вам звонят.",
+        success=True,
+        call_id=call_result.get("call_id"),
+    )
+
+
+@router.post("/confirm-phone-change", response_model=ConfirmPhoneChangeResponse)
+async def confirm_phone_change(
+    request: ConfirmPhoneChangeRequest,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> Any:
+    """Подтверждение смены телефона по 4 цифрам (pincode)."""
+    if not current_user.pending_phone or current_user.pending_phone != request.phone:
+        return ConfirmPhoneChangeResponse(message="Нет ожидающей смены телефона", success=False)
+    if current_user.pending_phone_expires_at and current_user.pending_phone_expires_at <= datetime.utcnow():
+        return ConfirmPhoneChangeResponse(message="Ожидание смены телефона истекло", success=False)
+    if not current_user.phone_verification_code or not current_user.phone_verification_expires:
+        return ConfirmPhoneChangeResponse(message="Верификация не инициирована", success=False)
+    if current_user.phone_verification_expires <= datetime.utcnow():
+        return ConfirmPhoneChangeResponse(message="Код истёк. Запросите звонок ещё раз.", success=False)
+    if current_user.phone_verification_call_id and str(current_user.phone_verification_call_id) != str(request.call_id):
+        return ConfirmPhoneChangeResponse(message="Неверная сессия верификации", success=False)
+    attempts = int(current_user.phone_verification_attempts or 0)
+    if attempts >= 5:
+        return ConfirmPhoneChangeResponse(message="Превышено число попыток. Запросите звонок ещё раз.", success=False)
+    if str(current_user.phone_verification_code) != str(request.phone_digits):
+        current_user.phone_verification_attempts = attempts + 1
+        db.commit()
+        return ConfirmPhoneChangeResponse(message="Неверные цифры номера телефона", success=False)
+
+    # Apply
+    current_user.phone = current_user.pending_phone
+    current_user.pending_phone = None
+    current_user.pending_phone_expires_at = None
+    current_user.is_phone_verified = True
+
+    current_user.phone_verification_code = None
+    current_user.phone_verification_call_id = None
+    current_user.phone_verification_expires = None
+    current_user.phone_verification_attempts = 0
+    current_user.phone_verification_target_phone = None
+    current_user.phone_verification_purpose = None
+
+    db.commit()
+    return ConfirmPhoneChangeResponse(message="Телефон успешно изменён и подтверждён", success=True)
+
+
+@router.post("/request-email-change", response_model=RequestEmailChangeResponse)
+async def request_email_change(
+    request: RequestEmailChangeRequest,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> Any:
+    """Запрос на смену email: сохраняет pending_email и отправляет письмо со ссылкой."""
+    new_email = request.email
+    existing = db.query(User).filter(User.email == new_email, User.id != current_user.id).first()
+    if existing:
+        return RequestEmailChangeResponse(message="Email уже используется", success=False)
+
+    current_user.pending_email = str(new_email)
+    db.commit()
+
+    try:
+        verification = VerificationService.create_email_change_verification(current_user, str(new_email), db)
+        from services.email_service import get_email_service
+        from urllib.parse import urljoin
+        base_url = get_settings().FRONTEND_URL
+        verify_url = urljoin(base_url, f"/verify-email?token={verification.token}")
+
+        subject = "Подтвердите новый email"
+        html = f"""
+        <html><body>
+          <h2>Подтверждение смены email</h2>
+          <p>Вы запросили смену email в DeDato.</p>
+          <p><a href="{verify_url}">Подтвердить новый email</a></p>
+          <p>Если ссылка не работает, скопируйте её в браузер:</p>
+          <p>{verify_url}</p>
+          <p>Ссылка действительна в течение 24 часов.</p>
+        </body></html>
+        """
+        await get_email_service().send_email(str(new_email), subject, html)
+    except Exception as e:
+        print(f"Ошибка отправки письма смены email: {e}")
+        return RequestEmailChangeResponse(message="Не удалось отправить письмо подтверждения", success=False)
+
+    return RequestEmailChangeResponse(
+        message="Письмо для подтверждения нового email отправлено. Перейдите по ссылке в письме.",
+        success=True,
+    )
+
+
+@router.post("/confirm-email-change", response_model=ConfirmEmailChangeResponse)
+async def confirm_email_change(
+    request: ConfirmEmailChangeRequest,
+    db: Session = Depends(get_db),
+) -> Any:
+    """Подтверждение смены email по токену из письма."""
+    try:
+        user = VerificationService.verify_email_token(request.token, db)
+        if not user:
+            return ConfirmEmailChangeResponse(message="Недействительный или истекший токен", success=False)
+
+        # ensure this token is for email_change and matches
+        ver = db.query(EmailVerification).filter(EmailVerification.token == request.token).first()
+        if not ver or ver.purpose != "email_change":
+            return ConfirmEmailChangeResponse(message="Недействительный токен для смены email", success=False)
+        if not user.pending_email or (ver.email_to_verify and user.pending_email != ver.email_to_verify):
+            return ConfirmEmailChangeResponse(message="Нет ожидающей смены email", success=False)
+
+        # uniqueness on apply
+        existing = db.query(User).filter(User.email == user.pending_email, User.id != user.id).first()
+        if existing:
+            return ConfirmEmailChangeResponse(message="Email уже используется", success=False)
+
+        user.email = user.pending_email
+        user.pending_email = None
+        user.is_verified = True
+        db.commit()
+
+        return ConfirmEmailChangeResponse(message="Email успешно изменён и подтверждён", success=True)
+    except Exception as e:
+        print(f"Ошибка confirm-email-change: {e}")
+        return ConfirmEmailChangeResponse(message="Внутренняя ошибка сервера", success=False)
 
 
 @router.post("/demo-master-access", response_model=Token)
@@ -87,9 +254,10 @@ async def register(user_in: UserCreate, db: Session = Depends(get_db)) -> Any:
     - **password**: Пароль
     - **role**: Роль пользователя (client, master, salon, admin)
     """
-    user = db.query(User).filter(User.email == user_in.email).first()
-    if user:
-        raise HTTPException(status_code=400, detail="Email already registered")
+    if user_in.email:
+        user = db.query(User).filter(User.email == user_in.email).first()
+        if user:
+            raise HTTPException(status_code=400, detail="Email already registered")
 
     # Проверяем, не занят ли телефон
     phone_user = db.query(User).filter(User.phone == user_in.phone).first()
@@ -159,9 +327,9 @@ async def register(user_in: UserCreate, db: Session = Depends(get_db)) -> Any:
         master.domain = generate_unique_domain(master.id, db)
         db.commit()
 
-    # Отправляем письмо верификации email
+    # Отправляем письмо верификации email (та же сессия db, что и при создании пользователя)
     try:
-        await VerificationService.send_verification_email(user)
+        await VerificationService.send_verification_email(user, db)
     except Exception as e:
         print(f"Ошибка отправки письма верификации: {e}")
         # Не прерываем регистрацию, если письмо не отправилось
@@ -169,12 +337,13 @@ async def register(user_in: UserCreate, db: Session = Depends(get_db)) -> Any:
     # Звонок для верификации телефона будет отправлен по запросу пользователя
     # через /api/auth/request-phone-verification
 
-    # Генерируем токены для входа
+    # Генерируем токены для входа (sub как в login: телефон, если email нет)
+    token_sub = (user.email or "").strip() or user.phone
     access_token = create_access_token(
-        data={"sub": user.email, "role": user.role.value.upper()},
+        data={"sub": token_sub, "role": user.role.value.upper()},
         expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
     )
-    refresh_token = create_refresh_token(data={"sub": user.email, "role": user.role.value.upper()})
+    refresh_token = create_refresh_token(data={"sub": token_sub, "role": user.role.value.upper()})
 
     return {
         "access_token": access_token,
@@ -543,8 +712,8 @@ async def request_email_verification(request: EmailVerificationRequest, db: Sess
             )
         
         # Отправляем письмо верификации
-        success = await VerificationService.send_verification_email(user)
-        
+        success = await VerificationService.send_verification_email(user, db)
+
         if success:
             return EmailVerificationResponse(
                 message="Письмо для верификации email отправлено",
@@ -568,24 +737,43 @@ async def request_email_verification(request: EmailVerificationRequest, db: Sess
 async def verify_email(request: VerifyEmailRequest, db: Session = Depends(get_db)):
     """Подтверждение email по токену"""
     try:
+        token = request.token
         # Проверяем токен
-        user = VerificationService.verify_email_token(request.token, db)
+        user = VerificationService.verify_email_token(token, db)
         
         if not user:
             return VerifyEmailResponse(
                 message="Недействительный или истекший токен",
                 success=False
             )
-        
-        # Помечаем email как верифицированный
-        user.is_verified = True
-        db.commit()
-        
-        return VerifyEmailResponse(
-            message="Email успешно подтвержден",
-            success=True,
-            user_id=user.id
-        )
+
+        ver = db.query(EmailVerification).filter(EmailVerification.token == token).first()
+        purpose = (ver.purpose if ver else "signup") if ver else "signup"
+
+        # signup: просто подтверждаем текущий email пользователя
+        if purpose == "signup":
+            user.is_verified = True
+            db.commit()
+            return VerifyEmailResponse(message="Email успешно подтвержден", success=True, user_id=user.id)
+
+        # email_change: переносим pending_email в email (если совпадает)
+        if purpose == "email_change":
+            if not user.pending_email:
+                return VerifyEmailResponse(message="Нет ожидающей смены email", success=False, user_id=user.id)
+            if ver and ver.email_to_verify and user.pending_email != ver.email_to_verify:
+                return VerifyEmailResponse(message="Нет ожидающей смены email", success=False, user_id=user.id)
+
+            existing = db.query(User).filter(User.email == user.pending_email, User.id != user.id).first()
+            if existing:
+                return VerifyEmailResponse(message="Email уже используется", success=False, user_id=user.id)
+
+            user.email = user.pending_email
+            user.pending_email = None
+            user.is_verified = True
+            db.commit()
+            return VerifyEmailResponse(message="Email успешно изменён и подтвержден", success=True, user_id=user.id)
+
+        return VerifyEmailResponse(message="Недействительный токен", success=False, user_id=user.id)
         
     except Exception as e:
         print(f"Ошибка верификации email: {e}")
@@ -705,8 +893,8 @@ async def resend_verification(request: ResendVerificationRequest, db: Session = 
             )
         
         # Отправляем письмо верификации
-        success = await VerificationService.send_verification_email(user)
-        
+        success = await VerificationService.send_verification_email(user, db)
+
         if success:
             return ResendVerificationResponse(
                 message="Письмо для верификации email отправлено повторно",
@@ -739,20 +927,32 @@ async def request_phone_verification(request: PhoneVerificationRequest, db: Sess
             )
         
         # Инициируем звонок через Zvonok (без генерации кода)
-        print(f"🔔 Инициируем верификацию телефона для пользователя {user.id}: {request.phone}")
         call_result = zvonok_service.send_verification_call(request.phone)
-        print(f"📞 Результат отправки звонка: {call_result}")
         
         if call_result["success"]:
-            print(f"✅ Звонок успешно отправлен: call_id={call_result.get('call_id')}")
+            # Сохраняем pincode/expiry/attempts для безопасной проверки на backend
+            pin_raw = str(
+                call_result.get("pincode")
+                or call_result.get("verification_number")
+                or ""
+            ).strip() or None
+            user.phone_verification_code = pin_raw
+            user.phone_verification_call_id = str(call_result.get("call_id") or "").strip() or None
+            user.phone_verification_expires = datetime.utcnow() + timedelta(minutes=5)
+            user.phone_verification_attempts = 0
+            user.phone_verification_target_phone = user.phone
+            user.phone_verification_purpose = "signup"
+            db.commit()
+            from settings import get_settings
+            stub = get_settings().zvonok_stub
             return PhoneVerificationResponse(
                 message="Звонок для верификации инициирован. Введите последние 4 цифры номера, с которого вам звонят.",
                 success=True,
-                call_id=call_result.get("call_id")
+                call_id=call_result.get("call_id"),
+                verification_number=pin_raw if stub else None,
             )
         else:
             error_message = call_result.get('error', 'Неизвестная ошибка')
-            print(f"❌ Ошибка отправки звонка: {error_message}")
             return PhoneVerificationResponse(
                 message=f"Ошибка инициации звонка: {error_message}",
                 success=False
@@ -777,31 +977,33 @@ async def verify_phone(request: VerifyPhoneRequest, db: Session = Depends(get_db
                 message="Пользователь с таким номером телефона не найден",
                 success=False
             )
-        
-        # Проверяем введенные цифры через Zvonok
-        print(f"🔍 Проверяем цифры для пользователя {user.id}: call_id={request.call_id}, digits={request.phone_digits}")
-        verification_result = zvonok_service.verify_phone_digits(request.call_id, request.phone_digits)
-        print(f"📋 Результат проверки цифр: {verification_result}")
-        
-        if verification_result["success"] and verification_result["verified"]:
-            # Отмечаем телефон как верифицированный
-            print(f"✅ Телефон {request.phone} успешно верифицирован для пользователя {user.id}")
-            user.is_phone_verified = True
-            user.phone_verification_code = None
-            user.phone_verification_expires = None
+
+        # Безопасная backend-проверка: сверяем введённые 4 цифры с pincode, сохранённым при flashcall.
+        if not user.phone_verification_code or not user.phone_verification_expires:
+            return VerifyPhoneResponse(message="Верификация не инициирована", success=False)
+        if user.phone_verification_expires <= datetime.utcnow():
+            return VerifyPhoneResponse(message="Код истёк. Запросите звонок ещё раз.", success=False)
+        if user.phone_verification_call_id and str(user.phone_verification_call_id) != str(request.call_id):
+            return VerifyPhoneResponse(message="Неверная сессия верификации. Запросите звонок ещё раз.", success=False)
+        attempts = int(user.phone_verification_attempts or 0)
+        if attempts >= 5:
+            return VerifyPhoneResponse(message="Превышено число попыток. Запросите звонок ещё раз.", success=False)
+        if str(user.phone_verification_code) != str(request.phone_digits):
+            user.phone_verification_attempts = attempts + 1
             db.commit()
-            
-            return VerifyPhoneResponse(
-                message="Телефон успешно верифицирован",
-                success=True,
-                user_id=user.id
-            )
-        else:
-            print(f"❌ Ошибка верификации: {verification_result.get('message', 'Неверные цифры номера телефона')}")
-            return VerifyPhoneResponse(
-                message=verification_result.get("message", "Неверные цифры номера телефона"),
-                success=False
-            )
+            return VerifyPhoneResponse(message="Неверные цифры номера телефона", success=False)
+
+        # Успех
+        user.is_phone_verified = True
+        user.phone_verification_code = None
+        user.phone_verification_call_id = None
+        user.phone_verification_expires = None
+        user.phone_verification_attempts = 0
+        user.phone_verification_target_phone = None
+        user.phone_verification_purpose = None
+        db.commit()
+
+        return VerifyPhoneResponse(message="Телефон успешно верифицирован", success=True, user_id=user.id)
             
     except Exception as e:
         print(f"Ошибка верификации телефона: {e}")

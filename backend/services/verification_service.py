@@ -11,6 +11,12 @@ from services.email_service import get_email_service
 
 class VerificationService:
     """Сервис для работы с верификацией email и сбросом пароля"""
+
+    @staticmethod
+    def generate_verification_code(length: int = 4) -> str:
+        """Короткий цифровой код (для legacy-flow, напр. удаления аккаунта)."""
+        import secrets
+        return "".join(str(secrets.randbelow(10)) for _ in range(length))
     
     @staticmethod
     def generate_token() -> str:
@@ -19,7 +25,7 @@ class VerificationService:
     
     @staticmethod
     def create_email_verification(user: User, db: Session) -> EmailVerification:
-        """Создает запись для верификации email"""
+        """Создает запись для верификации email (signup)."""
         # Удаляем старые записи верификации для этого пользователя
         db.query(EmailVerification).filter(
             EmailVerification.user_id == user.id
@@ -29,6 +35,8 @@ class VerificationService:
         verification = EmailVerification(
             user_id=user.id,
             token=VerificationService.generate_token(),
+            purpose="signup",
+            email_to_verify=user.email,
             expires_at=datetime.utcnow() + timedelta(hours=24),  # 24 часа
             is_used=False
         )
@@ -60,6 +68,26 @@ class VerificationService:
         db.refresh(reset)
         
         return reset
+
+    @staticmethod
+    def create_email_change_verification(user: User, new_email: str, db: Session) -> EmailVerification:
+        """Создает запись для подтверждения смены email (email_change)."""
+        db.query(EmailVerification).filter(
+            EmailVerification.user_id == user.id,
+            EmailVerification.purpose == "email_change",
+        ).delete()
+        verification = EmailVerification(
+            user_id=user.id,
+            token=VerificationService.generate_token(),
+            purpose="email_change",
+            email_to_verify=new_email,
+            expires_at=datetime.utcnow() + timedelta(hours=24),
+            is_used=False,
+        )
+        db.add(verification)
+        db.commit()
+        db.refresh(verification)
+        return verification
     
     @staticmethod
     def verify_email_token(token: str, db: Session) -> Optional[User]:
@@ -108,24 +136,30 @@ class VerificationService:
         return user
     
     @staticmethod
-    async def send_verification_email(user: User) -> bool:
-        """Отправляет письмо для верификации email"""
-        db = next(get_db())
-        
+    async def send_verification_email(user: User, db: Optional[Session] = None) -> bool:
+        """Отправляет письмо для верификации email.
+
+        Если передан db из текущего запроса — используем его (одна БД/транзакция с регистрацией).
+        Иначе открываем отдельную сессию (legacy-поведение для эндпоинтов без общего db).
+        """
+        if not (getattr(user, "email", None) or "").strip():
+            return True
+
+        own_session = db is None
+        if own_session:
+            db = next(get_db())
+
         try:
-            # Создаем запись верификации
             verification = VerificationService.create_email_verification(user, db)
-            
-            # Отправляем письмо
             email_service = get_email_service()
             success = await email_service.send_verification_email(user, verification.token)
-            
             return success
         except Exception as e:
             print(f"Ошибка отправки письма верификации: {e}")
             return False
         finally:
-            db.close()
+            if own_session and db is not None:
+                db.close()
     
     @staticmethod
     async def send_password_reset_email(user: User) -> bool:

@@ -210,7 +210,19 @@ class Settings(BaseSettings):
 
     @property
     def zvonok_stub(self) -> bool:
-        return self.ZVONOK_MODE.strip().lower() == "stub"
+        """True — без реальных запросов к Zvonok (локальный smoke, тесты).
+
+        - ZVONOK_MODE=stub → stub.
+        - Явный live: live, production, prod, 1, true, yes → реальный API.
+        - Пустой или любой иной режим → stub (безопасный дефолт: не бить в Zvonok
+          без явного opt-in; на проде для боевых звонков задайте ZVONOK_MODE=live).
+        """
+        mode = (self.ZVONOK_MODE or "").strip().lower()
+        if mode == "stub":
+            return True
+        if mode in ("live", "production", "prod", "1", "true", "yes"):
+            return False
+        return True
 
     @property
     def plusofon_stub(self) -> bool:

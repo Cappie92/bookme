@@ -59,8 +59,15 @@ class User(Base):
     is_phone_verified = Column(Boolean, default=False)
     phone_verification_code = Column(String, nullable=True)
     phone_verification_expires = Column(DateTime, nullable=True)
+    phone_verification_call_id = Column(String, nullable=True)
+    phone_verification_attempts = Column(Integer, default=0)
+    phone_verification_target_phone = Column(String, nullable=True)
+    phone_verification_purpose = Column(String, nullable=True)  # signup | phone_change | delete_account | etc
     password_reset_code = Column(String, nullable=True)
     password_reset_expires = Column(DateTime, nullable=True)
+    pending_phone = Column(String, nullable=True)
+    pending_phone_expires_at = Column(DateTime, nullable=True)
+    pending_email = Column(String, nullable=True)
     is_always_free = Column(Boolean, default=False)  # Всегда бесплатно - все платные функции доступны
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -1005,6 +1012,8 @@ class EmailVerification(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     token = Column(String, unique=True, nullable=False, index=True)
+    purpose = Column(String, nullable=False, default="signup")  # signup | email_change
+    email_to_verify = Column(String, nullable=True)
     expires_at = Column(DateTime, nullable=False)
     is_used = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)

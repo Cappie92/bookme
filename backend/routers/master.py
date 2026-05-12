@@ -951,9 +951,22 @@ async def update_master_profile(
     if full_name is not None:
         current_user.full_name = full_name
     if phone is not None:
-        current_user.phone = phone
+        phone_s = str(phone).strip()
+        if phone_s:
+            # Uniqueness + pending (смена телефона требует подтверждения)
+            existing = db.query(User).filter(User.phone == phone_s, User.id != current_user.id).first()
+            if existing:
+                raise HTTPException(status_code=400, detail="Телефон уже используется")
+            if phone_s != current_user.phone:
+                current_user.pending_phone = phone_s
     if email is not None:
-        current_user.email = email
+        email_s = str(email).strip()
+        if email_s:
+            existing = db.query(User).filter(User.email == email_s, User.id != current_user.id).first()
+            if existing:
+                raise HTTPException(status_code=400, detail="Email уже используется")
+            if email_s != current_user.email:
+                current_user.pending_email = email_s
     if birth_date is not None:
         current_user.birth_date = birth_date
     

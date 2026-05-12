@@ -28,6 +28,16 @@ class UserCreate(BaseModel):
     city: Optional[str] = None
     timezone: Optional[str] = None
 
+    @field_validator("email", mode="before")
+    @classmethod
+    def empty_email_to_none(cls, v: Any) -> Any:
+        """Фронт шлёт email: '' — приводим к None, иначе EmailStr падает и мешает регистрации."""
+        if v is None:
+            return None
+        if isinstance(v, str) and not v.strip():
+            return None
+        return v
+
 
 class UserUpdate(BaseModel):
     email: Optional[EmailStr] = None
@@ -1693,6 +1703,45 @@ class VerifyPhoneResponse(BaseModel):
     message: str
     success: bool
     user_id: Optional[int] = None
+
+
+class RequestPhoneChangeRequest(BaseModel):
+    phone: str = Field(..., pattern=r"^\+?1?\d{9,15}$")
+
+
+class RequestPhoneChangeResponse(BaseModel):
+    message: str
+    success: bool
+    call_id: Optional[str] = None
+
+
+class ConfirmPhoneChangeRequest(BaseModel):
+    phone: str = Field(..., pattern=r"^\+?1?\d{9,15}$")
+    call_id: str = Field(..., min_length=1)
+    phone_digits: str = Field(..., min_length=4, max_length=4, pattern=r"^\d{4}$")
+
+
+class ConfirmPhoneChangeResponse(BaseModel):
+    message: str
+    success: bool
+
+
+class RequestEmailChangeRequest(BaseModel):
+    email: EmailStr
+
+
+class RequestEmailChangeResponse(BaseModel):
+    message: str
+    success: bool
+
+
+class ConfirmEmailChangeRequest(BaseModel):
+    token: str
+
+
+class ConfirmEmailChangeResponse(BaseModel):
+    message: str
+    success: bool
 
 
 # Система лояльности

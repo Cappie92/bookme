@@ -39,11 +39,8 @@ def _city_and_address_for_yandex_text(booking: Any) -> tuple[Optional[str], Opti
         a = getattr(br, "address", None)
         if a and str(a).strip():
             addr = str(a).strip()
-        sal = getattr(br, "salon", None)
-        if sal is not None:
-            c = getattr(sal, "city", None)
-            if c and str(c).strip():
-                city = str(c).strip()
+        # Не обращаемся к br.salon: lazy/join подтянет полный Salon (несовпадение схемы salons → 500).
+        # Город ниже берётся с master / indie_master.
     if booking.master:
         m = booking.master
         if not city:
