@@ -69,30 +69,58 @@ function validateDob(dob) {
   return date <= now && date >= min
 }
 
+const REGISTER_API_ERROR_FALLBACK =
+  'Не удалось завершить регистрацию. Проверьте данные и попробуйте ещё раз.'
+
 /** Текст ошибки POST /api/auth/register для показа в модалке (без browser alert). */
 function mapRegisterApiError(detail) {
-  if (detail == null || detail === '') return 'Не удалось зарегистрироваться'
   let raw = ''
+  if (detail == null || detail === '') {
+    return REGISTER_API_ERROR_FALLBACK
+  }
   if (typeof detail === 'string') {
     raw = detail
   } else if (Array.isArray(detail)) {
     raw = detail
       .map((item) => {
-        if (item && typeof item === 'object' && 'msg' in item) return String(item.msg)
+        if (item && typeof item === 'object' && item.msg != null) return String(item.msg)
         return String(item)
       })
       .join(' ')
+  } else if (typeof detail === 'object') {
+    if (detail.msg != null) raw = String(detail.msg)
+    else if (detail.message != null) raw = String(detail.message)
+    else raw = ''
   } else {
     raw = String(detail)
   }
   const norm = raw.trim()
+  if (!norm || norm === '[object Object]') return REGISTER_API_ERROR_FALLBACK
   if (/email\s+already\s+registered/i.test(norm)) {
     return 'Пользователь с таким e-mail уже зарегистрирован'
   }
   if (/phone\s+number\s+already\s+registered/i.test(norm)) {
     return 'Пользователь с таким номером телефона уже зарегистрирован'
   }
-  return norm || 'Не удалось зарегистрироваться'
+  return norm || REGISTER_API_ERROR_FALLBACK
+}
+
+/** Прочитать тело ответа как JSON один раз (без второго res.json()). */
+async function readResponseJsonSafe(res) {
+  try {
+    const text = await res.text()
+    if (!text || !text.trim()) return {}
+    return JSON.parse(text)
+  } catch {
+    return {}
+  }
+}
+
+function pickRegisterApiDetail(body) {
+  if (!body || typeof body !== 'object') return null
+  if (body.detail !== undefined && body.detail !== null) return body.detail
+  if (body.message !== undefined && body.message !== null) return body.message
+  return null
 }
 
 /** Единый стиль пароля: компромисс по размеру буллетов iOS vs Android; desktop через sm: */
@@ -432,13 +460,9 @@ export default function AuthModal() {
         setForm({})
         // НЕ закрываем модальное окно - показываем форму верификации
       } else {
-        let err = {}
-        try {
-          err = await res.json()
-        } catch {
-          /* не JSON */
-        }
-        setErrors({ general: mapRegisterApiError(err.detail) })
+        const body = await readResponseJsonSafe(res)
+        const detail = pickRegisterApiDetail(body)
+        setErrors({ general: mapRegisterApiError(detail) })
       }
     } catch {
       setErrors({ general: 'Ошибка сети или сервера' })
