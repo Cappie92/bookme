@@ -24,6 +24,7 @@ const BlogList = lazy(() => import("./pages/BlogList"))
 const BlogPost = lazy(() => import("./pages/BlogPost"))
 const UserAgreement = lazy(() => import("./pages/UserAgreement"))
 const PersonalDataConsentPage = lazy(() => import("./pages/PersonalDataConsentPage"))
+const MarketingConsent = lazy(() => import("./pages/MarketingConsent"))
 const PublicProfile = lazy(() => import("./pages/PublicProfile"))
 // SubdomainPage снят: legacy /domain/:subdomain удалён (см. AUDIT_AND_HANDOFF.md).
 // Все клиентские переходы идут на современную /m/:slug (MasterPublicBookingPage).
@@ -33,6 +34,7 @@ const PaymentFailed = lazy(() => import("./pages/PaymentFailed"))
 const BranchBookingPage = lazy(() => import("./pages/BranchBookingPage"))
 const DesignSystemDemo = lazy(() => import("./pages/DesignSystemDemo"))
 const Clients = lazy(() => import("./pages/Clients"))
+const VerifyEmail = lazy(() => import("./pages/VerifyEmail"))
 
 // Client pages
 const ClientDashboard = lazy(() => import("./pages/ClientDashboard"))
@@ -110,6 +112,7 @@ function App() {
           <Route path="/" element={<MainLayout><Home/></MainLayout>} />
           <Route path="/pricing" element={<MainLayout><Pricing/></MainLayout>} />
           <Route path="/about" element={<MainLayout><About/></MainLayout>} />
+          <Route path="/verify-email" element={<MainLayout><VerifyEmail/></MainLayout>} />
           <Route path="/blog" element={<MainLayout><BlogList/></MainLayout>} />
           <Route path="/blog/:slug" element={<MainLayout><BlogPost/></MainLayout>} />
           <Route path="/dashboard" element={<MainLayout><ClientDashboard/></MainLayout>} />
@@ -128,6 +131,7 @@ function App() {
           <Route path="/admin/settings" element={<AdminLayout><AdminSettings/></AdminLayout>} />
           <Route path="/user-agreement" element={<UserAgreement/>} />
           <Route path="/personal-data-consent" element={<PersonalDataConsentPage />} />
+          <Route path="/marketing-consent" element={<MarketingConsent />} />
           <Route path="/payment/success" element={<PaymentSuccess/>} />
           <Route path="/payment/failed" element={<PaymentFailed/>} />
           <Route path="/client" element={<ClientLayout><ClientDashboard/></ClientLayout>} />
