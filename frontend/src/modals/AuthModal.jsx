@@ -69,6 +69,32 @@ function validateDob(dob) {
   return date <= now && date >= min
 }
 
+/** Текст ошибки POST /api/auth/register для показа в модалке (без browser alert). */
+function mapRegisterApiError(detail) {
+  if (detail == null || detail === '') return 'Не удалось зарегистрироваться'
+  let raw = ''
+  if (typeof detail === 'string') {
+    raw = detail
+  } else if (Array.isArray(detail)) {
+    raw = detail
+      .map((item) => {
+        if (item && typeof item === 'object' && 'msg' in item) return String(item.msg)
+        return String(item)
+      })
+      .join(' ')
+  } else {
+    raw = String(detail)
+  }
+  const norm = raw.trim()
+  if (/email\s+already\s+registered/i.test(norm)) {
+    return 'Пользователь с таким e-mail уже зарегистрирован'
+  }
+  if (/phone\s+number\s+already\s+registered/i.test(norm)) {
+    return 'Пользователь с таким номером телефона уже зарегистрирован'
+  }
+  return norm || 'Не удалось зарегистрироваться'
+}
+
 /** Единый стиль пароля: компромисс по размеру буллетов iOS vs Android; desktop через sm: */
 const AUTH_PASSWORD_INPUT_CLASS =
   'border rounded px-3 py-2 w-full min-h-[44px] text-[15px] leading-5 tracking-normal sm:text-sm sm:leading-normal'
@@ -406,11 +432,16 @@ export default function AuthModal() {
         setForm({})
         // НЕ закрываем модальное окно - показываем форму верификации
       } else {
-        const err = await res.json()
-        alert('Ошибка: ' + (err.detail || 'Не удалось зарегистрироваться'))
+        let err = {}
+        try {
+          err = await res.json()
+        } catch {
+          /* не JSON */
+        }
+        setErrors({ general: mapRegisterApiError(err.detail) })
       }
     } catch {
-      alert('Ошибка сети или сервера')
+      setErrors({ general: 'Ошибка сети или сервера' })
     } finally {
       setLoading(false)
     }
@@ -1173,6 +1204,14 @@ export default function AuthModal() {
                 )}
               </div>
               <form className="flex flex-col gap-4" onSubmit={handleRegister}>
+                {errors.general && (
+                  <div
+                    data-testid="auth-register-error"
+                    className="p-2.5 sm:p-3 bg-red-50 border border-red-200 rounded text-sm text-red-700"
+                  >
+                    {errors.general}
+                  </div>
+                )}
                 {REGISTER_FIELDS[regType].map(f => (
                   <div key={f.name} className="flex flex-col gap-1">
                     <label className="text-sm font-medium text-gray-700 flex items-center gap-1">

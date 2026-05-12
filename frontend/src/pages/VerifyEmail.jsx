@@ -67,10 +67,10 @@ export default function VerifyEmail() {
             На главную
           </Link>
           <Link
-            to="/dashboard"
+            to="/client"
             className="inline-flex items-center justify-center rounded-xl border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-800"
           >
-            В кабинет
+            Личный кабинет
           </Link>
         </div>
         {import.meta.env.DEV && (
