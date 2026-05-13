@@ -124,6 +124,15 @@ export default function Footer({ compact = false }) {
           <div className={compact ? 'mt-0.5 md:mt-1' : 'mt-1'}>
             © {new Date().getFullYear()} DeDato. Все права защищены.
           </div>
+          <div
+            className={
+              compact
+                ? 'mt-1 text-[10px] md:text-xs text-neutral-500 leading-snug tabular-nums'
+                : 'mt-2 text-xs text-neutral-500 leading-snug tabular-nums'
+            }
+          >
+            ИП Девятов С.С. · ОГРНИП: 325774600117850 · ИНН: 770171594527
+          </div>
         </div>
       </div>
     </footer>
