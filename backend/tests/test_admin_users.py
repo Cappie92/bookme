@@ -158,3 +158,139 @@ def test_admin_delete_client_emits_no_from_salons_sql(client, db, test_admin):
         event.remove(eng, "before_cursor_execute", before_cursor)
 
     assert hits == [], "unexpected SQL touching salons: " + "\n---\n".join(hits)
+
+
+def test_admin_put_user_updates_email(client, db, test_admin):
+    """PUT /api/admin/users/{id} — админ меняет email клиента; 200 и поле в БД обновлено."""
+    u = User(
+        email="put_client_before@test.com",
+        hashed_password=get_password_hash("x"),
+        phone="+79006660101",
+        full_name="Put Email Client",
+        role=UserRole.CLIENT,
+        is_active=True,
+        is_verified=False,
+        is_phone_verified=False,
+    )
+    db.add(u)
+    db.commit()
+    db.refresh(u)
+    uid = u.id
+
+    headers = _auth_admin(client, test_admin.phone, "testpassword")
+    r = client.put(
+        f"/api/admin/users/{uid}",
+        headers={**headers, "Content-Type": "application/json"},
+        json={
+            "full_name": "Put Email Client",
+            "email": "put_client_after@test.com",
+            "phone": "+79006660101",
+            "role": "client",
+            "is_active": True,
+            "is_verified": False,
+            "is_always_free": False,
+        },
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["email"] == "put_client_after@test.com"
+    row = db.query(User).filter(User.id == uid).first()
+    assert row is not None
+    assert row.email == "put_client_after@test.com"
+
+
+def test_admin_put_client_emits_no_from_salons_sql(client, db, test_admin):
+    """Регрессия: при PUT клиента не выполняется SQL к таблице salons."""
+    hits = []
+    eng = db.get_bind()
+
+    def before_cursor(conn, cursor, statement, parameters, context, executemany):
+        if not statement:
+            return
+        low = " ".join(statement.lower().split())
+        if "from salons" in low or "join salons" in low:
+            hits.append(statement)
+
+    event.listen(eng, "before_cursor_execute", before_cursor)
+    try:
+        u = User(
+            email="no_salon_sql_put@test.com",
+            hashed_password=get_password_hash("x"),
+            phone="+79006660202",
+            full_name="No Salon PUT",
+            role=UserRole.CLIENT,
+            is_active=True,
+            is_verified=False,
+            is_phone_verified=False,
+        )
+        db.add(u)
+        db.commit()
+        db.refresh(u)
+        uid = u.id
+        db.expunge(u)
+
+        headers = _auth_admin(client, test_admin.phone, "testpassword")
+        r = client.put(
+            f"/api/admin/users/{uid}",
+            headers={**headers, "Content-Type": "application/json"},
+            json={
+                "full_name": "No Salon PUT X",
+                "email": "no_salon_sql_put@test.com",
+                "phone": "+79006660202",
+                "role": "client",
+                "is_active": True,
+                "is_verified": True,
+                "is_always_free": False,
+            },
+        )
+        assert r.status_code == 200, r.text
+    finally:
+        event.remove(eng, "before_cursor_execute", before_cursor)
+
+    assert hits == [], "unexpected SQL touching salons: " + "\n---\n".join(hits)
+
+
+def test_admin_put_duplicate_email_returns_409(client, db, test_admin):
+    """Дубликат email — 409, не 500."""
+    a = User(
+        email="dup_owner@test.com",
+        hashed_password=get_password_hash("x"),
+        phone="+79006660301",
+        full_name="Owner",
+        role=UserRole.CLIENT,
+        is_active=True,
+        is_verified=False,
+        is_phone_verified=False,
+    )
+    b = User(
+        email="dup_other@test.com",
+        hashed_password=get_password_hash("x"),
+        phone="+79006660302",
+        full_name="Other",
+        role=UserRole.CLIENT,
+        is_active=True,
+        is_verified=False,
+        is_phone_verified=False,
+    )
+    db.add(a)
+    db.add(b)
+    db.commit()
+    db.refresh(a)
+    db.refresh(b)
+    aid = a.id
+
+    headers = _auth_admin(client, test_admin.phone, "testpassword")
+    r = client.put(
+        f"/api/admin/users/{aid}",
+        headers={**headers, "Content-Type": "application/json"},
+        json={
+            "full_name": "Owner",
+            "email": "dup_other@test.com",
+            "phone": "+79006660301",
+            "role": "client",
+            "is_active": True,
+            "is_verified": False,
+            "is_always_free": False,
+        },
+    )
+    assert r.status_code == 409, r.text
+    assert "email" in (r.json().get("detail") or "").lower()

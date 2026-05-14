@@ -127,6 +127,34 @@ def _get_service_context(
     return service_id, None, category_id
 
 
+# Статусы, при которых запись не считается «визитом» для first_visit (отмена / протухшая оплата).
+_FIRST_VISIT_IGNORED_BOOKING_STATUSES = frozenset(
+    {
+        BookingStatus.CANCELLED.value,
+        BookingStatus.CANCELLED_BY_CLIENT_EARLY.value,
+        BookingStatus.CANCELLED_BY_CLIENT_LATE.value,
+        BookingStatus.PAYMENT_EXPIRED.value,
+    }
+)
+
+
+def _has_non_cancelled_booking_with_master(db: Session, master_id: int, client_id: int) -> bool:
+    """
+    True, если у клиента уже есть любая запись к этому мастеру, кроме отменённых/expired оплаты.
+    Используется для first_visit: скидка «первый визит» не применяется повторно после первой
+    реальной брони (created / future / completed и т.д.), а не только после completed.
+    """
+    q = (
+        db.query(Booking.id)
+        .filter(
+            Booking.master_id == master_id,
+            Booking.client_id == client_id,
+        )
+        .filter(Booking.status.notin_(list(_FIRST_VISIT_IGNORED_BOOKING_STATUSES)))
+    )
+    return q.first() is not None
+
+
 def _count_completed_visits(
     db: Session,
     master_id: int,
@@ -403,9 +431,9 @@ def evaluate_discount_candidates(
             if not client_id:
                 candidate["reason"] = "insufficient_data"
             else:
-                visits = _count_completed_visits(db, master_id, client_id, None, None)
-                candidate["match"] = visits == 0
-                candidate["reason"] = "matched" if candidate["match"] else "has_previous_visit"
+                has_prior = _has_non_cancelled_booking_with_master(db, master_id, int(client_id))
+                candidate["match"] = not has_prior
+                candidate["reason"] = "matched" if candidate["match"] else "has_previous_booking"
 
         elif condition_type == LoyaltyConditionType.RETURNING_CLIENT.value:
             if not client_id or not booking_start:

@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ActivityIndicator, ScrollView, Image, KeyboardAvoidingView, Platform, Keyboard, TouchableWithoutFeedback, Modal, FlatList } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '@src/auth/AuthContext';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { logger } from '@src/utils/logger';
+import { normalizeRussianPhoneForApi } from '@src/utils/normalizeRussianPhoneForApi';
 import { getPublicBookingDraft, isDraftValidForPostLoginRedirect } from '@src/stores/publicBookingDraftStore';
 import { ScreenContainer } from '@src/components/ScreenContainer';
 import { cities, getTimezoneByCity } from '@src/data/cities';
@@ -12,13 +13,14 @@ type TabType = 'login' | 'register';
 
 export default function LoginScreen() {
   const { login, register } = useAuth();
+  const params = useLocalSearchParams<{ tab?: string; role?: string }>();
   const [activeTab, setActiveTab] = useState<TabType>('login');
-  
+
   // Состояние для входа
   const [phone, setPhone] = useState('+7');
   const [password, setPassword] = useState('');
   const [loginLoading, setLoginLoading] = useState(false);
-  const [loginErrors, setLoginErrors] = useState<{ phone?: string; password?: string }>({});
+  const [loginErrors, setLoginErrors] = useState<{ phone?: string; password?: string; general?: string }>({});
 
   // Состояние для регистрации
   const [email, setEmail] = useState('');
@@ -46,20 +48,30 @@ export default function LoginScreen() {
   const [timezone, setTimezone] = useState('');
   const [showCityModal, setShowCityModal] = useState(false);
 
-  // Валидация формы входа
+  useEffect(() => {
+    const t = (params.tab || '').toString().toLowerCase();
+    if (t === 'register') setActiveTab('register');
+    const r = (params.role || '').toString().toLowerCase();
+    if (r === 'client' || r === 'master') {
+      setUserRole(r);
+    }
+  }, [params.tab, params.role]);
+
+  // Валидация формы входа (как на web: проверяем канонический номер после normalizeRussianPhoneForApi)
   const validateLoginForm = () => {
-    const newErrors: { phone?: string; password?: string } = {};
-    
-    if (!phone || phone.trim() === '' || phone === '+7') {
+    const newErrors: { phone?: string; password?: string; general?: string } = {};
+    const normalized = normalizeRussianPhoneForApi(phone.trim());
+
+    if (!normalized || normalized === '+7') {
       newErrors.phone = 'Введите номер телефона';
-    } else if (!/^\+7\d{10}$/.test(phone)) {
+    } else if (!/^\+7\d{10}$/.test(normalized)) {
       newErrors.phone = 'Номер телефона должен быть в формате +7XXXXXXXXXX';
     }
-    
+
     if (!password || password.length < 6) {
       newErrors.password = 'Пароль должен содержать минимум 6 символов';
     }
-    
+
     setLoginErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -143,9 +155,15 @@ export default function LoginScreen() {
     return Object.keys(newErrors).length === 0;
   };
 
-  // Форматирование телефона
+  /** Как `formatPhone` в `frontend/src/modals/AuthModal.jsx` — в т.ч. 8XXXXXXXXXXX → +7XXXXXXXXXX */
   const formatPhone = (input: string) => {
     let digits = input.replace(/\D/g, '');
+    if (digits.startsWith('8') && digits.length === 11) {
+      return '+7' + digits.slice(1);
+    }
+    if (digits.startsWith('7') && digits.length === 11) {
+      return '+7' + digits.slice(1);
+    }
     if (digits.startsWith('7')) digits = digits.slice(1);
     if (digits.length > 10) digits = digits.slice(0, 10);
     return '+7' + digits;
@@ -154,8 +172,8 @@ export default function LoginScreen() {
   const handlePhoneChange = (text: string) => {
     const formatted = formatPhone(text);
     setPhone(formatted);
-    if (loginErrors.phone) {
-      setLoginErrors({ ...loginErrors, phone: undefined });
+    if (loginErrors.phone || loginErrors.general) {
+      setLoginErrors((e) => ({ ...e, phone: undefined, general: undefined }));
     }
   };
 
@@ -215,8 +233,8 @@ export default function LoginScreen() {
 
   const handlePasswordChange = (text: string) => {
     setPassword(text);
-    if (loginErrors.password) {
-      setLoginErrors({ ...loginErrors, password: undefined });
+    if (loginErrors.password || loginErrors.general) {
+      setLoginErrors((e) => ({ ...e, password: undefined, general: undefined }));
     }
   };
 
@@ -225,9 +243,8 @@ export default function LoginScreen() {
       return;
     }
 
-    logger.debug('auth', '🔍 [LOGIN] Начало входа', { phone });
-
     setLoginLoading(true);
+    setLoginErrors((e) => ({ ...e, general: undefined }));
     try {
       const loggedInUser = await login({ phone, password });
       logger.debug('auth', '✅ [LOGIN] Успешный вход!');
@@ -239,19 +256,26 @@ export default function LoginScreen() {
       const role = (typeof loggedInUser?.role === 'string' ? loggedInUser.role : '').toLowerCase();
       router.replace(role === 'client' ? '/client/dashboard' : '/');
     } catch (error: any) {
-      logger.error('❌ [LOGIN] ОШИБКА ВХОДА:', error);
-      
+      const status = error?.response?.status as number | undefined;
+      logger.error('❌ [LOGIN] ОШИБКА ВХОДА:', status ?? 'no-status', error?.message);
+
       let errorMessage = 'Ошибка входа';
-      if (error.response?.data?.detail) {
-        errorMessage = error.response.data.detail;
+      if (status === 401) {
+        errorMessage = 'Неверный e-mail или пароль';
+      } else if (error.response?.data?.detail) {
+        const d = error.response.data.detail;
+        errorMessage = typeof d === 'string' ? d : Array.isArray(d) ? JSON.stringify(d) : String(d);
       } else if (error.message) {
         errorMessage = error.message;
       } else if (error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND') {
-        errorMessage = 'Не удалось подключиться к серверу. Проверьте, что backend запущен и API_URL настроен правильно.';
+        errorMessage =
+          'Не удалось подключиться к серверу. Проверьте, что backend запущен и API_URL настроен правильно.';
       } else if (error.code === 'NETWORK_ERROR' || !error.response) {
-        errorMessage = 'Ошибка сети. Проверьте подключение к интернету и что backend доступен по адресу из .env';
+        errorMessage =
+          'Ошибка сети. Проверьте подключение к интернету и что backend доступен по адресу из .env';
       }
-      
+
+      setLoginErrors((e) => ({ ...e, general: errorMessage }));
       Alert.alert('Ошибка входа', errorMessage);
     } finally {
       setLoginLoading(false);
@@ -346,7 +370,6 @@ export default function LoginScreen() {
             style={[styles.tab, activeTab === 'login' && styles.tabActive]}
             onPress={() => {
               setActiveTab('login');
-              // Сбрасываем ошибки при переключении
               setLoginErrors({});
             }}
           >
@@ -373,6 +396,11 @@ export default function LoginScreen() {
         {/* Форма входа */}
         {activeTab === 'login' && (
           <View style={styles.form}>
+            {loginErrors.general ? (
+              <View style={styles.loginGeneralError} accessibilityLiveRegion="polite">
+                <Text style={styles.loginGeneralErrorText}>{loginErrors.general}</Text>
+              </View>
+            ) : null}
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Номер телефона</Text>
               <TextInput
@@ -790,6 +818,19 @@ const styles = StyleSheet.create({
   },
   form: {
     width: '100%',
+  },
+  loginGeneralError: {
+    marginBottom: 12,
+    padding: 12,
+    backgroundColor: '#fef2f2',
+    borderWidth: 1,
+    borderColor: '#fecaca',
+    borderRadius: 8,
+  },
+  loginGeneralErrorText: {
+    fontSize: 14,
+    color: '#b91c1c',
+    lineHeight: 20,
   },
   inputGroup: {
     marginBottom: 20,

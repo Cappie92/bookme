@@ -1258,3 +1258,78 @@ def test_build_public_loyalty_visual_hints_skips_inactive(db, master):
 
     out = build_public_loyalty_visual_hints(db, master)
     assert out["happy_hours"] == []
+
+
+def test_first_visit_not_matched_when_client_has_created_booking(db, master, client_user, service):
+    """first_visit: любая неотменённая бронь к мастеру (в т.ч. created) снимает скидку — не только completed."""
+    from utils.loyalty_discounts import evaluate_discount_candidates
+
+    _insert_master_service(db, master.id, service.id)
+    master.timezone = "UTC"
+    db.commit()
+
+    rule = LoyaltyDiscount(
+        master_id=master.id,
+        discount_type=LoyaltyDiscountType.QUICK,
+        name="First",
+        discount_percent=15.0,
+        is_active=True,
+        priority=1,
+        conditions={"condition_type": "first_visit", "parameters": {}},
+    )
+    db.add(rule)
+    start = datetime.utcnow() + timedelta(days=2)
+    end = start + timedelta(hours=1)
+    b = Booking(
+        master_id=master.id,
+        client_id=client_user.id,
+        service_id=service.id,
+        start_time=start,
+        end_time=end,
+        status=BookingStatus.CREATED.value,
+        payment_amount=1000.0,
+    )
+    db.add(b)
+    db.commit()
+
+    payload = {"start_time": datetime.utcnow() + timedelta(days=5), "service_id": service.id, "category_id": None}
+    _, best = evaluate_discount_candidates(master.id, client_user.id, None, payload, db)
+    assert best is None
+
+
+def test_first_visit_matched_when_only_cancelled_booking(db, master, client_user, service):
+    """Отменённая бронь не мешает first_visit."""
+    from utils.loyalty_discounts import evaluate_discount_candidates
+
+    _insert_master_service(db, master.id, service.id)
+    master.timezone = "UTC"
+    db.commit()
+
+    rule = LoyaltyDiscount(
+        master_id=master.id,
+        discount_type=LoyaltyDiscountType.QUICK,
+        name="First",
+        discount_percent=15.0,
+        is_active=True,
+        priority=1,
+        conditions={"condition_type": "first_visit", "parameters": {}},
+    )
+    db.add(rule)
+    start = datetime.utcnow() + timedelta(days=2)
+    end = start + timedelta(hours=1)
+    b = Booking(
+        master_id=master.id,
+        client_id=client_user.id,
+        service_id=service.id,
+        start_time=start,
+        end_time=end,
+        status=BookingStatus.CANCELLED.value,
+        payment_amount=1000.0,
+    )
+    db.add(b)
+    db.commit()
+
+    payload = {"start_time": datetime.utcnow() + timedelta(days=5), "service_id": service.id, "category_id": None}
+    _, best = evaluate_discount_candidates(master.id, client_user.id, None, payload, db)
+    assert best is not None
+    assert best["condition_type"] == "first_visit"

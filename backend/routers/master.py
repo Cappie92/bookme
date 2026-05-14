@@ -268,14 +268,12 @@ def get_future_bookings_paginated(
     # Получаем общее количество ДО применения joinedload (для точности подсчета)
     total = base_query.count()
     
-    # Теперь добавляем joinedload для загрузки связанных данных
+    # joinedload только service/client — не тянем Salon/SalonBranch.salon (SQLite без salons.address).
     query = (
         base_query
         .options(
             joinedload(Booking.service),
             joinedload(Booking.client),
-            joinedload(Booking.salon),
-            joinedload(Booking.branch)
         )
         .order_by(Booking.start_time.asc())
     )
@@ -3443,7 +3441,7 @@ def get_master_dashboard_stats(
         logger.debug("dashboard/stats start period=%s offset=%s user_id=%s", period, offset, current_user.id)
         logger.debug("dashboard/stats: imports")
         from sqlalchemy import and_, case, func, or_
-        from models import Income, Service, SalonBranch, BookingStatus, Subscription, IndieMaster, Salon
+        from models import Income, Service, SalonBranch, BookingStatus, Subscription, IndieMaster
         
         logger.debug("dashboard/stats: resolve master user_id=%s", current_user.id)
         master = db.query(Master).filter(Master.user_id == current_user.id).first()
@@ -3620,8 +3618,6 @@ def get_master_dashboard_stats(
             .options(
                 joinedload(Booking.service),
                 joinedload(Booking.client),
-                joinedload(Booking.salon),
-                joinedload(Booking.branch)
             )
             .filter(active_future_bookings_sql_filter(master, _now))
             .order_by(Booking.start_time.asc())
@@ -3688,16 +3684,20 @@ def get_master_dashboard_stats(
         next_working_info = None
         if next_bookings:
             next_booking = next_bookings[0]
-            # Определяем место работы
+            # Место работы без ORM Salon (урезанная схема salons в dev SQLite).
             work_location = "Собственная запись"
-            if next_booking.salon_id:
-                salon = db.query(Salon).filter(Salon.id == next_booking.salon_id).first()
-                if salon:
-                    work_location = salon.name
-                if next_booking.branch_id:
-                    branch = db.query(SalonBranch).filter(SalonBranch.id == next_booking.branch_id).first()
-                    if branch:
-                        work_location += f" - {branch.name}"
+            if next_booking.branch_id:
+                branch = (
+                    db.query(SalonBranch)
+                    .filter(SalonBranch.id == next_booking.branch_id)
+                    .first()
+                )
+                if branch and (getattr(branch, "name", None) or "").strip():
+                    work_location = str(branch.name).strip()
+                elif next_booking.salon_id:
+                    work_location = "Салон"
+            elif next_booking.salon_id:
+                work_location = "Салон"
             
             # Безопасная сериализация даты и времени
             booking_date = next_booking.start_time.date() if hasattr(next_booking.start_time, 'date') else None

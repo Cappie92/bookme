@@ -3,8 +3,8 @@
  * Слоты: start_time–end_time, плашки.
  */
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
-import { formatTimeRange } from '@src/utils/format';
+import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, useWindowDimensions } from 'react-native';
+import { formatTimeHHMM } from '@src/utils/format';
 import type { PublicSlot } from './types';
 
 interface TimeSlotsPickerProps {
@@ -13,6 +13,10 @@ interface TimeSlotsPickerProps {
   selectedSlot: PublicSlot | null;
   onSelect: (slot: PublicSlot) => void;
   loading?: boolean;
+  /** iOS vs Android визуал чипов */
+  uiVariant?: 'ios' | 'android';
+  /** Подпись скидки для слота (например, только для выбранного после price preview) */
+  discountHintForSlot?: (slot: PublicSlot) => string | null;
 }
 
 export function TimeSlotsPicker({
@@ -21,7 +25,19 @@ export function TimeSlotsPicker({
   selectedSlot,
   onSelect,
   loading,
+  uiVariant = 'android',
+  discountHintForSlot,
 }: TimeSlotsPickerProps) {
+  const { width: windowWidth } = useWindowDimensions();
+  /** Учёт padding ScrollView (16×2) + margin контейнера слотов (16×2) → ровно 3 колонки */
+  const chipWidth = React.useMemo(() => {
+    const horizontalPad = 64;
+    const gap = 8;
+    const cols = 3;
+    const usable = Math.max(0, windowWidth - horizontalPad);
+    return Math.max(72, Math.floor((usable - gap * (cols - 1)) / cols));
+  }, [windowWidth]);
+
   const slotsForDate = React.useMemo(() => {
     if (!selectedDate) return [];
     return slots
@@ -55,16 +71,38 @@ export function TimeSlotsPicker({
           const isSelected =
             selectedSlot?.start_time === slot.start_time &&
             selectedSlot?.end_time === slot.end_time;
+          const disc = discountHintForSlot?.(slot) ?? null;
           return (
             <TouchableOpacity
               key={`${slot.start_time}-${i}`}
-              style={[styles.chip, isSelected && styles.chipSelected]}
+              style={[
+                styles.chip,
+                { width: chipWidth, maxWidth: chipWidth, flexGrow: 0 },
+                uiVariant === 'android' && styles.chipAndroid,
+                isSelected && (uiVariant === 'ios' ? styles.chipSelectedIos : styles.chipSelectedAndroid),
+              ]}
               onPress={() => onSelect(slot)}
               activeOpacity={0.7}
             >
-              <Text style={styles.chipText}>
-                {formatTimeRange(slot.start_time, slot.end_time)}
+              <Text
+                style={[
+                  styles.chipText,
+                  isSelected && uiVariant === 'ios' && styles.chipTextSelectedIos,
+                ]}
+              >
+                {formatTimeHHMM(slot.start_time)}
               </Text>
+              {disc ? (
+                <Text
+                  style={[
+                    styles.chipDisc,
+                    isSelected && uiVariant === 'ios' && styles.chipDiscSelectedIos,
+                  ]}
+                  numberOfLines={1}
+                >
+                  {disc}
+                </Text>
+              ) : null}
             </TouchableOpacity>
           );
         })}
@@ -85,20 +123,45 @@ const styles = StyleSheet.create({
   },
   chip: {
     backgroundColor: '#fff',
-    paddingHorizontal: 14,
+    paddingHorizontal: 8,
     paddingVertical: 10,
-    borderRadius: 8,
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#ddd',
+    borderColor: '#dfe7df',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  chipSelected: {
-    borderColor: '#4CAF50',
-    backgroundColor: '#e8f5e9',
+  chipAndroid: {
+    borderRadius: 18,
+    borderColor: '#d7e2d7',
+  },
+  chipSelectedIos: {
+    borderColor: '#50b95a',
+    backgroundColor: '#50b95a',
+  },
+  chipSelectedAndroid: {
+    borderColor: '#8fd49a',
+    backgroundColor: '#dff4e1',
   },
   chipText: {
-    fontSize: 15,
+    fontSize: 13,
     color: '#333',
-    fontWeight: '500',
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  chipTextSelectedIos: {
+    color: '#fff',
+  },
+  chipDisc: {
+    fontSize: 10,
+    color: '#4d8e55',
+    marginTop: 2,
+    textAlign: 'center',
+    fontWeight: '600',
+    maxWidth: '100%',
+  },
+  chipDiscSelectedIos: {
+    color: '#ecffef',
   },
   loadingWrap: {
     flexDirection: 'row',

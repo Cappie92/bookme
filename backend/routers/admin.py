@@ -4,8 +4,9 @@ import uuid
 from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, noload
 from sqlalchemy import func, or_, and_, select
+from sqlalchemy.exc import IntegrityError
 
 from auth import get_current_active_user, require_admin, require_admin_or_moderator, require_moderator_permission
 from utils.blog_import import parse_blog_import_markdown
@@ -447,7 +448,17 @@ def update_user(
     """
     Обновление информации о пользователе.
     """
-    user = db.query(User).filter(User.id == user_id).first()
+    # Не тянем salon/master/indie через lazy-load (регрессия salons.* / урезанная схема в тестах).
+    user = (
+        db.query(User)
+        .options(
+            noload(User.salon_profile),
+            noload(User.master_profile),
+            noload(User.indie_profile),
+        )
+        .filter(User.id == user_id)
+        .first()
+    )
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -462,29 +473,75 @@ def update_user(
         )
     
     try:
-        # Обновляем разрешенные поля
-        allowed_fields = ['full_name', 'email', 'phone', 'role', 'is_active', 'is_verified', 'is_always_free']
-        
+        # Обновляем разрешенные поля (только скаляры User; без relationship).
+        allowed_fields = [
+            "full_name",
+            "email",
+            "phone",
+            "role",
+            "is_active",
+            "is_verified",
+            "is_phone_verified",
+            "is_always_free",
+        ]
+
         # Логируем изменение статуса "всегда бесплатно"
         old_always_free = user.is_always_free
-        new_always_free = user_data.get('is_always_free', old_always_free)
-        always_free_plan_id = user_data.get('always_free_plan_id')
-        
+        new_always_free = user_data.get("is_always_free", old_always_free)
+        always_free_plan_id = user_data.get("always_free_plan_id")
+
+        new_email = user_data.get("email", user.email)
+        if new_email and new_email != user.email:
+            clash = (
+                db.query(User.id)
+                .filter(User.email == new_email, User.id != user_id)
+                .first()
+            )
+            if clash:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Email already registered",
+                )
+        new_phone = user_data.get("phone", user.phone)
+        if new_phone and new_phone != user.phone:
+            clash_p = (
+                db.query(User.id)
+                .filter(User.phone == new_phone, User.id != user_id)
+                .first()
+            )
+            if clash_p:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Phone number already registered",
+                )
+
         for field, value in user_data.items():
             if field in allowed_fields:
-                if field == 'role' and value:
+                if field == "role" and value:
                     setattr(user, field, UserRole(value))
                 else:
                     setattr(user, field, value)
-        
+
         user.updated_at = datetime.utcnow()
         db.commit()
-        db.refresh(user)
-        
+
+        user = (
+            db.query(User)
+            .options(
+                noload(User.salon_profile),
+                noload(User.master_profile),
+                noload(User.indie_profile),
+            )
+            .filter(User.id == user_id)
+            .first()
+        )
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Пользователь не найден",
+            )
+
         # Обрабатываем подписку для "всегда бесплатно"
-        from models import Subscription, SubscriptionPlan, SubscriptionType, SubscriptionStatus
-        from datetime import datetime, timedelta
-        
         if new_always_free:
             # Определяем тип подписки на основе роли пользователя
             subscription_type = None
@@ -548,7 +605,6 @@ def update_user(
         
         # Логируем изменение статуса "всегда бесплатно" если оно произошло
         if old_always_free != new_always_free:
-            from models import AlwaysFreeLog
             log_entry = AlwaysFreeLog(
                 user_id=user_id,
                 admin_user_id=current_user.id,
@@ -564,12 +620,31 @@ def update_user(
         subscription_plan_label = _admin_subscription_plan_label(user, plan_id_by_user, plans_by_id)
 
         return _admin_user_public_dict(user, subscription_plan_label)
-        
-    except Exception as e:
+
+    except HTTPException:
         db.rollback()
+        raise
+    except IntegrityError:
+        db.rollback()
+        logger.exception(
+            "PUT /api/admin/users/%s failed IntegrityError (actor user_id=%s)",
+            user_id,
+            current_user.id if current_user else None,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Email or phone already registered",
+        )
+    except Exception:
+        db.rollback()
+        logger.exception(
+            "PUT /api/admin/users/%s failed (actor user_id=%s)",
+            user_id,
+            current_user.id if current_user else None,
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Ошибка при обновлении пользователя: {str(e)}"
+            detail="Не удалось обновить пользователя",
         )
 
 

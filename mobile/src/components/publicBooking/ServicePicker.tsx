@@ -22,6 +22,10 @@ interface ServicePickerProps {
   services: PublicService[];
   selectedService: PublicService | null;
   onSelect: (service: PublicService) => void;
+  /** iOS / Android оформление bottom sheet */
+  nativeVariant?: 'ios' | 'android';
+  /** Подпись бейджа скидки для услуги (если null — бейджа нет) */
+  discountForService?: (service: PublicService) => string | null;
 }
 
 function groupByCategory(services: PublicService[]): { name: string; services: PublicService[] }[] {
@@ -40,6 +44,8 @@ export function ServicePicker({
   services,
   selectedService,
   onSelect,
+  nativeVariant = 'android',
+  discountForService,
 }: ServicePickerProps) {
   const [search, setSearch] = useState('');
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
@@ -47,8 +53,7 @@ export function ServicePicker({
   React.useEffect(() => {
     if (visible) {
       setSearch('');
-      const gs = groupByCategory(services);
-      setExpandedCategories(gs.length > 0 ? new Set([gs[0].name]) : new Set());
+      setExpandedCategories(new Set());
     }
   }, [visible, services]);
 
@@ -65,8 +70,7 @@ export function ServicePicker({
     return groupByCategory(filtered);
   }, [services, search]);
 
-  const isExpanded = (name: string) =>
-    expandedCategories.has(name) || (groups.length === 1);
+  const isExpanded = (name: string) => expandedCategories.has(name);
 
   const toggleCategory = (name: string) => {
     setExpandedCategories((prev) => {
@@ -85,12 +89,25 @@ export function ServicePicker({
   return (
     <Modal visible={visible} transparent animationType="slide">
       <Pressable style={styles.overlay} onPress={onClose}>
-        <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
+        <Pressable
+          style={[
+            styles.sheet,
+            nativeVariant === 'ios' ? styles.sheetIos : styles.sheetAndroid,
+          ]}
+          onPress={(e) => e.stopPropagation()}
+        >
+          {nativeVariant === 'ios' ? <View style={styles.sheetGrab} /> : null}
           <View style={styles.header}>
             <Text style={styles.title}>Выберите услугу</Text>
-            <TouchableOpacity onPress={onClose} hitSlop={12}>
-              <Ionicons name="close" size={24} color="#666" />
-            </TouchableOpacity>
+            {nativeVariant === 'ios' ? (
+              <TouchableOpacity onPress={onClose} hitSlop={12} accessibilityRole="button">
+                <Text style={styles.doneBtn}>Готово</Text>
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity onPress={onClose} hitSlop={12} accessibilityRole="button">
+                <Ionicons name="close" size={24} color="#666" />
+              </TouchableOpacity>
+            )}
           </View>
 
           <View style={styles.searchWrap}>
@@ -135,7 +152,9 @@ export function ServicePicker({
                     </TouchableOpacity>
                     {isExpanded(g.name) && (
                       <View style={styles.categoryContent}>
-                        {g.services.map((s) => (
+                        {g.services.map((s) => {
+                          const disc = discountForService?.(s) ?? null;
+                          return (
                           <TouchableOpacity
                             key={s.id}
                             style={[
@@ -145,14 +164,21 @@ export function ServicePicker({
                             onPress={() => handleSelect(s)}
                             activeOpacity={0.7}
                           >
-                            <Text style={styles.serviceName} numberOfLines={1}>
-                              {s.name}
-                            </Text>
+                            <View style={styles.serviceTop}>
+                              <Text style={styles.serviceName} numberOfLines={2}>
+                                {s.name}
+                              </Text>
+                              {disc ? (
+                                <View style={styles.discountBadge}>
+                                  <Text style={styles.discountBadgeText}>{disc}</Text>
+                                </View>
+                              ) : null}
+                            </View>
                             <Text style={styles.serviceMeta}>
                               {s.duration} мин · {s.price} ₽
                             </Text>
                           </TouchableOpacity>
-                        ))}
+                        );})}
                       </View>
                     )}
                   </View>
@@ -178,6 +204,23 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 16,
     maxHeight: '80%',
   },
+  sheetIos: {
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+  },
+  sheetAndroid: {
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+  },
+  sheetGrab: {
+    width: 42,
+    height: 5,
+    borderRadius: 999,
+    backgroundColor: '#d9dfd9',
+    alignSelf: 'center',
+    marginTop: 10,
+    marginBottom: 4,
+  },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -190,6 +233,11 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '600',
     color: '#333',
+  },
+  doneBtn: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#50b95a',
   },
   searchWrap: {
     flexDirection: 'row',
@@ -269,6 +317,26 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: 'transparent',
   },
+  serviceTop: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  discountBadge: {
+    paddingHorizontal: 7,
+    paddingVertical: 4,
+    borderRadius: 999,
+    backgroundColor: '#fff7e6',
+    borderWidth: 1,
+    borderColor: '#f2deb0',
+    flexShrink: 0,
+  },
+  discountBadgeText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#976400',
+  },
   serviceRowSelected: {
     borderColor: '#4CAF50',
     backgroundColor: '#e8f5e9',
@@ -277,6 +345,8 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '500',
     color: '#333',
+    flex: 1,
+    minWidth: 0,
   },
   serviceMeta: {
     fontSize: 13,

@@ -7,7 +7,6 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
-  ScrollView,
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
@@ -18,7 +17,7 @@ import {
   BackHandler,
   Platform,
   Linking,
-  Image,
+  ScrollView,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -30,38 +29,159 @@ import {
   getClientNoteForMaster,
   getPublicEligibility,
   createPublicBooking,
+  getPublicBookingPricePreview,
   PublicMasterProfile,
   PublicService,
   PublicSlot,
+  type BookingPricePreview,
+  type CreatePublicBookingResponse,
+  type PublicEligibility,
 } from '@src/services/api/publicMasters';
 import {
   savePublicBookingDraft,
   getPublicBookingDraft,
   clearPublicBookingDraft,
   updatePublicBookingDraftStatus,
+  type DraftPricePreviewSnapshot,
 } from '@src/stores/publicBookingDraftStore';
 import { fetchCalendarIcs } from '@src/services/api/bookings';
 import { writeIcsToCacheAndGetUri } from '@src/utils/calendarIcsPath';
 import * as Sharing from 'expo-sharing';
 import { ServicePicker } from '@src/components/publicBooking/ServicePicker';
 import { DatePicker, buildDateOptionsFromSlots } from '@src/components/publicBooking/DatePicker';
-import { TimeSlotsPicker } from '@src/components/publicBooking/TimeSlotsPicker';
-import { formatDateForPicker, formatTimeRange } from '@src/utils/format';
+import { formatDateForPicker, formatTimeRange, formatTimeHHMM } from '@src/utils/format';
+import {
+  MasterPublicBookingPresentational,
+  type PublicBookingConfirmSummaryRow,
+} from '@src/components/publicBooking/MasterPublicBookingPresentational';
+import { getBookingNativeVariant } from '@src/components/publicBooking/bookingNativeTheme';
+import { getServiceDiscountBadge, formatPriceRub } from '@src/components/publicBooking/publicBookingDiscountUi';
 import { logger } from '@src/utils/logger';
 import { env } from '@src/config/env';
 import { debugConnectivity, type ConnectivityResult } from '@src/services/api/diagnostics';
-import { formatPublicAddressLine } from '@src/utils/publicAddressDisplay';
 import { resolveBackendUploadUrl } from '@src/utils/resolveBackendUploadUrl';
+import { buildMasterTimezoneDisplayLine } from '@src/utils/masterTimezoneDisplay';
+import { formatPublicAddressLine } from '@src/utils/publicAddressDisplay';
+import { buildGoogleCalendarTemplateUrl } from '@src/utils/googleCalendarUrl';
 
 const DAYS_AHEAD = 14;
 const LOAD_PROFILE_WATCHDOG_MS = 10000;
 const BOOT_GUARD_MS = 500;
 
+type BookingSuccessCardDetail = {
+  masterName: string;
+  serviceName: string;
+  dateLabel: string;
+  timeLabel: string;
+  addressLine: string | null;
+  addressDetail: string | null;
+  detailRows: PublicBookingConfirmSummaryRow[];
+  priceRows: PublicBookingConfirmSummaryRow[];
+  calendarTitle: string;
+  calendarStartIso: string;
+  calendarEndIso: string;
+  calendarLocation: string;
+  calendarDetails: string;
+};
+
+function previewLikeToPriceRows(p: {
+  base_price: number;
+  discount_amount: number;
+  final_price: number;
+  discount_percent?: number | null;
+}): PublicBookingConfirmSummaryRow[] {
+  const rows: PublicBookingConfirmSummaryRow[] = [];
+  if (p.final_price == null) return rows;
+  if (p.discount_amount > 0.001) {
+    rows.push({ label: 'Базовая цена', value: formatPriceRub(p.base_price) });
+    const disc =
+      `−${formatPriceRub(p.discount_amount)}` +
+      (p.discount_percent != null ? ` (${Math.round(p.discount_percent)}%)` : '');
+    rows.push({ label: 'Скидка', value: disc });
+    rows.push({ label: 'К оплате', value: formatPriceRub(p.final_price) });
+  } else {
+    rows.push({ label: 'К оплате', value: formatPriceRub(p.final_price) });
+  }
+  return rows;
+}
+
+function buildBookingSuccessCardDetail(
+  profile: PublicMasterProfile,
+  serviceName: string,
+  startIso: string,
+  endIso: string,
+  priceFrom:
+    | BookingPricePreview
+    | DraftPricePreviewSnapshot
+    | Pick<
+        CreatePublicBookingResponse,
+        'base_price' | 'discount_amount' | 'final_price' | 'discount_percent'
+      >
+    | null
+): BookingSuccessCardDetail {
+  const dateStr = startIso.length >= 10 ? startIso.slice(0, 10) : startIso;
+  const dateLabel = formatDateForPicker(dateStr);
+  const timeLabel = formatTimeRange(startIso, endIso);
+  const addressLine = formatPublicAddressLine(profile.city, profile.address);
+  const addressDetail =
+    profile.address_detail && String(profile.address_detail).trim()
+      ? String(profile.address_detail).trim()
+      : null;
+
+  const detailRows: PublicBookingConfirmSummaryRow[] = [
+    { label: 'Мастер', value: profile.master_name },
+    { label: 'Услуга', value: serviceName },
+    { label: 'Дата', value: dateLabel },
+    { label: 'Время', value: timeLabel },
+  ];
+  if (addressLine) detailRows.push({ label: 'Адрес', value: addressLine });
+  if (addressDetail) detailRows.push({ label: 'Как добраться', value: addressDetail });
+
+  let priceRows: PublicBookingConfirmSummaryRow[] = [];
+  if (priceFrom != null) {
+    const fp = priceFrom as {
+      base_price?: number | null;
+      discount_amount?: number;
+      final_price?: number | null;
+      discount_percent?: number | null;
+    };
+    if (fp.final_price != null && typeof fp.final_price === 'number') {
+      priceRows = previewLikeToPriceRows({
+        base_price: Number(fp.base_price ?? 0),
+        discount_amount: Number(fp.discount_amount ?? 0),
+        final_price: Number(fp.final_price),
+        discount_percent: fp.discount_percent ?? null,
+      });
+    }
+  }
+
+  const loc = [addressLine, addressDetail].filter(Boolean).join(', ');
+  const details = [profile.phone ? `Тел.: ${profile.phone}` : '', `Мастер: ${profile.master_name}`]
+    .filter(Boolean)
+    .join('\n');
+
+  return {
+    masterName: profile.master_name,
+    serviceName,
+    dateLabel,
+    timeLabel,
+    addressLine,
+    addressDetail,
+    detailRows,
+    priceRows,
+    calendarTitle: `${serviceName} — ${profile.master_name}`,
+    calendarStartIso: startIso,
+    calendarEndIso: endIso,
+    calendarLocation: loc,
+    calendarDetails: details || 'Запись DeDato',
+  };
+}
+
 export default function MasterPublicBookingScreen() {
   const { slug } = useLocalSearchParams<{ slug: string }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { isAuthenticated, user } = useAuth();
+  const { isAuthenticated, user, isLoading: authLoading } = useAuth();
 
   const [profile, setProfile] = useState<PublicMasterProfile | null>(null);
   const [loading, setLoading] = useState(true);
@@ -72,7 +192,7 @@ export default function MasterPublicBookingScreen() {
   const [slots, setSlots] = useState<PublicSlot[]>([]);
   const [slotsLoading, setSlotsLoading] = useState(false);
   const [slotsError, setSlotsError] = useState<string | null>(null);
-  const [eligibility, setEligibility] = useState<{ points: number | null; booking_blocked: boolean; requires_advance_payment: boolean } | null>(null);
+  const [eligibility, setEligibility] = useState<PublicEligibility | null>(null);
   const [clientNote, setClientNote] = useState<string | null>(null);
   const [showNoteModal, setShowNoteModal] = useState(false);
   const [showServicePicker, setShowServicePicker] = useState(false);
@@ -82,8 +202,11 @@ export default function MasterPublicBookingScreen() {
   const [successBookingCal, setSuccessBookingCal] = useState<{
     id: number;
     publicReference?: string;
+    detail: BookingSuccessCardDetail | null;
   } | null>(null);
   const [showAuthPrompt, setShowAuthPrompt] = useState(false);
+  const [showLoggedInConfirm, setShowLoggedInConfirm] = useState(false);
+  const [pricePreview, setPricePreview] = useState<BookingPricePreview | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [loadTimeout, setLoadTimeout] = useState(false);
   const [diagResult, setDiagResult] = useState<ConnectivityResult | null>(null);
@@ -257,6 +380,55 @@ export default function MasterPublicBookingScreen() {
     if (profile && isAuthenticated) loadEligibilityAndNote();
   }, [profile, isAuthenticated, loadEligibilityAndNote]);
 
+  useEffect(() => {
+    if (!slug || !selectedService || !selectedSlot) {
+      setPricePreview(null);
+      return;
+    }
+    if (authLoading) {
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const prev = await getPublicBookingPricePreview(
+          slug,
+          selectedService.id,
+          selectedSlot.start_time
+        );
+        if (!cancelled) setPricePreview(prev);
+      } catch {
+        if (!cancelled) setPricePreview(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    slug,
+    selectedService?.id,
+    selectedSlot?.start_time,
+    selectedSlot?.end_time,
+    isAuthenticated,
+    user?.id,
+    authLoading,
+  ]);
+
+  const tzLabel = (tz: string): string => {
+    const m: Record<string, string> = {
+      'Europe/Moscow': 'МСК',
+      'Europe/Samara': 'SAMT',
+      'Asia/Yekaterinburg': 'ЕКБ',
+      'Asia/Krasnoyarsk': 'КРС',
+    };
+    return m[tz] || tz.split('/').pop() || tz;
+  };
+
+  const masterTimezoneLine = React.useMemo(() => {
+    if (!profile?.master_timezone) return '';
+    return buildMasterTimezoneDisplayLine(profile.master_timezone, tzLabel(profile.master_timezone));
+  }, [profile?.master_timezone]);
+
   const handleSelectService = (s: PublicService) => {
     setSelectedService(s);
     setSelectedDate(null);
@@ -271,6 +443,15 @@ export default function MasterPublicBookingScreen() {
   const dateOptions = React.useMemo(
     () => buildDateOptionsFromSlots(slots, profile?.master_timezone),
     [slots, profile?.master_timezone]
+  );
+
+  const discountHintForSlot = useCallback(
+    (slot: PublicSlot) => {
+      if (!selectedSlot || !pricePreview || pricePreview.discount_amount <= 0.001) return null;
+      if (slot.start_time !== selectedSlot.start_time || slot.end_time !== selectedSlot.end_time) return null;
+      return `−${formatPriceRub(pricePreview.discount_amount)}`;
+    },
+    [selectedSlot, pricePreview]
   );
 
   // Draft: после логина автосоздание только если draft.intent === 'create_after_auth' (confirm flow). Логин из шапки не ставит intent.
@@ -307,9 +488,21 @@ export default function MasterPublicBookingScreen() {
           draft.created_booking_id != null &&
           !cancelled
         ) {
+          const svcNameDone =
+            draft.service_name ||
+            profile.services.find((s) => s.id === draft.service_id)?.name ||
+            'Услуга';
+          const detail = buildBookingSuccessCardDetail(
+            profile,
+            svcNameDone,
+            draft.start_time,
+            draft.end_time,
+            draft.price_preview_snapshot ?? null
+          );
           setSuccessBookingCal({
             id: draft.created_booking_id,
             publicReference: draft.created_public_reference,
+            detail,
           });
           setSelectedService(null);
           setSelectedDate(null);
@@ -334,7 +527,15 @@ export default function MasterPublicBookingScreen() {
           created_public_reference: res.public_reference,
         });
         if (!cancelled) {
-          setSuccessBookingCal({ id: res.id, publicReference: res.public_reference });
+          const svcName = res.service_name?.trim() || draft.service_name || svc.name;
+          const detail = buildBookingSuccessCardDetail(
+            profile,
+            svcName,
+            draft.start_time,
+            draft.end_time,
+            res
+          );
+          setSuccessBookingCal({ id: res.id, publicReference: res.public_reference, detail });
           setSelectedService(null);
           setSelectedDate(null);
           setSelectedSlot(null);
@@ -359,28 +560,8 @@ export default function MasterPublicBookingScreen() {
     });
   };
 
-  const handleBook = async () => {
+  const executeAuthenticatedBooking = async () => {
     if (!slug || !selectedService || !selectedSlot) return;
-    if (!isAuthenticated) {
-      const attemptId =
-        typeof crypto !== 'undefined' && crypto.randomUUID
-          ? crypto.randomUUID()
-          : `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-      await savePublicBookingDraft({
-        slug,
-        service_id: selectedService.id,
-        start_time: selectedSlot.start_time,
-        end_time: selectedSlot.end_time,
-        status: 'pending',
-        attempt_id: attemptId,
-        intent: 'create_after_auth',
-      });
-      if (__DEV__ && (env.DEBUG_AUTH || env.DEBUG_LOGS)) {
-        logger.debug('auth', '[public-booking] draft saved with intent create_after_auth', { slug });
-      }
-      setShowAuthPrompt(true);
-      return;
-    }
     setSubmitting(true);
     try {
       const res = await createPublicBooking(slug, {
@@ -388,10 +569,18 @@ export default function MasterPublicBookingScreen() {
         start_time: selectedSlot.start_time,
         end_time: selectedSlot.end_time,
       });
-      setSuccessBookingCal({ id: res.id, publicReference: res.public_reference });
+      const detail = buildBookingSuccessCardDetail(
+        profile,
+        selectedService.name,
+        selectedSlot.start_time,
+        selectedSlot.end_time,
+        res
+      );
+      setSuccessBookingCal({ id: res.id, publicReference: res.public_reference, detail });
       setSelectedService(null);
       setSelectedDate(null);
       setSelectedSlot(null);
+      setShowLoggedInConfirm(false);
     } catch (e: unknown) {
       const err = e as { response?: { status?: number; data?: { detail?: string } } };
       const msg = err?.response?.data?.detail || 'Не удалось создать запись';
@@ -401,9 +590,66 @@ export default function MasterPublicBookingScreen() {
     }
   };
 
+  const prepareGuestDraftAndOpenAuth = async () => {
+    if (!slug || !selectedService || !selectedSlot) return;
+    const attemptId =
+      typeof crypto !== 'undefined' && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+    await savePublicBookingDraft({
+      slug,
+      service_id: selectedService.id,
+      start_time: selectedSlot.start_time,
+      end_time: selectedSlot.end_time,
+      status: 'pending',
+      attempt_id: attemptId,
+      intent: 'create_after_auth',
+      service_name: selectedService.name,
+      master_name: profile.master_name,
+      price_preview_snapshot:
+        pricePreview && pricePreview.final_price != null
+          ? {
+              base_price: pricePreview.base_price,
+              discount_amount: pricePreview.discount_amount,
+              final_price: pricePreview.final_price,
+              discount_percent: pricePreview.discount_percent ?? null,
+              rule_name: pricePreview.rule_name ?? null,
+            }
+          : undefined,
+    });
+    if (__DEV__ && (env.DEBUG_AUTH || env.DEBUG_LOGS)) {
+      logger.debug('auth', '[public-booking] draft saved with intent create_after_auth', { slug });
+    }
+    setShowAuthPrompt(true);
+  };
+
+  const handlePrimaryBookingPress = () => {
+    if (!slug || !selectedService || !selectedSlot) return;
+    if (!isAuthenticated) {
+      void prepareGuestDraftAndOpenAuth();
+      return;
+    }
+    setShowLoggedInConfirm(true);
+  };
+
   const handleAddToCalendar = async () => {
     if (!successBookingCal) return;
+    const d = successBookingCal.detail;
     try {
+      if (Platform.OS === 'android' && d) {
+        const url = buildGoogleCalendarTemplateUrl({
+          title: d.calendarTitle,
+          startIso: d.calendarStartIso,
+          endIso: d.calendarEndIso,
+          details: d.calendarDetails,
+          location: d.calendarLocation,
+        });
+        const can = await Linking.canOpenURL(url);
+        if (can) {
+          await Linking.openURL(url);
+          return;
+        }
+      }
       const target =
         successBookingCal.publicReference?.trim()
           ? {
@@ -424,16 +670,6 @@ export default function MasterPublicBookingScreen() {
     } catch {
       Alert.alert('Ошибка', 'Не удалось добавить в календарь');
     }
-  };
-
-  const tzLabel = (tz: string): string => {
-    const m: Record<string, string> = {
-      'Europe/Moscow': 'МСК',
-      'Europe/Samara': 'SAMT',
-      'Asia/Yekaterinburg': 'ЕКБ',
-      'Asia/Krasnoyarsk': 'КРС',
-    };
-    return m[tz] || tz.split('/').pop() || tz;
   };
 
   const getGoToMyBookingsButton = () => {
@@ -555,15 +791,60 @@ export default function MasterPublicBookingScreen() {
 
   if (successBookingCal) {
     const refLabel = successBookingCal.publicReference?.trim();
+    const det = successBookingCal.detail;
     return (
       <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
-        <View style={[styles.successCard, { paddingTop: insets.top + 24 }]}>
-          <Ionicons name="checkmark-circle" size={64} color="#4CAF50" />
-          <Text style={styles.successTitle}>Запись создана</Text>
-          {refLabel ? (
-            <Text style={styles.successRef}>Номер записи: {refLabel}</Text>
+        <ScrollView
+          contentContainerStyle={[
+            styles.successScroll,
+            { paddingTop: insets.top + 16, paddingBottom: Math.max(24, insets.bottom + 16) },
+          ]}
+          keyboardShouldPersistTaps="handled"
+        >
+          <View style={styles.successHeader}>
+            <Ionicons name="checkmark-circle" size={64} color="#4CAF50" />
+            <Text style={styles.successTitle}>Запись создана</Text>
+            {refLabel ? <Text style={styles.successRef}>Номер записи: {refLabel}</Text> : null}
+            <Text style={styles.successSub}>Мастер подтвердит запись</Text>
+          </View>
+
+          {det ? (
+            <View style={styles.successDetailCard} accessibilityLabel="Детали записи">
+              <Text style={styles.successDetailHeading}>Детали записи</Text>
+              {det.detailRows.map((row, i) => (
+                <View key={`sd-${row.label}-${i}`} style={styles.successKvRow}>
+                  <Text style={styles.successKvLabel}>{row.label}</Text>
+                  <Text style={styles.successKvValue}>{row.value}</Text>
+                </View>
+              ))}
+              {det.priceRows.length > 0 ? (
+                <>
+                  <View style={styles.successPriceSep} />
+                  {det.priceRows.map((row, i) => (
+                    <View key={`sp-${row.label}-${i}`} style={styles.successKvRow}>
+                      <Text
+                        style={[
+                          styles.successKvLabel,
+                          row.label === 'К оплате' && styles.successKvLabelStrong,
+                        ]}
+                      >
+                        {row.label}
+                      </Text>
+                      <Text
+                        style={[
+                          styles.successKvValue,
+                          row.label === 'К оплате' && styles.successKvValueStrong,
+                        ]}
+                      >
+                        {row.value}
+                      </Text>
+                    </View>
+                  ))}
+                </>
+              ) : null}
+            </View>
           ) : null}
-          <Text style={styles.successSub}>Мастер подтвердит запись</Text>
+
           <TouchableOpacity style={styles.calendarBtn} onPress={handleAddToCalendar}>
             <Ionicons name="calendar-outline" size={20} color="#fff" />
             <Text style={styles.calendarBtnText}>Добавить в календарь</Text>
@@ -572,254 +853,168 @@ export default function MasterPublicBookingScreen() {
           <TouchableOpacity style={styles.secondaryBtn} onPress={() => setSuccessBookingCal(null)}>
             <Text style={styles.secondaryBtnText}>Вернуться к записи</Text>
           </TouchableOpacity>
-        </View>
+        </ScrollView>
       </SafeAreaView>
     );
   }
 
   const servicesEmpty = profile.services.length === 0;
-  const dateOptionsEmpty = !slotsLoading && selectedService && slots.length === 0;
-  const slotsForDateEmpty =
+  const dateOptionsEmpty = Boolean(!slotsLoading && selectedService && slots.length === 0);
+  const slotsForDateEmpty = Boolean(
     selectedDate &&
-    !slotsLoading &&
-    slots.filter((s) => s.start_time.startsWith(selectedDate)).length === 0;
+      !slotsLoading &&
+      slots.filter((s) => s.start_time.startsWith(selectedDate)).length === 0
+  );
 
-  return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-      <ScrollView
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-        contentContainerStyle={[styles.scrollContent, { paddingBottom: 40 + insets.bottom }]}
-      >
-        <View style={[styles.header, { paddingTop: Math.max(16, insets.top) }]}>
-          <TouchableOpacity onPress={handleBack} style={styles.backBtn}>
-            <Ionicons name="arrow-back" size={24} color="#333" />
-          </TouchableOpacity>
-        </View>
-        {__DEV__ && (env.DEBUG_HTTP || env.DEBUG_LOGS) && (diagResult || profileLoadResult) && (
-          <View style={styles.diagBlock}>
-            <Text style={styles.diagTitle}>[NET_DIAG]</Text>
-            {diagResult && (
-              <>
-                <Text style={styles.diagLine}>API_URL: {diagResult.apiUrl}</Text>
-                <Text style={styles.diagLine}>baseURL: {diagResult.baseURL}</Text>
-                <Text style={styles.diagLine}>
-                  health: {diagResult.health.ok ? 'OK' : 'FAIL'} {diagResult.health.ms}ms
-                  {diagResult.health.status != null ? ` (${diagResult.health.status})` : ''}
-                </Text>
-              </>
-            )}
-            {profileLoadResult && (
-              <Text style={styles.diagLine}>
-                getPublicMaster: {profileLoadResult.ok ? 'OK' : 'FAIL'} {profileLoadResult.ms}ms
-                {profileLoadResult.code != null ? ` code=${profileLoadResult.code}` : ''}
-              </Text>
-            )}
-          </View>
-        )}
+  const hint = eligibility?.loyalty_hint;
+  const showLoyaltyBanner = Boolean(isAuthenticated && hint?.active);
+  const loyaltyBannerTitle = (hint?.rule_name && String(hint.rule_name).trim()) || 'Доступна скидка';
+  const loyaltyBannerSubtitle =
+    hint?.discount_percent != null
+      ? `До ${Math.round(hint.discount_percent)}%. Итог пересчитывается после выбора услуги и времени.`
+      : 'Итоговая сумма считается после выбора услуги и времени.';
 
-        <View style={styles.profileCard}>
-          <View style={styles.headerRow}>
-            {avatarUri ? (
-              <Image
-                key={profile.avatar_url || 'avatar'}
-                source={{ uri: avatarUri }}
-                style={styles.avatar}
-                accessibilityLabel="Фото мастера"
-              />
-            ) : (
-              <View style={styles.avatarPlaceholder} accessibilityLabel="Фото мастера отсутствует">
-                <Ionicons name="person-outline" size={28} color="#8a8a8a" />
-              </View>
-            )}
-            <View style={styles.headerMain}>
-              <View style={styles.profileRow}>
-                <Text style={styles.masterName}>{profile.master_name}</Text>
-                {profile.master_timezone && (
-                  <View style={styles.tzBadge}>
-                    <Text style={styles.tzBadgeText}>{tzLabel(profile.master_timezone)}</Text>
-                  </View>
-                )}
-              </View>
-              {profile.description && (
-                <Text style={styles.description} numberOfLines={2}>{profile.description}</Text>
-              )}
-              {profile.city && <Text style={styles.city}>{profile.city}</Text>}
-            </View>
-          </View>
+  const dateDisplayLabel =
+    selectedDate != null
+      ? dateOptions.find((d) => d.dateStr === selectedDate)?.displayLabel ?? formatDateForPicker(selectedDate)
+      : '';
 
-          {(profile.phone || profile.yandex_maps_url || profile.address || profile.address_detail || profile.city) && (
-            <View style={styles.contactsCard}>
-              {!!profile.phone && (
-                <TouchableOpacity
-                  onPress={() => Linking.openURL(`tel:${profile.phone}`)}
-                  style={styles.contactRow}
-                  accessibilityRole="button"
-                >
-                  <Ionicons name="call-outline" size={18} color="#4CAF50" />
-                  <Text style={styles.contactLink}>{profile.phone}</Text>
-                </TouchableOpacity>
-              )}
+  const mainBookingSummaryRows: PublicBookingConfirmSummaryRow[] =
+    selectedService && selectedDate && selectedSlot
+      ? [
+          { label: 'Услуга', value: selectedService.name },
+          { label: 'Дата', value: dateDisplayLabel },
+          {
+            label: 'Время',
+            value: formatTimeRange(selectedSlot.start_time, selectedSlot.end_time),
+          },
+        ]
+      : [];
 
-              {!!(profile.city || profile.address) && (
-                <TouchableOpacity
-                  disabled={!profile.yandex_maps_url}
-                  onPress={() => profile.yandex_maps_url && Linking.openURL(profile.yandex_maps_url)}
-                  style={styles.contactRow}
-                  accessibilityRole="button"
-                >
-                  <Ionicons name="location-outline" size={18} color="#666" />
-                  <Text style={[styles.contactText, profile.yandex_maps_url && styles.contactLink]}>
-                    {formatPublicAddressLine(profile.city, profile.address)}
-                  </Text>
-                </TouchableOpacity>
-              )}
+  const confirmationSummaryRows: PublicBookingConfirmSummaryRow[] =
+    selectedService && selectedDate && selectedSlot
+      ? [
+          { label: 'Мастер', value: profile.master_name },
+          {
+            label: 'Услуга',
+            value: `${selectedService.name} — ${selectedService.price} ₽, ${selectedService.duration} мин`,
+          },
+          { label: 'Дата', value: dateDisplayLabel },
+          {
+            label: 'Время',
+            value: formatTimeRange(selectedSlot.start_time, selectedSlot.end_time),
+          },
+        ]
+      : [];
 
-              {!!profile.address_detail && String(profile.address_detail).trim() && (
-                <Text style={styles.addressDetail}>{profile.address_detail}</Text>
-              )}
+  const confirmationPriceRows: PublicBookingConfirmSummaryRow[] =
+    pricePreview && pricePreview.final_price != null ? previewLikeToPriceRows(pricePreview) : [];
 
-              {!!profile.yandex_maps_url && (
-                <TouchableOpacity
-                  onPress={() => Linking.openURL(profile.yandex_maps_url)}
-                  style={styles.mapsBtn}
-                  accessibilityRole="button"
-                >
-                  <Ionicons name="map-outline" size={18} color="#2f7d32" />
-                  <Text style={styles.mapsBtnText}>Открыть в Яндекс Картах</Text>
-                </TouchableOpacity>
-              )}
-            </View>
-          )}
+  const svcDisc = selectedService ? getServiceDiscountBadge(profile, selectedService.id) : null;
+  const serviceRowDiscountBadge = svcDisc?.label ?? null;
 
-          {isAuthenticated && clientNote != null && (
-            <TouchableOpacity style={styles.noteRow} onPress={() => setShowNoteModal(true)}>
-              <Ionicons name="document-text-outline" size={18} color="#666" />
-              <Text style={styles.noteLabel}>Ваша заметка</Text>
-            </TouchableOpacity>
-          )}
-        </View>
+  const pointsLine =
+    isAuthenticated && eligibility?.points != null && eligibility.points > 0
+      ? `Доступно баллов: ${eligibility.points}`
+      : null;
 
-        {(profile.booking_blocked || eligibility?.booking_blocked) && (
-          <View style={styles.warning}>
-            <Text style={styles.warningText}>Запись недоступна</Text>
-          </View>
-        )}
-
-        {(profile.requires_advance_payment || eligibility?.requires_advance_payment) && (
-          <View style={styles.info}>
-            <Text style={styles.infoText}>Требуется предоплата для подтверждения записи</Text>
-          </View>
-        )}
-
-        {isAuthenticated && eligibility?.points != null && eligibility.points > 0 && (
-          <View style={styles.points}>
-            <Text style={styles.pointsText}>Доступно баллов: {eligibility.points}</Text>
-          </View>
-        )}
-
-        {/* Step 1: Service */}
-        <Text style={styles.sectionTitle}>1. Услуга</Text>
-        {servicesEmpty ? (
-          <View style={styles.emptyState}>
-            <Text style={styles.emptyStateText}>У мастера пока нет услуг</Text>
-          </View>
-        ) : (
-          <TouchableOpacity
-            style={styles.stepButton}
-            onPress={() => setShowServicePicker(true)}
-            activeOpacity={0.7}
-          >
-            <Text style={selectedService ? styles.stepButtonText : styles.stepButtonPlaceholder}>
-              {selectedService
-                ? `${selectedService.name} — ${selectedService.price} ₽, ${selectedService.duration} мин`
-                : 'Выберите услугу'}
-            </Text>
-            <Ionicons name="chevron-forward" size={20} color="#999" />
-          </TouchableOpacity>
-        )}
-
-        {/* Step 2: Date */}
-        <Text style={styles.sectionTitle}>2. Дата</Text>
-        {!canSelectDate ? (
-          <View style={[styles.stepButton, styles.stepButtonDisabled]}>
-            <Text style={[styles.stepButtonPlaceholder, styles.stepButtonPlaceholderDisabled]}>
-              Сначала выберите услугу
-            </Text>
-          </View>
-        ) : dateOptionsEmpty ? (
-          <View style={styles.emptyState}>
-            <Text style={styles.emptyStateText}>Нет свободных дат на ближайшие 14 дней</Text>
-          </View>
-        ) : (
-          <TouchableOpacity
-            style={styles.stepButton}
-            onPress={() => setShowDatePicker(true)}
-            activeOpacity={0.7}
-          >
-            <Text style={selectedDate ? styles.stepButtonText : styles.stepButtonPlaceholder}>
-              {selectedDate
-                ? dateOptions.find((d) => d.dateStr === selectedDate)?.displayLabel ?? formatDateForPicker(selectedDate)
-                : 'Выберите дату'}
-            </Text>
-            <Ionicons name="chevron-forward" size={20} color="#999" />
-          </TouchableOpacity>
-        )}
-
-        {/* Step 3: Time — показываем только после выбора даты */}
-        {selectedDate && (
+  const diagEl =
+    __DEV__ && (env.DEBUG_HTTP || env.DEBUG_LOGS) && (diagResult || profileLoadResult) ? (
+      <View style={styles.diagBlock}>
+        <Text style={styles.diagTitle}>[NET_DIAG]</Text>
+        {diagResult && (
           <>
-            <Text style={styles.sectionTitle}>3. Время</Text>
-            {slotsForDateEmpty ? (
-              <View style={styles.emptyState}>
-                <Text style={styles.emptyStateText}>Нет свободного времени на выбранную дату</Text>
-              </View>
-            ) : (
-              <TimeSlotsPicker
-                slots={slots}
-                selectedDate={selectedDate}
-                selectedSlot={selectedSlot}
-                onSelect={setSelectedSlot}
-                loading={slotsLoading}
-              />
-            )}
+            <Text style={styles.diagLine}>API_URL: {diagResult.apiUrl}</Text>
+            <Text style={styles.diagLine}>baseURL: {diagResult.baseURL}</Text>
+            <Text style={styles.diagLine}>
+              health: {diagResult.health.ok ? 'OK' : 'FAIL'} {diagResult.health.ms}ms
+              {diagResult.health.status != null ? ` (${diagResult.health.status})` : ''}
+            </Text>
           </>
         )}
-
-        {/* Сводка выбора */}
-        {selectedService && selectedDate && selectedSlot && (
-          <View style={styles.summary}>
-            <Text style={styles.summaryLabel}>Услуга: {selectedService.name} — {selectedService.price} ₽, {selectedService.duration} мин</Text>
-            <Text style={styles.summaryLabel}>
-              Дата: {dateOptions.find((d) => d.dateStr === selectedDate)?.displayLabel ?? formatDateForPicker(selectedDate)}
-            </Text>
-            <Text style={styles.summaryLabel}>
-              Время: {formatTimeRange(selectedSlot.start_time, selectedSlot.end_time)}
-            </Text>
-          </View>
+        {profileLoadResult && (
+          <Text style={styles.diagLine}>
+            getPublicMaster: {profileLoadResult.ok ? 'OK' : 'FAIL'} {profileLoadResult.ms}ms
+            {profileLoadResult.code != null ? ` code=${profileLoadResult.code}` : ''}
+          </Text>
         )}
+      </View>
+    ) : null;
 
-        {/* CTA: показываем при полном выборе (услуга+дата+слот); при booking_blocked — disabled */}
-        {canSubmit && (
-          <TouchableOpacity
-            style={[
-              styles.cta,
-              (submitting || profile.booking_blocked || eligibility?.booking_blocked) && styles.ctaDisabled,
-            ]}
-            onPress={handleBook}
-            disabled={submitting || profile.booking_blocked || eligibility?.booking_blocked}
-          >
-            {submitting ? (
-              <ActivityIndicator size="small" color="#fff" />
-            ) : profile.booking_blocked || eligibility?.booking_blocked ? (
-              <Text style={styles.ctaText}>Запись недоступна</Text>
-            ) : (
-              <Text style={styles.ctaText}>Записаться</Text>
-            )}
-          </TouchableOpacity>
-        )}
+  const nativeVariant = getBookingNativeVariant();
 
-        <View style={styles.bottomPad} />
-      </ScrollView>
+  return (
+    <SafeAreaView style={{ flex: 1, backgroundColor: '#f4f6f4' }} edges={['top']}>
+      <MasterPublicBookingPresentational
+        insets={insets}
+        onBack={handleBack}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        diagBlock={diagEl}
+        profile={profile}
+        avatarUri={avatarUri}
+        masterTimezoneLine={masterTimezoneLine}
+        showLoyaltyBanner={showLoyaltyBanner}
+        loyaltyBannerTitle={loyaltyBannerTitle}
+        loyaltyBannerSubtitle={loyaltyBannerSubtitle}
+        bookingBlocked={Boolean(profile.booking_blocked || eligibility?.booking_blocked)}
+        advancePayment={Boolean(profile.requires_advance_payment || eligibility?.requires_advance_payment)}
+        pointsLine={pointsLine}
+        clientNote={clientNote}
+        isAuthenticated={isAuthenticated}
+        onOpenClientNote={() => setShowNoteModal(true)}
+        servicesEmpty={servicesEmpty}
+        selectedService={selectedService}
+        serviceRowDiscountBadge={serviceRowDiscountBadge}
+        onOpenServicePicker={() => setShowServicePicker(true)}
+        canSelectDate={canSelectDate}
+        dateOptionsEmpty={dateOptionsEmpty}
+        selectedDate={selectedDate}
+        dateDisplayLabel={dateDisplayLabel}
+        onOpenDatePicker={() => setShowDatePicker(true)}
+        slotsForDateEmpty={slotsForDateEmpty}
+        slots={slots}
+        slotsLoading={slotsLoading}
+        selectedSlot={selectedSlot}
+        onSelectSlot={setSelectedSlot}
+        discountHintForSlot={discountHintForSlot}
+        mainBookingSummaryRows={mainBookingSummaryRows}
+        mainBookingPriceRows={confirmationPriceRows}
+        canSubmit={canSubmit}
+        submitting={submitting}
+        ctaBlocked={Boolean(profile.booking_blocked || eligibility?.booking_blocked)}
+        ctaLabel={
+          profile.booking_blocked || eligibility?.booking_blocked ? 'Запись недоступна' : 'Записаться'
+        }
+        onPrimaryCtaPress={handlePrimaryBookingPress}
+        guestAuthSheet={{
+          visible: showAuthPrompt,
+          summaryRows: confirmationSummaryRows,
+          priceRows: confirmationPriceRows,
+          onClose: () => setShowAuthPrompt(false),
+          onLogin: () => {
+            setShowAuthPrompt(false);
+            router.replace('/login');
+          },
+          onRegister: () => {
+            setShowAuthPrompt(false);
+            router.replace('/login?tab=register&role=client' as any);
+          },
+        }}
+        loggedInConfirm={{
+          visible: showLoggedInConfirm,
+          onClose: () => setShowLoggedInConfirm(false),
+          onConfirm: () => {
+            void executeAuthenticatedBooking();
+          },
+          onChangeTime: () => {
+            setShowLoggedInConfirm(false);
+            setSelectedSlot(null);
+          },
+          submitting,
+          summaryRows: confirmationSummaryRows,
+          priceRows: confirmationPriceRows,
+        }}
+      />
 
       <ServicePicker
         visible={showServicePicker}
@@ -827,6 +1022,8 @@ export default function MasterPublicBookingScreen() {
         services={profile.services}
         selectedService={selectedService}
         onSelect={handleSelectService}
+        nativeVariant={nativeVariant}
+        discountForService={(s) => getServiceDiscountBadge(profile, s.id)?.label ?? null}
       />
 
       <DatePicker
@@ -838,6 +1035,7 @@ export default function MasterPublicBookingScreen() {
         loading={slotsLoading}
         error={slotsError}
         onRetry={loadAvailability}
+        nativeVariant={nativeVariant}
       />
 
       <Modal visible={showNoteModal} transparent animationType="fade">
@@ -847,21 +1045,6 @@ export default function MasterPublicBookingScreen() {
             <Text style={styles.modalBody}>{clientNote || '—'}</Text>
             <TouchableOpacity onPress={() => setShowNoteModal(false)}>
               <Text style={styles.modalClose}>Закрыть</Text>
-            </TouchableOpacity>
-          </View>
-        </Pressable>
-      </Modal>
-
-      <Modal visible={showAuthPrompt} transparent animationType="slide">
-        <Pressable style={styles.modalOverlay} onPress={() => setShowAuthPrompt(false)}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Вход для записи</Text>
-            <Text style={styles.modalBody}>Войдите или зарегистрируйтесь, чтобы создать запись</Text>
-            <TouchableOpacity style={styles.cta} onPress={() => { setShowAuthPrompt(false); router.replace('/login'); }}>
-              <Text style={styles.ctaText}>Войти</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => setShowAuthPrompt(false)}>
-              <Text style={styles.modalClose}>Отмена</Text>
             </TouchableOpacity>
           </View>
         </Pressable>
@@ -1041,11 +1224,58 @@ const styles = StyleSheet.create({
   ctaDisabled: { opacity: 0.7 },
   ctaText: { color: '#fff', fontSize: 16, fontWeight: '600' },
   bottomPad: { height: 40 },
-  successCard: {
-    flex: 1,
-    justifyContent: 'center',
+  successScroll: {
+    flexGrow: 1,
     alignItems: 'center',
-    padding: 24,
+    paddingHorizontal: 20,
+  },
+  successHeader: {
+    alignItems: 'center',
+    width: '100%',
+    maxWidth: 400,
+  },
+  successDetailCard: {
+    width: '100%',
+    maxWidth: 400,
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    marginTop: 20,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  successDetailHeading: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 12,
+  },
+  successKvRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 10,
+    gap: 12,
+  },
+  successKvLabel: {
+    fontSize: 14,
+    color: '#666',
+    flexShrink: 0,
+    maxWidth: '44%',
+  },
+  successKvValue: {
+    fontSize: 14,
+    color: '#333',
+    flex: 1,
+    textAlign: 'right',
+    flexWrap: 'wrap',
+  },
+  successKvLabelStrong: { fontWeight: '700', color: '#222' },
+  successKvValueStrong: { fontWeight: '700', color: '#222' },
+  successPriceSep: {
+    height: 1,
+    backgroundColor: '#eee',
+    marginVertical: 10,
   },
   successTitle: { fontSize: 22, fontWeight: '600', color: '#333', marginTop: 16 },
   successRef: { fontSize: 15, fontWeight: '600', color: '#333', marginTop: 10 },

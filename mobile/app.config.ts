@@ -78,6 +78,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         },
         {
           action: 'VIEW',
+          /** pathPrefix на полный путь /m/... (не dedato://m/ где path=/slug без /m). */
           data: [{ scheme: 'dedato', pathPrefix: '/m' }],
           category: ['BROWSABLE', 'DEFAULT'],
         },

@@ -12,6 +12,15 @@ export type DraftStatus = 'pending' | 'submitted' | 'done';
 /** Устанавливается только при CTA «Записаться» без логина (confirm flow). Логин из шапки не ставит intent. */
 export type DraftIntent = 'create_after_auth';
 
+/** Снимок preview цены перед уходом на логин (для success UI, если ответ create уже недоступен). */
+export type DraftPricePreviewSnapshot = {
+  base_price: number;
+  discount_amount: number;
+  final_price: number;
+  discount_percent?: number | null;
+  rule_name?: string | null;
+};
+
 export interface PublicBookingDraft {
   slug: string;
   service_id: number;
@@ -27,6 +36,10 @@ export interface PublicBookingDraft {
   status?: DraftStatus;
   /** Только при confirm flow: после логина автосоздать бронь. Без intent (логин из шапки) не создаём. */
   intent?: DraftIntent;
+  /** Снимок UI на момент «Записаться» (гость). */
+  service_name?: string;
+  master_name?: string;
+  price_preview_snapshot?: DraftPricePreviewSnapshot | null;
 }
 
 export async function savePublicBookingDraft(draft: PublicBookingDraft): Promise<void> {
@@ -57,18 +70,10 @@ export function isDraftValidForPostLoginRedirect(draft: PublicBookingDraft | nul
   return true;
 }
 
-export async function updatePublicBookingDraftStatus(
-  updates: Pick<
-    PublicBookingDraft,
-    'status' | 'created_booking_id' | 'created_public_reference' | 'intent'
-  >
-): Promise<void> {
+export async function updatePublicBookingDraftStatus(updates: Partial<PublicBookingDraft>): Promise<void> {
   const draft = await getPublicBookingDraft();
   if (!draft) return;
-  await AsyncStorage.setItem(
-    DRAFT_KEY,
-    JSON.stringify({ ...draft, ...updates })
-  );
+  await AsyncStorage.setItem(DRAFT_KEY, JSON.stringify({ ...draft, ...updates }));
 }
 
 export async function clearPublicBookingDraft(): Promise<void> {

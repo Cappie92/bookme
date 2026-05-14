@@ -15,6 +15,7 @@ import { useAuth } from '../contexts/AuthContext'
 import { formatPublicAddressLine } from '../utils/publicAddressDisplay'
 import { metrikaGoal } from '../analytics/metrika'
 import { M } from '../analytics/metrikaEvents'
+import { openPublicMasterAppDeepLink } from '../utils/publicMasterAppLink'
 
 const API_BASE = '/api/public/masters'
 
@@ -204,9 +205,7 @@ export default function MasterPublicBookingPage() {
           <div className="flex items-center gap-2 shrink-0">
             <button
               type="button"
-              onClick={() => {
-                window.location.href = `dedato://m/${slug}`
-              }}
+              onClick={() => openPublicMasterAppDeepLink(slug)}
               className="px-3 py-1.5 text-sm font-medium text-white bg-[#4CAF50] rounded-lg hover:bg-[#45a049]"
             >
               Открыть
