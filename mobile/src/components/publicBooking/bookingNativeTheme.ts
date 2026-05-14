@@ -195,6 +195,25 @@ export function createBookingNativeStyles(t: BookingNativeTheme) {
       alignItems: 'center',
       justifyContent: 'center',
     },
+    /** Гость: «Войти» + иконка в одной капсуле (не декоративные три точки). */
+    navRightGuest: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 5,
+      minHeight: 40,
+      paddingLeft: 10,
+      paddingRight: 12,
+      borderRadius: 20,
+      borderWidth: 1,
+      borderColor: t.colors.cardBorder,
+      backgroundColor: t.colors.cardBg,
+    },
+    navRightGuestLabel: {
+      fontSize: 15,
+      fontWeight: '700',
+      color: t.colors.text,
+    },
     navTitleWrap: { flex: 1, alignItems: 'center', paddingHorizontal: 8 },
     scrollContent: { paddingTop: 6, paddingHorizontal: BOOKING_H_PAD, paddingBottom: 120 },
     card: {

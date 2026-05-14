@@ -31,7 +31,7 @@ import {
   createBookingNativeStyles,
 } from './bookingNativeTheme';
 
-/** Строка label/value для confirmation (guest / logged-in). */
+/** Строка label/value для summary в sheet входа (guest). */
 export type PublicBookingConfirmSummaryRow = { label: string; value: string };
 
 export type MasterPublicBookingPresentationalProps = {
@@ -43,9 +43,10 @@ export type MasterPublicBookingPresentationalProps = {
   avatarUri: string | null;
   /** Часовой пояс мастера без «живых» часов, напр. «Москва (GMT+3)» */
   masterTimezoneLine: string;
-  showLoyaltyBanner: boolean;
-  loyaltyBannerTitle: string;
-  loyaltyBannerSubtitle: string;
+  /** Подсказка по скидке до выбора времени (eligibility), над блоком «3. Время». */
+  discountPreface?: { title: string; subtitle: string } | null;
+  /** Пояснение применённой скидки из price preview — над «Итог записи». */
+  discountAppliedExplain?: { title: string; subtitle: string } | null;
   bookingBlocked: boolean;
   advancePayment: boolean;
   pointsLine: string | null;
@@ -66,7 +67,8 @@ export type MasterPublicBookingPresentationalProps = {
   slotsLoading: boolean;
   selectedSlot: PublicSlot | null;
   onSelectSlot: (s: PublicSlot) => void;
-  discountHintForSlot: (slot: PublicSlot) => string | null;
+  slotHhBadgeForSlot?: (slot: PublicSlot) => string | null;
+  discountHintForSlot?: (slot: PublicSlot) => string | null;
   /** Итог записи на экране: услуга/дата/время (value без «Услуга:» в одной строке). */
   mainBookingSummaryRows: PublicBookingConfirmSummaryRow[];
   /** Цены для итога (база/скидка/к оплате), строки уже отформатированы. */
@@ -76,6 +78,9 @@ export type MasterPublicBookingPresentationalProps = {
   ctaBlocked: boolean;
   ctaLabel: string;
   onPrimaryCtaPress: () => void;
+  /** Правая кнопка шапки: вход (гость) или кабинет (клиент / не-клиент). */
+  navRightMode: 'guest' | 'client' | 'staff';
+  onNavRightPress: () => void;
   guestAuthSheet: {
     visible: boolean;
     summaryRows: PublicBookingConfirmSummaryRow[];
@@ -84,30 +89,18 @@ export type MasterPublicBookingPresentationalProps = {
     onLogin: () => void;
     onRegister: () => void;
   };
-  loggedInConfirm: {
-    visible: boolean;
-    onClose: () => void;
-    onConfirm: () => void;
-    onChangeTime: () => void;
-    submitting: boolean;
-    summaryRows: PublicBookingConfirmSummaryRow[];
-    priceRows?: PublicBookingConfirmSummaryRow[];
-  };
 };
 
 function ConfirmSummarySection({
   heading,
   rows,
-  variant,
 }: {
   heading: string;
   rows: PublicBookingConfirmSummaryRow[];
-  variant: 'guest' | 'loggedIn';
 }) {
   if (rows.length === 0) return null;
-  const boxStyle = variant === 'guest' ? modalStyles.guestSummaryBox : modalStyles.loggedSummaryBox;
   return (
-    <View style={boxStyle}>
+    <View style={modalStyles.guestSummaryBox}>
       <Text style={modalStyles.sectionHeading}>{heading}</Text>
       {rows.map((row, i) => (
         <View
@@ -159,9 +152,34 @@ export function MasterPublicBookingPresentational(props: MasterPublicBookingPres
               Запись
             </Text>
           </View>
-          <View style={[s.navIconBtn, { opacity: 0.35 }]} pointerEvents="none">
-            <Ionicons name="ellipsis-horizontal" size={18} color="#293529" />
-          </View>
+          {props.navRightMode === 'guest' ? (
+            <TouchableOpacity
+              onPress={props.onNavRightPress}
+              style={s.navRightGuest}
+              accessibilityRole="button"
+              accessibilityLabel="Войти"
+              hitSlop={{ top: 8, bottom: 8, left: 4, right: 8 }}
+              activeOpacity={0.78}
+            >
+              <Ionicons name="log-in-outline" size={20} color={t.colors.text} />
+              <Text style={s.navRightGuestLabel}>Войти</Text>
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity
+              onPress={props.onNavRightPress}
+              style={s.navIconBtn}
+              accessibilityRole="button"
+              accessibilityLabel={props.navRightMode === 'client' ? 'Мой кабинет' : 'На главную'}
+              hitSlop={8}
+              activeOpacity={0.78}
+            >
+              <Ionicons
+                name={props.navRightMode === 'client' ? 'person-circle-outline' : 'home-outline'}
+                size={22}
+                color={t.colors.text}
+              />
+            </TouchableOpacity>
+          )}
         </View>
 
         {props.diagBlock}
@@ -261,13 +279,6 @@ export function MasterPublicBookingPresentational(props: MasterPublicBookingPres
           ) : null}
         </View>
 
-        {props.showLoyaltyBanner ? (
-          <View style={s.tonalBanner}>
-            <Text style={s.tonalBannerTitle}>{props.loyaltyBannerTitle}</Text>
-            <Text style={s.tonalBannerSub}>{props.loyaltyBannerSubtitle}</Text>
-          </View>
-        ) : null}
-
         {props.bookingBlocked ? (
           <View style={[s.tonalBanner, { backgroundColor: '#fff3e0', borderColor: '#ffe0b2' }]}>
             <Text style={[s.tonalBannerTitle, { color: '#e65100' }]}>Запись недоступна</Text>
@@ -349,6 +360,12 @@ export function MasterPublicBookingPresentational(props: MasterPublicBookingPres
 
         {props.selectedDate ? (
           <>
+            {props.discountPreface ? (
+              <View style={[s.tonalBanner, { marginBottom: 4 }]}>
+                <Text style={s.tonalBannerTitle}>{props.discountPreface.title}</Text>
+                <Text style={s.tonalBannerSub}>{props.discountPreface.subtitle}</Text>
+              </View>
+            ) : null}
             <View style={s.sectionHead}>
               <Text style={t.font.sectionTitle}>3. Время</Text>
             </View>
@@ -364,6 +381,7 @@ export function MasterPublicBookingPresentational(props: MasterPublicBookingPres
                 onSelect={props.onSelectSlot}
                 loading={props.slotsLoading}
                 uiVariant={v}
+                slotHhBadgeForSlot={props.slotHhBadgeForSlot}
                 discountHintForSlot={props.discountHintForSlot}
               />
             )}
@@ -372,6 +390,22 @@ export function MasterPublicBookingPresentational(props: MasterPublicBookingPres
 
         {props.selectedService && props.selectedDate && props.selectedSlot ? (
           <>
+            {props.discountAppliedExplain ? (
+              <View
+                style={[
+                  s.tonalBanner,
+                  {
+                    marginTop: 18,
+                    marginBottom: 10,
+                    borderLeftWidth: 3,
+                    borderLeftColor: t.colors.primary,
+                  },
+                ]}
+              >
+                <Text style={s.tonalBannerTitle}>{props.discountAppliedExplain.title}</Text>
+                <Text style={s.tonalBannerSub}>{props.discountAppliedExplain.subtitle}</Text>
+              </View>
+            ) : null}
             <View style={s.summarySpacer} />
             <View style={s.summaryBox}>
               <Text style={[t.font.caption, s.summaryHeading]}>Итог записи</Text>
@@ -457,12 +491,10 @@ export function MasterPublicBookingPresentational(props: MasterPublicBookingPres
               <ConfirmSummarySection
                 heading="Детали записи"
                 rows={props.guestAuthSheet.summaryRows}
-                variant="guest"
               />
               <ConfirmSummarySection
                 heading="Стоимость"
                 rows={props.guestAuthSheet.priceRows ?? []}
-                variant="guest"
               />
             </ScrollView>
             <View style={modalStyles.sheetActions}>
@@ -488,62 +520,6 @@ export function MasterPublicBookingPresentational(props: MasterPublicBookingPres
         </Pressable>
       </Modal>
 
-      <Modal visible={props.loggedInConfirm.visible} transparent animationType="fade">
-        <Pressable style={modalStyles.overlayDim} onPress={props.loggedInConfirm.onClose}>
-          <Pressable
-            style={[
-              modalStyles.cardCenter,
-              v === 'android' && { borderWidth: 1, borderColor: '#dfe7df', elevation: 4 },
-              v === 'ios' && {
-                shadowColor: '#1b2c1d',
-                shadowOffset: { width: 0, height: 8 },
-                shadowOpacity: 0.12,
-                shadowRadius: 20,
-              },
-            ]}
-            onPress={(e) => e.stopPropagation()}
-          >
-            <ScrollView
-              style={modalStyles.cardScroll}
-              contentContainerStyle={modalStyles.cardScrollContent}
-              keyboardShouldPersistTaps="handled"
-              bounces={false}
-              showsVerticalScrollIndicator={false}
-            >
-              <Text style={modalStyles.title}>Подтвердить запись?</Text>
-              <ConfirmSummarySection
-                heading="Детали записи"
-                rows={props.loggedInConfirm.summaryRows}
-                variant="loggedIn"
-              />
-              <ConfirmSummarySection
-                heading="Стоимость"
-                rows={props.loggedInConfirm.priceRows ?? []}
-                variant="loggedIn"
-              />
-            </ScrollView>
-            <View style={modalStyles.cardActions}>
-              <TouchableOpacity
-                style={[modalStyles.primary, { marginTop: 0 }]}
-                onPress={props.loggedInConfirm.onConfirm}
-                disabled={props.loggedInConfirm.submitting}
-              >
-                {props.loggedInConfirm.submitting ? (
-                  <ActivityIndicator color="#fff" />
-                ) : (
-                  <Text style={modalStyles.primaryText}>Подтвердить запись</Text>
-                )}
-              </TouchableOpacity>
-              <TouchableOpacity style={modalStyles.secondaryOutlineMuted} onPress={props.loggedInConfirm.onChangeTime}>
-                <Text style={modalStyles.secondaryOutlineMutedText}>Изменить время</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={modalStyles.tertiary} onPress={props.loggedInConfirm.onClose}>
-                <Text style={modalStyles.tertiaryText}>Отмена</Text>
-              </TouchableOpacity>
-            </View>
-          </Pressable>
-        </Pressable>
-      </Modal>
     </View>
   );
 }
@@ -601,15 +577,6 @@ const modalStyles = StyleSheet.create({
     paddingHorizontal: 16,
     marginBottom: 14,
   },
-  loggedSummaryBox: {
-    backgroundColor: '#f7faf7',
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#e3ebe4',
-    paddingVertical: 14,
-    paddingHorizontal: 14,
-    marginBottom: 12,
-  },
   sectionHeading: {
     fontSize: 11,
     fontWeight: '800',
@@ -656,46 +623,6 @@ const modalStyles = StyleSheet.create({
     marginBottom: 14,
   },
   secondaryOutlineText: { color: '#2b7b34', fontSize: 16, fontWeight: '800' },
-  secondaryOutlineMuted: {
-    minHeight: 48,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#dfe7df',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 12,
-    backgroundColor: '#fafcfa',
-  },
-  secondaryOutlineMutedText: { color: '#495549', fontSize: 15, fontWeight: '700' },
   tertiary: { paddingVertical: 16, alignItems: 'center' },
   tertiaryText: { fontSize: 15, fontWeight: '600', color: '#7a857b' },
-  overlayDim: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'center',
-    padding: 24,
-  },
-  cardCenter: {
-    backgroundColor: '#fff',
-    borderRadius: 22,
-    paddingHorizontal: 20,
-    paddingTop: 20,
-    paddingBottom: 16,
-    maxWidth: 400,
-    width: '100%',
-    maxHeight: '88%',
-    alignSelf: 'center',
-  },
-  cardScroll: {
-    maxHeight: 340,
-  },
-  cardScrollContent: {
-    paddingBottom: 8,
-  },
-  cardActions: {
-    paddingTop: 18,
-    marginTop: 4,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: '#e3ebe4',
-  },
 });

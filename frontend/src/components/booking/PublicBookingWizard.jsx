@@ -243,13 +243,13 @@ function lastBookingSuccessMatchesSlot(rec, serviceId, slot) {
 }
 
 const LOYALTY_HINT_TITLE_BY_TYPE = {
-  birthday: 'Скидка ко дню рождения',
-  first_visit: 'Скидка на первый визит',
-  returning_client: 'Скидка для возвращающегося клиента',
-  regular_visits: 'Скидка для постоянного клиента',
-  service_discount: 'Скидка на выбранную услугу',
+  birthday: 'День рождения',
+  first_visit: 'Первый визит',
+  returning_client: 'Скидка за возвращение',
+  regular_visits: 'Постоянный клиент',
+  service_discount: 'Скидка на услугу',
   personal: 'Персональная скидка',
-  happy_hours: 'Скидка в счастливые часы',
+  happy_hours: 'Счастливые часы',
 }
 
 function formatSuccessBookingDateRu(iso) {

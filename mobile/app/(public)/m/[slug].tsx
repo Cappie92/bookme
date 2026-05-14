@@ -63,6 +63,12 @@ import { resolveBackendUploadUrl } from '@src/utils/resolveBackendUploadUrl';
 import { buildMasterTimezoneDisplayLine } from '@src/utils/masterTimezoneDisplay';
 import { formatPublicAddressLine } from '@src/utils/publicAddressDisplay';
 import { buildGoogleCalendarTemplateUrl } from '@src/utils/googleCalendarUrl';
+import {
+  buildAppliedDiscountExplain,
+  buildDiscountPrefaceFromHint,
+  happyHoursChipLabel,
+  hasHappyHoursVisual,
+} from '@src/utils/publicBookingLoyaltyCopy';
 
 const DAYS_AHEAD = 14;
 const LOAD_PROFILE_WATCHDOG_MS = 10000;
@@ -205,7 +211,6 @@ export default function MasterPublicBookingScreen() {
     detail: BookingSuccessCardDetail | null;
   } | null>(null);
   const [showAuthPrompt, setShowAuthPrompt] = useState(false);
-  const [showLoggedInConfirm, setShowLoggedInConfirm] = useState(false);
   const [pricePreview, setPricePreview] = useState<BookingPricePreview | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [loadTimeout, setLoadTimeout] = useState(false);
@@ -229,6 +234,25 @@ export default function MasterPublicBookingScreen() {
       router.replace('/');
     }
   }, [isAuthenticated, user?.role, router]);
+
+  const navRightMode: 'guest' | 'client' | 'staff' = !isAuthenticated
+    ? 'guest'
+    : String(user?.role ?? '').toLowerCase() === 'client'
+      ? 'client'
+      : 'staff';
+
+  const handleNavRightPress = useCallback(() => {
+    if (!isAuthenticated) {
+      router.push('/login?tab=login&role=client' as any);
+      return;
+    }
+    const role = (user?.role != null ? String(user.role) : '').toLowerCase();
+    if (role === 'client' && slug) {
+      router.push({ pathname: '/client/dashboard', params: { returnTo: `/m/${slug}` } } as any);
+    } else {
+      router.push('/' as any);
+    }
+  }, [isAuthenticated, user?.role, router, slug]);
 
   useEffect(() => {
     if (!__DEV__ || !(env.DEBUG_HTTP || env.DEBUG_LOGS)) return;
@@ -445,14 +469,37 @@ export default function MasterPublicBookingScreen() {
     [slots, profile?.master_timezone]
   );
 
-  const discountHintForSlot = useCallback(
-    (slot: PublicSlot) => {
-      if (!selectedSlot || !pricePreview || pricePreview.discount_amount <= 0.001) return null;
-      if (slot.start_time !== selectedSlot.start_time || slot.end_time !== selectedSlot.end_time) return null;
-      return `−${formatPriceRub(pricePreview.discount_amount)}`;
-    },
-    [selectedSlot, pricePreview]
+  const slotHhBadgeForSlot = useCallback(
+    (slot: PublicSlot) =>
+      happyHoursChipLabel(
+        slot.start_time,
+        profile?.master_timezone || 'Europe/Moscow',
+        profile?.loyalty_visual?.happy_hours ?? []
+      ),
+    [profile?.master_timezone, profile?.loyalty_visual?.happy_hours]
   );
+
+  const discountPreface = React.useMemo(() => {
+    if (!isAuthenticated || !profile || !selectedService || !selectedDate) return null;
+    const hint = eligibility?.loyalty_hint;
+    if (!hint?.active) return null;
+    if (selectedSlot) return null;
+    return buildDiscountPrefaceFromHint(hint, {
+      profileHasHappyHours: hasHappyHoursVisual(profile.loyalty_visual?.happy_hours),
+    });
+  }, [
+    isAuthenticated,
+    profile,
+    selectedService,
+    selectedDate,
+    selectedSlot,
+    eligibility?.loyalty_hint,
+  ]);
+
+  const discountAppliedExplain = React.useMemo(() => {
+    if (!selectedSlot) return null;
+    return buildAppliedDiscountExplain(pricePreview);
+  }, [selectedSlot, pricePreview]);
 
   // Draft: после логина автосоздание только если draft.intent === 'create_after_auth' (confirm flow). Логин из шапки не ставит intent.
   useEffect(() => {
@@ -561,7 +608,7 @@ export default function MasterPublicBookingScreen() {
   };
 
   const executeAuthenticatedBooking = async () => {
-    if (!slug || !selectedService || !selectedSlot) return;
+    if (!slug || !profile || !selectedService || !selectedSlot) return;
     setSubmitting(true);
     try {
       const res = await createPublicBooking(slug, {
@@ -580,7 +627,6 @@ export default function MasterPublicBookingScreen() {
       setSelectedService(null);
       setSelectedDate(null);
       setSelectedSlot(null);
-      setShowLoggedInConfirm(false);
     } catch (e: unknown) {
       const err = e as { response?: { status?: number; data?: { detail?: string } } };
       const msg = err?.response?.data?.detail || 'Не удалось создать запись';
@@ -591,7 +637,7 @@ export default function MasterPublicBookingScreen() {
   };
 
   const prepareGuestDraftAndOpenAuth = async () => {
-    if (!slug || !selectedService || !selectedSlot) return;
+    if (!slug || !profile || !selectedService || !selectedSlot) return;
     const attemptId =
       typeof crypto !== 'undefined' && crypto.randomUUID
         ? crypto.randomUUID()
@@ -629,7 +675,7 @@ export default function MasterPublicBookingScreen() {
       void prepareGuestDraftAndOpenAuth();
       return;
     }
-    setShowLoggedInConfirm(true);
+    void executeAuthenticatedBooking();
   };
 
   const handleAddToCalendar = async () => {
@@ -866,14 +912,6 @@ export default function MasterPublicBookingScreen() {
       slots.filter((s) => s.start_time.startsWith(selectedDate)).length === 0
   );
 
-  const hint = eligibility?.loyalty_hint;
-  const showLoyaltyBanner = Boolean(isAuthenticated && hint?.active);
-  const loyaltyBannerTitle = (hint?.rule_name && String(hint.rule_name).trim()) || 'Доступна скидка';
-  const loyaltyBannerSubtitle =
-    hint?.discount_percent != null
-      ? `До ${Math.round(hint.discount_percent)}%. Итог пересчитывается после выбора услуги и времени.`
-      : 'Итоговая сумма считается после выбора услуги и времени.';
-
   const dateDisplayLabel =
     selectedDate != null
       ? dateOptions.find((d) => d.dateStr === selectedDate)?.displayLabel ?? formatDateForPicker(selectedDate)
@@ -948,14 +986,15 @@ export default function MasterPublicBookingScreen() {
       <MasterPublicBookingPresentational
         insets={insets}
         onBack={handleBack}
+        navRightMode={navRightMode}
+        onNavRightPress={handleNavRightPress}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         diagBlock={diagEl}
         profile={profile}
         avatarUri={avatarUri}
         masterTimezoneLine={masterTimezoneLine}
-        showLoyaltyBanner={showLoyaltyBanner}
-        loyaltyBannerTitle={loyaltyBannerTitle}
-        loyaltyBannerSubtitle={loyaltyBannerSubtitle}
+        discountPreface={discountPreface}
+        discountAppliedExplain={discountAppliedExplain}
         bookingBlocked={Boolean(profile.booking_blocked || eligibility?.booking_blocked)}
         advancePayment={Boolean(profile.requires_advance_payment || eligibility?.requires_advance_payment)}
         pointsLine={pointsLine}
@@ -976,7 +1015,7 @@ export default function MasterPublicBookingScreen() {
         slotsLoading={slotsLoading}
         selectedSlot={selectedSlot}
         onSelectSlot={setSelectedSlot}
-        discountHintForSlot={discountHintForSlot}
+        slotHhBadgeForSlot={slotHhBadgeForSlot}
         mainBookingSummaryRows={mainBookingSummaryRows}
         mainBookingPriceRows={confirmationPriceRows}
         canSubmit={canSubmit}
@@ -999,20 +1038,6 @@ export default function MasterPublicBookingScreen() {
             setShowAuthPrompt(false);
             router.replace('/login?tab=register&role=client' as any);
           },
-        }}
-        loggedInConfirm={{
-          visible: showLoggedInConfirm,
-          onClose: () => setShowLoggedInConfirm(false),
-          onConfirm: () => {
-            void executeAuthenticatedBooking();
-          },
-          onChangeTime: () => {
-            setShowLoggedInConfirm(false);
-            setSelectedSlot(null);
-          },
-          submitting,
-          summaryRows: confirmationSummaryRows,
-          priceRows: confirmationPriceRows,
         }}
       />
 

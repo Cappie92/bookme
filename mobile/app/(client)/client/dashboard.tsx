@@ -3,9 +3,11 @@
  * 4 секции: Будущие записи, Прошедшие записи, Избранные, Мои баллы
  */
 
-import React, { useEffect, useState } from 'react'
-import { View, ScrollView, Text, StyleSheet, RefreshControl, Alert, TouchableOpacity, Linking } from 'react-native'
-import { useRouter } from 'expo-router'
+import React, { useEffect, useState, useLayoutEffect, useMemo } from 'react'
+import { View, ScrollView, Text, StyleSheet, RefreshControl, Alert, TouchableOpacity, Linking, Platform } from 'react-native'
+import { useRouter, useLocalSearchParams } from 'expo-router'
+import { useNavigation } from '@react-navigation/native'
+import { Ionicons } from '@expo/vector-icons'
 import { useAuth } from '@src/auth/AuthContext'
 import { useFavoritesStore } from '@src/stores/favoritesStore'
 import {
@@ -31,9 +33,14 @@ import * as Sharing from 'expo-sharing'
 import { BookingRowPast } from '@src/components/client/BookingRowPast'
 import { FavoriteCard } from '@src/components/client/FavoriteCard'
 import { ClientNoteModal } from '@src/components/client/ClientNoteModal'
+import { sanitizePublicBookingReturnTo } from '@src/utils/sanitizePublicBookingReturnTo'
 
 export default function ClientDashboardScreen() {
   const router = useRouter()
+  const navigation = useNavigation()
+  const params = useLocalSearchParams<{ returnTo?: string | string[] }>()
+  const safeReturnTo = useMemo(() => sanitizePublicBookingReturnTo(params.returnTo), [params.returnTo])
+
   const { user } = useAuth()
   
   // State
@@ -98,6 +105,34 @@ export default function ClientDashboardScreen() {
   useEffect(() => {
     loadData()
   }, [])
+
+  useLayoutEffect(() => {
+    if (!safeReturnTo) {
+      navigation.setOptions({ headerLeft: undefined })
+      return () => {
+        navigation.setOptions({ headerLeft: undefined })
+      }
+    }
+    navigation.setOptions({
+      headerLeft: () => (
+        <TouchableOpacity
+          accessibilityRole="button"
+          accessibilityLabel="Назад к записи"
+          onPress={() => router.replace(safeReturnTo as any)}
+          style={{
+            paddingHorizontal: 8,
+            paddingVertical: 6,
+            marginLeft: Platform.OS === 'ios' ? 4 : 0,
+          }}
+        >
+          <Ionicons name="arrow-back" size={24} color="#111827" />
+        </TouchableOpacity>
+      ),
+    })
+    return () => {
+      navigation.setOptions({ headerLeft: undefined })
+    }
+  }, [navigation, router, safeReturnTo])
 
   const handleToggleFavorite = async (favKey: string, addContext?: { type: 'master'; itemId: number; name: string }) => {
     try {

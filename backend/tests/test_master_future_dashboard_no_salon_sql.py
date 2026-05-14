@@ -94,3 +94,30 @@ def test_master_dashboard_stats_no_salon_join_sql(client, db):
         event.remove(eng, "before_cursor_execute", before_cursor)
 
     assert hits == [], "unexpected SQL touching salons:\n" + "\n---\n".join(hits)
+
+
+def test_client_dashboard_stats_no_salon_join_sql(client, db, test_user):
+    """GET /api/client/dashboard/stats — 200 и нет FROM/JOIN salons в SQL запроса."""
+    hits = []
+    eng = db.get_bind()
+
+    def before_cursor(conn, cursor, statement, parameters, context, executemany):
+        if not statement:
+            return
+        low = " ".join(statement.lower().split())
+        if "from salons" in low or "join salons" in low:
+            hits.append(statement)
+
+    event.listen(eng, "before_cursor_execute", before_cursor)
+    try:
+        headers = _auth_headers(client, test_user.phone, "testpassword")
+        r = client.get("/api/client/dashboard/stats", headers=headers)
+        assert r.status_code == 200, r.text
+        data = r.json()
+        assert "past_bookings" in data
+        assert "future_bookings" in data
+        assert "top_salons" in data
+    finally:
+        event.remove(eng, "before_cursor_execute", before_cursor)
+
+    assert hits == [], "unexpected SQL touching salons:\n" + "\n---\n".join(hits)

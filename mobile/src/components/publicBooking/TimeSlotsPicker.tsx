@@ -15,7 +15,9 @@ interface TimeSlotsPickerProps {
   loading?: boolean;
   /** iOS vs Android визуал чипов */
   uiVariant?: 'ios' | 'android';
-  /** Подпись скидки для слота (например, только для выбранного после price preview) */
+  /** Happy hours: бейдж на слоте до выбора (напр. «−13%»), по `loyalty_visual.happy_hours`. */
+  slotHhBadgeForSlot?: (slot: PublicSlot) => string | null;
+  /** Резерв: не использовать для returning/service и т.п. — только если нужен второй источник. */
   discountHintForSlot?: (slot: PublicSlot) => string | null;
 }
 
@@ -26,6 +28,7 @@ export function TimeSlotsPicker({
   onSelect,
   loading,
   uiVariant = 'android',
+  slotHhBadgeForSlot,
   discountHintForSlot,
 }: TimeSlotsPickerProps) {
   const { width: windowWidth } = useWindowDimensions();
@@ -71,7 +74,10 @@ export function TimeSlotsPicker({
           const isSelected =
             selectedSlot?.start_time === slot.start_time &&
             selectedSlot?.end_time === slot.end_time;
-          const disc = discountHintForSlot?.(slot) ?? null;
+          const hh = slotHhBadgeForSlot?.(slot) ?? null;
+          const legacy = !hh && discountHintForSlot ? discountHintForSlot(slot) : null;
+          const disc = hh ?? legacy;
+          const isHhSlot = !!hh;
           return (
             <TouchableOpacity
               key={`${slot.start_time}-${i}`}
@@ -79,30 +85,33 @@ export function TimeSlotsPicker({
                 styles.chip,
                 { width: chipWidth, maxWidth: chipWidth, flexGrow: 0 },
                 uiVariant === 'android' && styles.chipAndroid,
+                isHhSlot && styles.chipHhHint,
                 isSelected && (uiVariant === 'ios' ? styles.chipSelectedIos : styles.chipSelectedAndroid),
               ]}
               onPress={() => onSelect(slot)}
               activeOpacity={0.7}
             >
-              <Text
-                style={[
-                  styles.chipText,
-                  isSelected && uiVariant === 'ios' && styles.chipTextSelectedIos,
-                ]}
-              >
-                {formatTimeHHMM(slot.start_time)}
-              </Text>
-              {disc ? (
+              <View style={[styles.chipInner, disc ? styles.chipInnerWithBadge : styles.chipInnerSingle]}>
                 <Text
                   style={[
-                    styles.chipDisc,
-                    isSelected && uiVariant === 'ios' && styles.chipDiscSelectedIos,
+                    styles.chipText,
+                    isSelected && uiVariant === 'ios' && styles.chipTextSelectedIos,
                   ]}
-                  numberOfLines={1}
                 >
-                  {disc}
+                  {formatTimeHHMM(slot.start_time)}
                 </Text>
-              ) : null}
+                {disc ? (
+                  <Text
+                    style={[
+                      styles.chipDisc,
+                      isSelected && uiVariant === 'ios' && styles.chipDiscSelectedIos,
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {disc}
+                  </Text>
+                ) : null}
+              </View>
             </TouchableOpacity>
           );
         })}
@@ -114,6 +123,7 @@ export function TimeSlotsPicker({
 const styles = StyleSheet.create({
   container: {
     marginTop: 4,
+    marginBottom: 8,
     marginHorizontal: 16,
   },
   grid: {
@@ -121,19 +131,41 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 8,
   },
+  /** Единая высота всех чипов (как раньше «высокий» вариант со второй строкой). */
   chip: {
+    height: 56,
     backgroundColor: '#fff',
     paddingHorizontal: 8,
-    paddingVertical: 10,
+    paddingVertical: 0,
     borderRadius: 16,
     borderWidth: 1,
     borderColor: '#dfe7df',
+    alignItems: 'stretch',
+    justifyContent: 'center',
+  },
+  chipInner: {
+    flex: 1,
+    width: '100%',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  /** Только время — по центру по вертикали. */
+  chipInnerSingle: {
+    justifyContent: 'center',
+  },
+  /** Время + скидка: блок чуть выше центра чипа. */
+  chipInnerWithBadge: {
+    justifyContent: 'flex-start',
+    paddingTop: 7,
+    paddingBottom: 5,
   },
   chipAndroid: {
     borderRadius: 18,
     borderColor: '#d7e2d7',
+  },
+  chipHhHint: {
+    borderColor: '#8fd49a',
+    backgroundColor: '#f4fbf6',
   },
   chipSelectedIos: {
     borderColor: '#50b95a',
@@ -154,6 +186,7 @@ const styles = StyleSheet.create({
   },
   chipDisc: {
     fontSize: 10,
+    lineHeight: 12,
     color: '#4d8e55',
     marginTop: 2,
     textAlign: 'center',

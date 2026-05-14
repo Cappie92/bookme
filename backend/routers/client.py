@@ -5,8 +5,8 @@ import pytz
 
 from fastapi import APIRouter, Depends, HTTPException, status, Body, Query
 from fastapi.responses import Response, JSONResponse
-from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import func, or_, and_
+from sqlalchemy.orm import Session, joinedload, noload
+from sqlalchemy import func, or_, and_, select
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +29,7 @@ def _parse_optional_client_birth_date(raw: Any) -> Optional[date_type]:
 from auth import get_current_active_user, require_client
 from database import get_db
 from models import (
-    User, Salon, Master, IndieMaster, Service, Booking, 
+    User, Salon, SalonBranch, Master, IndieMaster, Service, Booking,
     BookingStatus, ClientNote, ClientMasterNote, ClientSalonNote, UserRole, ClientFavorite,
     TemporaryBooking, MasterPaymentSettings, AppliedDiscount, GlobalSettings, OwnerType
 )
@@ -1932,6 +1932,7 @@ def get_client_dashboard_stats(
         # Прошедшие записи - записи, которые уже прошли по времени, независимо от статуса
         past_bookings = (
             db.query(Booking)
+            .options(noload(Booking.salon))
             .filter(
                 Booking.client_id == current_user.id,
                 Booking.status != BookingStatus.CANCELLED
@@ -1971,6 +1972,7 @@ def get_client_dashboard_stats(
         # Получаем все записи (не cancelled) для подсчета будущих
         all_bookings = (
             db.query(Booking)
+            .options(noload(Booking.salon))
             .filter(
                 Booking.client_id == current_user.id,
                 Booking.status != BookingStatus.CANCELLED
@@ -2022,18 +2024,26 @@ def get_client_dashboard_stats(
             .all()
         )
         
-        # Получаем названия салонов
-        salon_names = {}
+        # Имя для топа: только salon_branches (без FROM salons — на частичной SQLite нет salons.address).
+        branch_tbl = SalonBranch.__table__
+        salon_names: dict[int, str] = {}
         for salon_id, _ in top_salons:
-            salon = db.query(Salon).filter(Salon.id == salon_id).first()
-            if salon:
-                salon_names[salon_id] = salon.name
-        
+            nm = db.execute(
+                select(branch_tbl.c.name)
+                .where(branch_tbl.c.salon_id == salon_id)
+                .order_by(branch_tbl.c.id)
+                .limit(1)
+            ).scalar_one_or_none()
+            if nm is not None and str(nm).strip():
+                salon_names[salon_id] = str(nm).strip()
+            else:
+                salon_names[salon_id] = "Салон"
+
         top_salons_with_names = [
             {
                 "salon_id": salon_id,
-                "salon_name": salon_names.get(salon_id, "Неизвестный салон"),
-                "booking_count": count
+                "salon_name": salon_names[salon_id],
+                "booking_count": count,
             }
             for salon_id, count in top_salons
         ]
