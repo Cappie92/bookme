@@ -426,7 +426,7 @@ export default function AllBookingsModal({ isOpen, onClose, onConfirmSuccess, in
           start_time: b.start_time || `${b.date || ''}T${b.time || '00:00'}:00`,
         }));
         setItems(bookings);
-        setTotal(data?.total ?? 0);
+        setTotal(data?.total_all ?? data?.total ?? 0);
         setTotalPages(data?.total_pages ?? 0);
       } else {
         const filtersToUse = appliedFilters ?? pastFilters;

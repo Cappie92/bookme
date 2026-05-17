@@ -25,14 +25,21 @@ def cancelled_statuses_tuple() -> tuple[BookingStatus, ...]:
     )
 
 
+def inactive_future_statuses_tuple() -> tuple[BookingStatus, ...]:
+    """Не входят во вкладку «Будущие» (бейдж и основной список дашборда)."""
+    return cancelled_statuses_tuple() + (
+        BookingStatus.COMPLETED,
+        BookingStatus.PAYMENT_EXPIRED,
+    )
+
+
 def active_future_core(now_utc: datetime | None = None) -> Any:
     """Условие по времени и статусу для «активных» будущих (без привязки к владельцу)."""
     now = now_utc or datetime.utcnow()
-    cancelled = cancelled_statuses_tuple()
+    inactive = inactive_future_statuses_tuple()
     return and_(
         Booking.start_time > now,
-        Booking.status.notin_(cancelled),
-        Booking.status != BookingStatus.COMPLETED,
+        Booking.status.notin_(inactive),
     )
 
 

@@ -254,7 +254,10 @@ def get_future_bookings_paginated(
     now_utc = datetime.utcnow()
     request_id = str(uuid.uuid4())[:8]
     from settings import get_settings
-    from utils.master_future_bookings_query import future_bookings_sql_filter
+    from utils.master_future_bookings_query import (
+        active_future_bookings_sql_filter,
+        future_bookings_sql_filter,
+    )
 
     tz_env = get_settings().TZ or ""
     tz_names = time_module.tzname if hasattr(time_module, "tzname") else ("", "")
@@ -265,9 +268,11 @@ def get_future_bookings_paginated(
         )
 
     base_query = db.query(Booking).filter(future_bookings_sql_filter(master, now_utc))
-    
-    # Получаем общее количество ДО применения joinedload (для точности подсчета)
-    total = base_query.count()
+    active_query = db.query(Booking).filter(active_future_bookings_sql_filter(master, now_utc))
+
+    # total — только активные (бейдж «Будущие»); total_all — с отменёнными (пагинация модалки)
+    total = active_query.count()
+    total_all = base_query.count()
     
     # joinedload только service/client — не тянем Salon/SalonBranch.salon (SQLite без salons.address).
     query = (
@@ -374,9 +379,10 @@ def get_future_bookings_paginated(
     return {
         "bookings": result,
         "total": total,
+        "total_all": total_all,
         "page": page,
         "limit": limit,
-        "total_pages": (total + limit - 1) // limit if total > 0 else 0
+        "total_pages": (total_all + limit - 1) // limit if total_all > 0 else 0,
     }
 
 
