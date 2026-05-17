@@ -451,7 +451,7 @@ def ensure_test_salon(
 
     su = User(
         phone=TEST_SALON_PHONE,
-        email=f"{TEST_SALON_PHONE}@test.local",
+        email=f"salon.{TEST_SALON_PHONE.lstrip('+')}@example.com",
         role=UserRole.SALON,
         is_active=True,
         hashed_password=get_password_hash(TEST_SALON_PASSWORD),
@@ -691,7 +691,7 @@ def create_completed_bookings_bulk(
         if not client:
             client = User(
                 phone=item.client_phone,
-                email=f"{item.client_phone}@client.test",
+                email=f"dev.client.{item.client_phone.lstrip('+')}@example.com",
                 role=UserRole.CLIENT,
                 is_active=True,
                 is_verified=True,

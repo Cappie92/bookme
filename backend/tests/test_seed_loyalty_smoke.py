@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """Тесты smoke-seed: admin не трогается, идемпотентность, cleanup только smoke."""
+import argparse
 import os
 import sys
 
@@ -118,3 +119,63 @@ def test_main_without_flag_exits_zero(capsys):
         smoke.main(["--local"])
     assert exc.value.code == 0
     assert "No-op" in capsys.readouterr().out
+
+
+def test_all_smoke_emails_pass_emailstr():
+    result = smoke.verify_smoke_emails()
+    assert result["ok"] is True, result.get("invalid")
+    for email in smoke.ALL_SMOKE_EMAILS:
+        assert "@example.com" in email
+        assert "@test.local" not in email
+
+
+def test_prod_smoke_requires_confirm_flag():
+    with pytest.raises(SystemExit) as exc:
+        smoke.validate_args(
+            argparse.Namespace(
+                enable_smoke_seed=True,
+                local=False,
+                prod_smoke=True,
+                i_understand_this_writes_smoke_data=False,
+                cleanup=False,
+                yes=False,
+                create_past_booking=False,
+                create_active_reserve=False,
+            )
+        )
+    assert exc.value.code == 2
+
+
+def test_loyalty_preview_after_seed(db):
+    smoke.seed_core(db)
+    preview = smoke.verify_loyalty_preview(db)
+    assert preview["ok"] is True, preview.get("checks")
+
+
+def test_users_me_ok_for_smoke_client(client, db):
+    smoke.seed_core(db)
+    r = client.post(
+        "/api/auth/login",
+        json={"phone": smoke.PHONE_CLIENT_POINTS, "password": smoke.SMOKE_PASSWORD},
+    )
+    assert r.status_code == 200, r.text
+    token = r.json()["access_token"]
+    me = client.get("/api/auth/users/me", headers={"Authorization": f"Bearer {token}"})
+    assert me.status_code == 200, me.text
+    assert "@example.com" in me.json()["email"]
+    assert "@test.local" not in me.json()["email"]
+
+
+def test_post_seed_self_check_passes(db):
+    smoke.seed_core(db)
+    report = smoke.run_post_seed_self_check(db)
+    assert report["ok"] is True, report
+
+
+def test_script_does_not_import_destructive_reseed():
+    import scripts.seed_loyalty_smoke as mod
+
+    source = open(mod.__file__, encoding="utf-8").read()
+    assert "import reseed_local_test_data" not in source
+    assert "from scripts.reseed_local_test_data" not in source
+    assert "reset_non_admin_users(" not in source

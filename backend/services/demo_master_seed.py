@@ -147,7 +147,7 @@ def _ensure_client(db: Session, phone: str, name: str) -> User:
     if not client:
         client = User(
             phone=phone,
-            email=f"{phone.replace('+', '')}@demo-client.local",
+            email=f"demo.client.{phone.replace('+', '')}@example.com",
             full_name=name,
             role=UserRole.CLIENT,
             hashed_password=get_password_hash("demo_client_pw"),

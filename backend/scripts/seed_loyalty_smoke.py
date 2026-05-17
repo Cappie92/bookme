@@ -41,9 +41,16 @@ from models import (
     MasterSchedule,
     MasterService,
     Service,
+    Subscription,
+    SubscriptionPlan,
+    SubscriptionReservation,
+    SubscriptionStatus,
+    SubscriptionType,
     User,
     UserRole,
 )
+from constants import duration_months_to_days
+from utils.balance_utils import deposit_balance, get_or_create_user_balance, get_user_available_balance
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
@@ -63,11 +70,19 @@ PHONE_CLIENT_ENABLED = "+79990000902"
 PHONE_MASTER_DISABLED = "+79990000911"
 PHONE_MASTER_ENABLED = "+79990000912"
 
-EMAIL_CLIENT_POINTS = f"loyalty-smoke-client.{SMOKE_TAG}@example.com"
-EMAIL_CLIENT_EMPTY = f"loyalty-smoke-empty.{SMOKE_TAG}@example.com"
-EMAIL_CLIENT_ENABLED = f"loyalty-smoke-enabled-client.{SMOKE_TAG}@example.com"
-EMAIL_MASTER_DISABLED = f"loyalty-smoke-master.{SMOKE_TAG}@example.com"
-EMAIL_MASTER_ENABLED = f"loyalty-smoke-enabled-master.{SMOKE_TAG}@example.com"
+EMAIL_CLIENT_POINTS = "loyalty-smoke-client@example.com"
+EMAIL_CLIENT_EMPTY = "loyalty-smoke-empty@example.com"
+EMAIL_CLIENT_ENABLED = "loyalty-smoke-enabled-client@example.com"
+EMAIL_MASTER_DISABLED = "loyalty-smoke-master@example.com"
+EMAIL_MASTER_ENABLED = "loyalty-smoke-enabled-master@example.com"
+
+ALL_SMOKE_EMAILS = (
+    EMAIL_CLIENT_POINTS,
+    EMAIL_CLIENT_EMPTY,
+    EMAIL_CLIENT_ENABLED,
+    EMAIL_MASTER_DISABLED,
+    EMAIL_MASTER_ENABLED,
+)
 
 SMOKE_CLIENT_PHONES = (
     PHONE_CLIENT_POINTS,
@@ -277,6 +292,286 @@ def _ensure_schedule(db: Session, master_id: int) -> Tuple[int, int]:
         if day_slots:
             days += 1
     return days, slot_rows
+
+
+SMOKE_PLAN_NAME = f"SmokeSeed_{SMOKE_TAG}"
+
+
+def _get_or_create_smoke_subscription_plan(db: Session, preferred_name: str = "Basic") -> SubscriptionPlan:
+    """План только для smoke-мастеров; не меняет существующие планы в каталоге."""
+    plan = (
+        db.query(SubscriptionPlan)
+        .filter(
+            SubscriptionPlan.subscription_type == SubscriptionType.MASTER,
+            SubscriptionPlan.name == SMOKE_PLAN_NAME,
+        )
+        .first()
+    )
+    if plan:
+        return plan
+
+    plan = (
+        db.query(SubscriptionPlan)
+        .filter(
+            SubscriptionPlan.subscription_type == SubscriptionType.MASTER,
+            SubscriptionPlan.is_active == True,
+            SubscriptionPlan.name == preferred_name,
+        )
+        .first()
+    )
+    if plan:
+        return plan
+
+    plan = (
+        db.query(SubscriptionPlan)
+        .filter(
+            SubscriptionPlan.subscription_type == SubscriptionType.MASTER,
+            SubscriptionPlan.is_active == True,
+        )
+        .order_by(SubscriptionPlan.display_order.asc(), SubscriptionPlan.id.asc())
+        .first()
+    )
+    if plan:
+        return plan
+
+    plan = SubscriptionPlan(
+        name=SMOKE_PLAN_NAME,
+        display_name="Smoke test plan",
+        subscription_type=SubscriptionType.MASTER,
+        price_1month=3000.0,
+        price_3months=8000.0,
+        price_6months=15000.0,
+        price_12months=28000.0,
+        is_active=True,
+        display_order=9999,
+    )
+    db.add(plan)
+    db.flush()
+    return plan
+
+
+def _plan_total_price(plan: SubscriptionPlan, duration_months: int) -> float:
+    import math
+
+    if duration_months == 1:
+        monthly = float(plan.price_1month or 0)
+    elif duration_months == 3:
+        monthly = float(plan.price_3months or 0)
+    elif duration_months == 6:
+        monthly = float(plan.price_6months or 0)
+    else:
+        monthly = float(plan.price_12months or 0)
+    return math.ceil(monthly) * duration_months
+
+
+def _ensure_master_subscription_and_balance(
+    db: Session,
+    user: User,
+    *,
+    plan_name: str = "Basic",
+    duration_months: int = 1,
+) -> Dict[str, Any]:
+    """
+    Активная подписка + баланс только для smoke-мастера (не трогает глобальные планы/цены).
+    """
+    import math
+
+    _guard_not_admin(user, "set subscription/balance")
+    plan = _get_or_create_smoke_subscription_plan(db, preferred_name=plan_name)
+    duration_days = duration_months_to_days(duration_months)
+    total_price = _plan_total_price(plan, duration_months)
+    daily_rate = int(math.ceil(total_price / duration_days)) if duration_days else 0
+
+    start_dt = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    end_dt = start_dt + timedelta(days=duration_days)
+
+    for s in (
+        db.query(Subscription)
+        .filter(
+            Subscription.user_id == user.id,
+            Subscription.subscription_type == SubscriptionType.MASTER,
+        )
+        .all()
+    ):
+        s.status = SubscriptionStatus.EXPIRED
+        s.is_active = False
+
+    new_sub = Subscription(
+        user_id=user.id,
+        subscription_type=SubscriptionType.MASTER,
+        status=SubscriptionStatus.ACTIVE,
+        plan_id=plan.id,
+        start_date=start_dt,
+        end_date=end_dt,
+        price=total_price,
+        daily_rate=daily_rate,
+        is_active=True,
+        auto_renewal=False,
+        salon_branches=0,
+        salon_employees=0,
+        master_bookings=0,
+    )
+    db.add(new_sub)
+    db.flush()
+    db.add(
+        SubscriptionReservation(
+            user_id=user.id,
+            subscription_id=new_sub.id,
+            reserved_amount=0.0,
+        )
+    )
+
+    target_balance = max(math.ceil(daily_rate * duration_days * 1.05), total_price * 1.05, 5000.0)
+    ub = get_or_create_user_balance(db, user.id)
+    current = float(ub.balance or 0)
+    delta = target_balance - current
+    if delta > 0:
+        deposit_balance(
+            db,
+            user.id,
+            delta,
+            description=f"[{SMOKE_TAG}] prod-smoke seed balance top-up",
+        )
+    ub = get_or_create_user_balance(db, user.id)
+    return {
+        "plan_name": plan.name,
+        "subscription_id": new_sub.id,
+        "daily_rate": daily_rate,
+        "end_date": end_dt.isoformat(),
+        "balance_rub": float(ub.balance),
+        "available_balance_rub": float(get_user_available_balance(db, user.id)),
+    }
+
+
+def verify_smoke_emails() -> Dict[str, Any]:
+    """Все smoke email должны проходить Pydantic EmailStr (иначе GET /api/auth/users/me → 500)."""
+    from pydantic import EmailStr, TypeAdapter
+
+    adapter = TypeAdapter(EmailStr)
+    invalid: List[str] = []
+    for email in ALL_SMOKE_EMAILS:
+        try:
+            adapter.validate_python(email)
+        except Exception:
+            invalid.append(email)
+    banned = ("@test.local", "@local", "@localhost", ".local", "@client.test")
+    for email in ALL_SMOKE_EMAILS:
+        low = email.lower()
+        if any(b in low for b in banned):
+            invalid.append(email)
+    return {"ok": len(invalid) == 0, "invalid": invalid}
+
+
+def verify_loyalty_preview(db: Session) -> Dict[str, Any]:
+    from utils.public_booking_loyalty import build_public_booking_price_preview_loyalty
+
+    master_dis = db.query(Master).filter(Master.domain == DOMAIN_DISABLED).first()
+    master_en = db.query(Master).filter(Master.domain == DOMAIN_ENABLED).first()
+    client_pts = _get_user_by_phone(db, PHONE_CLIENT_POINTS)
+    client_en = _get_user_by_phone(db, PHONE_CLIENT_ENABLED)
+    if not all([master_dis, master_en, client_pts, client_en]):
+        return {"ok": False, "error": "missing smoke entities for preview check"}
+
+    today = datetime.now(MSK).date() + timedelta(days=2)
+    start = datetime.combine(today, time(10, 0), tzinfo=MSK)
+
+    dis_preview = build_public_booking_price_preview_loyalty(
+        db,
+        master_id=master_dis.id,
+        client_id=client_pts.id,
+        discounted_price=SERVICE_PRICE,
+        use_loyalty_points=True,
+    )
+    en_preview = build_public_booking_price_preview_loyalty(
+        db,
+        master_id=master_en.id,
+        client_id=client_en.id,
+        discounted_price=SERVICE_PRICE,
+        use_loyalty_points=True,
+    )
+
+    checks = {
+        "disabled_old_points": {
+            "available_points": int(dis_preview["available_points"]) == 100,
+            "loyalty_points_to_use": int(dis_preview["loyalty_points_to_use"]) == 100,
+            "amount_to_pay": float(dis_preview["amount_to_pay"]) == 900.0,
+            "use_loyalty_points": bool(dis_preview.get("use_loyalty_points")),
+        },
+        "enabled_max_percent": {
+            "available_points": int(en_preview["available_points"]) == 800,
+            "max_payment_percent": int(en_preview.get("max_payment_percent") or 0) == 50,
+            "loyalty_points_to_use": int(en_preview["loyalty_points_to_use"]) == 500,
+            "amount_to_pay": float(en_preview["amount_to_pay"]) == 500.0,
+        },
+    }
+    ok = all(all(v.values()) for v in checks.values())
+    return {
+        "ok": ok,
+        "checks": checks,
+        "disabled_preview": dis_preview,
+        "enabled_preview": en_preview,
+        "sample_start_time": start.isoformat(),
+    }
+
+
+def verify_public_http() -> Dict[str, Any]:
+    """GET публичных профилей мастеров (200)."""
+    from fastapi.testclient import TestClient
+    from main import app
+
+    client = TestClient(app)
+    out: Dict[str, Any] = {"masters": {}, "ok": True}
+    for domain in SMOKE_DOMAINS:
+        r = client.get(f"/api/public/masters/{domain}")
+        out["masters"][domain] = {"status_code": r.status_code}
+        if r.status_code != 200:
+            out["ok"] = False
+    return out
+
+
+def print_smoke_users_report(db: Session) -> None:
+    print("\n=== Smoke users (password: test123) ===")
+    rows = []
+    for phone in list(SMOKE_CLIENT_PHONES) + list(SMOKE_MASTER_PHONES):
+        u = _get_user_by_phone(db, phone)
+        if not u:
+            print(f"  MISSING phone={phone}")
+            continue
+        rows.append(u)
+        print(
+            f"  id={u.id} role={u.role.value if hasattr(u.role, 'value') else u.role} "
+            f"phone={u.phone!r} email={u.email!r}"
+        )
+    if not rows:
+        print("  (no smoke users found)")
+
+
+def run_post_seed_self_check(db: Session) -> Dict[str, Any]:
+    """Полный self-check; при ошибке ok=False."""
+    report: Dict[str, Any] = {"ok": True, "sections": {}}
+
+    email_chk = verify_smoke_emails()
+    report["sections"]["emails"] = email_chk
+    if not email_chk["ok"]:
+        report["ok"] = False
+
+    http_chk = verify_public_http()
+    report["sections"]["public_http"] = http_chk
+    if not http_chk["ok"]:
+        report["ok"] = False
+
+    avail = verify_public_availability(db)
+    report["sections"]["availability"] = avail
+    if avail.get("any_zero"):
+        report["ok"] = False
+
+    preview = verify_loyalty_preview(db)
+    report["sections"]["loyalty_preview"] = preview
+    if not preview.get("ok"):
+        report["ok"] = False
+
+    print_smoke_users_report(db)
+    return report
 
 
 def verify_public_availability(db: Session) -> Dict[str, Any]:
@@ -565,6 +860,7 @@ def seed_core(db: Session) -> Dict[str, Any]:
         db, master_dis.id, is_enabled=False, max_payment_percent=None, accrual_percent=10
     )
     _set_earned_points(db, master_id=master_dis.id, client_id=client_pts.id, points=100)
+    sub_dis = _ensure_master_subscription_and_balance(db, mu_dis, plan_name="Basic")
 
     mu_en = _upsert_master_user(
         db,
@@ -582,6 +878,7 @@ def seed_core(db: Session) -> Dict[str, Any]:
         db, master_en.id, is_enabled=True, max_payment_percent=50, accrual_percent=10
     )
     _set_earned_points(db, master_id=master_en.id, client_id=client_en.id, points=800)
+    sub_en = _ensure_master_subscription_and_balance(db, mu_en, plan_name="Basic")
 
     db.commit()
 
@@ -594,6 +891,8 @@ def seed_core(db: Session) -> Dict[str, Any]:
             "schedule_days_ensured": sched_dis_days,
             "schedule_slot_rows": sched_dis_slots,
             "login_phone": PHONE_MASTER_DISABLED,
+            "email": EMAIL_MASTER_DISABLED,
+            "subscription": sub_dis,
         },
         "enabled_master": {
             "domain": DOMAIN_ENABLED,
@@ -603,15 +902,23 @@ def seed_core(db: Session) -> Dict[str, Any]:
             "schedule_days_ensured": sched_en_days,
             "schedule_slot_rows": sched_en_slots,
             "login_phone": PHONE_MASTER_ENABLED,
+            "email": EMAIL_MASTER_ENABLED,
+            "subscription": sub_en,
         },
         "client_with_points": {
             "phone": PHONE_CLIENT_POINTS,
+            "email": EMAIL_CLIENT_POINTS,
             "client_id": client_pts.id,
             "points": 100,
         },
-        "client_empty": {"phone": PHONE_CLIENT_EMPTY, "client_id": client_empty.id},
+        "client_empty": {
+            "phone": PHONE_CLIENT_EMPTY,
+            "email": EMAIL_CLIENT_EMPTY,
+            "client_id": client_empty.id,
+        },
         "client_enabled_master": {
             "phone": PHONE_CLIENT_ENABLED,
+            "email": EMAIL_CLIENT_ENABLED,
             "client_id": client_en.id,
             "points": 800,
         },
@@ -917,6 +1224,11 @@ def validate_args(args: argparse.Namespace) -> None:
             file=sys.stderr,
         )
         sys.exit(2)
+    if args.prod_smoke:
+        print(
+            "Prod-smoke mode: only LOYALTY_SMOKE_2026_05 tagged phones/domains; "
+            "no reset_non_admin_users / no full reseed."
+        )
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
@@ -947,18 +1259,26 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             print("\n=== Active reserve booking ===")
             print(f"  {res}")
 
-        avail = verify_public_availability(db)
-        print("\n=== Availability self-check ===")
-        for domain, info in avail.get("masters", {}).items():
-            print(
-                f"  {domain}: slots={info.get('slots_count_next_14_days')} "
-                f"first={info.get('first_available_date')} sample={info.get('sample_slots')}"
-            )
-        if avail.get("any_zero"):
-            print(
-                "\n[FAIL] Нет bookable-слотов — проверьте MasterSchedule (30-мин строки).",
-                file=sys.stderr,
-            )
+        self_check = run_post_seed_self_check(db)
+        print("\n=== Self-check summary ===")
+        for section, data in self_check.get("sections", {}).items():
+            ok_flag = data.get("ok", not data.get("any_zero"))
+            if section == "availability":
+                ok_flag = not data.get("any_zero")
+            print(f"  {section}: {'OK' if ok_flag else 'FAIL'}")
+            if section == "availability":
+                for domain, info in data.get("masters", {}).items():
+                    print(
+                        f"    {domain}: slots={info.get('slots_count_next_14_days')} "
+                        f"first={info.get('first_available_date')} sample={info.get('sample_slots')}"
+                    )
+            if section == "loyalty_preview" and not data.get("ok"):
+                print(f"    checks={data.get('checks')}")
+            if section == "emails" and not data.get("ok"):
+                print(f"    invalid={data.get('invalid')}")
+
+        if not self_check.get("ok"):
+            print("\n[FAIL] Post-seed self-check failed.", file=sys.stderr)
             return 1
 
         print_seed_report(db, report)

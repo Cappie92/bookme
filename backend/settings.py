@@ -74,7 +74,7 @@ class Settings(BaseSettings):
     # --- Demo master ---
     # Не использовать +79990000000…+79990000009: они заняты reseed_local_test_data (MASTER_PHONES).
     DEMO_MASTER_PHONE: str = "+79990009999"
-    DEMO_MASTER_EMAIL: str = "demo-master@dedato.local"
+    DEMO_MASTER_EMAIL: str = "demo-master@example.com"
     DEMO_MASTER_NAME: str = "Демо мастер DeDato"
 
     # --- Payments (Robokassa) ---

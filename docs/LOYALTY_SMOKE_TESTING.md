@@ -15,8 +15,10 @@
 - Без `--enable-smoke-seed` скрипт **ничего не меняет** (exit 0, сообщение No-op).
 - Пользователи с `role=ADMIN` **только логируются**, не обновляются и не удаляются.
 - Cleanup вызывает `AdminProtectionError`, если кандидат на удаление — ADMIN.
-- Нет `truncate` / `drop` / общего reseed.
+- Нет `truncate` / `drop` / общего reseed и **нет** `reset_non_admin_users` на production.
+- Email smoke-аккаунтов только на **`@example.com`** (валидны для Pydantic `EmailStr`; **не** использовать `@test.local`, `@localhost`, `*.local`).
 - Все smoke-сущности помечены тегом `LOYALTY_SMOKE_2026_05` (email, `loyalty_transactions.source`, `booking.notes`, domain).
+- Для smoke-мастеров выставляются **активная подписка (Basic)** и **баланс** (только их user_id).
 
 ## Создаваемые данные
 
@@ -24,9 +26,10 @@
 |----------|----------------|
 | Мастер (loyalty **выкл.**) | domain `loyalty-smoke-master`, login `+79990000911` |
 | Мастер (loyalty **вкл.**) | domain `loyalty-smoke-enabled-master`, login `+79990000912` |
-| Клиент с баллами | `+79990000901`, 100 earned у disabled-мастера |
-| Клиент без баллов | `+79990000900` |
-| Клиент enabled-мастера | `+79990000902`, 800 earned |
+| Клиент с баллами | `+79990000901`, `loyalty-smoke-client@example.com`, 100 earned у disabled-мастера |
+| Клиент без баллов | `+79990000900`, `loyalty-smoke-empty@example.com` |
+| Клиент enabled-мастера | `+79990000902`, `loyalty-smoke-enabled-client@example.com`, 800 earned |
+| Email мастеров | `loyalty-smoke-master@example.com`, `loyalty-smoke-enabled-master@example.com` |
 | Услуга | «Стрижка smoke» — 1000 ₽, 60 мин |
 | Расписание | 15 дней вперёд, 08:00–20:00 MSK, **слоты по 30 мин** (иначе публичная запись покажет «Нет свободных дат») |
 | `loyalty_settings` (disabled) | `is_enabled=false`, `max_payment_percent=NULL` |
@@ -75,13 +78,89 @@ python3 scripts/seed_loyalty_smoke.py --cleanup --enable-smoke-seed --local
 python3 scripts/seed_loyalty_smoke.py --cleanup --enable-smoke-seed --local --yes
 ```
 
-## Prod / stage smoke
+## Prod smoke
+
+**Не запускайте** на production:
+
+- `reseed_local_test_data.py` (полный reseed / `reset_non_admin_users`);
+- любые dev-only reset/truncate.
+
+**Можно** (только smoke-телефоны `+799900009xx` и домены `loyalty-smoke-*`):
+
+Обязательные флаги: `--prod-smoke` + `--enable-smoke-seed` + `--i-understand-this-writes-smoke-data`.
+
+После seed скрипт выполняет self-check (публичные страницы 200, слоты > 0, preview баллов, валидность email). При ошибке exit code **1**.
+
+### Команды на prod (Docker)
+
+Базовый prod-smoke seed:
 
 ```bash
-python3 scripts/seed_loyalty_smoke.py --prod-smoke --enable-smoke-seed --i-understand-this-writes-smoke-data
-python3 scripts/seed_loyalty_smoke.py --prod-smoke --enable-smoke-seed --i-understand-this-writes-smoke-data --create-past-booking --create-active-reserve
+docker-compose -f docker-compose.prod.yml exec -T backend sh -lc \
+  'cd /app && python3 scripts/prod_smoke_seed.py --prod-smoke --enable-smoke-seed --i-understand-this-writes-smoke-data'
+```
 
-python3 scripts/seed_loyalty_smoke.py --cleanup --prod-smoke --enable-smoke-seed --i-understand-this-writes-smoke-data --yes
+То же через `seed_loyalty_smoke.py`:
+
+```bash
+docker-compose -f docker-compose.prod.yml exec -T backend sh -lc \
+  'cd /app && python3 scripts/seed_loyalty_smoke.py --prod-smoke --enable-smoke-seed --i-understand-this-writes-smoke-data'
+```
+
+С прошлой записью (confirm / spent):
+
+```bash
+docker-compose -f docker-compose.prod.yml exec -T backend sh -lc \
+  'cd /app && python3 scripts/prod_smoke_seed.py --prod-smoke --enable-smoke-seed --i-understand-this-writes-smoke-data --create-past-booking'
+```
+
+С активным резервом на будущую запись:
+
+```bash
+docker-compose -f docker-compose.prod.yml exec -T backend sh -lc \
+  'cd /app && python3 scripts/prod_smoke_seed.py --prod-smoke --enable-smoke-seed --i-understand-this-writes-smoke-data --create-active-reserve'
+```
+
+Cleanup **dry-run** (ничего не удаляет):
+
+```bash
+docker-compose -f docker-compose.prod.yml exec -T backend sh -lc \
+  'cd /app && python3 scripts/seed_loyalty_smoke.py --cleanup --prod-smoke --enable-smoke-seed --i-understand-this-writes-smoke-data'
+```
+
+Cleanup **выполнить** (только smoke-tagged данные):
+
+```bash
+docker-compose -f docker-compose.prod.yml exec -T backend sh -lc \
+  'cd /app && python3 scripts/seed_loyalty_smoke.py --cleanup --prod-smoke --enable-smoke-seed --i-understand-this-writes-smoke-data --yes'
+```
+
+### URL на prod
+
+- https://dedato.ru/m/loyalty-smoke-master — loyalty **выкл.**, клиент `+79990000901` (100 баллов)
+- https://dedato.ru/m/loyalty-smoke-enabled-master — loyalty **вкл.**, max 50%, клиент `+79990000902` (800 баллов)
+
+Пароль всех smoke-аккаунтов: **`test123`**.
+
+### Сценарии после prod-smoke
+
+1. Public booking: старые баллы при выключенной программе → preview/запись **900 ₽**, резерв **100**.
+2. Отмена записи → резерв возвращается на баланс.
+3. Confirm мастером → `spent` в `loyalty_transactions`; earned **нет** (программа выкл.).
+4. ЛК клиента: история баллов, прошлые записи с «Баллами: −100 ₽».
+5. ЛК мастера: real money **900 ₽** после confirm.
+6. Enabled master: списание до **500** (50% от 1000), к оплате **500 ₽**.
+7. Mobile: те же сценарии на `/m/loyalty-smoke-master`.
+
+### Проверка email (локально / в контейнере)
+
+```bash
+cd backend && python3 -c "
+from scripts.seed_loyalty_smoke import verify_smoke_emails, ALL_SMOKE_EMAILS
+r = verify_smoke_emails()
+assert r['ok'], r
+print('OK:', ALL_SMOKE_EMAILS)
+"
 ```
 
 ## Ручные сценарии
