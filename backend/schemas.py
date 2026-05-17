@@ -675,7 +675,14 @@ class PublicBookingCreateOut(BaseModel):
     base_price: Optional[float] = None
     discount_percent: Optional[float] = None
     discount_amount: float = 0.0
-    final_price: Optional[float] = None
+    discounted_price: Optional[float] = Field(
+        None, description="Цена после скидки (до баллов), совпадает с payment_amount в БД"
+    )
+    loyalty_points_used: int = Field(0, description="Зарезервировано баллами (1 балл = 1 ₽)")
+    final_price: Optional[float] = Field(
+        None,
+        description="К оплате деньгами после баллов (max(0, discounted_price - loyalty_points_used))",
+    )
     rule_name: Optional[str] = None
     condition_type: Optional[str] = None
 
@@ -832,7 +839,12 @@ class BookingFutureShortCanon(BaseModel):
     salon_name: Optional[str] = None
     master_name: str
     service_name: str
-    price: float
+    price: float  # К оплате деньгами (amount_to_pay), обратная совместимость
+    payment_amount: float = Field(
+        0.0, description="Сумма после скидки до списания баллов"
+    )
+    loyalty_points_used: int = Field(0, description="Зарезервировано баллами (1 балл = 1 ₽)")
+    amount_to_pay: float = Field(0.0, description="К оплате деньгами: max(0, payment_amount - loyalty_points_used)")
     duration: int
     date: datetime
     start_time: datetime
@@ -885,7 +897,12 @@ class BookingPastShortCanon(BaseModel):
     salon_name: Optional[str] = None
     master_name: str
     service_name: str
-    price: float
+    price: float  # К оплате деньгами (amount_to_pay), обратная совместимость
+    payment_amount: float = Field(
+        0.0, description="Сумма после скидки до списания баллов"
+    )
+    loyalty_points_used: int = Field(0, description="Зарезервировано баллами (1 балл = 1 ₽)")
+    amount_to_pay: float = Field(0.0, description="К оплате деньгами: max(0, payment_amount - loyalty_points_used)")
     duration: int
     date: datetime
     start_time: datetime
@@ -2890,13 +2907,16 @@ class ClientLoyaltyPointsOut(BaseModel):
     master_id: int
     master_name: str
     master_domain: Optional[str] = None
-    balance: int  # Текущий баланс
+    balance: int  # Доступно к списанию (ledger минус активные резервы)
+    reserved_points: int = Field(0, description="Зарезервировано на активных записях")
+    ledger_balance: int = Field(0, description="Баланс в ledger без учёта резервов")
     transactions: List[LoyaltyTransactionOut] = []
 
 
 class ClientLoyaltyPointsSummaryOut(BaseModel):
     masters: List[ClientLoyaltyPointsOut]
-    total_balance: int  # Общий баланс по всем мастерам
+    total_balance: int  # Сумма доступных баллов по всем мастерам
+    total_reserved: int = Field(0, description="Сумма зарезервированных баллов")
 
 
 class AvailableLoyaltyPointsOut(BaseModel):

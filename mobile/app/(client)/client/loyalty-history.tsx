@@ -1,57 +1,56 @@
 /**
- * LoyaltyHistoryScreen - история транзакций лояльности
- * Может показывать историю конкретного мастера (если передан masterId)
- * или список всех мастеров для выбора
+ * История транзакций лояльности (по мастеру или сводно по всем мастерам из /points).
  */
 
 import React, { useEffect, useState } from 'react'
-import { View, ScrollView, Text, StyleSheet, RefreshControl, Alert } from 'react-native'
+import { View, ScrollView, Text, StyleSheet, RefreshControl, ActivityIndicator } from 'react-native'
 import { useLocalSearchParams } from 'expo-router'
-import { getLoyaltyHistory, LoyaltyTransaction, getClientLoyaltyPoints } from '@src/services/api/clientDashboard'
+import { getLoyaltyHistory, LoyaltyTransaction } from '@src/services/api/clientDashboard'
 import { formatDateTimeShort } from '@src/utils/clientDashboard'
 
-// Components
 import { ScreenContainer } from '@src/components/ScreenContainer'
 
 export default function LoyaltyHistoryScreen() {
   const params = useLocalSearchParams<{ masterId?: string; masterName?: string }>()
-  
+
   const [transactions, setTransactions] = useState<LoyaltyTransaction[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
-  
-  const masterId = params.masterId ? Number(params.masterId) : null
-  const masterName = params.masterName || 'История'
-  
+
+  const masterId =
+    params.masterId != null && String(params.masterId).trim() !== ''
+      ? Number(params.masterId)
+      : null
+  const masterIdOk = masterId != null && !Number.isNaN(masterId) ? masterId : null
+
+  const masterNameSubtitle =
+    typeof params.masterName === 'string' && params.masterName.trim().length > 0
+      ? params.masterName.trim()
+      : ''
+
   const loadData = async () => {
-    if (!masterId) {
-      // Если нет masterId — показываем пустое состояние или список мастеров
-      // Для простоты сейчас просто пустое состояние
-      return
-    }
-    
     try {
       setIsLoading(true)
-      const data = await getLoyaltyHistory(masterId)
+      const data = await getLoyaltyHistory(masterIdOk)
       setTransactions(data)
     } catch (error) {
       if (__DEV__) console.error('[LoyaltyHistory] Ошибка загрузки:', error)
-      Alert.alert('Ошибка', 'Не удалось загрузить историю')
+      setTransactions([])
     } finally {
       setIsLoading(false)
     }
   }
-  
+
   const onRefresh = async () => {
     setRefreshing(true)
     await loadData()
     setRefreshing(false)
   }
-  
+
   useEffect(() => {
     loadData()
-  }, [masterId])
-  
+  }, [masterIdOk])
+
   return (
     <ScreenContainer>
       <ScrollView
@@ -61,18 +60,30 @@ export default function LoyaltyHistoryScreen() {
         }
       >
         <View style={styles.content}>
-          <Text style={styles.title}>История: {masterName}</Text>
-          
-          {transactions.length === 0 ? (
+          {masterNameSubtitle ? (
+            <Text style={styles.subtitle} numberOfLines={2}>
+              {masterNameSubtitle}
+            </Text>
+          ) : (
+            <Text style={styles.subtitleMuted}>Все мастера</Text>
+          )}
+
+          {isLoading && transactions.length === 0 ? (
+            <View style={styles.loadingBox}>
+              <ActivityIndicator color="#16a34a" />
+            </View>
+          ) : transactions.length === 0 ? (
             <View style={styles.emptyContainer}>
               <Text style={styles.emptyText}>Нет транзакций</Text>
             </View>
           ) : (
             <View style={styles.card}>
-              {transactions.map(tx => {
+              {transactions.map((tx) => {
                 const isEarned = tx.transaction_type === 'earned'
                 const displayPoints = isEarned ? tx.points : -tx.points
-                const reasonText = tx.service_name || (isEarned ? 'Начисление' : 'Списание')
+                const reasonText =
+                  tx.service_name ||
+                  (isEarned ? 'Начисление баллов' : 'Списание баллов (оплата записи)')
                 return (
                   <View key={tx.id} style={styles.transactionRow}>
                     <View style={styles.transactionInfo}>
@@ -83,12 +94,15 @@ export default function LoyaltyHistoryScreen() {
                         {formatDateTimeShort(tx.earned_at ?? tx.created_at)}
                       </Text>
                     </View>
-                    
-                    <Text style={[
-                      styles.transactionAmount,
-                      isEarned ? styles.amountPositive : styles.amountNegative
-                    ]}>
-                      {displayPoints > 0 ? '+' : ''}{displayPoints}
+
+                    <Text
+                      style={[
+                        styles.transactionAmount,
+                        isEarned ? styles.amountPositive : styles.amountNegative,
+                      ]}
+                    >
+                      {displayPoints > 0 ? '+' : ''}
+                      {displayPoints} б.
                     </Text>
                   </View>
                 )
@@ -109,11 +123,20 @@ const styles = StyleSheet.create({
   content: {
     padding: 16,
   },
-  title: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: '#111827',
-    marginBottom: 16,
+  subtitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#374151',
+    marginBottom: 12,
+  },
+  subtitleMuted: {
+    fontSize: 14,
+    color: '#9ca3af',
+    marginBottom: 12,
+  },
+  loadingBox: {
+    padding: 24,
+    alignItems: 'center',
   },
   card: {
     backgroundColor: '#ffffff',

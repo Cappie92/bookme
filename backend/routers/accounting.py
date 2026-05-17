@@ -11,7 +11,7 @@ from openpyxl.styles import Font, PatternFill, Alignment
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
-from sqlalchemy import func, desc, and_, or_
+from sqlalchemy import func, desc, and_, or_, case
 
 from database import get_db
 from models import (
@@ -19,8 +19,10 @@ from models import (
     Service, BookingStatus, TaxRate, MasterClientMetadata
 )
 from auth import get_current_active_user
+from utils.booking_loyalty_reserve import clear_loyalty_points_reserve
 from utils.client_display_name import get_client_display_name, get_meta_for_client, strip_indie_service_prefix
 from utils.subscription_features import has_finance_access
+from utils.booking_real_money import booking_amount_to_pay, booking_money_api_fields, booking_real_money_sql
 
 router = APIRouter(prefix="/api/master/accounting", tags=["accounting"])
 
@@ -146,44 +148,34 @@ async def update_booking_status(
             booking.status = BookingStatus.AWAITING_CONFIRMATION
         elif new_status == "cancelled":
             booking.status = BookingStatus.CANCELLED
+            clear_loyalty_points_reserve(booking)
             if cancellation_reason:
                 booking.cancellation_reason = cancellation_reason
                 booking.cancelled_by_user_id = current_user.id
         elif new_status == "client_requested_early":
             booking.status = BookingStatus.CANCELLED_BY_CLIENT_EARLY
+            clear_loyalty_points_reserve(booking)
             booking.cancellation_reason = "client_requested"
             booking.cancelled_by_user_id = booking.client_id  # Клиент отменил сам
         elif new_status == "client_requested_late":
             booking.status = BookingStatus.CANCELLED_BY_CLIENT_LATE
+            clear_loyalty_points_reserve(booking)
             booking.cancellation_reason = "client_requested"
             booking.cancelled_by_user_id = booking.client_id  # Клиент отменил сам
         elif new_status == "completed":
-            booking.status = BookingStatus.COMPLETED
-            # Создаем подтверждение и доход при необходимости
-            existing_confirmation = db.query(BookingConfirmation).filter(
-                BookingConfirmation.booking_id == booking_id
-            ).first()
-            if not existing_confirmation:
-                confirmation = BookingConfirmation(
-                    booking_id=booking_id,
-                    master_id=master_user_id,
-                    confirmed_income=booking.payment_amount or 0
-                )
-                db.add(confirmation)
+            from services.booking_visit_finalize import finalize_post_visit_booking
 
-            existing_income = db.query(Income).filter(Income.booking_id == booking_id).first()
-            if not existing_income:
-                income = Income(
-                    # Income.indie_master_id -> FK на indie_masters.id (не masters.id)
-                    indie_master_id=None,
-                    booking_id=booking_id,
-                    total_amount=booking.payment_amount or 0,
-                    master_earnings=booking.payment_amount or 0,
-                    salon_earnings=0,
-                    income_date=datetime.utcnow().date(),
-                    service_date=booking.start_time.date()
+            master_row_id = get_master_id_from_user(current_user.id, db)
+            try:
+                finalize_post_visit_booking(
+                    db,
+                    booking=booking,
+                    master_row_id=master_row_id,
+                    master_user_id=master_user_id,
+                    require_past_start=False,
                 )
-                db.add(income)
+            except ValueError as ve:
+                raise HTTPException(status_code=400, detail=str(ve)) from ve
 
         db.commit()
         return {"message": "Статус записи обновлен", "booking_id": booking_id, "new_status": new_status}
@@ -248,7 +240,7 @@ def auto_confirm_awaiting_on_manual_switch(db: Session, user_id: int) -> int:
         confirmation = BookingConfirmation(
             booking_id=booking.id,
             master_id=master_user_id,
-            confirmed_income=booking.payment_amount or 0
+            confirmed_income=booking_amount_to_pay(booking.payment_amount, booking.loyalty_points_used),
         )
         db.add(confirmation)
         booking.status = BookingStatus.COMPLETED
@@ -760,9 +752,9 @@ async def get_accounting_summary(
         # Ожидаемые доходы: ещё без строки BookingConfirmation (как pending-стек dashboard/stats:
         # created / confirmed / awaiting_confirmation).
         expected_incomes = db.query(
-            func.sum(Booking.payment_amount).label("total_expected_income"),
-            func.date(Booking.start_time).label("date")
-        ).filter(
+            func.sum(booking_real_money_sql(Booking, Service, func, case, and_)).label("total_expected_income"),
+            func.date(Booking.start_time).label("date"),
+        ).outerjoin(Service, Booking.service_id == Service.id).filter(
             owner_expected,
             Booking.start_time >= start_date,
             Booking.start_time <= end_date,
@@ -897,7 +889,7 @@ async def get_pending_confirmations(
                 "service_name": svc_name,
                 "date": booking.start_time.date(),
                 "start_time": booking.start_time,
-                "payment_amount": booking.payment_amount,
+                **booking_money_api_fields(booking),
                 "status": booking.status,
             })
             logger.info(
@@ -963,115 +955,39 @@ async def confirm_booking(
                 detail="Нельзя подтвердить будущую запись. Подтверждение доступно после времени начала.",
             )
         
-        # Проверяем, не подтверждено ли уже
-        existing_confirmation = db.query(BookingConfirmation).filter(
-            BookingConfirmation.booking_id == booking_id
-        ).first()
-        
-        if existing_confirmation:
-            return {
-                "message": "Услуга уже подтверждена",
-                "confirmed_income": existing_confirmation.confirmed_income,
-            }
-        
-        # Обработка баллов лояльности: списание и начисление
-        points_spent = 0
-        if booking.loyalty_points_used and booking.loyalty_points_used > 0:
-            # Списываем баллы
-            from utils.loyalty import spend_points
-            try:
-                spend_points(
-                    db=db,
-                    master_id=master_row_id,
-                    client_id=booking.client_id,
-                    amount=float(booking.loyalty_points_used),
-                    booking_id=booking_id
-                )
-                points_spent = booking.loyalty_points_used
-                logger.info(f"Списано {points_spent} баллов для записи {booking_id}")
-            except Exception as e:
-                logger.error(f"Ошибка при списании баллов для записи {booking_id}: {e}")
-                # Не прерываем процесс подтверждения, но логируем ошибку
-        
-        # Вычисляем доход мастера (с учетом списанных баллов)
-        actual_payment_amount = (booking.payment_amount or 0) - (points_spent or 0)
-        
-        # Создаем подтверждение
-        confirmation = BookingConfirmation(
-            booking_id=booking_id,
-            master_id=master_user_id,
-            confirmed_income=actual_payment_amount
-        )
-        db.add(confirmation)
-        
-        # Создаем income запись (доход уменьшается на сумму списанных баллов)
-        income = Income(
-            # Income.indie_master_id -> FK на indie_masters.id (не masters.id)
-            indie_master_id=None,
-            booking_id=booking_id,
-            total_amount=booking.payment_amount or 0,  # Сумма к оплате после скидки
-            master_earnings=actual_payment_amount,  # Фактический доход мастера
-            salon_earnings=0,  # Для индивидуальных мастеров
-            income_date=datetime.utcnow().date(),
-            service_date=booking.start_time.date()
-        )
-        db.add(income)
-        
-        # Начисляем баллы (только с суммы, оплаченной деньгами)
-        if booking.client_id:
-            from utils.loyalty import get_loyalty_settings, earn_points
-            loyalty_settings = get_loyalty_settings(db, master_row_id)
-            
-            if loyalty_settings and loyalty_settings.is_enabled and loyalty_settings.accrual_percent:
-                # Баллы начисляются только с суммы, оплаченной деньгами
-                amount_for_points = actual_payment_amount
-                points_to_earn = int(amount_for_points * (loyalty_settings.accrual_percent / 100))
-                
-                if points_to_earn > 0:
-                    try:
-                        earn_points(
-                            db=db,
-                            master_id=master_row_id,
-                            client_id=booking.client_id,
-                            amount=points_to_earn,
-                            booking_id=booking_id,
-                            service_id=booking.service_id,
-                            lifetime_days=loyalty_settings.points_lifetime_days
-                        )
-                        logger.info(f"Начислено {points_to_earn} баллов для записи {booking_id}")
-                    except Exception as e:
-                        logger.error(f"Ошибка при начислении баллов для записи {booking_id}: {e}")
-        
-        # Создаем расходы типа service_based для этой услуги
-        service_expenses = db.query(MasterExpense).filter(
-            MasterExpense.master_id == master_user_id,
-            MasterExpense.expense_type == "service_based",
-            MasterExpense.service_id == booking.service_id,
-            MasterExpense.is_active == True
-        ).all()
-        
-        for template in service_expenses:
-            expense_record = MasterExpense(
-                master_id=master_user_id,
-                name=f"{template.name} (услуга #{booking_id})",
-                expense_type="one_time",  # Создаем как разовый
-                amount=template.amount,
-                expense_date=datetime.utcnow()
+        from services.booking_visit_finalize import finalize_post_visit_booking
+
+        try:
+            fin = finalize_post_visit_booking(
+                db,
+                booking=booking,
+                master_row_id=master_row_id,
+                master_user_id=master_user_id,
+                require_past_start=True,
             )
-            db.add(expense_record)
-        
-        # Обновляем статус бронирования на completed
-        booking.status = BookingStatus.COMPLETED
-        
+        except ValueError as ve:
+            raise HTTPException(status_code=400, detail=str(ve)) from ve
+
         db.commit()
-        
-        logger.info(f"Подтверждена услуга {booking_id} для мастера {current_user.id}, списано баллов: {points_spent}")
-        
+
+        if fin.get("already"):
+            return {
+                "message": fin.get("message", "Услуга уже подтверждена"),
+                "confirmed_income": fin["confirmed_income"],
+            }
+
+        logger.info(
+            "Подтверждена услуга %s для мастера %s, списано баллов: %s",
+            booking_id,
+            current_user.id,
+            fin.get("points_spent", 0),
+        )
+
         return {
-            "message": "Услуга успешно подтверждена",
-            "confirmed_income": actual_payment_amount,
-            "points_spent": points_spent,
-            "expenses_created": len(service_expenses)
+            "message": fin.get("message", "Услуга успешно подтверждена"),
+            "confirmed_income": fin["confirmed_income"],
+            "points_spent": fin.get("points_spent", 0),
+            "expenses_created": fin.get("expenses_created", 0),
         }
     except HTTPException:
         raise
@@ -1093,31 +1009,34 @@ async def confirm_all_bookings(
         master_id, indie_id = get_booking_owner_ids(current_user.id, db)
         owner_cond = _booking_owner_filter(Booking, master_id, indie_id)
         
-        # Получаем все confirmed бронирования в прошлом без подтверждения
+        now_utc = datetime.utcnow()
         pending_bookings = db.query(Booking).outerjoin(
             BookingConfirmation,
             Booking.id == BookingConfirmation.booking_id
         ).filter(
             owner_cond,
             Booking.status == BookingStatus.AWAITING_CONFIRMATION,
-            BookingConfirmation.id == None
+            BookingConfirmation.id == None,
+            Booking.start_time < now_utc,
         ).all()
-        
+
+        from services.booking_visit_finalize import finalize_post_visit_booking
+
         confirmed_count = 0
         for booking in pending_bookings:
-            # Создаем подтверждение
-            confirmation = BookingConfirmation(
-                booking_id=booking.id,
-                master_id=master_user_id,
-                confirmed_income=booking.payment_amount or 0
-            )
-            db.add(confirmation)
-            
-            # Обновляем статус бронирования на completed
-            booking.status = BookingStatus.COMPLETED
-            
-            confirmed_count += 1
-        
+            try:
+                fin = finalize_post_visit_booking(
+                    db,
+                    booking=booking,
+                    master_row_id=master_row_id,
+                    master_user_id=master_user_id,
+                    require_past_start=False,
+                )
+                if not fin.get("already"):
+                    confirmed_count += 1
+            except ValueError:
+                continue
+
         db.commit()
         
         logger.info(f"Подтверждено {confirmed_count} услуг для мастера {current_user.id}")
@@ -1163,9 +1082,8 @@ async def cancel_booking(
             raise HTTPException(status_code=400, detail="Услуга уже подтверждена")
         
         # При отмене сбрасываем резервирование баллов (баллы не были списаны, так как запись не подтверждена)
-        if booking.loyalty_points_used:
-            booking.loyalty_points_used = 0
-        
+        clear_loyalty_points_reserve(booking)
+
         # Устанавливаем причину отмены и инициатора
         booking.cancelled_by_user_id = current_user.id
         booking.cancellation_reason = cancellation_reason
@@ -1211,8 +1129,8 @@ async def cancel_all_bookings(
         
         cancelled_count = 0
         for booking in pending_bookings:
-            # Обновляем статус бронирования на cancelled
             booking.status = BookingStatus.CANCELLED
+            clear_loyalty_points_reserve(booking)
             cancelled_count += 1
         
         db.commit()

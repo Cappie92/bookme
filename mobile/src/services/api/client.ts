@@ -36,6 +36,27 @@ function previewResponseBody(data: unknown): string | undefined {
   return truncateForDebug(String(data), DEBUG_BODY_PREVIEW_MAX);
 }
 
+/**
+ * GET /api/subscriptions/my при отсутствии подписки — контракт backend: 404 + detail/message "no_subscription".
+ * Это не сбой; не пишем logger.error и не засоряем DBG-снимок.
+ */
+function isSubscriptionsMyNoSubscription404(
+  status: number | undefined,
+  url: string | undefined,
+  data: unknown,
+  method: string | undefined
+): boolean {
+  if (status !== 404) return false;
+  if ((method || 'get').toLowerCase() !== 'get') return false;
+  if (typeof url !== 'string' || !url.includes('subscriptions/my')) return false;
+  if (data == null || typeof data !== 'object') return false;
+  const d = data as { detail?: unknown; message?: unknown };
+  const raw = d.detail ?? d.message;
+  if (raw === 'no_subscription') return true;
+  if (typeof raw === 'string' && raw.includes('no_subscription')) return true;
+  return false;
+}
+
 /** Снимок для панели DBG (SHOW_DBG_FLOATING_PANEL, строго DEBUG_MOBILE_ERRORS=1); не меняет поведение API. */
 function captureAxiosErrorForMobileDebug(error: AxiosError): void {
   if (!__DEV__ || !env.SHOW_DBG_FLOATING_PANEL) return;
@@ -55,7 +76,13 @@ function captureAxiosErrorForMobileDebug(error: AxiosError): void {
   const isSilent404 =
     status === 404 &&
     (silent404Substrings.some((s) => path.includes(s)) ||
-      (path.includes('client/favorites/') && (originalRequest?.method || '').toLowerCase() === 'delete'));
+      (path.includes('client/favorites/') && (originalRequest?.method || '').toLowerCase() === 'delete') ||
+      isSubscriptionsMyNoSubscription404(
+        status,
+        path,
+        error.response?.data,
+        originalRequest?.method
+      ));
 
   if (is401WithoutToken || isSilent404) return;
   // Тот же ожидаемый 401 на bootstrap /me — не засоряем DBG-панель (логика API не меняется).
@@ -232,10 +259,11 @@ apiClient.interceptors.response.use(
         'client/salon-notes/',
       ];
 
-      const isSilent404 = status === 404 && (
-        silent404Substrings.some((s) => url.includes(s)) ||
-        (url.includes('client/favorites/') && (originalRequest?.method || '').toLowerCase() === 'delete')
-      );
+      const isSilent404 =
+        status === 404 &&
+        (silent404Substrings.some((s) => url.includes(s)) ||
+          (url.includes('client/favorites/') && (originalRequest?.method || '').toLowerCase() === 'delete') ||
+          isSubscriptionsMyNoSubscription404(status, url, data, originalRequest?.method));
 
       if (!isSilent404 && !is401WithoutToken) {
         logger.error('API Error:', { status, message: data?.detail || data?.message || error.message, url });

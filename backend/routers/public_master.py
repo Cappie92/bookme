@@ -24,7 +24,12 @@ from models import (
     MasterPaymentSettings,
 )
 from utils.client_restrictions import check_client_restrictions
-from utils.loyalty import get_available_points
+from utils.public_booking_loyalty import (
+    build_public_booking_price_preview_loyalty,
+    compute_public_create_loyalty_points_used,
+    effective_available_points,
+)
+from utils.loyalty import get_loyalty_settings
 from services.scheduling import get_available_slots, check_master_working_hours, check_booking_conflicts
 from utils.loyalty_discounts import (
     evaluate_and_prepare_applied_discount,
@@ -133,6 +138,7 @@ class PublicBookingCreate(BaseModel):
     service_id: int
     start_time: datetime
     end_time: datetime
+    use_loyalty_points: bool = False
 
 
 class ClientNoteOut(BaseModel):
@@ -153,15 +159,27 @@ class EligibilityOut(BaseModel):
     requires_advance_payment: bool = False
     points: Optional[int] = None
     loyalty_hint: Optional[LoyaltyHintOut] = None
+    points_payment_available: bool = False
+    loyalty_program_enabled: bool = False
 
 
 class BookingPricePreviewOut(BaseModel):
     base_price: float
     discount_percent: Optional[float] = None
     discount_amount: float = 0.0
-    final_price: float
+    discounted_price: float = Field(..., description="После скидки, до баллов")
+    final_price: float = Field(..., description="К оплате деньгами (после баллов), обратная совместимость")
+    amount_to_pay: float = Field(..., description="Дублирует final_price")
     rule_name: Optional[str] = None
     condition_type: Optional[str] = None
+    use_loyalty_points: bool = False
+    points_payment_available: bool = False
+    available_points: int = 0
+    max_payment_percent: Optional[int] = None
+    loyalty_points_to_use: int = 0
+    loyalty_program_enabled: bool = Field(
+        False, description="Начисление новых баллов включено (is_enabled в настройках)"
+    )
 
 
 def _get_master_by_slug(db: Session, slug: str) -> Optional[Master]:
@@ -449,6 +467,13 @@ def create_public_booking(
     )
     base_price = float(service.price or 0)
     payment_amount = discounted_amount if discounted_amount is not None else base_price
+    loyalty_points_used = compute_public_create_loyalty_points_used(
+        db,
+        master_id=master.id,
+        client_id=current_user.id,
+        discounted_price=float(payment_amount),
+        use_loyalty_points=bool(body.use_loyalty_points),
+    )
 
     booking_data = {
         "service_id": service.id,
@@ -458,7 +483,7 @@ def create_public_booking(
         "client_id": current_user.id,
         "status": BookingStatus.CREATED.value,
         "payment_amount": payment_amount,
-        "loyalty_points_used": 0,
+        "loyalty_points_used": loyalty_points_used,
     }
     try:
         booking_data = normalize_booking_fields(
@@ -483,6 +508,7 @@ def create_public_booking(
     status_val = getattr(booking.status, "value", str(booking.status))
     disc_amt = float(applied_discount_data.get("discount_amount") or 0) if applied_discount_data else 0.0
     disc_pct = applied_discount_data.get("discount_percent") if applied_discount_data else None
+    money_to_pay = max(0.0, float(payment_amount) - float(loyalty_points_used))
     return PublicBookingCreateOut(
         id=booking.id,
         status=status_val,
@@ -493,7 +519,9 @@ def create_public_booking(
         base_price=base_price,
         discount_percent=float(disc_pct) if disc_pct is not None else None,
         discount_amount=disc_amt,
-        final_price=float(payment_amount),
+        discounted_price=float(payment_amount),
+        loyalty_points_used=int(loyalty_points_used),
+        final_price=money_to_pay,
         rule_name=_sanitize_public_loyalty_rule_name(
             applied_discount_data.get("rule_name") if applied_discount_data else None
         ),
@@ -559,9 +587,14 @@ def get_public_eligibility(
         if restriction.get("requires_advance_payment"):
             result.requires_advance_payment = True
         try:
-            result.points = get_available_points(db, master.id, current_user.id)
+            eff = effective_available_points(db, master_id=master.id, client_id=current_user.id)
+            result.points = eff
+            result.points_payment_available = eff > 0
         except Exception:
             result.points = 0
+            result.points_payment_available = False
+        ls = get_loyalty_settings(db, master.id)
+        result.loyalty_program_enabled = bool(ls and ls.is_enabled)
         result.loyalty_hint = _loyalty_hint_for_eligibility(db, master.id, current_user)
     return result
 
@@ -576,6 +609,7 @@ def get_booking_price_preview(
     slug: str,
     service_id: int = Query(..., description="ID MasterService из профиля"),
     start_time: datetime = Query(..., description="Начало выбранного слота (ISO)"),
+    use_loyalty_points: bool = Query(False, description="Учитывать списание баллов (только для авторизованного клиента)"),
     db: Session = Depends(get_db),
     current_user: Optional[User] = Depends(get_current_user_optional),
 ) -> Any:
@@ -627,21 +661,39 @@ def get_booking_price_preview(
         )
         raise
     if not applied or discounted_amount is None:
-        return BookingPricePreviewOut(
-            base_price=base_price,
-            discount_percent=None,
-            discount_amount=0.0,
-            final_price=base_price,
-            rule_name=None,
-            condition_type=None,
-        )
-    disc_amt = float(applied.get("discount_amount") or 0)
-    disc_pct = applied.get("discount_percent")
+        disc_amt = 0.0
+        disc_pct = None
+        discounted_price = base_price
+        rule_name = None
+        condition_type = None
+    else:
+        disc_amt = float(applied.get("discount_amount") or 0)
+        disc_pct = applied.get("discount_percent")
+        discounted_price = float(discounted_amount)
+        rule_name = _sanitize_public_loyalty_rule_name(applied.get("rule_name"))
+        condition_type = applied.get("condition_type")
+
+    loyalty = build_public_booking_price_preview_loyalty(
+        db,
+        master_id=master.id,
+        client_id=client_id,
+        discounted_price=discounted_price,
+        use_loyalty_points=use_loyalty_points,
+    )
+    money = float(loyalty["amount_to_pay"])
     return BookingPricePreviewOut(
         base_price=base_price,
         discount_percent=float(disc_pct) if disc_pct is not None else None,
         discount_amount=disc_amt,
-        final_price=float(discounted_amount),
-        rule_name=_sanitize_public_loyalty_rule_name(applied.get("rule_name")),
-        condition_type=applied.get("condition_type"),
+        discounted_price=discounted_price,
+        final_price=money,
+        amount_to_pay=money,
+        rule_name=rule_name,
+        condition_type=condition_type,
+        use_loyalty_points=bool(loyalty.get("use_loyalty_points")),
+        points_payment_available=bool(loyalty.get("points_payment_available")),
+        available_points=int(loyalty.get("available_points") or 0),
+        max_payment_percent=loyalty.get("max_payment_percent"),
+        loyalty_points_to_use=int(loyalty.get("loyalty_points_to_use") or 0),
+        loyalty_program_enabled=bool(loyalty.get("loyalty_program_enabled")),
     )

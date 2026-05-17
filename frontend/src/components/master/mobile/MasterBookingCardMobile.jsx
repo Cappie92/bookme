@@ -10,6 +10,7 @@ import {
   isFuturePending,
   MasterBookingClientBlockMobile,
   resolveBookingPriceDisplay,
+  MasterBookingLoyaltyRubLine,
 } from './masterBookingShared';
 
 const BRAND_GREEN = '#4CAF50';
@@ -155,9 +156,12 @@ export default function MasterBookingCardMobile({
         <div className="flex min-w-0 items-baseline justify-between gap-2">
           <p className={titleCls}>{b.service_name || '—'}</p>
           {priceLine ? (
-            <span className={priceCls} style={{ color: BRAND_GREEN }}>
-              {priceLine}
-            </span>
+            <div className="shrink-0 text-right">
+              <span className={priceCls} style={{ color: BRAND_GREEN }}>
+                {priceLine}
+              </span>
+              <MasterBookingLoyaltyRubLine booking={b} className="mt-0.5 text-[10px] font-semibold text-[#2F7C43] leading-tight" />
+            </div>
           ) : null}
         </div>
         <div className="mt-0.5 min-w-0 pr-1">

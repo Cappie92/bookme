@@ -74,7 +74,11 @@ export default function PublicBookingAuthPrompt({
               К оплате:{' '}
               {pricePreview
                 ? Number(
-                    Number(pricePreview.discount_amount) > 0 ? pricePreview.final_price : pricePreview.base_price
+                    pricePreview.final_price ??
+                      pricePreview.amount_to_pay ??
+                      (Number(pricePreview.discount_amount) > 0
+                        ? pricePreview.discounted_price
+                        : pricePreview.base_price)
                   ).toLocaleString('ru-RU')
                 : price
                   ? Number(price).toLocaleString('ru-RU')

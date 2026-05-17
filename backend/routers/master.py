@@ -66,6 +66,7 @@ from schemas import ServiceCategoryCreate, ServiceCategoryOut
 from schemas import MasterServiceCategoryCreate, MasterServiceCategoryOut, MasterServiceCreate, MasterServiceUpdate, MasterServiceOut, MasterProfileUpdate, InvitationResponse, InvitationOut, ClientRestrictionCreate, ClientRestrictionUpdate, ClientRestriction, ClientRestrictionOut, ClientRestrictionList, ClientRestrictionRuleCreate, ClientRestrictionRuleUpdate, ClientRestrictionRuleOut, MasterPaymentSettingsUpdate, MasterPaymentSettingsOut, BookingCheckResponse
 from utils.loyalty_discounts import build_applied_discount_info
 from utils.master_canon import LEGACY_INDIE_MODE
+from utils.booking_real_money import booking_money_api_fields, booking_real_money_sql
 
 router = APIRouter(
     prefix="/master",
@@ -226,7 +227,7 @@ def get_detailed_bookings(
             "status": booking.status,
             "notes": booking.notes,
             "payment_method": booking.payment_method,
-            "payment_amount": booking.payment_amount,
+            **booking_money_api_fields(booking),
             "created_at": booking.created_at.isoformat() if booking.created_at else None,
             "updated_at": booking.updated_at.isoformat() if booking.updated_at else None,
             "applied_discount": applied_info
@@ -511,7 +512,7 @@ def get_past_appointments(
             "status": booking.status,
             "cancellation_reason": getattr(booking, "cancellation_reason", None),
             "status_color": status_color,
-            "payment_amount": booking.payment_amount if booking.payment_amount else 0,
+            **booking_money_api_fields(booking),
             "start_time": booking.start_time.isoformat(),
             "end_time": booking.end_time.isoformat()
         })
@@ -3519,7 +3520,9 @@ def get_master_dashboard_stats(
         logger.debug(f"Период: {period}, offset: {offset}")
         logger.debug(f"Текущий период: {current_period}")
         logger.debug(f"Предыдущий период: {previous_period}")
-        
+
+        _real_money_line = booking_real_money_sql(Booking, Service, func, case, and_)
+
         # Статистика за текущий период
         current_bookings = 0
         current_income = 0
@@ -3539,14 +3542,16 @@ def get_master_dashboard_stats(
             )
             
             current_income = (
-                db.query(func.sum(Booking.payment_amount))
+                db.query(func.sum(_real_money_line))
+                .outerjoin(Service, Booking.service_id == Service.id)
                 .filter(
                     or_(Booking.master_id == master.id, Booking.indie_master_id == master.id),
                     Booking.start_time >= period_start_dt,
                     Booking.start_time <= period_end_dt,
                     Booking.status == BookingStatus.COMPLETED.value,
                 )
-                .scalar() or 0
+                .scalar()
+                or 0
             )
         
         # Статистика за предыдущий период
@@ -3568,14 +3573,16 @@ def get_master_dashboard_stats(
             )
             
             previous_income = (
-                db.query(func.sum(Booking.payment_amount))
+                db.query(func.sum(_real_money_line))
+                .outerjoin(Service, Booking.service_id == Service.id)
                 .filter(
                     or_(Booking.master_id == master.id, Booking.indie_master_id == master.id),
                     Booking.start_time >= prev_period_start_dt,
                     Booking.start_time <= prev_period_end_dt,
                     Booking.status == BookingStatus.COMPLETED.value,
                 )
-                .scalar() or 0
+                .scalar()
+                or 0
             )
         
         # Расчет динамики
@@ -3672,7 +3679,7 @@ def get_master_dashboard_stats(
                 "service_name": service_name,
                 "service_duration": duration_text,
                 "service_price": svc.price if svc else 0,
-                "payment_amount": booking.payment_amount if booking.payment_amount else 0,
+                **booking_money_api_fields(booking),
                 "client_display_name": client_name,
                 "client_name": client_name,
                 "client_phone": client_phone,
@@ -3732,10 +3739,6 @@ def get_master_dashboard_stats(
             BookingStatus.CONFIRMED.value,
             BookingStatus.AWAITING_CONFIRMATION.value,
         )
-        _amount_line = case(
-            (and_(Booking.payment_amount.isnot(None), Booking.payment_amount > 0), Booking.payment_amount),
-            else_=func.coalesce(Service.price, 0),
-        )
         # Расчет данных для периодов (для гистограмм)
         periods_data = []
         for period_data in periods:
@@ -3754,11 +3757,11 @@ def get_master_dashboard_stats(
                         0,
                     ).label("bookings_pending"),
                     func.coalesce(
-                        func.sum(case((Booking.status == BookingStatus.COMPLETED.value, _amount_line), else_=0)),
+                        func.sum(case((Booking.status == BookingStatus.COMPLETED.value, _real_money_line), else_=0)),
                         0,
                     ).label("income_confirmed_rub"),
                     func.coalesce(
-                        func.sum(case((Booking.status.in_(_dash_pending_statuses), _amount_line), else_=0)),
+                        func.sum(case((Booking.status.in_(_dash_pending_statuses), _real_money_line), else_=0)),
                         0,
                     ).label("income_pending_rub"),
                 )
@@ -3948,20 +3951,22 @@ def get_master_dashboard_stats(
             earnings_query = earnings_query.group_by(Booking.service_id).order_by(func.sum(Income.master_earnings).desc()).limit(3)
         else:
             if indie_master is not None:
-                earnings_query = db.query(
-                    Booking.service_id,
-                    func.sum(Booking.payment_amount).label("total_earnings")
-                ).filter(
-                    or_(Booking.master_id == master.id, Booking.indie_master_id == indie_master.id),
-                    Booking.status.in_(TOP_SERVICE_STATUSES),
+                earnings_query = (
+                    db.query(Booking.service_id, func.sum(_real_money_line).label("total_earnings"))
+                    .outerjoin(Service, Booking.service_id == Service.id)
+                    .filter(
+                        or_(Booking.master_id == master.id, Booking.indie_master_id == indie_master.id),
+                        Booking.status.in_(TOP_SERVICE_STATUSES),
+                    )
                 )
             else:
-                earnings_query = db.query(
-                    Booking.service_id,
-                    func.sum(Booking.payment_amount).label("total_earnings")
-                ).filter(
-                    Booking.master_id == master.id,
-                    Booking.status.in_(TOP_SERVICE_STATUSES),
+                earnings_query = (
+                    db.query(Booking.service_id, func.sum(_real_money_line).label("total_earnings"))
+                    .outerjoin(Service, Booking.service_id == Service.id)
+                    .filter(
+                        Booking.master_id == master.id,
+                        Booking.status.in_(TOP_SERVICE_STATUSES),
+                    )
                 )
             if agg_start and agg_end:
                 agg_start_dt = datetime.combine(agg_start, datetime.min.time()) if isinstance(agg_start, date) else agg_start
@@ -3970,27 +3975,29 @@ def get_master_dashboard_stats(
             if indie_master is not None:
                 indie_services_count = db.query(func.count(Service.id)).filter(Service.indie_master_id == indie_master.id).scalar()
                 if indie_services_count > 0:
-                    earnings_query = earnings_query.join(Service, Service.id == Booking.service_id).filter(Service.indie_master_id == indie_master.id)
-            earnings_query = earnings_query.group_by(Booking.service_id).order_by(func.sum(Booking.payment_amount).desc()).limit(3)
+                    earnings_query = earnings_query.filter(Service.indie_master_id == indie_master.id)
+            earnings_query = earnings_query.group_by(Booking.service_id).order_by(func.sum(_real_money_line).desc()).limit(3)
 
         top_services_by_earnings = earnings_query.all()
         # Fallback: если данных о доходах в Income нет (dev/seed), считаем по сумме оплат из Booking
         if not top_services_by_earnings:
             if indie_master is not None:
-                q_fallback = db.query(
-                    Booking.service_id,
-                    func.sum(Booking.payment_amount).label("total_earnings")
-                ).filter(
-                    or_(Booking.master_id == master.id, Booking.indie_master_id == indie_master.id),
-                    Booking.status.in_(TOP_SERVICE_STATUSES),
+                q_fallback = (
+                    db.query(Booking.service_id, func.sum(_real_money_line).label("total_earnings"))
+                    .outerjoin(Service, Booking.service_id == Service.id)
+                    .filter(
+                        or_(Booking.master_id == master.id, Booking.indie_master_id == indie_master.id),
+                        Booking.status.in_(TOP_SERVICE_STATUSES),
+                    )
                 )
             else:
-                q_fallback = db.query(
-                    Booking.service_id,
-                    func.sum(Booking.payment_amount).label("total_earnings")
-                ).filter(
-                    Booking.master_id == master.id,
-                    Booking.status.in_(TOP_SERVICE_STATUSES),
+                q_fallback = (
+                    db.query(Booking.service_id, func.sum(_real_money_line).label("total_earnings"))
+                    .outerjoin(Service, Booking.service_id == Service.id)
+                    .filter(
+                        Booking.master_id == master.id,
+                        Booking.status.in_(TOP_SERVICE_STATUSES),
+                    )
                 )
             if agg_start and agg_end:
                 agg_start_dt = datetime.combine(agg_start, datetime.min.time()) if isinstance(agg_start, date) else agg_start
@@ -3999,8 +4006,8 @@ def get_master_dashboard_stats(
             if indie_master is not None:
                 indie_services_count = db.query(func.count(Service.id)).filter(Service.indie_master_id == indie_master.id).scalar()
                 if indie_services_count > 0:
-                    q_fallback = q_fallback.join(Service, Service.id == Booking.service_id).filter(Service.indie_master_id == indie_master.id)
-            top_services_by_earnings = q_fallback.group_by(Booking.service_id).order_by(func.sum(Booking.payment_amount).desc()).limit(3).all()
+                    q_fallback = q_fallback.filter(Service.indie_master_id == indie_master.id)
+            top_services_by_earnings = q_fallback.group_by(Booking.service_id).order_by(func.sum(_real_money_line).desc()).limit(3).all()
 
         # Получаем названия услуг для заработка из Service
         service_earnings_names = {}

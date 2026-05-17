@@ -18,6 +18,7 @@ import {
   Platform,
   Linking,
   ScrollView,
+  Switch,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -90,24 +91,31 @@ type BookingSuccessCardDetail = {
   calendarDetails: string;
 };
 
-function previewLikeToPriceRows(p: {
-  base_price: number;
-  discount_amount: number;
-  final_price: number;
-  discount_percent?: number | null;
-}): PublicBookingConfirmSummaryRow[] {
+function previewLikeToPriceRows(p: BookingPricePreview): PublicBookingConfirmSummaryRow[] {
   const rows: PublicBookingConfirmSummaryRow[] = [];
-  if (p.final_price == null) return rows;
-  if (p.discount_amount > 0.001) {
-    rows.push({ label: 'Базовая цена', value: formatPriceRub(p.base_price) });
-    const disc =
-      `−${formatPriceRub(p.discount_amount)}` +
-      (p.discount_percent != null ? ` (${Math.round(p.discount_percent)}%)` : '');
-    rows.push({ label: 'Скидка', value: disc });
-    rows.push({ label: 'К оплате', value: formatPriceRub(p.final_price) });
-  } else {
-    rows.push({ label: 'К оплате', value: formatPriceRub(p.final_price) });
+  const pay = p.final_price ?? p.amount_to_pay;
+  if (pay == null || !Number.isFinite(Number(pay))) return rows;
+  const base = Number(p.base_price ?? 0);
+  const disc = Number(p.discount_amount ?? 0);
+  const discounted =
+    p.discounted_price != null && Number.isFinite(Number(p.discounted_price))
+      ? Number(p.discounted_price)
+      : disc > 0.001
+        ? Math.max(0, base - disc)
+        : base;
+  const pts = Number(p.loyalty_points_to_use ?? 0);
+
+  rows.push({ label: 'Стоимость', value: formatPriceRub(base) });
+  if (disc > 0.001) {
+    const discLabel =
+      `−${formatPriceRub(disc)}` + (p.discount_percent != null ? ` (${Math.round(p.discount_percent)}%)` : '');
+    rows.push({ label: 'Скидка', value: discLabel });
+    rows.push({ label: 'После скидки', value: formatPriceRub(discounted) });
   }
+  if (pts > 0) {
+    rows.push({ label: 'Баллами', value: `−${formatPriceRub(pts)}` });
+  }
+  rows.push({ label: 'К оплате', value: formatPriceRub(Number(pay)) });
   return rows;
 }
 
@@ -152,12 +160,24 @@ function buildBookingSuccessCardDetail(
       discount_percent?: number | null;
     };
     if (fp.final_price != null && typeof fp.final_price === 'number') {
+      const ext = fp as {
+        discounted_price?: number | null;
+        loyalty_points_used?: number;
+        amount_to_pay?: number;
+      };
       priceRows = previewLikeToPriceRows({
         base_price: Number(fp.base_price ?? 0),
         discount_amount: Number(fp.discount_amount ?? 0),
-        final_price: Number(fp.final_price),
         discount_percent: fp.discount_percent ?? null,
-      });
+        discounted_price: Number(
+          ext.discounted_price != null ? ext.discounted_price : Number(fp.base_price ?? 0)
+        ),
+        final_price: Number(fp.final_price),
+        amount_to_pay: Number(ext.amount_to_pay ?? fp.final_price),
+        loyalty_points_to_use: Number(
+          (ext as { loyalty_points_to_use?: number }).loyalty_points_to_use ?? ext.loyalty_points_used ?? 0
+        ),
+      } as BookingPricePreview);
     }
   }
 
@@ -212,6 +232,7 @@ export default function MasterPublicBookingScreen() {
   } | null>(null);
   const [showAuthPrompt, setShowAuthPrompt] = useState(false);
   const [pricePreview, setPricePreview] = useState<BookingPricePreview | null>(null);
+  const [useLoyaltyPoints, setUseLoyaltyPoints] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [loadTimeout, setLoadTimeout] = useState(false);
   const [diagResult, setDiagResult] = useState<ConnectivityResult | null>(null);
@@ -286,6 +307,7 @@ export default function MasterPublicBookingScreen() {
     setSelectedSlot(null);
     setSlots([]);
     setSlotsError(null);
+    setUseLoyaltyPoints(false);
   }, [slug]);
 
   const loadProfile = useCallback(async () => {
@@ -418,7 +440,14 @@ export default function MasterPublicBookingScreen() {
         const prev = await getPublicBookingPricePreview(
           slug,
           selectedService.id,
-          selectedSlot.start_time
+          selectedSlot.start_time,
+          Boolean(
+            isAuthenticated &&
+              eligibility &&
+              eligibility.points != null &&
+              eligibility.points > 0 &&
+              useLoyaltyPoints
+          )
         );
         if (!cancelled) setPricePreview(prev);
       } catch {
@@ -436,6 +465,8 @@ export default function MasterPublicBookingScreen() {
     isAuthenticated,
     user?.id,
     authLoading,
+    useLoyaltyPoints,
+    eligibility?.points,
   ]);
 
   const tzLabel = (tz: string): string => {
@@ -457,12 +488,19 @@ export default function MasterPublicBookingScreen() {
     setSelectedService(s);
     setSelectedDate(null);
     setSelectedSlot(null);
+    setUseLoyaltyPoints(false);
   };
 
   const handleSelectDate = (dateStr: string) => {
     setSelectedDate(dateStr);
     setSelectedSlot(null);
+    setUseLoyaltyPoints(false);
   };
+
+  const handleSelectSlot = useCallback((slot: PublicSlot) => {
+    setUseLoyaltyPoints(false);
+    setSelectedSlot(slot);
+  }, []);
 
   const dateOptions = React.useMemo(
     () => buildDateOptionsFromSlots(slots, profile?.master_timezone),
@@ -500,6 +538,56 @@ export default function MasterPublicBookingScreen() {
     if (!selectedSlot) return null;
     return buildAppliedDiscountExplain(pricePreview);
   }, [selectedSlot, pricePreview]);
+
+  const loyaltyPaySlot = React.useMemo(() => {
+    const hasSummary = Boolean(selectedService && selectedDate && selectedSlot);
+    if (
+      !hasSummary ||
+      !isAuthenticated ||
+      !eligibility ||
+      eligibility.points == null ||
+      eligibility.points <= 0
+    ) {
+      return null;
+    }
+    if (!pricePreview || pricePreview.points_payment_available !== true) {
+      return null;
+    }
+    const ptsApplied = Number(pricePreview.loyalty_points_to_use ?? 0);
+    return (
+      <View style={{ paddingHorizontal: 4, marginTop: 10, marginBottom: 4 }}>
+        <View
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 12,
+          }}
+        >
+          <Text style={{ fontSize: 15, color: '#2d6e43', flex: 1 }}>Оплатить баллами</Text>
+          <Switch
+            value={useLoyaltyPoints}
+            onValueChange={setUseLoyaltyPoints}
+            trackColor={{ false: '#ccc', true: '#a5d6a7' }}
+            thumbColor={useLoyaltyPoints ? '#2e7d32' : '#f4f3f4'}
+          />
+        </View>
+        {useLoyaltyPoints && ptsApplied <= 0 ? (
+          <Text style={{ fontSize: 12, color: '#b45309', marginTop: 8 }}>
+            Баллы не применены к этой записи.
+          </Text>
+        ) : null}
+      </View>
+    );
+  }, [
+    selectedService,
+    selectedDate,
+    selectedSlot,
+    isAuthenticated,
+    eligibility,
+    pricePreview,
+    useLoyaltyPoints,
+  ]);
 
   // Draft: после логина автосоздание только если draft.intent === 'create_after_auth' (confirm flow). Логин из шапки не ставит intent.
   useEffect(() => {
@@ -567,6 +655,7 @@ export default function MasterPublicBookingScreen() {
           service_id: draft.service_id,
           start_time: draft.start_time,
           end_time: draft.end_time,
+          use_loyalty_points: false,
         });
         await updatePublicBookingDraftStatus({
           status: 'done',
@@ -583,6 +672,7 @@ export default function MasterPublicBookingScreen() {
             res
           );
           setSuccessBookingCal({ id: res.id, publicReference: res.public_reference, detail });
+          setUseLoyaltyPoints(false);
           setSelectedService(null);
           setSelectedDate(null);
           setSelectedSlot(null);
@@ -615,6 +705,12 @@ export default function MasterPublicBookingScreen() {
         service_id: selectedService.id,
         start_time: selectedSlot.start_time,
         end_time: selectedSlot.end_time,
+        use_loyalty_points: Boolean(
+          useLoyaltyPoints &&
+            eligibility &&
+            eligibility.points != null &&
+            eligibility.points > 0
+        ),
       });
       const detail = buildBookingSuccessCardDetail(
         profile,
@@ -624,6 +720,7 @@ export default function MasterPublicBookingScreen() {
         res
       );
       setSuccessBookingCal({ id: res.id, publicReference: res.public_reference, detail });
+      setUseLoyaltyPoints(false);
       setSelectedService(null);
       setSelectedDate(null);
       setSelectedSlot(null);
@@ -995,6 +1092,7 @@ export default function MasterPublicBookingScreen() {
         masterTimezoneLine={masterTimezoneLine}
         discountPreface={discountPreface}
         discountAppliedExplain={discountAppliedExplain}
+        loyaltyPaySlot={loyaltyPaySlot}
         bookingBlocked={Boolean(profile.booking_blocked || eligibility?.booking_blocked)}
         advancePayment={Boolean(profile.requires_advance_payment || eligibility?.requires_advance_payment)}
         pointsLine={pointsLine}
@@ -1014,7 +1112,7 @@ export default function MasterPublicBookingScreen() {
         slots={slots}
         slotsLoading={slotsLoading}
         selectedSlot={selectedSlot}
-        onSelectSlot={setSelectedSlot}
+        onSelectSlot={handleSelectSlot}
         slotHhBadgeForSlot={slotHhBadgeForSlot}
         mainBookingSummaryRows={mainBookingSummaryRows}
         mainBookingPriceRows={confirmationPriceRows}

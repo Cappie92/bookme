@@ -24,6 +24,7 @@ from models import (
     IndieMaster,
 )
 from auth import get_current_active_user
+from utils.booking_real_money import booking_amount_to_pay
 
 router = APIRouter(prefix="/api/master/clients", tags=["master-clients"])
 
@@ -123,7 +124,7 @@ def _get_clients_with_completed(db: Session, master_id: int) -> List[Dict[str, A
                 "has_note": False,
             }
         by_client[cid]["completed_count"] += 1
-        by_client[cid]["total_revenue"] += float(b.payment_amount or 0)
+        by_client[cid]["total_revenue"] += booking_amount_to_pay(b.payment_amount, b.loyalty_points_used)
         if b.start_time and (by_client[cid]["last_visit_at"] is None or b.start_time > by_client[cid]["last_visit_at"]):
             by_client[cid]["last_visit_at"] = b.start_time
 

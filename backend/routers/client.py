@@ -27,6 +27,7 @@ def _parse_optional_client_birth_date(raw: Any) -> Optional[date_type]:
 
 
 from auth import get_current_active_user, require_client
+from utils.booking_loyalty_reserve import clear_loyalty_points_reserve
 from database import get_db
 from models import (
     User, Salon, SalonBranch, Master, IndieMaster, Service, Booking,
@@ -109,17 +110,30 @@ def get_current_time_in_timezone(timezone_str: str) -> datetime:
     return datetime.now(tz)
 
 
-def _booking_list_display_price(booking: Booking) -> float:
-    """
-    Стоимость записи для списков ЛК: `payment_amount` (уже со скидкой при создании),
-    иначе прайс услуги из справочника.
-    """
+def _booking_payment_amount(booking: Booking) -> float:
+    """Сумма после скидки (до баллов): payment_amount или прайс услуги."""
     pa = getattr(booking, "payment_amount", None)
     if pa is not None:
         return float(pa)
     if booking.service is not None and booking.service.price is not None:
         return float(booking.service.price)
     return 0.0
+
+
+def _booking_list_price_fields(booking: Booking) -> dict:
+    """
+    Поля цены для списков ЛК клиента.
+    price / amount_to_pay — денежная часть; payment_amount — до баллов; loyalty_points_used — резерв.
+    """
+    payment_amount = _booking_payment_amount(booking)
+    loyalty_pts = int(getattr(booking, "loyalty_points_used", None) or 0)
+    amount_to_pay = max(0.0, payment_amount - float(loyalty_pts))
+    return {
+        "payment_amount": payment_amount,
+        "loyalty_points_used": loyalty_pts,
+        "amount_to_pay": amount_to_pay,
+        "price": amount_to_pay,
+    }
 
 
 # Всегда canon schema (без indie_master_id). Резолв indie→master на read-path.
@@ -206,7 +220,7 @@ def get_future_bookings(
             # быть выставлен — но клиент его не должен видеть).
             salon_name = None
             service_name = b.service.name if b.service else "-"
-            price = _booking_list_display_price(b)
+            price_fields = _booking_list_price_fields(b)
             duration = int(b.service.duration) if b.service and b.service.duration is not None else 0
             date = b.start_time
             branch_name = None
@@ -242,7 +256,10 @@ def get_future_bookings(
                 salon_name=salon_name,
                 master_name=master_name,
                 service_name=service_name,
-                price=price,
+                price=price_fields["price"],
+                payment_amount=price_fields["payment_amount"],
+                loyalty_points_used=price_fields["loyalty_points_used"],
+                amount_to_pay=price_fields["amount_to_pay"],
                 duration=duration,
                 date=date,
                 start_time=b.start_time,
@@ -353,7 +370,7 @@ def get_past_bookings(
             # их в этом виде больше не получает.
             salon_name = None
             service_name = b.service.name if b.service else "-"
-            price = _booking_list_display_price(b)
+            price_fields = _booking_list_price_fields(b)
             duration = int(b.service.duration) if b.service and b.service.duration is not None else 0
             date = b.start_time
             branch_name = None
@@ -389,7 +406,10 @@ def get_past_bookings(
                 salon_name=salon_name,
                 master_name=master_name,
                 service_name=service_name,
-                price=price,
+                price=price_fields["price"],
+                payment_amount=price_fields["payment_amount"],
+                loyalty_points_used=price_fields["loyalty_points_used"],
+                amount_to_pay=price_fields["amount_to_pay"],
                 duration=duration,
                 date=date,
                 start_time=b.start_time,
@@ -1076,8 +1096,7 @@ def cancel_booking(
         raise HTTPException(status_code=400, detail="Booking is already cancelled")
 
     # При отмене сбрасываем резервирование баллов (баллы не были списаны, так как запись не подтверждена)
-    if booking.loyalty_points_used:
-        booking.loyalty_points_used = 0
+    clear_loyalty_points_reserve(booking)
 
     booking.status = BookingStatus.CANCELLED
     db.commit()

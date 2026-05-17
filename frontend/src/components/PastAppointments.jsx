@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { ChevronLeftIcon, ChevronRightIcon, InformationCircleIcon } from '@heroicons/react/24/outline';
 import { apiGet, apiPost } from '../utils/api';
+import { formatMoney } from '../utils/formatMoney';
+import { masterDisplayMainRub, masterLoyaltyRub } from '../utils/masterBookingMoney';
 
 export default function PastAppointments() {
   const [appointments, setAppointments] = useState([]);
@@ -292,7 +294,18 @@ export default function PastAppointments() {
                         </span>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-green-600">
-                        {appointment.payment_amount > 0 ? `${appointment.payment_amount} ₽` : '-'}
+                        {masterDisplayMainRub(appointment) > 0 || masterLoyaltyRub(appointment) > 0 ? (
+                          <div className="flex flex-col items-end gap-0.5">
+                            <span>{formatMoney(masterDisplayMainRub(appointment))}</span>
+                            {masterLoyaltyRub(appointment) > 0 ? (
+                              <span className="text-xs font-medium text-[#2F7C43]">
+                                Баллами: −{masterLoyaltyRub(appointment).toLocaleString('ru-RU')} ₽
+                              </span>
+                            ) : null}
+                          </div>
+                        ) : (
+                          '-'
+                        )}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-right">
                         {appointment.status === 'cancelled_by_client_early' || appointment.status === 'cancelled_by_client_late' ? (

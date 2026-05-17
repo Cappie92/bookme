@@ -2,6 +2,7 @@ import React from 'react';
 import { canConfirmPostVisit, canPreVisitConfirmBooking, isFuturePendingConfirmationStatus } from '../../../utils/bookingOutcome';
 import { getStatusBadgeForPast } from '../../../utils/bookingStatusDisplay';
 import { formatMoney } from '../../../utils/formatMoney';
+import { masterDisplayMainRub, masterLoyaltyRub } from '../../../utils/masterBookingMoney';
 
 /**
  * Единый допуск к действию «Подтвердить» (карточка, detail sheet, строка таблицы, handler).
@@ -34,24 +35,24 @@ export function isFutureCancelled(status) {
 }
 
 /**
- * Цена для карточек/детали: payment_amount → service_price → price → amount;
- * сначала ищем положительное значение, иначе первое конечное число (в т.ч. 0).
+ * Цена для карточек/детали: реальные деньги (amount_to_pay / payment − баллы), иначе цена услуги.
  */
 export function resolveBookingPriceDisplay(booking) {
   if (!booking) return null;
-  const keys = ['payment_amount', 'service_price', 'price', 'amount'];
-  const candidates = keys.map((k) => booking[k]);
-  for (const raw of candidates) {
-    if (raw == null || raw === '') continue;
-    const n = Number(raw);
-    if (Number.isFinite(n) && n > 0) return formatMoney(n);
-  }
-  for (const raw of candidates) {
-    if (raw == null || raw === '') continue;
-    const n = Number(raw);
-    if (Number.isFinite(n)) return formatMoney(n);
-  }
+  const main = masterDisplayMainRub(booking);
+  if (Number.isFinite(main)) return formatMoney(main);
   return null;
+}
+
+/** Строка «Баллами: −N ₽» под основной суммой (ЛК мастера). */
+export function MasterBookingLoyaltyRubLine({ booking, className = '' }) {
+  const pts = masterLoyaltyRub(booking);
+  if (!pts) return null;
+  return (
+    <div className={`tabular-nums ${className}`.trim()}>
+      Баллами: −{pts.toLocaleString('ru-RU')} ₽
+    </div>
+  );
 }
 
 /**

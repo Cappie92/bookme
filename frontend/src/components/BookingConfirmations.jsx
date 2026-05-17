@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { CheckIcon, XMarkIcon } from '@heroicons/react/24/outline';
 import { apiGet, apiPost } from '../utils/api';
 import { CANCELLATION_REASONS } from '../utils/bookingOutcome';
+import { formatMoney } from '../utils/formatMoney';
+import { masterDisplayMainRub, masterLoyaltyRub } from '../utils/masterBookingMoney';
 
 export default function BookingConfirmations({ onConfirmSuccess }) {
   const [pendingBookings, setPendingBookings] = useState([]);
@@ -186,8 +188,13 @@ export default function BookingConfirmations({ onConfirmSuccess }) {
               <div className="text-sm text-gray-500">
                 {new Date(booking.date).toLocaleDateString('ru-RU')} в {booking.start_time}
               </div>
-              <div className="text-sm font-semibold text-green-600">
-                {booking.payment_amount} ₽
+              <div className="text-sm font-semibold text-green-600 space-y-0.5">
+                <div>{formatMoney(masterDisplayMainRub(booking))}</div>
+                {masterLoyaltyRub(booking) > 0 ? (
+                  <div className="text-xs font-medium text-[#2F7C43]">
+                    Баллами: −{masterLoyaltyRub(booking).toLocaleString('ru-RU')} ₽
+                  </div>
+                ) : null}
               </div>
             </div>
             <div className="flex gap-2">

@@ -10,7 +10,7 @@ import React, { useState, useEffect } from 'react'
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
 import { Booking } from '@src/services/api/bookings'
-import { formatDateShort, getBookingPrice, formatPriceDisplay } from '@src/utils/clientDashboard'
+import { formatDateShort, getBookingPrice, formatPriceDisplay, formatPrice } from '@src/utils/clientDashboard'
 import { useFavoritesStore, logFav } from '@src/stores/favoritesStore'
 import { FavoriteButtonControlled } from './FavoriteButtonControlled'
 
@@ -49,9 +49,21 @@ export function BookingRowPast({
   }, [booking.id, booking.master_id, favKey, isFavorite])
 
   const dateShort = formatDateShort(booking.start_time)
+  const pts = Number(booking.loyalty_points_used ?? 0)
+  const payAmt =
+    booking.payment_amount != null && !Number.isNaN(Number(booking.payment_amount))
+      ? Number(booking.payment_amount)
+      : null
+  const amountToPayRaw =
+    booking.amount_to_pay != null && !Number.isNaN(Number(booking.amount_to_pay))
+      ? Number(booking.amount_to_pay)
+      : getBookingPrice(booking)
+  const amountToPay = amountToPayRaw != null && !Number.isNaN(amountToPayRaw) ? amountToPayRaw : undefined
   const price = getBookingPrice(booking)
   const priceStr = formatPriceDisplay(price)
+  const hasPriceDetail = pts > 0 && payAmt != null
   const hasActions = !!onRepeat || !!onNotes || !!onDislike
+  const canExpand = hasActions || hasPriceDetail
 
   return (
     <View style={styles.card}>
@@ -100,11 +112,16 @@ export function BookingRowPast({
             <Text style={styles.priceText}>{priceStr}</Text>
           ) : null}
         </View>
+        {pts > 0 ? (
+          <Text style={styles.loyaltyDeductionText}>
+            Баллами: −{formatPriceDisplay(pts)}
+          </Text>
+        ) : null}
         <View style={styles.dateTimeRow}>
           <Text style={styles.dateText} numberOfLines={1}>
             {dateShort}
           </Text>
-          {hasActions && (
+          {canExpand && (
             <TouchableOpacity
               onPress={() => setExpanded(!expanded)}
               activeOpacity={0.7}
@@ -120,6 +137,14 @@ export function BookingRowPast({
           )}
         </View>
       </TouchableOpacity>
+
+      {expanded && hasPriceDetail && payAmt != null && amountToPay != null ? (
+        <View style={styles.priceBreakdown}>
+          <Text style={styles.breakdownLine}>Стоимость: {formatPrice(payAmt)}</Text>
+          <Text style={styles.breakdownLine}>Баллами: −{formatPrice(pts)}</Text>
+          <Text style={styles.breakdownLineStrong}>К оплате: {formatPrice(amountToPay)}</Text>
+        </View>
+      ) : null}
 
       {expanded && hasActions && (
         <View style={styles.actionsPanel}>
@@ -260,6 +285,30 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: '#111827',
     flexShrink: 0,
+  },
+  loyaltyDeductionText: {
+    marginTop: 4,
+    fontSize: 12,
+    fontWeight: '500',
+    color: '#64748b',
+  },
+  priceBreakdown: {
+    marginTop: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 4,
+    borderTopWidth: 1,
+    borderTopColor: '#f3f4f6',
+  },
+  breakdownLine: {
+    fontSize: 12,
+    color: '#6b7280',
+    marginBottom: 4,
+  },
+  breakdownLineStrong: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#111827',
+    marginTop: 2,
   },
   dateTimeRow: {
     flexDirection: 'row',

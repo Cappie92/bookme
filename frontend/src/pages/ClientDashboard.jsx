@@ -19,6 +19,7 @@ import {
   fetchClientGoogleCalendarUrl,
   sendClientCalendarEmail,
 } from '../utils/clientBookingCalendarActions'
+import { ClientBookingPriceDisplay } from '../utils/clientBookingPrice'
 
 // Вспомогательные функции
 function formatDate(dateStr) {
@@ -76,12 +77,11 @@ function formatTimeOnly(dateStr) {
   return `${hours}:${minutes}`
 }
 
-/** Макс. время по транзакциям типа earned (для сортировки «последнее начисление»). */
-function getLastEarnedMs(master) {
+/** Макс. время по последней операции лояльности (earned/spent) — для сортировки. */
+function getLastLoyaltyActivityMs(master) {
   const txs = Array.isArray(master?.transactions) ? master.transactions : []
   let max = 0
   for (const t of txs) {
-    if (t.transaction_type !== 'earned') continue
     const raw = t.earned_at ?? t.created_at
     if (!raw) continue
     const ms = new Date(raw).getTime()
@@ -196,6 +196,7 @@ export default function ClientDashboard() {
   const [loyaltySummary, setLoyaltySummary] = useState({
     loading: true,
     totalBalance: null,
+    totalReserved: 0,
     masters: [],
     error: false,
   })
@@ -436,12 +437,13 @@ export default function ClientDashboard() {
         setLoyaltySummary({
           loading: false,
           totalBalance: Number(loyaltyData?.total_balance ?? 0),
+          totalReserved: Number(loyaltyData?.total_reserved ?? 0),
           masters: Array.isArray(loyaltyData?.masters) ? loyaltyData.masters : [],
           error: false,
         })
       } catch (error) {
         console.error('Ошибка при загрузке баллов:', error)
-        setLoyaltySummary({ loading: false, totalBalance: null, masters: [], error: true })
+        setLoyaltySummary({ loading: false, totalBalance: null, totalReserved: 0, masters: [], error: true })
       }
       
       // Загружаем будущие записи (краткий список, до 5 — по умолчанию на бэкенде)
@@ -1273,7 +1275,7 @@ export default function ClientDashboard() {
   const loyaltyTopMasters = useMemo(() => {
     const list = Array.isArray(loyaltySummary.masters) ? loyaltySummary.masters : []
     return [...list]
-      .sort((a, b) => getLastEarnedMs(b) - getLastEarnedMs(a))
+      .sort((a, b) => getLastLoyaltyActivityMs(b) - getLastLoyaltyActivityMs(a))
       .slice(0, 3)
   }, [loyaltySummary.masters])
 
@@ -1332,16 +1334,16 @@ export default function ClientDashboard() {
 
       <div className="top-row mt-2 mb-6 grid grid-cols-1 gap-2.5 max-lg:gap-2 lg:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)] lg:items-stretch">
         {/* KPI: ближайшая запись */}
-        <div className="min-w-0">
+        <div className="min-w-0 flex flex-col lg:h-full">
           {futureLoading ? (
-            <div className="next-booking animate-pulse rounded-2xl bg-gradient-to-br from-[#4CAF50] to-[#43A047] p-6 min-h-[200px]" />
+            <div className="next-booking h-full min-h-[200px] animate-pulse rounded-2xl bg-gradient-to-br from-[#4CAF50] to-[#43A047] p-6 lg:min-h-0" />
           ) : nextBookingHero ? (() => {
             const b = nextBookingHero
             const masterKey = getMasterKey(b)
             const isFav = masterKey !== null && favoriteMasterIds.has(masterKey)
             return (
               <div
-                className="next-booking relative overflow-hidden rounded-2xl border border-transparent bg-gradient-to-br from-[#4CAF50] to-[#43A047] p-[22px] text-white shadow-[0_10px_24px_-12px_rgba(76,175,80,0.45)]"
+                className="next-booking relative flex h-full min-h-[220px] flex-col overflow-hidden rounded-2xl border border-transparent bg-gradient-to-br from-[#4CAF50] to-[#43A047] p-[22px] text-white shadow-[0_10px_24px_-12px_rgba(76,175,80,0.45)] lg:min-h-0"
               >
                 <h2 className="m-0 mb-1.5 text-2xl font-bold tracking-[-0.02em] text-white">Ближайшая запись</h2>
                 <div className="master mb-[18px] text-sm text-white/[0.84]">
@@ -1353,7 +1355,7 @@ export default function ClientDashboard() {
                     b.master_name
                   )}
                 </div>
-                <div className="mb-5 grid gap-3 sm:grid-cols-2">
+                <div className="mb-5 grid flex-1 gap-3 sm:grid-cols-2">
                   <div className="detail-item">
                     <div className="lbl mb-1 text-[11px] font-semibold uppercase tracking-wider text-white/[0.72]">Дата и время</div>
                     <div className="val text-[15px] font-semibold text-white tabular-nums">
@@ -1367,15 +1369,17 @@ export default function ClientDashboard() {
                     </div>
                   </div>
                   <div className="detail-item">
-                    <div className="lbl mb-1 text-[11px] font-semibold uppercase tracking-wider text-white/[0.72]">Стоимость</div>
-                    <div className="val text-[15px] font-semibold text-white tabular-nums">{b.price} ₽</div>
+                    <div className="lbl mb-1 text-[11px] font-semibold uppercase tracking-wider text-white/[0.72]">К оплате</div>
+                    <div className="val text-[15px]">
+                      <ClientBookingPriceDisplay booking={b} variant="hero" />
+                    </div>
                   </div>
                   <div className="detail-item">
                     <div className="lbl mb-1 text-[11px] font-semibold uppercase tracking-wider text-white/[0.72]">Статус</div>
                     <div className="val text-[15px] font-semibold text-white">{getBookingStatusLabel(b.status)}</div>
                   </div>
                 </div>
-                <div className="flex flex-wrap gap-2">
+                <div className="mt-auto flex flex-wrap gap-2">
                   {b.master_name && b.master_name !== '-' && (
                     <span className="inline-flex items-center rounded-[10px] border border-white/[0.18] bg-white/[0.12] p-0.5">
                       {b.indie_master_id ? (
@@ -1416,13 +1420,13 @@ export default function ClientDashboard() {
               </div>
             )
           })() : (
-            <div className="next-booking flex min-h-[180px] flex-col justify-center rounded-2xl border border-transparent bg-gradient-to-br from-[#4CAF50] to-[#43A047] p-[22px] text-center text-white/90 shadow-[0_10px_24px_-12px_rgba(76,175,80,0.45)]">
+            <div className="next-booking flex h-full min-h-[200px] flex-col justify-center rounded-2xl border border-transparent bg-gradient-to-br from-[#4CAF50] to-[#43A047] p-[22px] text-center text-white/90 shadow-[0_10px_24px_-12px_rgba(76,175,80,0.45)] lg:min-h-0">
               <p className="m-0 text-sm font-medium">Нет предстоящих записей</p>
             </div>
           )}
         </div>
 
-        <div className="loyalty-card flex min-h-0 min-w-0 flex-col rounded-2xl border border-[#E7E2DF] bg-white p-[18px] shadow-sm">
+        <div className="loyalty-card flex h-full min-h-0 min-w-0 flex-col rounded-2xl border border-[#E7E2DF] bg-white p-[18px] shadow-sm lg:min-h-[280px]">
           <div className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Мои баллы</div>
           <div className="points mt-2 text-[28px] font-bold leading-tight tracking-[-0.02em] text-neutral-900 tabular-nums min-h-[2.25rem] sm:text-[30px]">
             {loyaltySummary.loading ? (
@@ -1434,7 +1438,14 @@ export default function ClientDashboard() {
             )}
           </div>
           {!loyaltySummary.loading && !loyaltySummary.error && (
-            <p className="mt-1 text-[11px] text-neutral-500 leading-snug">Сумма баллов по всем мастерам</p>
+            <p className="mt-1 text-[11px] text-neutral-500 leading-snug">
+              Доступно к списанию по всем мастерам
+              {loyaltySummary.totalReserved > 0 && (
+                <span className="block mt-0.5 text-amber-700">
+                  В резерве: {loyaltySummary.totalReserved} баллов
+                </span>
+              )}
+            </p>
           )}
           {loyaltySummary.error && (
             <p className="mt-1 text-[11px] text-neutral-500">Баланс временно недоступен</p>
@@ -1443,7 +1454,7 @@ export default function ClientDashboard() {
           {!loyaltySummary.loading && !loyaltySummary.error && loyaltyTopMasters.length > 0 && (
             <ul className="mt-3 max-h-[200px] space-y-2 overflow-y-auto border-t border-[#EFEBE8] pt-3">
               {loyaltyTopMasters.map((m) => {
-                const lastMs = getLastEarnedMs(m)
+                const lastMs = getLastLoyaltyActivityMs(m)
                 const lastLabel =
                   lastMs > 0 ? formatDateTimeShort(new Date(lastMs).toISOString()) : null
                 return (
@@ -1466,12 +1477,19 @@ export default function ClientDashboard() {
                       )}
                       {lastLabel ? (
                         <span className="mt-0.5 block text-[10px] text-neutral-500">
-                          Последнее начисление: {lastLabel}
+                          Последняя операция: {lastLabel}
                         </span>
                       ) : null}
                     </div>
-                    <span className="shrink-0 text-[12px] font-bold tabular-nums text-neutral-900">
-                      {m.balance}
+                    <span className="shrink-0 text-right">
+                      <span className="block text-[12px] font-bold tabular-nums text-neutral-900">
+                        {m.balance}
+                      </span>
+                      {Number(m.reserved_points ?? 0) > 0 && (
+                        <span className="block text-[10px] font-medium text-amber-700 tabular-nums">
+                          в резерве: {m.reserved_points}
+                        </span>
+                      )}
                     </span>
                   </li>
                 )
@@ -1605,7 +1623,7 @@ export default function ClientDashboard() {
                       <p className="text-xs text-neutral-600 mb-3 leading-snug">
                         {b.service_name ? (b.service_name.includes(' - ') ? b.service_name.split(' - ')[0] : b.service_name) : '—'}
                         <span className="text-neutral-300 mx-1">·</span>
-                        <span className="tabular-nums">{b.price} ₽</span>
+                        <ClientBookingPriceDisplay booking={b} variant="inline" />
                         <span className="text-neutral-300 mx-1">·</span>
                         <span>{b.duration} мин</span>
                       </p>
@@ -1695,7 +1713,9 @@ export default function ClientDashboard() {
                           <td className="py-3.5 px-4 text-gray-600">
                             {b.service_name ? (b.service_name.includes(' - ') ? b.service_name.split(' - ')[0] : b.service_name) : '—'}
                           </td>
-                          <td className="py-3.5 px-4 text-gray-700 tabular-nums whitespace-nowrap">{b.price} ₽</td>
+                          <td className="py-3.5 px-4 text-gray-700 whitespace-nowrap">
+                            <ClientBookingPriceDisplay booking={b} />
+                          </td>
                           <td className="py-3.5 px-4 text-gray-600 tabular-nums whitespace-nowrap">
                             {b.start_time ? formatDateTimeShort(b.start_time) : formatDateTimeShort(b.date)}
                           </td>
@@ -1940,7 +1960,7 @@ export default function ClientDashboard() {
                       <p className="text-xs text-gray-500 mb-2.5">
                         {serviceDisplay}
                         <span className="text-gray-300 mx-1">·</span>
-                        <span className="tabular-nums">{b.price} ₽</span>
+                        <ClientBookingPriceDisplay booking={b} variant="inline" />
                       </p>
                       <div className="flex items-center gap-0.5">
                         <div className="inline-flex items-center justify-center w-9 h-9 min-w-[36px] min-h-[36px]">
@@ -2026,7 +2046,9 @@ export default function ClientDashboard() {
                           <td className="py-3.5 px-4 text-gray-600">
                             {b.service_name ? (b.salon_name && b.salon_name !== '-' ? b.service_name.split(' - ')[0] : b.service_name) : '—'}
                           </td>
-                          <td className="py-3.5 px-4 text-gray-700 tabular-nums whitespace-nowrap">{b.price} ₽</td>
+                          <td className="py-3.5 px-4 text-gray-700 whitespace-nowrap">
+                            <ClientBookingPriceDisplay booking={b} />
+                          </td>
                           <td className="py-3.5 px-4 text-gray-600 tabular-nums whitespace-nowrap">{formatDateShort(b.date)}</td>
                           <td className="py-3.5 px-4 w-[112px]">
                             <div className="inline-flex items-center justify-end gap-0.5 w-full">
@@ -2471,7 +2493,7 @@ export default function ClientDashboard() {
                                 : b.service_name
                               : '—'}
                             <span className="text-gray-400"> · </span>
-                            <span className="tabular-nums">{b.price} ₽</span>
+                            <ClientBookingPriceDisplay booking={b} variant="inline" />
                             <span className="text-gray-400"> · </span>
                             <span>{b.duration} мин</span>
                           </p>
@@ -2585,7 +2607,9 @@ export default function ClientDashboard() {
                                   : b.service_name
                                 : '-'}
                         </td>
-                            <td className="py-3 px-3 align-top whitespace-nowrap">{b.price} ₽</td>
+                            <td className="py-3 px-3 align-top whitespace-nowrap">
+                              <ClientBookingPriceDisplay booking={b} />
+                            </td>
                             <td className="py-3 px-3 align-top whitespace-nowrap">
                               {b.duration != null ? `${b.duration} мин` : '—'}
                         </td>
@@ -2780,7 +2804,7 @@ export default function ClientDashboard() {
                           <p className="text-xs text-gray-600 mt-1">
                             {serviceDisplay}
                             <span className="text-gray-400"> · </span>
-                            <span className="tabular-nums">{b.price} ₽</span>
+                            <ClientBookingPriceDisplay booking={b} variant="inline" />
                           </p>
                           <div className="flex flex-wrap items-center gap-1 mt-3 pt-2 border-t border-gray-100">
                             <div className="inline-flex items-center justify-center w-10 h-10 min-w-[40px] min-h-[40px]">
@@ -2907,7 +2931,9 @@ export default function ClientDashboard() {
                                   : b.service_name
                                 : '-'}
                         </td>
-                            <td className="py-3 px-3 align-top whitespace-nowrap">{b.price} ₽</td>
+                            <td className="py-3 px-3 align-top whitespace-nowrap">
+                              <ClientBookingPriceDisplay booking={b} />
+                            </td>
                             <td className="py-3 px-3 align-top whitespace-nowrap">
                               {b.duration != null ? `${b.duration} мин` : '—'}
                             </td>
@@ -3128,7 +3154,8 @@ export default function ClientDashboard() {
                           </span>
                         </td>
                         <td className="py-2 px-3">
-                          {trans.service_name || '-'}
+                          {trans.service_name ||
+                            (trans.transaction_type === 'spent' ? 'Оплата записи баллами' : '-')}
                         </td>
                         <td className="py-2 px-3">
                           {formatDateForLoyalty(trans.earned_at)}
@@ -3158,7 +3185,14 @@ export default function ClientDashboard() {
                     >
                       <div>
                         <div className="font-medium text-gray-900">{master.master_name}</div>
-                        <div className="text-sm text-gray-600">{master.balance} баллов</div>
+                        <div className="text-sm text-gray-600">
+                          {master.balance} баллов
+                          {master.balance === 0 &&
+                          Array.isArray(master.transactions) &&
+                          master.transactions.length > 0
+                            ? ' · есть история'
+                            : ''}
+                        </div>
                       </div>
                       <button
                         onClick={() => setSelectedLoyaltyMaster(master)}

@@ -7,6 +7,9 @@
 
 Опции:
   --no-smoke-extended  — пропустить шаг 7d (loyalty QA + заметка клиента; см. docs/SMOKE_RESEED_MAP.md)
+  --no-loyalty-public-smoke  — пропустить шаг 7e (публичные loyalty-smoke мастера +799900009xx)
+  --loyalty-create-past-booking  — в 7e: прошлая запись для confirm
+  --loyalty-create-active-reserve  — в 7e: будущая запись с резервом баллов
 
 Требует: ENVIRONMENT=development, backend запущен, админ +79031078685 существует.
 """
@@ -718,6 +721,21 @@ def main() -> int:
         action="store_true",
         help="Не выполнять шаг 7d: расширение smoke (loyalty settings, quick/personal, заметка клиента).",
     )
+    ap.add_argument(
+        "--no-loyalty-public-smoke",
+        action="store_true",
+        help="Не выполнять шаг 7e: публичные loyalty smoke-аккаунты (см. docs/LOYALTY_SMOKE_TESTING.md).",
+    )
+    ap.add_argument(
+        "--loyalty-create-past-booking",
+        action="store_true",
+        help="В шаге 7e: создать прошлую smoke-запись для confirm flow.",
+    )
+    ap.add_argument(
+        "--loyalty-create-active-reserve",
+        action="store_true",
+        help="В шаге 7e: создать будущую запись с резервом баллов.",
+    )
     args = ap.parse_args()
     base = args.base_url.rstrip("/")
     admin_password = args.admin_password
@@ -725,6 +743,10 @@ def main() -> int:
     legacy_indie_bookings = args.legacy_indie_bookings
     verbose = args.verbose
     smoke_extended = not args.no_smoke_extended
+    loyalty_public_smoke = smoke_extended and not args.no_loyalty_public_smoke
+    loyalty_past = args.loyalty_create_past_booking
+    loyalty_reserve = args.loyalty_create_active_reserve
+    loyalty_smoke_ok = True
 
     if no_salon:
         print("Режим --no-salon: только подписки (мастера, балансы, клиенты). Без салона/услуг/расписаний/броней.")
@@ -1583,6 +1605,20 @@ def main() -> int:
                     except Exception as ex:
                         print(f"\n[WARN] Smoke extension (7d) failed: {ex}")
 
+                # 7e) Публичные loyalty smoke-мастера (+799900009xx) — ORM, та же БД что backend
+                if loyalty_public_smoke:
+                    try:
+                        from seed_loyalty_smoke import run_loyalty_public_smoke_reseed
+
+                        run_loyalty_public_smoke_reseed(
+                            with_past_booking=loyalty_past,
+                            with_active_reserve=loyalty_reserve,
+                            fail_on_zero_slots=True,
+                        )
+                    except Exception as ex:
+                        print(f"\n[FAIL] Loyalty public smoke (7e): {ex}")
+                        loyalty_smoke_ok = False
+
             # Indie sanity check (только при --legacy-indie-bookings)
             if legacy_indie_bookings:
                 try:
@@ -1653,7 +1689,7 @@ def main() -> int:
         mode_str = "subscriptions only" if no_salon else "full"
         indie_mode_str = "legacy-indie" if legacy_indie_bookings else "master-only"
         print(f"\n--- Результат reseed ({mode_str}, mode={indie_mode_str}) ---")
-        all_ok = subscription_check_ok and not bad_phones
+        all_ok = subscription_check_ok and not bad_phones and loyalty_smoke_ok
         for m in master_results:
             dr = m["daily_rate"]
             bal = m["balance_rub"]

@@ -322,9 +322,14 @@ export default function MasterPublicBookingPage() {
                     </div>
                   )}
                   {currentUser && eligibility.points != null && eligibility.points > 0 && (
-                    <div className="rounded-xl border border-emerald-200/50 bg-emerald-50/50 px-3 py-2.5 text-sm text-neutral-800">
-                      <span className="font-medium text-neutral-900">Баллы: </span>
-                      {eligibility.points}
+                    <div className="rounded-xl border border-emerald-200 bg-white px-3.5 py-3 text-sm text-neutral-800 shadow-[0_1px_2px_rgba(45,45,45,0.04)]">
+                      <p className="font-medium text-neutral-900">
+                        Доступно баллов:{' '}
+                        <span className="tabular-nums">{eligibility.points}</span>
+                      </p>
+                      <p className="text-[13px] text-neutral-600 mt-1.5 leading-snug">
+                        Оплату баллами можно включить в блоке итога после выбора времени.
+                      </p>
                     </div>
                   )}
                 </div>

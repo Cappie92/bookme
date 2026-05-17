@@ -96,10 +96,19 @@ export interface SubscriptionCalculationResponse {
   forced_upgrade_type?: string | null;
 }
 
+function isNoSubscription404Payload(data: unknown): boolean {
+  if (data == null || typeof data !== 'object') return false;
+  const d = data as { detail?: unknown; message?: unknown };
+  const raw = d.detail ?? d.message;
+  if (raw === 'no_subscription') return true;
+  if (typeof raw === 'string' && raw.includes('no_subscription')) return true;
+  return false;
+}
+
 /**
  * Получить текущую активную подписку пользователя.
  * GET /api/subscriptions/my — read-only, не создаёт подписку.
- * При отсутствии подписки возвращает 404 → null.
+ * При отсутствии подписки backend: 404 + detail/message "no_subscription" → null (норма).
  */
 export async function fetchCurrentSubscription(): Promise<Subscription | null> {
   try {
@@ -107,8 +116,8 @@ export async function fetchCurrentSubscription(): Promise<Subscription | null> {
     return response.data;
   } catch (err: any) {
     const status = err?.response?.status;
-    const detail = err?.response?.data?.detail;
-    if (status === 404 && (detail === 'no_subscription' || String(detail).includes('no_subscription'))) {
+    const data = err?.response?.data;
+    if (status === 404 && isNoSubscription404Payload(data)) {
       return null;
     }
     throw err;

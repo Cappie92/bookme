@@ -12,6 +12,8 @@ export interface ClientLoyaltyMaster {
   master_name: string
   master_domain?: string | null
   balance: number
+  reserved_points?: number
+  ledger_balance?: number
   transactions?: LoyaltyTransaction[]
 }
 
@@ -40,6 +42,7 @@ export interface LoyaltyTransaction {
 export interface ClientLoyaltyPointsResponse {
   masters: ClientLoyaltyMaster[]
   total_balance: number
+  total_reserved?: number
 }
 
 /**
@@ -50,24 +53,56 @@ export async function getClientLoyaltyPoints(): Promise<ClientLoyaltyPointsRespo
     const response = await apiClient.get<ClientLoyaltyPointsResponse>('/api/client/loyalty/points')
     return response.data
   } catch (_error: any) {
-    // Graceful fallback при ошибке
     return {
       masters: [],
-      total_balance: 0
+      total_balance: 0,
+      total_reserved: 0,
     }
   }
 }
 
+function _mergeTransactionsFromPoints(data: ClientLoyaltyPointsResponse): LoyaltyTransaction[] {
+  const out: LoyaltyTransaction[] = []
+  for (const m of data.masters ?? []) {
+    for (const t of m.transactions ?? []) {
+      out.push({ ...t, master_id: t.master_id ?? m.master_id })
+    }
+  }
+  out.sort((a, b) => {
+    const ta = new Date(a.earned_at ?? a.created_at).getTime()
+    const tb = new Date(b.earned_at ?? b.created_at).getTime()
+    return tb - ta
+  })
+  return out
+}
+
 /**
- * Получить историю транзакций лояльности для конкретного мастера
+ * История лояльности: по мастеру (backend GET .../history/{id}) или сводка из /points.
  */
-export async function getLoyaltyHistory(masterId: number): Promise<LoyaltyTransaction[]> {
-  try {
-    const response = await apiClient.get<LoyaltyTransaction[]>(`/api/client/loyalty/history/${masterId}`)
-    return response.data
-  } catch (_error: any) {
+export async function getLoyaltyHistory(masterId: number | null): Promise<LoyaltyTransaction[]> {
+  if (masterId != null && !Number.isNaN(masterId)) {
+    try {
+      const response = await apiClient.get<LoyaltyTransaction[]>(`/api/client/loyalty/history/${masterId}`)
+      if (Array.isArray(response.data) && response.data.length > 0) {
+        return response.data
+      }
+    } catch (_e: any) {
+      /* fallback below */
+    }
+    const pts = await getClientLoyaltyPoints()
+    const slice = pts.masters?.find((m) => m.master_id === masterId)?.transactions ?? []
+    if (slice.length > 0) {
+      return [...slice].sort(
+        (a, b) =>
+          new Date(b.earned_at ?? b.created_at).getTime() -
+          new Date(a.earned_at ?? a.created_at).getTime()
+      )
+    }
     return []
   }
+
+  const pts = await getClientLoyaltyPoints()
+  return _mergeTransactionsFromPoints(pts)
 }
 
 /**
@@ -86,13 +121,12 @@ export async function getClientDashboardStats(): Promise<ClientDashboardStats> {
     const response = await apiClient.get<ClientDashboardStats>('/api/client/dashboard/stats')
     return response.data
   } catch (_error: any) {
-    // Fallback
     return {
       future_bookings_count: 0,
       past_bookings_count: 0,
       favorites_count: 0,
       total_loyalty_points: 0,
-      salons_enabled: false
+      salons_enabled: false,
     }
   }
 }

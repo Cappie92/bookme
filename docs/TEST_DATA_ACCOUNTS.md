@@ -2,7 +2,7 @@
 
 > **Не редактировать вручную.** Файл перезаписывается `backend/scripts/reseed_local_test_data.py` после каждого reseed.
 
-- **Сгенерировано:** 2026-05-04 09:33:12 UTC
+- **Сгенерировано:** 2026-05-15 16:57:02 UTC
 - **Режим reseed:** `full` (`--no-salon`=нет)
 - **Indie / брони:** `master-only`
 - **Макс. коммерческий план мастера в БД:** `Premium` (план `AlwaysFree` — служебный, в публичном списке не показывается).
@@ -19,12 +19,12 @@
 |------|-------|-------|-----------|------|--------------|-------------------|----------|------------|-----------|---------|----------------|---------|--------|-------------|---------------|
 | master | +79990000000 | master0@example.com | Мастер Free 0 | Free | — | can_continue=true | test123 | no | no | no | no | no | no | 0 | Free |
 | master | +79990000001 | master1@example.com | Мастер Free 1 | Free | — | can_continue=true | test123 | no | no | no | no | no | no | 0 | Free |
-| master | +79990000002 | master2@example.com | Мастер Basic 2 | Basic | normal | 20+ дней подписки | test123 | yes | no | no | no | no | yes | 1 | Basic |
-| master | +79990000003 | master3@example.com | Мастер Basic 3 | Basic | low | деактивация после daily job | test123 | yes | no | no | no | no | yes | 1 | Basic |
-| master | +79990000004 | master4@example.com | Мастер Standard 4 | Standard | normal | 20+ дней подписки | test123 | yes | no | no | no | no | yes | 1 | Basic |
-| master | +79990000005 | master5@example.com | Мастер Standard 5 | Standard | low | деактивация после daily job | test123 | yes | no | no | no | no | yes | 1 | Basic |
-| master | +79990000006 | master6@example.com | Мастер Pro 6 | Pro | normal | 20+ дней подписки | test123 | yes | yes | no | yes | no | yes | 3 | Pro |
-| master | +79990000007 | master7@example.com | Мастер Pro 7 | Pro | low | деактивация после daily job | test123 | yes | yes | no | yes | no | yes | 3 | Pro |
+| master | +79990000002 | master2@example.com | Мастер Basic 2 | Basic | normal | 20+ дней подписки | test123 | no | no | no | no | no | yes | 1 | Basic |
+| master | +79990000003 | master3@example.com | Мастер Basic 3 | Basic | low | деактивация после daily job | test123 | no | no | no | no | no | yes | 1 | Basic |
+| master | +79990000004 | master4@example.com | Мастер Standard 4 | Standard | normal | 20+ дней подписки | test123 | no | no | no | no | no | yes | 1 | Basic |
+| master | +79990000005 | master5@example.com | Мастер Standard 5 | Standard | low | деактивация после daily job | test123 | no | no | no | no | no | yes | 1 | Basic |
+| master | +79990000006 | master6@example.com | Мастер Pro 6 | Pro | normal | 20+ дней подписки | test123 | yes | yes | yes | yes | yes | yes | 3 | Pro |
+| master | +79990000007 | master7@example.com | Мастер Pro 7 | Pro | low | деактивация после daily job | test123 | yes | yes | yes | yes | yes | yes | 3 | Pro |
 | master | +79990000008 | master8@example.com | Мастер Premium 8 | Premium | normal | 20+ дней подписки | test123 | yes | yes | yes | yes | yes | yes | 999999 | Premium |
 | master | +79990000009 | master9@example.com | Мастер Premium 9 | Premium | low | деактивация после daily job | test123 | yes | yes | yes | yes | yes | yes | 999999 | Premium |
 

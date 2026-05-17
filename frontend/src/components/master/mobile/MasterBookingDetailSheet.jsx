@@ -9,6 +9,7 @@ import {
   isFuturePending,
   MasterBookingClientBlockMobile,
   resolveBookingPriceDisplay,
+  MasterBookingLoyaltyRubLine,
 } from './masterBookingShared';
 import { masterZClass } from '../../../config/masterOverlayZIndex';
 import MasterActionSheet from './MasterActionSheet';
@@ -96,6 +97,7 @@ export default function MasterBookingDetailSheet({
             <div>
               <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">Сумма</span>
               <p className="mt-0.5 font-medium text-gray-900">{priceLabel || '—'}</p>
+              <MasterBookingLoyaltyRubLine booking={b} className="mt-1 text-xs font-medium text-[#2F7C43]" />
             </div>
             {durationMin != null && Number.isFinite(durationMin) ? (
               <div>

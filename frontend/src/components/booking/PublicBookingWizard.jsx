@@ -8,7 +8,6 @@ import { ChevronDownIcon, ChevronUpIcon, MagnifyingGlassIcon, CalendarIcon, Chev
 import { formatTimeShort, formatTimezoneLabel } from '../../utils/dateFormat'
 import { useAuth } from '../../contexts/AuthContext'
 import PublicBookingAuthPrompt from './PublicBookingAuthPrompt'
-import PublicBookingLoggedInConfirmModal from './PublicBookingLoggedInConfirmModal'
 import { metrikaGoal } from '../../analytics/metrika'
 import { M } from '../../analytics/metrikaEvents'
 import { apiGet } from '../../utils/api'
@@ -252,6 +251,19 @@ const LOYALTY_HINT_TITLE_BY_TYPE = {
   happy_hours: 'Счастливые часы',
 }
 
+/** Подпись к скидке в UI: без QA/debug-имён из rule_name, при необходимости — по condition_type. */
+function humanDiscountCaptionFromPreview(pv) {
+  if (!pv || typeof pv !== 'object') return ''
+  const rn = String(pv.rule_name ?? pv.ruleName ?? '').trim()
+  const ct = String(pv.condition_type ?? pv.conditionType ?? '').trim()
+  if (/\[QA|QA\s*SMOKE/i.test(rn)) {
+    return LOYALTY_HINT_TITLE_BY_TYPE[ct] || ''
+  }
+  if (rn) return rn
+  if (ct && LOYALTY_HINT_TITLE_BY_TYPE[ct]) return LOYALTY_HINT_TITLE_BY_TYPE[ct]
+  return ''
+}
+
 function formatSuccessBookingDateRu(iso) {
   if (!iso) return '—'
   const d = new Date(iso)
@@ -281,12 +293,17 @@ function normalizePublicBookingCreateResponse(raw) {
   const et = src.end_time ?? src.endTime
   const fp = src.final_price ?? src.finalPrice
   const bp = src.base_price ?? src.basePrice
+  const ddp = src.discounted_price ?? src.discountedPrice
+  const lpu = src.loyalty_points_used ?? src.loyaltyPointsUsed
   const dpct = src.discount_percent ?? src.discountPercent
   const damt = src.discount_amount ?? src.discountAmount
   const rn = src.rule_name ?? src.ruleName
   const ct = src.condition_type ?? src.conditionType
   const finalPrice = toFiniteNumberOrNull(fp)
   const basePrice = toFiniteNumberOrNull(bp)
+  const discountedPrice = toFiniteNumberOrNull(ddp)
+  const loyaltyUsedRaw = lpu == null || lpu === '' ? null : toFiniteNumberOrNull(lpu)
+  const loyaltyPointsUsed = loyaltyUsedRaw == null ? 0 : Math.max(0, Math.round(Number(loyaltyUsedRaw)))
   const discPct = dpct == null || dpct === '' ? null : toFiniteNumberOrNull(dpct)
   const discAmtRaw = damt == null || damt === '' ? 0 : toFiniteNumberOrNull(damt)
   const discAmt = discAmtRaw == null ? 0 : discAmtRaw
@@ -299,6 +316,8 @@ function normalizePublicBookingCreateResponse(raw) {
     base_price: basePrice,
     discount_percent: discPct,
     discount_amount: discAmt,
+    discounted_price: discountedPrice != null ? discountedPrice : basePrice,
+    loyalty_points_used: loyaltyPointsUsed,
     rule_name: rn != null ? String(rn) : null,
     condition_type: ct != null ? String(ct) : null,
   }
@@ -321,8 +340,16 @@ function fillPublicBookingCreateSummaryGaps(normalized, clientCtx) {
   const pv = clientCtx.preview
   if (pv && typeof pv === 'object') {
     if (out.final_price == null || !Number.isFinite(Number(out.final_price))) {
-      const fp = toFiniteNumberOrNull(pv.final_price ?? pv.finalPrice)
-      if (fp != null) out.final_price = fp
+      const fp2 = toFiniteNumberOrNull(pv.final_price ?? pv.finalPrice ?? pv.amount_to_pay ?? pv.amountToPay)
+      if (fp2 != null) out.final_price = fp2
+    }
+    if (out.discounted_price == null || !Number.isFinite(Number(out.discounted_price))) {
+      const ddisc = toFiniteNumberOrNull(pv.discounted_price ?? pv.discountedPrice)
+      if (ddisc != null) out.discounted_price = ddisc
+    }
+    if (!(Number(out.loyalty_points_used) > 0) && Number(pv.loyalty_points_to_use ?? pv.loyaltyPointsToUse) > 0) {
+      const lu = toFiniteNumberOrNull(pv.loyalty_points_to_use ?? pv.loyaltyPointsToUse)
+      if (lu != null) out.loyalty_points_used = Math.round(lu)
     }
     if (out.base_price == null || !Number.isFinite(Number(out.base_price))) {
       const bp = toFiniteNumberOrNull(pv.base_price ?? pv.basePrice)
@@ -351,7 +378,8 @@ function hasPublicBookingSuccessSummary(s) {
   const n = normalizePublicBookingCreateResponse(s)
   const nameOk = String(n.service_name ?? '').trim().length > 0
   const timeOk = n.start_time != null && String(n.start_time).trim() !== ''
-  const priceOk = n.final_price != null && Number.isFinite(Number(n.final_price))
+  const money = n.final_price ?? n.amount_to_pay
+  const priceOk = money != null && Number.isFinite(Number(money))
   return nameOk && timeOk && priceOk
 }
 
@@ -367,11 +395,7 @@ function devLogPublicBookingCreateSuccess(label, rawBody, normalized) {
 
 function successDiscountRuleLabel(s) {
   const n = normalizePublicBookingCreateResponse(s)
-  const r = String(n.rule_name ?? '').trim()
-  if (r) return r
-  const ct = String(n.condition_type ?? '').trim()
-  if (ct && LOYALTY_HINT_TITLE_BY_TYPE[ct]) return LOYALTY_HINT_TITLE_BY_TYPE[ct]
-  return ct || ''
+  return humanDiscountCaptionFromPreview(n)
 }
 
 /** Для sessionStorage после POST: слот + нормализованные поля цены из ответа API. */
@@ -475,9 +499,9 @@ export default function PublicBookingWizard({
   const [pricePreview, setPricePreview] = useState(null)
   const [pricePreviewLoading, setPricePreviewLoading] = useState(false)
   const [pricePreviewError, setPricePreviewError] = useState(null)
+  const [usePoints, setUsePoints] = useState(false)
   const pricePreviewRef = useRef(null)
   const [showAuthPrompt, setShowAuthPrompt] = useState(false)
-  const [showLoggedInConfirmModal, setShowLoggedInConfirmModal] = useState(false)
   const [slots, setSlots] = useState([])
   const [slotsLoading, setSlotsLoading] = useState(false)
   const [slotsError, setSlotsError] = useState(null)
@@ -601,7 +625,7 @@ export default function PublicBookingWizard({
   const authPromptSummary = useMemo(() => {
     if (!selectedService || !selectedDate || !selectedSlot) return null
     const dateLabel = dateOptions.find((d) => d.dateStr === selectedDate)?.displayLabel || selectedDate
-    const timeLabel = `${formatTimeShort(selectedSlot.start_time)}–${formatTimeShort(selectedSlot.end_time)}`
+    const timeLabel = formatTimeShort(selectedSlot.start_time)
     const timezoneOrCity = profile?.master_timezone
       ? formatTimezoneLabel(profile.master_timezone)
       : (profile?.city ?? '')
@@ -691,7 +715,11 @@ export default function PublicBookingWizard({
     const token = typeof localStorage !== 'undefined' ? localStorage.getItem('access_token') : null
     let cancelled = false
     const st = encodeURIComponent(selectedSlot.start_time)
-    const url = `/api/public/masters/${encodeURIComponent(slug)}/booking-price-preview?service_id=${selectedService.id}&start_time=${st}`
+    const loyaltyQs =
+      usePoints && currentUser && eligibility != null && eligibility.points != null && eligibility.points > 0
+        ? '&use_loyalty_points=true'
+        : ''
+    const url = `/api/public/masters/${encodeURIComponent(slug)}/booking-price-preview?service_id=${selectedService.id}&start_time=${st}${loyaltyQs}`
     setPricePreviewLoading(true)
     setPricePreviewError(null)
     const headers = {}
@@ -719,7 +747,7 @@ export default function PublicBookingWizard({
     return () => {
       cancelled = true
     }
-  }, [slug, selectedService, selectedSlot, currentUser?.id])
+  }, [slug, selectedService, selectedSlot, currentUser?.id, usePoints, eligibility?.points])
 
   useEffect(() => {
     pricePreviewRef.current = pricePreview
@@ -766,14 +794,10 @@ export default function PublicBookingWizard({
     }
   }, [selectedSlot, selectedDate, slotsForDate, slotsLoading])
 
-  // Закрыть промпт «Подтвердите запись» после успешной авторизации
+  // Закрыть промпт входа/регистрации после успешной авторизации
   useEffect(() => {
     if (currentUser) setShowAuthPrompt(false)
   }, [currentUser])
-
-  useEffect(() => {
-    setShowLoggedInConfirmModal(false)
-  }, [selectedService?.id, selectedDate, selectedSlot?.start_time, selectedSlot?.end_time])
 
   useEffect(() => {
     mountedRef.current = true
@@ -865,7 +889,12 @@ export default function PublicBookingWizard({
     const requestSeq = ++autoSubmitSeqRef.current
     const isActive = () => mountedRef.current && autoSubmitSeqRef.current === requestSeq
     const url = `/api/public/masters/${encodeURIComponent(slug)}/bookings`
-    const payload = { service_id: draft.service_id, start_time: draft.start_time, end_time: draft.end_time }
+    const payload = {
+      service_id: draft.service_id,
+      start_time: draft.start_time,
+      end_time: draft.end_time,
+      use_loyalty_points: false,
+    }
     if (typeof __DEV__ !== 'undefined' && __DEV__) {
       console.debug('[public-booking] POST booking (draft fresh, auto after login)', { url, payload, ageMs })
     }
@@ -1035,6 +1064,7 @@ export default function PublicBookingWizard({
     setSelectedService(s)
     setSelectedDate(null)
     setSelectedSlot(null)
+    setUsePoints(false)
     setSubmitError(null)
     setPostLoginRestoreNotice(false)
     setShowServiceDropdown(false)
@@ -1044,11 +1074,13 @@ export default function PublicBookingWizard({
   const handleSelectDate = (dateStr) => {
     setSelectedDate(dateStr)
     setSelectedSlot(null)
+    setUsePoints(false)
     setPostLoginRestoreNotice(false)
     setCalendarExpanded(false)
   }
 
   const handleSelectSlot = (slot) => {
+    setUsePoints(false)
     setSelectedSlot(slot)
     setPostLoginRestoreNotice(false)
   }
@@ -1058,6 +1090,10 @@ export default function PublicBookingWizard({
   const bookingBlocked = profile?.booking_blocked === true || eligibility?.booking_blocked === true
   const requiresAdvancePayment = profile?.requires_advance_payment === true || eligibility?.requires_advance_payment === true
   const loyaltyHintCopy = useMemo(() => buildLoyaltyHintCopy(eligibility?.loyalty_hint), [eligibility?.loyalty_hint])
+
+  /** Виден при полном выборе слота: авторизован и effective-баллы > 0 (не зависит от preview с use_loyalty_points=false). */
+  const showLoyaltyPointsToggle =
+    Boolean(currentUser) && Number(eligibility?.points ?? 0) > 0
 
   const performPublicBookingCreate = useCallback(async () => {
     if (!canSubmit || bookingBlocked) return
@@ -1078,10 +1114,13 @@ export default function PublicBookingWizard({
     setSubmitting(true)
     metrikaGoal(M.PUBLIC_BOOKING_FORM_SUBMIT, { slug, context: 'public_wizard' })
     const url = `/api/public/masters/${encodeURIComponent(slug)}/bookings`
+    const useLoyalty =
+      !!(usePoints && eligibility && eligibility.points != null && eligibility.points > 0)
     const payload = {
       service_id: selectedService.id,
       start_time: selectedSlot.start_time,
       end_time: selectedSlot.end_time,
+      use_loyalty_points: useLoyalty,
     }
     if (typeof __DEV__ !== 'undefined' && __DEV__) {
       console.debug('[public-booking] POST booking', { url, payload })
@@ -1093,11 +1132,7 @@ export default function PublicBookingWizard({
           'Content-Type': 'application/json',
           Authorization: `Bearer ${localStorage.getItem('access_token')}`,
         },
-        body: JSON.stringify({
-          service_id: selectedService.id,
-          start_time: selectedSlot.start_time,
-          end_time: selectedSlot.end_time,
-        }),
+        body: JSON.stringify(payload),
       })
       if (typeof __DEV__ !== 'undefined' && __DEV__) {
         console.debug('[public-booking] POST response', { status: res.status, ok: res.ok })
@@ -1199,6 +1234,8 @@ export default function PublicBookingWizard({
     selectedSlot,
     onBookingSuccess,
     onBookingError,
+    usePoints,
+    eligibility,
   ])
 
   const handleGuestBookingIntent = useCallback(() => {
@@ -1280,10 +1317,7 @@ export default function PublicBookingWizard({
               <strong className="font-semibold">Дата:</strong> {formatSuccessBookingDateRu(sum.start_time)}
             </div>
             <div className="mb-1.5">
-              <strong className="font-semibold">Время:</strong>{' '}
-              {sum.end_time
-                ? `${formatTimeShort(sum.start_time)}–${formatTimeShort(sum.end_time)}`
-                : formatTimeShort(sum.start_time)}
+              <strong className="font-semibold">Время:</strong> {formatTimeShort(sum.start_time)}
             </div>
             {Number(sum.discount_amount) > 0 ? (
               <div className="mb-1.5">
@@ -1298,8 +1332,22 @@ export default function PublicBookingWizard({
                 {discountRuleLabel ? ` — ${discountRuleLabel}` : ''}
               </div>
             ) : null}
+            {sum.discounted_price != null &&
+            Number.isFinite(Number(sum.discounted_price)) &&
+            Number(sum.loyalty_points_used) > 0 ? (
+              <div className="mb-1.5">
+                <strong className="font-semibold">После скидки:</strong>{' '}
+                {Number(sum.discounted_price).toLocaleString('ru-RU')} ₽
+              </div>
+            ) : null}
+            {Number(sum.loyalty_points_used) > 0 ? (
+              <div className="mb-1.5">
+                <strong className="font-semibold">Баллами:</strong> {'\u2212'}
+                {Number(sum.loyalty_points_used).toLocaleString('ru-RU')} ₽
+              </div>
+            ) : null}
             <div className="font-semibold">
-              К оплате: {Number(sum.final_price).toLocaleString('ru-RU')} ₽
+              К оплате: {Number(sum.final_price ?? sum.amount_to_pay).toLocaleString('ru-RU')} ₽
             </div>
           </div>
         ) : null}
@@ -1625,10 +1673,13 @@ export default function PublicBookingWizard({
         )}
       </div>
 
-      {/* Step 3: Время — .slots / .slot */}
+      {/* Step 3: Время — карточка + сетка слотов (бейдж скидки только при данных API, напр. HH). */}
       {selectedDate && (
-        <div>
-          <label className="block text-[15px] font-medium text-[#4B4F59] mb-2.5">3. Время</label>
+        <div className="rounded-[14px] border border-[#E8E2DD] bg-white px-4 py-4 sm:px-5 shadow-[0_2px_8px_rgba(45,45,45,0.06)]">
+          <div className="mb-3">
+            <h3 className="text-[15px] font-medium text-[#4B4F59]">3. Время</h3>
+            <p className="text-[13px] text-[#6A6E76] mt-0.5">Выберите удобное время</p>
+          </div>
           {slotsLoading ? (
             <p className="text-[#66686F] text-base">Загрузка слотов...</p>
           ) : slotsForDate.length === 0 ? (
@@ -1646,21 +1697,23 @@ export default function PublicBookingWizard({
                     key={`${slot.start_time}-${i}`}
                     type="button"
                     onClick={() => handleSelectSlot(slot)}
-                    className={`h-[52px] min-h-[52px] w-full inline-flex flex-col items-center justify-center rounded-xl text-sm font-medium tabular-nums leading-tight text-center border shadow-[0_1px_2px_rgba(45,45,45,0.03)] transition-shadow ${
+                    className={`min-h-[56px] h-[56px] w-full inline-flex flex-col items-center justify-center rounded-xl tabular-nums leading-tight text-center border shadow-[0_1px_2px_rgba(45,45,45,0.04)] transition-shadow ${
                       isSelected
                         ? 'bg-[#4CAF50] border-[#4CAF50] text-white shadow-[0_8px_18px_-10px_rgba(76,175,80,0.6)]'
-                        : 'bg-white border-[#E8E2DD] text-[#3B3F47] hover:border-[#D0CAC4]'
+                        : 'bg-[#FAFAFB] border-[#E8E2DD] text-[#3B3F47] hover:border-[#C8DCC9] hover:bg-white'
                     }`}
                     data-testid={slotStartId ? `slot-${slotStartId}` : undefined}
                     title={hhLabel ? `Счастливые часы ${hhLabel}` : undefined}
                   >
-                    <span className={`time ${isSelected ? 'font-semibold' : 'font-medium'}`}>
-                      {formatTimeShort(slot.start_time)}–{formatTimeShort(slot.end_time)}
+                    <span
+                      className={`text-[15px] tracking-tight ${isSelected ? 'font-semibold' : 'font-semibold text-[#2D313A]'}`}
+                    >
+                      {formatTimeShort(slot.start_time)}
                     </span>
                     {hhLabel ? (
                       <span
-                        className={`badge text-xs font-medium mt-0.5 leading-none ${
-                          isSelected ? 'text-[#E9FFEF]' : 'text-[#45A049]'
+                        className={`mt-0.5 text-[11px] font-semibold leading-none ${
+                          isSelected ? 'text-[#E9FFEF]' : 'text-[#3A8E45]'
                         }`}
                       >
                         {hhLabel}
@@ -1677,7 +1730,7 @@ export default function PublicBookingWizard({
       {/* Сводка — .summary */}
       {selectedService && selectedDate && selectedSlot && (
         <div
-          className="mt-5 rounded-[14px] border border-[#BDE6CC] bg-[#EAF9EE] px-[18px] py-4 text-[#2F6F44]"
+          className="mt-7 rounded-[14px] border border-[#BDE6CC] bg-[#EAF9EE] px-[18px] py-4 text-[#2F6F44]"
           data-testid="public-booking-summary"
         >
           <div className="text-[15px] leading-relaxed mb-1.5 last:mb-0">
@@ -1689,8 +1742,7 @@ export default function PublicBookingWizard({
           </div>
           <div className="text-[15px] leading-relaxed mb-1.5 flex flex-wrap items-center gap-x-2 gap-y-1">
             <span>
-              <strong className="font-semibold">Время:</strong>{' '}
-              {formatTimeShort(selectedSlot.start_time)}–{formatTimeShort(selectedSlot.end_time)}
+              <strong className="font-semibold">Время:</strong> {formatTimeShort(selectedSlot.start_time)}
             </span>
             {selectedSlotHhLabel ? (
               <span
@@ -1701,6 +1753,32 @@ export default function PublicBookingWizard({
               </span>
             ) : null}
           </div>
+          {showLoyaltyPointsToggle && (
+            <>
+              <div className="h-px bg-[#CDE8D7] my-2.5" aria-hidden="true" />
+              <label className="flex items-start gap-2.5 mb-3 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  className="mt-1 h-4 w-4 rounded border-neutral-300 text-[#4CAF50] shrink-0"
+                  checked={usePoints}
+                  onChange={(e) => setUsePoints(e.target.checked)}
+                  data-testid="public-booking-use-points"
+                />
+                <span className="text-[14px] text-[#2F6F44] leading-snug">
+                  <span className="font-semibold">Оплатить баллами</span>
+                  <span className="block text-[13px] text-[#4E7C60] font-normal mt-0.5">
+                    Итог пересчитается ниже (1 балл = 1 ₽).
+                  </span>
+                </span>
+              </label>
+            </>
+          )}
+          {usePoints &&
+          pricePreview &&
+          !pricePreviewLoading &&
+          Number(pricePreview.loyalty_points_to_use ?? 0) <= 0 ? (
+            <p className="text-[13px] text-amber-900/90 mb-2">Баллы не применены к этой записи.</p>
+          ) : null}
           {pricePreviewLoading && (
             <div className="text-sm text-[#4E7C60] pt-2 mt-2 border-t border-[#CDE8D7]">Считаем скидку…</div>
           )}
@@ -1711,9 +1789,13 @@ export default function PublicBookingWizard({
             <>
               <div className="h-px bg-[#CDE8D7] my-2.5" aria-hidden="true" />
               <div className="text-[15px] leading-relaxed mb-1.5 text-[#2F6F44] space-y-1.5">
+                <div>
+                  <strong className="font-semibold">Стоимость:</strong>{' '}
+                  {Number(pricePreview.base_price ?? 0).toLocaleString('ru-RU')} ₽
+                </div>
                 {Number(pricePreview.discount_amount) > 0 ? (
                   <div>
-                    Скидка: {'\u2212'}
+                    <strong className="font-semibold">Скидка:</strong> {'\u2212'}
                     {Number(pricePreview.discount_amount).toLocaleString('ru-RU')} ₽
                     {pricePreview.discount_percent != null ? (
                       <>
@@ -1721,17 +1803,25 @@ export default function PublicBookingWizard({
                         {Number(pricePreview.discount_percent)}%
                       </>
                     ) : null}
-                    {pricePreview.rule_name ? ` (${pricePreview.rule_name})` : ''}
+                    {(() => {
+                      const cap = humanDiscountCaptionFromPreview(pricePreview)
+                      return cap ? ` — ${cap}` : ''
+                    })()}
+                  </div>
+                ) : null}
+                <div>
+                  <strong className="font-semibold">После скидки:</strong>{' '}
+                  {Number(pricePreview.discounted_price ?? pricePreview.final_price ?? 0).toLocaleString('ru-RU')} ₽
+                </div>
+                {Number(pricePreview.loyalty_points_to_use) > 0 ? (
+                  <div>
+                    <strong className="font-semibold">Баллами:</strong> {'\u2212'}
+                    {Number(pricePreview.loyalty_points_to_use).toLocaleString('ru-RU')} ₽
                   </div>
                 ) : null}
                 <div className="font-semibold">
                   К оплате:{' '}
-                  {Number(
-                    Number(pricePreview.discount_amount) > 0
-                      ? pricePreview.final_price
-                      : pricePreview.base_price
-                  ).toLocaleString('ru-RU')}{' '}
-                  ₽
+                  {Number(pricePreview.final_price ?? pricePreview.amount_to_pay ?? 0).toLocaleString('ru-RU')} ₽
                 </div>
               </div>
             </>
@@ -1773,7 +1863,7 @@ export default function PublicBookingWizard({
               handleGuestBookingIntent()
               return
             }
-            setShowLoggedInConfirmModal(true)
+            void performPublicBookingCreate()
           }}
           disabled={submitting || bookingBlocked}
           className={`w-full min-h-[52px] rounded-xl text-lg font-bold text-white transition-colors ${
@@ -1787,24 +1877,6 @@ export default function PublicBookingWizard({
           </button>
         </div>
       )}
-
-      <PublicBookingLoggedInConfirmModal
-        open={showLoggedInConfirmModal}
-        onClose={() => !submitting && setShowLoggedInConfirmModal(false)}
-        onConfirm={() => {
-          setShowLoggedInConfirmModal(false)
-          void performPublicBookingCreate()
-        }}
-        onChangeTime={() => {
-          setShowLoggedInConfirmModal(false)
-          setSelectedSlot(null)
-        }}
-        profile={profile}
-        summary={authPromptSummary}
-        pricePreview={pricePreviewLoading ? null : pricePreview}
-        selectedSlotHhLabel={selectedSlotHhLabel}
-        submitting={submitting}
-      />
 
       <PublicBookingAuthPrompt
         open={showAuthPrompt}

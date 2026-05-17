@@ -131,6 +131,8 @@ def test_public_booking_then_client_list_shows_discounted_price(client, db, test
     assert r.status_code == 200, r.text
     created = r.json()
     assert float(created.get("final_price") or 0) == pytest.approx(910.0)
+    assert float(created.get("discounted_price") or 0) == pytest.approx(910.0)
+    assert int(created.get("loyalty_points_used") or 0) == 0
     assert float(created.get("base_price") or 0) == pytest.approx(1000.0)
     assert float(created.get("discount_amount") or 0) == pytest.approx(90.0)
     assert created.get("discount_percent") == pytest.approx(9.0)
@@ -142,7 +144,7 @@ def test_public_booking_then_client_list_shows_discounted_price(client, db, test
     row = db.query(Booking).filter(Booking.id == created["id"]).first()
     assert row is not None
     assert float(row.payment_amount or 0) == pytest.approx(910.0)
-    assert float(created["final_price"]) == pytest.approx(float(row.payment_amount))
+    assert float(created["final_price"]) == pytest.approx(float(row.payment_amount) - int(row.loyalty_points_used or 0))
 
     r2 = client.get("/api/client/bookings/?full=true", headers=headers)
     assert r2.status_code == 200, r2.text
@@ -150,3 +152,72 @@ def test_public_booking_then_client_list_shows_discounted_price(client, db, test
     ours = [x for x in rows if x.get("master_domain") == DOMAIN]
     assert len(ours) >= 1
     assert float(ours[0]["price"]) == pytest.approx(910.0)
+
+
+def test_public_booking_with_use_loyalty_points(client, db, test_user, pb_master_setup):
+    """POST public booking с use_loyalty_points: резерв в booking, spent в ledger только после confirm."""
+    from datetime import datetime
+
+    from models import Booking, LoyaltySettings, LoyaltyTransaction, Master
+
+    m = db.query(Master).filter(Master.domain == DOMAIN).first()
+    assert m is not None
+    db.add(
+        LoyaltySettings(
+            master_id=m.id,
+            is_enabled=True,
+            accrual_percent=10,
+            max_payment_percent=100,
+            points_lifetime_days=None,
+        )
+    )
+    db.add(
+        LoyaltyTransaction(
+            master_id=m.id,
+            client_id=test_user.id,
+            booking_id=None,
+            transaction_type="earned",
+            points=400,
+            earned_at=datetime.utcnow(),
+            expires_at=None,
+            service_id=None,
+        )
+    )
+    db.commit()
+
+    login = client.post(
+        "/api/auth/login",
+        json={"phone": test_user.phone, "password": "testpassword"},
+    )
+    assert login.status_code == 200, login.text
+    token = login.json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    mid = pb_master_setup["master_service_id"]
+    wd = pb_master_setup["work_date"]
+    tz = ZoneInfo("Europe/Moscow")
+    st = datetime(wd.year, wd.month, wd.day, 10, 0, 0, tzinfo=tz)
+    et = datetime(wd.year, wd.month, wd.day, 10, 30, 0, tzinfo=tz)
+
+    body = {
+        "service_id": mid,
+        "start_time": st.isoformat(),
+        "end_time": et.isoformat(),
+        "use_loyalty_points": True,
+    }
+    r = client.post(f"/api/public/masters/{DOMAIN}/bookings", json=body, headers=headers)
+    assert r.status_code == 200, r.text
+    created = r.json()
+    assert float(created["discounted_price"]) == pytest.approx(910.0)
+    assert int(created["loyalty_points_used"]) == 400
+    assert float(created["final_price"]) == pytest.approx(510.0)
+
+    row = db.query(Booking).filter(Booking.id == created["id"]).first()
+    assert int(row.loyalty_points_used or 0) == 400
+    assert float(row.payment_amount or 0) == pytest.approx(910.0)
+
+    spent = db.query(LoyaltyTransaction).filter(
+        LoyaltyTransaction.booking_id == row.id,
+        LoyaltyTransaction.transaction_type == "spent",
+    ).first()
+    assert spent is None

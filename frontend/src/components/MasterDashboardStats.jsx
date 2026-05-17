@@ -23,6 +23,7 @@ import MasterBookingDetailSheet from './master/mobile/MasterBookingDetailSheet';
 import MasterBookingCancelSheet from './master/mobile/MasterBookingCancelSheet';
 import { getPlanDisplayName } from '../utils/subscriptionPlanNames';
 import { formatMoney } from '../utils/formatMoney';
+import { masterDisplayMainRub, masterLoyaltyRub } from '../utils/masterBookingMoney';
 import { formatDateShort, formatTimeShort } from '../utils/dateFormat';
 import { getStatusBadgeForPast } from '../utils/bookingStatusDisplay';
 import { useToast } from '../contexts/ToastContext';
@@ -526,9 +527,10 @@ export default function MasterDashboardStats({
       ? `${st.getDate()} ${st.toLocaleDateString('ru-RU', { month: 'short' })}`
       : '';
     const stPill = futureStatusPill(booking.status);
-    const pay = Number(booking.payment_amount);
+    const pay = masterDisplayMainRub(booking);
     const svc = Number(booking.service_price);
-    const amountRub = pay > 0 ? pay : (svc > 0 ? svc : 0);
+    const pts = masterLoyaltyRub(booking);
+    const amountRub = pay > 0 || pts > 0 ? pay : (svc > 0 ? svc : 0);
     const dur =
       booking.service_duration && String(booking.service_duration).trim()
         ? String(booking.service_duration).replace(/\s*минут\b/gi, ' мин')
@@ -565,8 +567,15 @@ export default function MasterDashboardStats({
         </div>
         <div className="ml-auto flex min-w-0 shrink-0 items-center gap-3 pl-1 sm:gap-4 sm:pl-2">
           <div className="w-[4.5rem] shrink-0 text-right sm:w-24">
-            {amountRub > 0 ? (
-              <span className="text-[13.5px] font-semibold tabular-nums text-[#2D2D2D]">{formatMoney(amountRub)}</span>
+            {amountRub > 0 || pts > 0 ? (
+              <div className="flex flex-col items-end gap-0.5">
+                <span className="text-[13.5px] font-semibold tabular-nums text-[#2D2D2D]">{formatMoney(amountRub)}</span>
+                {pts > 0 ? (
+                  <span className="text-[10px] font-medium text-[#2F7C43] leading-tight">
+                    Баллами: −{pts.toLocaleString('ru-RU')} ₽
+                  </span>
+                ) : null}
+              </div>
             ) : (
               <span className="text-[12px] font-medium text-[#A0A0A0]">—</span>
             )}
@@ -627,9 +636,10 @@ export default function MasterDashboardStats({
       ? `${st.getDate()} ${st.toLocaleDateString('ru-RU', { month: 'short' })}`
       : '';
     const meta = getStatusBadgeForPast(b, masterSettings?.master ?? null);
-    const pay = Number(booking.payment_amount);
+    const pay = masterDisplayMainRub(booking);
     const svc = Number(booking.service_price);
-    const amountRub = pay > 0 ? pay : (svc > 0 ? svc : 0);
+    const pts = masterLoyaltyRub(booking);
+    const amountRub = pay > 0 || pts > 0 ? pay : (svc > 0 ? svc : 0);
     return (
       <div className="group flex w-full min-w-0 items-center gap-3 text-sm sm:gap-4">
         <div className="w-[58px] min-w-[58px] shrink-0 select-none text-center sm:w-[64px] sm:min-w-[64px]">
@@ -660,8 +670,15 @@ export default function MasterDashboardStats({
         </div>
         <div className="ml-auto flex min-w-0 shrink-0 items-center gap-3 pl-1 sm:gap-4 sm:pl-2">
           <div className="w-[4.5rem] shrink-0 text-right sm:w-24">
-            {amountRub > 0 ? (
-              <span className="text-[13.5px] font-semibold tabular-nums text-[#2D2D2D]">{formatMoney(amountRub)}</span>
+            {amountRub > 0 || pts > 0 ? (
+              <div className="flex flex-col items-end gap-0.5">
+                <span className="text-[13.5px] font-semibold tabular-nums text-[#2D2D2D]">{formatMoney(amountRub)}</span>
+                {pts > 0 ? (
+                  <span className="text-[10px] font-medium text-[#2F7C43] leading-tight">
+                    Баллами: −{pts.toLocaleString('ru-RU')} ₽
+                  </span>
+                ) : null}
+              </div>
             ) : (
               <span className="text-[12px] font-medium text-[#A0A0A0]">—</span>
             )}

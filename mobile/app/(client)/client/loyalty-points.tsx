@@ -78,7 +78,10 @@ export default function LoyaltyPointsScreen() {
           {/* Masters list */}
           {masters.length === 0 ? (
             <View style={styles.emptyContainer}>
-              <Text style={styles.emptyText}>Пока нет начисленных баллов</Text>
+              <Text style={styles.emptyText}>
+                Нет доступных баллов. Если вы уже платили баллами, откройте «История» у мастера — там
+                будут списания.
+              </Text>
             </View>
           ) : (
             <View style={styles.card}>

@@ -33,6 +33,9 @@ export interface Booking {
   // Информация об оплате
   payment_method: string | null; // 'on_visit' или 'advance'
   payment_amount: number | null;
+  /** К оплате деньгами после баллов (ЛК клиента) */
+  amount_to_pay?: number | null;
+  loyalty_points_used?: number | null;
   is_paid: boolean | null;
   
   created_at: string | null; // ISO datetime string (может быть null в detailed)

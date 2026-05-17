@@ -78,9 +78,16 @@ export interface BookingPricePreview {
   base_price: number;
   discount_percent?: number | null;
   discount_amount: number;
+  discounted_price: number;
   final_price: number;
+  amount_to_pay: number;
   rule_name?: string | null;
   condition_type?: string | null;
+  use_loyalty_points?: boolean;
+  points_payment_available?: boolean;
+  available_points?: number;
+  max_payment_percent?: number | null;
+  loyalty_points_to_use?: number;
 }
 
 export interface ClientNoteResponse {
@@ -97,6 +104,8 @@ export interface CreatePublicBookingResponse {
   base_price?: number | null;
   discount_percent?: number | null;
   discount_amount?: number;
+  discounted_price?: number | null;
+  loyalty_points_used?: number;
   final_price?: number | null;
   rule_name?: string | null;
   condition_type?: string | null;
@@ -137,7 +146,8 @@ export async function getPublicEligibility(slug: string): Promise<PublicEligibil
 export async function getPublicBookingPricePreview(
   slug: string,
   serviceId: number,
-  startTimeIso: string
+  startTimeIso: string,
+  useLoyaltyPoints?: boolean
 ): Promise<BookingPricePreview> {
   const response = await apiClient.get<BookingPricePreview>(
     `/api/public/masters/${encodeURIComponent(slug)}/booking-price-preview`,
@@ -145,6 +155,7 @@ export async function getPublicBookingPricePreview(
       params: {
         service_id: serviceId,
         start_time: startTimeIso,
+        ...(useLoyaltyPoints ? { use_loyalty_points: true } : {}),
       },
     }
   );
@@ -153,7 +164,7 @@ export async function getPublicBookingPricePreview(
 
 export async function createPublicBooking(
   slug: string,
-  payload: { service_id: number; start_time: string; end_time: string }
+  payload: { service_id: number; start_time: string; end_time: string; use_loyalty_points?: boolean }
 ): Promise<CreatePublicBookingResponse> {
   const response = await apiClient.post<CreatePublicBookingResponse>(
     `/api/public/masters/${encodeURIComponent(slug)}/bookings`,

@@ -108,7 +108,10 @@ def spend_points(
     available_balance = calculate_client_balance(db, master_id, client_id)
     if available_balance < amount:
         raise ValueError(f"Недостаточно баллов. Доступно: {available_balance}, требуется: {amount}")
-    
+
+    booking_row = db.query(Booking).filter(Booking.id == booking_id).first()
+    service_id = booking_row.service_id if booking_row else None
+
     # Создаем одну транзакцию списания
     # Логика FIFO будет учитываться через calculate_client_balance при проверке баланса
     spent_trans = LoyaltyTransaction(
@@ -117,7 +120,8 @@ def spend_points(
         booking_id=booking_id,
         transaction_type='spent',
         points=int(amount),
-        earned_at=now  # Для spent это дата списания
+        earned_at=now,  # Для spent это дата списания
+        service_id=service_id,
     )
     
     db.add(spent_trans)

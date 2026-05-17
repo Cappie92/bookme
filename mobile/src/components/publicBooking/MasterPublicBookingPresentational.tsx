@@ -47,6 +47,8 @@ export type MasterPublicBookingPresentationalProps = {
   discountPreface?: { title: string; subtitle: string } | null;
   /** Пояснение применённой скидки из price preview — над «Итог записи». */
   discountAppliedExplain?: { title: string; subtitle: string } | null;
+  /** Блок над строками цены в итоге (напр. переключатель баллов). */
+  loyaltyPaySlot?: React.ReactNode;
   bookingBlocked: boolean;
   advancePayment: boolean;
   pointsLine: string | null;
@@ -423,6 +425,7 @@ export function MasterPublicBookingPresentational(props: MasterPublicBookingPres
                   </Text>
                 </View>
               ))}
+              {props.loyaltyPaySlot}
               {props.mainBookingPriceRows.length > 0 ? <View style={s.sumSectionSep} /> : null}
               {props.mainBookingPriceRows.map((row, i) => {
                 const isPay = row.label === 'К оплате';
