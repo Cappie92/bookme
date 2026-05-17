@@ -22,6 +22,8 @@ def test_booking_amount_to_pay_and_serialization():
     assert booking_amount_to_pay(1000, 100) == 900.0
     assert booking_amount_to_pay(1000, 0) == 1000.0
     assert booking_amount_to_pay(None, None) == 0.0
+    assert booking_amount_to_pay(None, 0, service_price=1000) == 1000.0
+    assert booking_amount_to_pay(None, 100, service_price=1000) == 900.0
 
     class B:
         payment_amount = 1000.0
@@ -31,6 +33,7 @@ def test_booking_amount_to_pay_and_serialization():
     assert d["payment_amount"] == 1000.0
     assert d["loyalty_points_used"] == 100
     assert d["amount_to_pay"] == 900.0
+    assert d["price"] == 900.0
 
 
 def test_finalize_income_real_money_after_loyalty_points(db):
@@ -235,3 +238,184 @@ def test_dashboard_stats_week_with_loyalty_no_sqlite_greatest(client, db, test_m
     body = r.json()
     assert "weeks_data" in body
     assert body["period"] == "week"
+
+
+def _future_booking_headers(client, master_user):
+    res = client.post(
+        "/api/auth/login",
+        json={"phone": master_user.phone, "password": "testpassword"},
+    )
+    assert res.status_code == 200
+    return {"Authorization": f"Bearer {res.json()['access_token']}"}
+
+
+def test_future_bookings_money_with_loyalty_reserve(client, db, test_master):
+    """GET /bookings/future: payment_amount, loyalty_points_used, amount_to_pay, price."""
+    mrow = Master(
+        user_id=test_master.id,
+        bio="",
+        experience_years=1,
+        timezone="Europe/Moscow",
+        timezone_confirmed=True,
+    )
+    db.add(mrow)
+    db.commit()
+    db.refresh(mrow)
+
+    cu = User(
+        email="futamt@example.com",
+        phone="+79005500505",
+        full_name="ClientFut",
+        hashed_password=get_password_hash("testpassword"),
+        role=UserRole.CLIENT,
+        is_active=True,
+        is_verified=True,
+    )
+    db.add(cu)
+    db.commit()
+    db.refresh(cu)
+
+    svc = Service(name="Hair", price=1000, duration=60, salon_id=None)
+    db.add(svc)
+    db.commit()
+    db.refresh(svc)
+
+    now = datetime.utcnow()
+    b = Booking(
+        client_id=cu.id,
+        service_id=svc.id,
+        master_id=mrow.id,
+        start_time=now + timedelta(days=2),
+        end_time=now + timedelta(days=2, hours=1),
+        status=BookingStatus.CREATED.value,
+        payment_amount=1000.0,
+        loyalty_points_used=100,
+    )
+    db.add(b)
+    db.commit()
+    db.refresh(b)
+    bid = b.id
+
+    headers = _future_booking_headers(client, test_master)
+    r = client.get("/api/master/bookings/future?page=1&limit=20", headers=headers)
+    assert r.status_code == 200, r.text
+    hit = next((row for row in r.json()["bookings"] if row["id"] == bid), None)
+    assert hit is not None
+    assert float(hit["payment_amount"]) == 1000.0
+    assert int(hit["loyalty_points_used"]) == 100
+    assert float(hit["amount_to_pay"]) == 900.0
+    assert float(hit["price"]) == 900.0
+    assert float(hit["service_price"]) == 1000.0
+
+
+def test_future_bookings_money_no_loyalty(client, db, test_master):
+    mrow = Master(
+        user_id=test_master.id,
+        bio="",
+        experience_years=1,
+        timezone="Europe/Moscow",
+        timezone_confirmed=True,
+    )
+    db.add(mrow)
+    db.commit()
+    db.refresh(mrow)
+
+    cu = User(
+        email="futamt2@example.com",
+        phone="+79005500506",
+        full_name="ClientFut2",
+        hashed_password=get_password_hash("testpassword"),
+        role=UserRole.CLIENT,
+        is_active=True,
+        is_verified=True,
+    )
+    db.add(cu)
+    db.commit()
+    db.refresh(cu)
+
+    svc = Service(name="Hair2", price=1000, duration=60, salon_id=None)
+    db.add(svc)
+    db.commit()
+    db.refresh(svc)
+
+    now = datetime.utcnow()
+    b = Booking(
+        client_id=cu.id,
+        service_id=svc.id,
+        master_id=mrow.id,
+        start_time=now + timedelta(days=3),
+        end_time=now + timedelta(days=3, hours=1),
+        status=BookingStatus.CREATED.value,
+        payment_amount=1000.0,
+        loyalty_points_used=0,
+    )
+    db.add(b)
+    db.commit()
+    db.refresh(b)
+    bid = b.id
+
+    headers = _future_booking_headers(client, test_master)
+    r = client.get("/api/master/bookings/future?page=1&limit=20", headers=headers)
+    assert r.status_code == 200
+    hit = next((row for row in r.json()["bookings"] if row["id"] == bid), None)
+    assert hit is not None
+    assert float(hit["amount_to_pay"]) == 1000.0
+    assert float(hit["price"]) == 1000.0
+
+
+def test_future_bookings_money_fallback_service_price(client, db, test_master):
+    """payment_amount null → gross из service.price."""
+    mrow = Master(
+        user_id=test_master.id,
+        bio="",
+        experience_years=1,
+        timezone="Europe/Moscow",
+        timezone_confirmed=True,
+    )
+    db.add(mrow)
+    db.commit()
+    db.refresh(mrow)
+
+    cu = User(
+        email="futamt3@example.com",
+        phone="+79005500507",
+        full_name="ClientFut3",
+        hashed_password=get_password_hash("testpassword"),
+        role=UserRole.CLIENT,
+        is_active=True,
+        is_verified=True,
+    )
+    db.add(cu)
+    db.commit()
+    db.refresh(cu)
+
+    svc = Service(name="Hair3", price=1000, duration=60, salon_id=None)
+    db.add(svc)
+    db.commit()
+    db.refresh(svc)
+
+    now = datetime.utcnow()
+    b = Booking(
+        client_id=cu.id,
+        service_id=svc.id,
+        master_id=mrow.id,
+        start_time=now + timedelta(days=4),
+        end_time=now + timedelta(days=4, hours=1),
+        status=BookingStatus.CREATED.value,
+        payment_amount=None,
+        loyalty_points_used=0,
+    )
+    db.add(b)
+    db.commit()
+    db.refresh(b)
+    bid = b.id
+
+    headers = _future_booking_headers(client, test_master)
+    r = client.get("/api/master/bookings/future?page=1&limit=20", headers=headers)
+    assert r.status_code == 200
+    hit = next((row for row in r.json()["bookings"] if row["id"] == bid), None)
+    assert hit is not None
+    assert hit["payment_amount"] is None
+    assert float(hit["amount_to_pay"]) == 1000.0
+    assert float(hit["price"]) == 1000.0
+    assert float(hit["service_price"]) == 1000.0

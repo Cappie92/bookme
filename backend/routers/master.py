@@ -349,6 +349,7 @@ def get_future_bookings_paginated(
         svc_name = strip_indie_service_prefix(service_name)
         client_master_alias = (str(meta.alias_name).strip() if meta and getattr(meta, 'alias_name', None) else None) or None
         client_account_name = (str(client.full_name).strip() if client and getattr(client, 'full_name', None) else None) or None
+        svc_price = float(booking.service.price) if booking.service and booking.service.price is not None else 0.0
         result.append({
             "id": booking.id,
             "start_time": booking.start_time.isoformat(),
@@ -359,6 +360,8 @@ def get_future_bookings_paginated(
             "cancellation_reason": getattr(booking, "cancellation_reason", None),
             "service_name": svc_name or service_name,
             "service_duration": duration_text,
+            "service_price": svc_price,
+            **booking_money_api_fields(booking, service_price=svc_price),
             "client_display_name": client_name,
             "client_name": client_name,
             "client_phone": client_phone,
@@ -512,7 +515,9 @@ def get_past_appointments(
             "status": booking.status,
             "cancellation_reason": getattr(booking, "cancellation_reason", None),
             "status_color": status_color,
-            **booking_money_api_fields(booking),
+            **booking_money_api_fields(
+                booking, service_price=service.price if service else 0
+            ),
             "start_time": booking.start_time.isoformat(),
             "end_time": booking.end_time.isoformat()
         })

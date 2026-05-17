@@ -11,13 +11,23 @@ from typing import Any, Mapping, Optional
 def booking_amount_to_pay(
     payment_amount: Optional[float],
     loyalty_points_used: Optional[int],
+    *,
+    service_price: Optional[float] = None,
 ) -> float:
-    pa = float(payment_amount or 0)
+    """К оплате деньгами: max(0, gross − loyalty), gross = payment_amount или service.price."""
+    if payment_amount is not None and float(payment_amount) > 0:
+        gross = float(payment_amount)
+    else:
+        gross = float(service_price or 0)
     lp = float(loyalty_points_used or 0)
-    return max(0.0, pa - lp)
+    return max(0.0, gross - lp)
 
 
-def booking_money_api_fields(booking: Any) -> dict[str, Any]:
+def booking_money_api_fields(
+    booking: Any,
+    *,
+    service_price: Optional[float] = None,
+) -> dict[str, Any]:
     """Поля для JSON ответов мастерских эндпоинтов (ORM Booking или mapping)."""
     pa = getattr(booking, "payment_amount", None)
     if pa is None and isinstance(booking, Mapping):
@@ -26,11 +36,17 @@ def booking_money_api_fields(booking: Any) -> dict[str, Any]:
     if lp is None and isinstance(booking, Mapping):
         lp = booking.get("loyalty_points_used")
     lp_int = int(lp or 0)
-    atp = booking_amount_to_pay(pa, lp_int)
+    sp = service_price
+    if sp is None:
+        svc = getattr(booking, "service", None)
+        if svc is not None:
+            sp = getattr(svc, "price", None)
+    atp = booking_amount_to_pay(pa, lp_int, service_price=sp)
     return {
         "payment_amount": pa,
         "loyalty_points_used": lp_int,
         "amount_to_pay": atp,
+        "price": atp,
     }
 
 
