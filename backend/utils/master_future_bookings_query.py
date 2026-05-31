@@ -43,11 +43,16 @@ def active_future_core(now_utc: datetime | None = None) -> Any:
     )
 
 
+def hub_cancelled_future_statuses_tuple() -> tuple[BookingStatus, ...]:
+    """Вкладка «✕» в ЛК мастера: отменённые + истёкшая оплата (start_time ещё в будущем)."""
+    return cancelled_statuses_tuple() + (BookingStatus.PAYMENT_EXPIRED,)
+
+
 def cancelled_future_core(now_utc: datetime | None = None) -> Any:
-    """Отменённые, но время записи ещё не наступило."""
+    """Неактивные будущие для вкладки «✕» и для bookings[] в GET /bookings/future."""
     now = now_utc or datetime.utcnow()
-    cancelled = cancelled_statuses_tuple()
-    return and_(Booking.start_time > now, Booking.status.in_(cancelled))
+    statuses = hub_cancelled_future_statuses_tuple()
+    return and_(Booking.start_time > now, Booking.status.in_(statuses))
 
 
 def future_bookings_sql_filter(master: Any, now_utc: datetime | None = None) -> Any:

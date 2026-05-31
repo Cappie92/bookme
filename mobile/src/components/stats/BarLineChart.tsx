@@ -7,18 +7,30 @@ import {
   CHART_LEGEND_STRIP_BORDER,
   CHART_SURFACE_BG,
   CHART_SURFACE_BORDER,
-  MASTER_STATS_CHANGE_LINE_DOT,
+  MASTER_STATS_BAR_CURRENT,
+  MASTER_STATS_CHANGE_LINE_DOT_FILL,
   MASTER_STATS_CHANGE_LINE_STROKE,
   MASTER_STATS_LEGEND_CURRENT,
   MASTER_STATS_LEGEND_FUTURE,
   MASTER_STATS_LEGEND_PAST,
+  masterStatsBarFill,
 } from '@src/utils/masterStatsChartTheme';
 
 /** Мин. ширина контента на точку — плотный ритм bucket’ов. */
 const ITEM_W = 42;
-const LINE_STROKE_W = 1.25;
-const DOT_R = 2;
-const DOT_R_ACTIVE = 3;
+const LINE_STROKE_W = 2.5;
+const DOT_R = 3.25;
+const DOT_R_ACTIVE = 4;
+const DOT_STROKE_W = 1.5;
+const DOT_STROKE_W_ACTIVE = 2;
+/** Столбцы без полупрозрачности — различие только цветом. */
+const PAST_BAR_OPACITY = 1;
+const FUTURE_BAR_OPACITY = 1;
+/** Верхний/нижний отступ plot, чтобы линия/точки/скругления столбцов не обрезались. */
+const PLOT_PADDING_TOP = 18;
+const PLOT_PADDING_BOTTOM = 6;
+/** Доля запаса по оси Y для столбцов и линии. */
+const Y_DOMAIN_HEADROOM = 0.18;
 const BAR_TOP_RADIUS = 4;
 /** Уже столбец → больше воздуха между колонками (агрессивнее vs web density). */
 const BAR_WIDTH_FRAC = 0.34;
@@ -75,12 +87,9 @@ interface BarLineChartProps {
 }
 
 export const CHART_COLORS = {
-  /** Согласовано с current stack (legacy single-bar). */
-  current: '#2e7d32',
-  /** Legacy single-bar: past заметно тише. */
-  past: '#d1dae6',
-  future: 'rgba(100,149,237,0.38)',
-  /** Линия % изменения — паритет с web Recharts stroke */
+  past: MASTER_STATS_LEGEND_PAST,
+  current: MASTER_STATS_LEGEND_CURRENT,
+  future: MASTER_STATS_LEGEND_FUTURE,
   line: MASTER_STATS_CHANGE_LINE_STROKE,
   bg: CHART_SURFACE_BG,
   border: CHART_SURFACE_BORDER,
@@ -90,7 +99,6 @@ const DEFAULT_LINE_COLOR = CHART_COLORS.line;
 /** Вертикаль: больше площади plot, меньше «пустого» верха (см. PLOT_PADDING_TOP). */
 const DEFAULT_CHART_HEIGHT = 248;
 const DEFAULT_PLOT_HEIGHT = 216;
-const PLOT_PADDING_TOP = 2;
 
 function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
@@ -147,11 +155,7 @@ export function BarLineChart({
   };
 
   const colors = useMemo(() => {
-    const defaultBarColor = (p: BarLineChartPoint) => {
-      if (p.is_current) return CHART_COLORS.current;
-      if (p.is_future) return CHART_COLORS.future;
-      return CHART_COLORS.past;
-    };
+    const defaultBarColor = (p: BarLineChartPoint) => masterStatsBarFill(p);
     return {
       bar: barColor ?? defaultBarColor,
       line: lineColor,
@@ -160,7 +164,8 @@ export function BarLineChart({
 
   const maxBar = useMemo(() => {
     const m = Math.max(...data.map((d) => d.bar || 0), 0);
-    return m <= 0 ? 1 : m;
+    if (m <= 0) return 1;
+    return m * (1 + Y_DOMAIN_HEADROOM);
   }, [data]);
 
   const lineRange = useMemo(() => {
@@ -171,7 +176,9 @@ export function BarLineChart({
       min -= 1;
       max += 1;
     }
-    return { min, max };
+    const span = max - min || 1;
+    const pad = span * Y_DOMAIN_HEADROOM;
+    return { min: min - pad, max: max + pad };
   }, [data]);
 
   const chartContentWidth = useMemo(() => {
@@ -182,19 +189,19 @@ export function BarLineChart({
   const points = useMemo(() => {
     if (!layout || data.length === 0) return [];
     const w = chartContentWidth;
-    const chartH = Math.max(1, plotHeight);
+    const innerPlotH = Math.max(1, plotHeight - PLOT_PADDING_BOTTOM);
     const n = data.length;
     const step = w / n;
     const barWidth = clamp(step * BAR_WIDTH_FRAC, BAR_WIDTH_MIN, BAR_WIDTH_MAX);
 
     const yBar = (bar: number) => {
       const v = (bar || 0) / maxBar;
-      return PLOT_PADDING_TOP + chartH - chartH * clamp(v, 0, 1);
+      return PLOT_PADDING_TOP + innerPlotH - innerPlotH * clamp(v, 0, 1);
     };
     const yLine = (line: number) => {
       const { min, max } = lineRange;
       const t = (line - min) / (max - min);
-      return PLOT_PADDING_TOP + chartH - chartH * clamp(t, 0, 1);
+      return PLOT_PADDING_TOP + innerPlotH - innerPlotH * clamp(t, 0, 1);
     };
 
     return data.map((d, i) => {
@@ -293,60 +300,35 @@ export function BarLineChart({
 
   const chartContent = (
     <View style={[styles.chartContentWrap, { width: chartContentWidth }]} pointerEvents="box-none">
-          <View style={[styles.plotArea, { width: chartContentWidth, height: plotHeight + PLOT_PADDING_TOP }]}>
+          <View
+            style={[
+              styles.plotArea,
+              { width: chartContentWidth, height: PLOT_PADDING_TOP + plotHeight },
+            ]}
+          >
             {layout &&
-              [0.2, 0.4, 0.6, 0.8].map((frac, gi) => (
-                <View
-                  key={`grid-${gi}`}
-                  style={[
-                    styles.gridLine,
-                    {
-                      top: PLOT_PADDING_TOP + plotHeight * frac,
-                      left: 4,
-                      right: 4,
-                    },
-                  ]}
-                  pointerEvents="none"
-                />
-              ))}
-            {/* tappable zones — поверх всего, pointerEvents по умолчанию */}
-            {layout &&
-              points.map((p) => (
-                <Pressable
-                  key={`hit-${p.i}`}
-                  onPress={() => handleBarPress(p.i)}
-                  delayPressIn={0}
-                  hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
-                  style={[styles.hitZone, { left: p.step * p.i, width: hitZoneWidth }]}
-                />
-              ))}
-
-          {/* line segments */}
-          {layout &&
-            lineSegments.map((s) => (
-              <View
-                key={s.key}
-                style={[
-                  styles.lineSeg,
-                  {
-                    left: s.left,
-                    top: s.top,
-                    width: s.width,
-                    height: LINE_STROKE_W,
-                    backgroundColor: colors.line,
-                    opacity: 0.68,
-                    transform: [{ rotateZ: s.rotate }],
-                  },
-                ]}
-                pointerEvents="none"
-              />
-            ))}
-
-          {/* bars — single column OR stacked confirmed+pending */}
+              [0.2, 0.4, 0.6, 0.8].map((frac, gi) => {
+                const innerPlotH = Math.max(1, plotHeight - PLOT_PADDING_BOTTOM);
+                return (
+                  <View
+                    key={`grid-${gi}`}
+                    style={[
+                      styles.gridLine,
+                      {
+                        top: PLOT_PADDING_TOP + innerPlotH * frac,
+                        left: 6,
+                        right: 6,
+                      },
+                    ]}
+                    pointerEvents="none"
+                  />
+                );
+              })}
+          {/* bars — single column OR stacked confirmed+pending (под линией) */}
           {layout &&
             points.map((p) => {
               const d = data[p.i];
-              const barH = Math.max(0, PLOT_PADDING_TOP + plotHeight - p.yBarTop);
+              const barH = Math.max(0, PLOT_PADDING_TOP + plotHeight - PLOT_PADDING_BOTTOM - p.yBarTop);
               const isSelected = selectedIndex != null && Number(selectedIndex) === Number(p.i);
               const segs = d.barSegments;
               const useStack =
@@ -364,19 +346,15 @@ export function BarLineChart({
                 const hP = total > 0 ? barH * (pVal / total) : 0;
                 const isPast = d.is_past === true;
                 const isCurrentBucket = d.is_current === true;
-                const stackOpacity = isSelected ? 1 : isPast ? 0.62 : isCurrentBucket ? 1 : 0.86;
+                const stackOpacity = isPast ? PAST_BAR_OPACITY : isCurrentBucket ? 1 : FUTURE_BAR_OPACITY;
+                const monochromeCurrentStack =
+                  isCurrentBucket && segs[0].color === segs[1].color;
                 const hairlineTop =
-                  hC > 0 && hP > 0
-                    ? isCurrentBucket
-                      ? 'rgba(255,255,255,0.82)'
-                      : 'rgba(255,255,255,0.38)'
+                  hC > 0 && hP > 0 && !monochromeCurrentStack
+                    ? 'rgba(255,255,255,0.55)'
                     : 'transparent';
-                const ringW = isSelected ? 1 : isCurrentBucket ? StyleSheet.hairlineWidth : 0;
-                const ringCol = isSelected
-                  ? 'rgba(46,125,50,0.48)'
-                  : isCurrentBucket
-                    ? 'rgba(46,125,50,0.28)'
-                    : 'transparent';
+                const ringW = isSelected ? StyleSheet.hairlineWidth : 0;
+                const ringCol = isSelected ? 'rgba(56,142,60,0.35)' : 'transparent';
                 return (
                   <View
                     key={`bar-stack-${p.i}`}
@@ -403,8 +381,12 @@ export function BarLineChart({
                             bottom: 0,
                             borderTopLeftRadius: hP > 0 ? 0 : BAR_TOP_RADIUS,
                             borderTopRightRadius: hP > 0 ? 0 : BAR_TOP_RADIUS,
-                            borderBottomWidth: hP > 0 ? StyleSheet.hairlineWidth : 0,
-                            borderBottomColor: hP > 0 ? 'rgba(0,0,0,0.07)' : 'transparent',
+                            borderBottomWidth:
+                              hP > 0 && !monochromeCurrentStack ? StyleSheet.hairlineWidth : 0,
+                            borderBottomColor:
+                              hP > 0 && !monochromeCurrentStack
+                                ? 'rgba(0,0,0,0.07)'
+                                : 'transparent',
                           },
                         ]}
                       />
@@ -419,7 +401,10 @@ export function BarLineChart({
                             bottom: hC,
                             borderTopLeftRadius: BAR_TOP_RADIUS,
                             borderTopRightRadius: BAR_TOP_RADIUS,
-                            borderTopWidth: hC > 0 ? StyleSheet.hairlineWidth : 0,
+                            borderTopWidth:
+                              hC > 0 && hP > 0 && !monochromeCurrentStack
+                                ? StyleSheet.hairlineWidth
+                                : 0,
                             borderTopColor: hairlineTop,
                           },
                         ]}
@@ -429,8 +414,8 @@ export function BarLineChart({
                 );
               }
 
-              const solidBarColor = isSelected ? CHART_COLORS.current : colors.bar(d);
-              const legacyOpacity = isSelected ? 1 : d.is_past === true ? 0.62 : d.is_current === true ? 1 : 0.86;
+              const solidBarColor = isSelected ? MASTER_STATS_BAR_CURRENT : colors.bar(d);
+              const barOpacity = d.is_past ? PAST_BAR_OPACITY : d.is_future ? FUTURE_BAR_OPACITY : 1;
               return (
                 <View
                   key={`bar-${p.i}`}
@@ -441,9 +426,9 @@ export function BarLineChart({
                       width: p.barWidth,
                       height: Math.max(barH, isSelected ? 4 : 0),
                       backgroundColor: solidBarColor,
-                      opacity: legacyOpacity,
-                      borderWidth: isSelected ? 1 : 0,
-                      borderColor: isSelected ? 'rgba(76,175,80,0.36)' : 'transparent',
+                      opacity: barOpacity,
+                      borderWidth: isSelected ? StyleSheet.hairlineWidth : 0,
+                      borderColor: isSelected ? 'rgba(56,142,60,0.35)' : 'transparent',
                     },
                   ]}
                   pointerEvents="none"
@@ -451,7 +436,28 @@ export function BarLineChart({
               );
             })}
 
-          {/* Линия % — плоские точки без halo, максимально спокойно */}
+          {/* Линия % — одна линия поверх столбцов, без подложки */}
+          {layout &&
+            lineSegments.map((s) => (
+              <View
+                key={s.key}
+                style={[
+                  styles.lineSeg,
+                  styles.lineLayer,
+                  {
+                    left: s.left,
+                    top: s.top,
+                    width: s.width,
+                    height: LINE_STROKE_W,
+                    backgroundColor: colors.line,
+                    transform: [{ rotateZ: s.rotate }],
+                  },
+                ]}
+                pointerEvents="none"
+              />
+            ))}
+
+          {/* Точки линии — поверх линии */}
           {layout &&
             points.map((p) => {
               const isDotActive = selectedIndex !== null && p.i === selectedIndex;
@@ -461,22 +467,34 @@ export function BarLineChart({
                   key={`dot-${p.i}`}
                   style={[
                     styles.dot,
+                    styles.lineLayer,
                     {
                       left: p.cx - r / 2,
                       top: p.yLine - r / 2,
                       width: r,
                       height: r,
                       borderRadius: r / 2,
-                      backgroundColor: MASTER_STATS_CHANGE_LINE_DOT,
-                      borderWidth: 1,
-                      borderColor: '#ffffff',
-                      opacity: isDotActive ? 1 : 0.88,
+                      backgroundColor: MASTER_STATS_CHANGE_LINE_DOT_FILL,
+                      borderWidth: isDotActive ? DOT_STROKE_W_ACTIVE : DOT_STROKE_W,
+                      borderColor: MASTER_STATS_CHANGE_LINE_STROKE,
                     },
                   ]}
                   pointerEvents="none"
                 />
               );
             })}
+
+            {/* Hit zones — последний слой для тапов */}
+            {layout &&
+              points.map((p) => (
+                <Pressable
+                  key={`hit-${p.i}`}
+                  onPress={() => handleBarPress(p.i)}
+                  delayPressIn={0}
+                  hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
+                  style={[styles.hitZone, styles.hitLayer, { left: p.step * p.i, width: hitZoneWidth }]}
+                />
+              ))}
           </View>
 
           {/* x labels — при >10 точек показываем каждый 2й для читаемости */}
@@ -526,12 +544,12 @@ export function BarLineChart({
         <View style={[styles.legendStrip, compact && styles.legendStripCompact]} pointerEvents="none">
           <View style={[styles.legendRow, compact && styles.legendRowCompact]}>
             <View style={styles.legendItem}>
-              <View style={[styles.legendSwatch, { backgroundColor: MASTER_STATS_LEGEND_CURRENT }]} />
-              <Text style={[styles.legendLabel, compact && styles.legendLabelCompact]}>Сейчас</Text>
-            </View>
-            <View style={styles.legendItem}>
               <View style={[styles.legendSwatch, { backgroundColor: MASTER_STATS_LEGEND_PAST }]} />
               <Text style={[styles.legendLabel, compact && styles.legendLabelCompact]}>Прошлые</Text>
+            </View>
+            <View style={styles.legendItem}>
+              <View style={[styles.legendSwatch, { backgroundColor: MASTER_STATS_LEGEND_CURRENT }]} />
+              <Text style={[styles.legendLabel, compact && styles.legendLabelCompact]}>Сейчас</Text>
             </View>
             <View style={styles.legendItem}>
               <View style={[styles.legendSwatch, { backgroundColor: MASTER_STATS_LEGEND_FUTURE }]} />
@@ -606,8 +624,8 @@ const styles = StyleSheet.create({
   chart: {
     backgroundColor: CHART_COLORS.bg,
     borderRadius: 10,
-    paddingHorizontal: 5,
-    paddingVertical: 5,
+    paddingHorizontal: 8,
+    paddingVertical: 8,
     overflow: 'hidden',
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: CHART_COLORS.border,
@@ -631,12 +649,18 @@ const styles = StyleSheet.create({
     position: 'absolute',
     height: StyleSheet.hairlineWidth,
     backgroundColor: CHART_GRID_STROKE,
-    opacity: 0.55,
+    opacity: 0.38,
   },
   hitZone: {
     position: 'absolute',
     top: 0,
     bottom: 0,
+  },
+  lineLayer: {
+    zIndex: 10,
+  },
+  hitLayer: {
+    zIndex: 20,
   },
   bar: {
     position: 'absolute',

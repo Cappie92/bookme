@@ -1,18 +1,28 @@
 /**
- * Stacked bar colors for master dashboard/stats — mobile-only tuning (web uses inline fills).
+ * Stacked bar colors — из masterStatsChartTheme (mobile-only).
  */
+import {
+  MASTER_STATS_BAR_CURRENT,
+  MASTER_STATS_BAR_CURRENT_PENDING,
+  MASTER_STATS_BAR_FUTURE,
+  MASTER_STATS_BAR_FUTURE_PENDING,
+  MASTER_STATS_BAR_PAST,
+  MASTER_STATS_BAR_PAST_PENDING,
+} from '@src/utils/masterStatsChartTheme';
+
 export function masterStackSegmentFills(entry: {
   is_current?: boolean;
   is_past?: boolean;
   is_future?: boolean;
 }): { confirmed: string; pending: string } {
   if (entry.is_past) {
-    /* Сильно тише фон: past на втором плане, почти «воздух». */
-    return { confirmed: '#cbd5e1', pending: '#f1f5f9' };
+    return { confirmed: MASTER_STATS_BAR_PAST, pending: MASTER_STATS_BAR_PAST_PENDING };
   }
   if (entry.is_current) {
-    /* Текущий период — явный якорь + читаемый pending. */
-    return { confirmed: '#2e7d32', pending: '#5dade2' };
+    return { confirmed: MASTER_STATS_BAR_CURRENT, pending: MASTER_STATS_BAR_CURRENT_PENDING };
   }
-  return { confirmed: '#1e88e5', pending: '#a5d6fa' };
+  if (entry.is_future) {
+    return { confirmed: MASTER_STATS_BAR_FUTURE, pending: MASTER_STATS_BAR_FUTURE_PENDING };
+  }
+  return { confirmed: MASTER_STATS_BAR_FUTURE, pending: MASTER_STATS_BAR_FUTURE_PENDING };
 }

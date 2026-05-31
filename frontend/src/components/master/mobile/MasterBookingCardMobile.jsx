@@ -6,8 +6,11 @@ import { getStatusBadgeForPast } from '../../../utils/bookingStatusDisplay';
 import { shouldSplitFutureBookingsByConfirmation } from '../../../utils/bookingOutcome';
 import {
   canMasterConfirmBooking,
+  getMasterHubCancelledStatusLabel,
   isFutureCancelled,
   isFuturePending,
+  isMasterHubCancelledTabStatus,
+  MasterBookingCancellationReasonLine,
   MasterBookingClientBlockMobile,
   resolveBookingPriceDisplay,
   MasterBookingLoyaltyRubLine,
@@ -48,10 +51,11 @@ export default function MasterBookingCardMobile({
   const metaLine =
     timeEnd && timeStart ? `${dayPart} · ${timeStart}–${timeEnd}` : `${dayPart} · ${timeStart || '—'}`;
 
-  const isCancelled = isFutureCancelled(b.status);
+  const isCancelledTab = sectionType === 'cancelled';
+  const isCancelled = isCancelledTab ? isMasterHubCancelledTabStatus(b.status) : isFutureCancelled(b.status);
   const showConfirm =
-    !hideActions && !isCancelled && canMasterConfirmBooking(b, master, hasExtendedStats);
-  const showCancel = !hideActions && !isCancelled && canCancelBooking(b);
+    !hideActions && !isCancelledTab && !isCancelled && canMasterConfirmBooking(b, master, hasExtendedStats);
+  const showCancel = !hideActions && !isCancelledTab && !isCancelled && canCancelBooking(b);
   const isBusy = actionBookingId === b.id;
   const hasNote = !!(b.has_client_note && (b.client_note || '').trim());
   const pastMeta = sectionType === 'past' ? getStatusBadgeForPast(b, master) : null;
@@ -143,6 +147,46 @@ export default function MasterBookingCardMobile({
   const btnCancel = isHub
     ? 'flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border-2 border-red-200 bg-white text-[#DC2626] shadow-sm hover:bg-red-50 disabled:opacity-50'
     : 'flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border-2 border-[#FECACA] bg-white text-[#DC2626] shadow-sm hover:bg-red-50 disabled:opacity-50';
+
+  if (isCancelledTab) {
+    const cancelledShell = isHub
+      ? 'relative overflow-hidden rounded-[18px] border border-[#FECACA] bg-white shadow-[0_8px_24px_-16px_rgba(45,45,45,0.18)] border-l-[5px] border-l-[#F87171]'
+      : 'relative overflow-hidden rounded-xl border border-[#FECACA] bg-white shadow-sm border-l-[4px] border-l-[#F87171]';
+    return (
+      <article className={cancelledShell}>
+        <button
+          type="button"
+          onClick={() => onOpenDetail?.(b)}
+          className="block w-full px-3 py-2.5 text-left transition-colors hover:bg-[#FAFAF9] active:bg-[#F5F5F4]"
+        >
+          <div className="flex min-w-0 items-start justify-between gap-2">
+            <span
+              className="inline-flex shrink-0 items-center rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-semibold text-red-800 ring-1 ring-red-100"
+            >
+              {getMasterHubCancelledStatusLabel(b.status)}
+            </span>
+            {priceLine ? (
+              <div className="shrink-0 text-right">
+                <span className="text-[13px] font-semibold tabular-nums text-[#57534E]">{priceLine}</span>
+                <MasterBookingLoyaltyRubLine
+                  booking={b}
+                  className="mt-0.5 text-[10px] font-medium text-[#78716C] leading-tight"
+                />
+              </div>
+            ) : null}
+          </div>
+          <p className="mt-1.5 text-[14px] font-semibold leading-snug text-[#1C1917] line-clamp-2">
+            {b.service_name || '—'}
+          </p>
+          <div className="mt-0.5">
+            <MasterBookingClientBlockMobile booking={b} size="compact" />
+          </div>
+          <p className="mt-0.5 text-[11px] font-medium tabular-nums text-[#78716C]">{metaLine}</p>
+          <MasterBookingCancellationReasonLine booking={b} />
+        </button>
+      </article>
+    );
+  }
 
   return (
     <article className={shell}>

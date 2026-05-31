@@ -1,5 +1,10 @@
 import React from 'react';
-import { canConfirmPostVisit, canPreVisitConfirmBooking, isFuturePendingConfirmationStatus } from '../../../utils/bookingOutcome';
+import {
+  canConfirmPostVisit,
+  canPreVisitConfirmBooking,
+  CANCELLATION_REASONS,
+  isFuturePendingConfirmationStatus,
+} from '../../../utils/bookingOutcome';
 import { getStatusBadgeForPast } from '../../../utils/bookingStatusDisplay';
 import { formatMoney } from '../../../utils/formatMoney';
 import { masterDisplayMainRub, masterLoyaltyRub } from '../../../utils/masterBookingMoney';
@@ -32,6 +37,32 @@ export function isFuturePending(status) {
 export function isFutureCancelled(status) {
   const s = String(status || '').toLowerCase();
   return s === 'cancelled' || s === 'cancelled_by_client_early' || s === 'cancelled_by_client_late';
+}
+
+/** Вкладка «✕» / отменённые future в hub мастера (включая payment_expired). */
+export function isMasterHubCancelledTabStatus(status) {
+  const s = String(status || '').toLowerCase();
+  return isFutureCancelled(status) || s === 'payment_expired';
+}
+
+export function getMasterHubCancelledStatusLabel(status) {
+  const s = String(status || '').toLowerCase();
+  if (s === 'payment_expired') return 'Оплата истекла';
+  if (s === 'cancelled_by_client_early' || s === 'cancelled_by_client_late') return 'Отменено клиентом';
+  if (s === 'cancelled') return 'Отменено';
+  return 'Отменено';
+}
+
+/** Подпись причины отмены из существующего поля booking.cancellation_reason. */
+export function MasterBookingCancellationReasonLine({ booking, className = '' }) {
+  const raw = (booking?.cancellation_reason || '').trim();
+  if (!raw) return null;
+  const label = CANCELLATION_REASONS[raw] || raw;
+  return (
+    <p className={`mt-0.5 text-[10px] leading-snug text-[#6B6B6B] ${className}`.trim()}>
+      {label}
+    </p>
+  );
 }
 
 /**

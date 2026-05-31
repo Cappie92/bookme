@@ -7,6 +7,8 @@ import {
   canMasterConfirmBooking,
   isFutureCancelled,
   isFuturePending,
+  isMasterHubCancelledTabStatus,
+  getMasterHubCancelledStatusLabel,
   MasterBookingClientBlockMobile,
   resolveBookingPriceDisplay,
   MasterBookingLoyaltyRubLine,
@@ -41,7 +43,10 @@ export default function MasterBookingDetailSheet({
   const startRef = b.start_time || b.date;
   const dateStr = formatDateShort(startRef || b.date);
   const timeStr = formatTimeShort(b.start_time) || b.time || '';
-  const isCancelled = isFutureCancelled(b.status);
+  const isCancelled =
+    sectionType === 'cancelled'
+      ? isMasterHubCancelledTabStatus(b.status)
+      : isFutureCancelled(b.status);
   const showConfirm =
     !hideActions && !isCancelled && canMasterConfirmBooking(b, master, hasExtendedStats);
   const showCancel = !hideActions && !isCancelled && canCancelBooking(b);
@@ -77,8 +82,10 @@ export default function MasterBookingDetailSheet({
             isFuturePending(b.status) && (
             <p className="mt-1 text-xs font-medium text-amber-800">Статус: на подтверждении</p>
           )}
-          {sectionType === 'future' && isCancelled && (
-            <p className="mt-1 text-xs font-medium text-red-700">Статус: отменено</p>
+          {(sectionType === 'future' || sectionType === 'cancelled') && isCancelled && (
+            <p className="mt-1 text-xs font-medium text-red-700">
+              Статус: {getMasterHubCancelledStatusLabel(b.status)}
+            </p>
           )}
           <div className="mt-2 flex flex-nowrap items-center gap-2 overflow-x-auto">
             <BookingStatusBadge sectionType={sectionType} booking={b} master={master} />

@@ -21,6 +21,7 @@ import AllBookingsModal from './AllBookingsModal';
 import MasterBookingCardMobile from './master/mobile/MasterBookingCardMobile';
 import MasterBookingDetailSheet from './master/mobile/MasterBookingDetailSheet';
 import MasterBookingCancelSheet from './master/mobile/MasterBookingCancelSheet';
+import { isMasterHubCancelledTabStatus } from './master/mobile/masterBookingShared';
 import { getPlanDisplayName } from '../utils/subscriptionPlanNames';
 import { formatMoney } from '../utils/formatMoney';
 import { masterDisplayMainRub, masterLoyaltyRub } from '../utils/masterBookingMoney';
@@ -135,6 +136,7 @@ export default function MasterDashboardStats({
   /** Desktop booking hub: отдельные totals/превью из "полных" источников */
   const [desktopFuturePreview, setDesktopFuturePreview] = useState([]);
   const [desktopFutureTotal, setDesktopFutureTotal] = useState(0);
+  const [desktopCancelledPreview, setDesktopCancelledPreview] = useState([]);
   const [desktopPastPendingPreview, setDesktopPastPendingPreview] = useState([]);
   const [desktopPastPendingTotal, setDesktopPastPendingTotal] = useState(0);
   const [servicesStatsTab, setServicesStatsTab] = useState('bookings'); // 'bookings' или 'earnings'
@@ -264,16 +266,22 @@ export default function MasterDashboardStats({
           ...b,
           start_time: b.start_time || (b.date && b.time ? `${b.date}T${b.time}:00` : null),
         }))
-        .filter((b) => !!b.start_time)
-        .filter((b) => !isFutureCancelled(b.status))
+        .filter((b) => !!b.start_time);
+      const active = normalized
+        .filter((b) => !isMasterHubCancelledTabStatus(b.status))
         .sort((a, b) => new Date(a.start_time || 0) - new Date(b.start_time || 0));
-      setDesktopFuturePreview(normalized);
+      const cancelled = normalized
+        .filter((b) => isMasterHubCancelledTabStatus(b.status))
+        .sort((a, b) => new Date(a.start_time || 0) - new Date(b.start_time || 0));
+      setDesktopFuturePreview(active);
       setDesktopFutureTotal(Number(data?.total) || 0);
+      setDesktopCancelledPreview(cancelled);
     } catch (err) {
       // не блокируем экран из-за totals на dashboard
       console.error('Ошибка загрузки будущих записей (desktop totals):', err);
       setDesktopFuturePreview([]);
       setDesktopFutureTotal(0);
+      setDesktopCancelledPreview([]);
     }
   };
 
@@ -489,6 +497,11 @@ export default function MasterDashboardStats({
   /** Desktop hub: future/pending считаем из future endpoint (не из stats.next_bookings_list, который может быть урезан). */
   const desktopFutureAll = useMemo(() => (Array.isArray(desktopFuturePreview) ? desktopFuturePreview : []), [desktopFuturePreview]);
   const desktopFutureTop3 = useMemo(() => desktopFutureAll.slice(0, 3), [desktopFutureAll]);
+  const desktopCancelledAll = useMemo(
+    () => (Array.isArray(desktopCancelledPreview) ? desktopCancelledPreview : []),
+    [desktopCancelledPreview]
+  );
+  const desktopCancelledTop3 = useMemo(() => desktopCancelledAll.slice(0, 3), [desktopCancelledAll]);
 
   /** Desktop «Ожидают»: сначала все прошлые post-visit confirmation, затем будущие pre-visit confirmation. */
   const desktopPendingPastAll = useMemo(
@@ -511,6 +524,35 @@ export default function MasterDashboardStats({
   const desktopFutureCount = desktopFutureTotal;
   const desktopPastCount = pastBookingsTotal;
   const desktopPendingCount = desktopPastPendingTotal + desktopPendingFutureAll.length;
+
+  const renderCancelledBookingCards = (items, { variant = 'hub', limit } = {}) => {
+    const slice = limit != null ? items.slice(0, limit) : items;
+    if (!slice.length) return null;
+    return (
+      <ul className={`m-0 list-none p-0 ${variant === 'hub' ? 'space-y-3' : 'space-y-2.5'}`}>
+        {slice.map((b, i) => {
+          const normalized = {
+            ...b,
+            start_time: b.start_time || (b.date && b.time ? `${b.date}T${b.time}:00` : ''),
+          };
+          return (
+            <li key={b.id || `c-${i}`} className="m-0 p-0">
+              <MasterBookingCardMobile
+                variant={variant}
+                booking={normalized}
+                sectionType="cancelled"
+                master={masterSettings?.master ?? null}
+                hasExtendedStats={hasExtendedStats}
+                hideActions
+                actionBookingId={actionBookingId}
+                onOpenDetail={(book) => setMobileBookingDetail({ booking: book, sectionType: 'cancelled' })}
+              />
+            </li>
+          );
+        })}
+      </ul>
+    );
+  };
 
   const renderActivityFutureRow = (booking) => {
     const b = { ...booking, start_time: booking.start_time || (booking.date && booking.time ? `${booking.date}T${booking.time}:00` : '') };
@@ -1098,6 +1140,8 @@ export default function MasterDashboardStats({
                 setAllBookingsModalMode('past');
               } else if (desktopBookingTab === 'pending') {
                 setAllBookingsModalMode(desktopPendingPastAll.length > 0 && desktopPendingFutureAll.length === 0 ? 'past' : 'future');
+              } else if (desktopBookingTab === 'cancelled') {
+                setAllBookingsModalMode('future');
               } else {
                 setAllBookingsModalMode('future');
               }
@@ -1139,6 +1183,26 @@ export default function MasterDashboardStats({
           <button
             type="button"
             role="tab"
+            aria-selected={desktopBookingTab === 'pending'}
+            onClick={() => setDesktopBookingTab('pending')}
+            className={`min-h-[40px] min-w-0 flex-1 rounded-[10px] px-3 py-2 text-[13px] font-semibold transition ${
+              desktopBookingTab === 'pending'
+                ? 'bg-white text-[#2D2D2D] shadow-[0_1px_2px_rgba(45,45,45,0.10)]'
+                : 'text-[#6B6B6B] hover:text-[#2D2D2D] hover:bg-white/30'
+            }`}
+          >
+            <span className="whitespace-nowrap">Ожидают</span>
+            <span
+              className={`ml-1.5 inline-flex h-4 min-w-[1rem] items-center justify-center rounded-full px-1 text-[10px] font-semibold tabular-nums ${
+                desktopBookingTab === 'pending' ? 'bg-[#FEF7E6] text-[#B45309]' : 'bg-white/50 text-[#6B6B6B]'
+              }`}
+            >
+              {desktopPendingCount}
+            </span>
+          </button>
+          <button
+            type="button"
+            role="tab"
             aria-selected={desktopBookingTab === 'past'}
             onClick={() => setDesktopBookingTab('past')}
             className={`min-h-[40px] min-w-0 flex-1 rounded-[10px] px-3 py-2 text-[13px] font-semibold transition ${
@@ -1159,22 +1223,17 @@ export default function MasterDashboardStats({
           <button
             type="button"
             role="tab"
-            aria-selected={desktopBookingTab === 'pending'}
-            onClick={() => setDesktopBookingTab('pending')}
-            className={`min-h-[40px] min-w-0 flex-1 rounded-[10px] px-3 py-2 text-[13px] font-semibold transition ${
-              desktopBookingTab === 'pending'
-                ? 'bg-white text-[#2D2D2D] shadow-[0_1px_2px_rgba(45,45,45,0.10)]'
-                : 'text-[#6B6B6B] hover:text-[#2D2D2D] hover:bg-white/30'
+            aria-selected={desktopBookingTab === 'cancelled'}
+            title="Отменённые записи"
+            aria-label="Отменённые записи"
+            onClick={() => setDesktopBookingTab('cancelled')}
+            className={`min-h-[40px] w-9 shrink-0 rounded-[10px] px-1 py-2 text-center text-[15px] font-bold leading-none transition ${
+              desktopBookingTab === 'cancelled'
+                ? 'bg-white text-red-700 shadow-[0_1px_2px_rgba(45,45,45,0.10)] ring-1 ring-red-100'
+                : 'text-[#9CA3AF] hover:bg-white/40 hover:text-red-600'
             }`}
           >
-            <span className="whitespace-nowrap">Ожидают</span>
-            <span
-              className={`ml-1.5 inline-flex h-4 min-w-[1rem] items-center justify-center rounded-full px-1 text-[10px] font-semibold tabular-nums ${
-                desktopBookingTab === 'pending' ? 'bg-[#FEF7E6] text-[#B45309]' : 'bg-white/50 text-[#6B6B6B]'
-              }`}
-            >
-              {desktopPendingCount}
-            </span>
+            ✕
           </button>
         </div>
       </div>
@@ -1240,6 +1299,16 @@ export default function MasterDashboardStats({
             <div className="rounded-[16px] border border-dashed border-[#E7E2DF] bg-white/70 px-6 py-10 text-center">
               <p className="text-[14px] font-semibold text-[#2D2D2D]">Нет прошедших записей</p>
               <p className="mt-1 text-[13px] text-[#6B6B6B]">История появится после завершённых визитов</p>
+            </div>
+          )
+        ) : null}
+
+        {desktopBookingTab === 'cancelled' ? (
+          desktopCancelledTop3.length > 0 ? (
+            renderCancelledBookingCards(desktopCancelledTop3, { variant: 'hub' })
+          ) : (
+            <div className="rounded-[16px] border border-dashed border-[#E7E2DF] bg-white/70 px-6 py-10 text-center">
+              <p className="text-[14px] font-semibold text-[#2D2D2D]">Нет отменённых записей</p>
             </div>
           )
         ) : null}
@@ -1614,6 +1683,26 @@ export default function MasterDashboardStats({
             <button
               type="button"
               role="tab"
+              aria-selected={activityListTab === 'pending'}
+              onClick={() => setActivityListTab('pending')}
+              className={`min-h-[36px] min-w-0 flex-1 rounded-[8px] px-2 py-1.5 text-[12px] font-semibold transition ${
+                activityListTab === 'pending'
+                  ? 'bg-white text-[#2D2D2D] shadow-[0_1px_2px_rgba(45,45,45,0.10)]'
+                  : 'text-[#6B6B6B] hover:text-[#2D2D2D] hover:bg-white/30'
+              }`}
+            >
+              <span className="whitespace-nowrap">Ожидают</span>
+              <span
+                className={`ml-1 inline-flex h-4 min-w-[1rem] items-center justify-center rounded-full px-1 text-[10px] font-semibold tabular-nums ${
+                  activityListTab === 'pending' ? 'bg-[#FEF7E6] text-[#B45309]' : 'bg-white/50 text-[#6B6B6B]'
+                }`}
+              >
+                {desktopPendingCount}
+              </span>
+            </button>
+            <button
+              type="button"
+              role="tab"
               aria-selected={activityListTab === 'past'}
               onClick={() => setActivityListTab('past')}
               className={`min-h-[36px] min-w-0 flex-1 rounded-[8px] px-2 py-1.5 text-[12px] font-semibold transition ${
@@ -1634,22 +1723,17 @@ export default function MasterDashboardStats({
             <button
               type="button"
               role="tab"
-              aria-selected={activityListTab === 'pending'}
-              onClick={() => setActivityListTab('pending')}
-              className={`min-h-[36px] min-w-0 flex-1 rounded-[8px] px-2 py-1.5 text-[12px] font-semibold transition ${
-                activityListTab === 'pending'
-                  ? 'bg-white text-[#2D2D2D] shadow-[0_1px_2px_rgba(45,45,45,0.10)]'
-                  : 'text-[#6B6B6B] hover:text-[#2D2D2D] hover:bg-white/30'
+              aria-selected={activityListTab === 'cancelled'}
+              title="Отменённые записи"
+              aria-label="Отменённые записи"
+              onClick={() => setActivityListTab('cancelled')}
+              className={`min-h-[36px] w-8 shrink-0 rounded-[8px] px-1 py-1.5 text-center text-[14px] font-bold leading-none transition ${
+                activityListTab === 'cancelled'
+                  ? 'bg-white text-red-700 shadow-[0_1px_2px_rgba(45,45,45,0.10)] ring-1 ring-red-100'
+                  : 'text-[#9CA3AF] hover:bg-white/40 hover:text-red-600'
               }`}
             >
-              <span className="whitespace-nowrap">Ожидают</span>
-              <span
-                className={`ml-1 inline-flex h-4 min-w-[1rem] items-center justify-center rounded-full px-1 text-[10px] font-semibold tabular-nums ${
-                  activityListTab === 'pending' ? 'bg-[#FEF7E6] text-[#B45309]' : 'bg-white/50 text-[#6B6B6B]'
-                }`}
-              >
-                {desktopPendingCount}
-              </span>
+              ✕
             </button>
           </div>
         </div>
@@ -1758,6 +1842,16 @@ export default function MasterDashboardStats({
               </div>
             )
           ) : null}
+
+          {activityListTab === 'cancelled' ? (
+            desktopCancelledAll.length > 0 ? (
+              renderCancelledBookingCards(desktopCancelledAll.slice(0, 3), { variant: 'hub' })
+            ) : (
+              <div className="rounded-[12px] border border-dashed border-[#E7E2DF] bg-white px-5 py-8 text-center">
+                <p className="text-[13px] font-semibold text-[#2D2D2D]">Нет отменённых записей</p>
+              </div>
+            )
+          ) : null}
         </div>
       </section>
 
@@ -1804,6 +1898,7 @@ export default function MasterDashboardStats({
             sectionType={mobileBookingDetail.sectionType}
             master={masterSettings?.master ?? null}
             hasExtendedStats={hasExtendedStats}
+            hideActions={mobileBookingDetail.sectionType === 'cancelled'}
             actionBookingId={actionBookingId}
             onClose={() => setMobileBookingDetail(null)}
             onConfirm={handleConfirmUnified}
