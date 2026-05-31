@@ -30,16 +30,24 @@ export function ScreenContainer({
       ? [styles.scrollContent, scrollViewProps.contentContainerStyle]
       : styles.scrollContent;
     
+    const {
+      style: scrollStyleProp,
+      contentContainerStyle: _contentContainerStyleProp,
+      showsVerticalScrollIndicator: showsIndicatorProp,
+      keyboardShouldPersistTaps: persistTapsProp,
+      ...restScrollProps
+    } = scrollViewProps ?? {};
+
     return (
       <SafeAreaView style={containerStyle} edges={defaultEdges} {...safeAreaProps}>
         <ScrollView
-          style={styles.scrollView}
+          {...restScrollProps}
+          style={[styles.scrollView, scrollStyleProp]}
           contentContainerStyle={mergedContentStyle}
-          showsVerticalScrollIndicator={scrollViewProps?.showsVerticalScrollIndicator !== undefined 
-            ? scrollViewProps.showsVerticalScrollIndicator 
-            : false}
-          keyboardShouldPersistTaps={scrollViewProps?.keyboardShouldPersistTaps || 'handled'}
-          {...scrollViewProps}
+          showsVerticalScrollIndicator={
+            showsIndicatorProp !== undefined ? showsIndicatorProp : false
+          }
+          keyboardShouldPersistTaps={persistTapsProp || 'handled'}
         >
           {children}
         </ScrollView>

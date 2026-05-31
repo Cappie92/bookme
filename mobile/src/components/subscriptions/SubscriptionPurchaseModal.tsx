@@ -82,6 +82,15 @@ function LoadingState({ label }: { label: string }) {
   );
 }
 
+function StepMessage({ title, subtitle }: { title: string; subtitle?: string }) {
+  return (
+    <View style={styles.center}>
+      <Text style={styles.messageTitle}>{title}</Text>
+      {subtitle ? <Text style={styles.messageSubtitle}>{subtitle}</Text> : null}
+    </View>
+  );
+}
+
 function CalculationLoadingState() {
   return (
     <View style={styles.centerSmall}>
@@ -347,6 +356,7 @@ export function SubscriptionPurchaseModal({
   const insets = useSafeAreaInsets();
   const [plans, setPlans] = React.useState<SubscriptionPlan[]>([]);
   const [loadingPlans, setLoadingPlans] = React.useState(false);
+  const [plansError, setPlansError] = React.useState<string | null>(null);
 
   const [step, setStep] = React.useState<Step>(1);
   const [selectedPlan, setSelectedPlan] = React.useState<SubscriptionPlan | null>(null);
@@ -389,6 +399,7 @@ export function SubscriptionPurchaseModal({
       setLoadingCalculation(false);
       setLoadingPayment(false);
       setPaymentOpened(false);
+      setPlansError(null);
     }
   }, [calculation?.calculation_id]);
 
@@ -398,13 +409,17 @@ export function SubscriptionPurchaseModal({
     (async () => {
       try {
         setLoadingPlans(true);
+        setPlansError(null);
         const data = await fetchAvailableSubscriptions(subscriptionType);
         const filtered = data
           .filter((p) => p.name !== 'Free' && p.name !== 'AlwaysFree')
           .sort((a, b) => a.display_order - b.display_order);
         setPlans(filtered);
-      } catch (e) {
-        Alert.alert('Ошибка', 'Не удалось загрузить тарифы');
+      } catch (e: any) {
+        const msg = e?.response?.data?.detail || e?.message || 'Не удалось загрузить тарифы';
+        setPlansError(String(msg));
+        setPlans([]);
+        Alert.alert('Ошибка', String(msg));
       } finally {
         setLoadingPlans(false);
       }
@@ -624,6 +639,10 @@ export function SubscriptionPurchaseModal({
   }, [loadingPayment, calculation, payFromBalance]);
 
   const sheetMaxHeight = Math.round(Dimensions.get('window').height * 0.88);
+  const footerPaddingBottom = 12 + Math.max(insets.bottom, 0);
+  /** Фиксированная высота «хрома» sheet (header + шаги + footer), чтобы ScrollView не схлопывался на Android. */
+  const sheetChromeHeight = 52 + 48 + 64 + footerPaddingBottom;
+  const scrollMaxHeight = Math.max(160, sheetMaxHeight - sheetChromeHeight);
 
   const goNext = () => {
     if (step === 1 && canGoNextFromStep1) setStep(2);
@@ -640,7 +659,23 @@ export function SubscriptionPurchaseModal({
 
   const stepContent = () => {
     if (loadingPlans) return <LoadingState label="Загрузка тарифов…" />;
+    if (plansError) {
+      return (
+        <StepMessage
+          title="Не удалось загрузить тарифы"
+          subtitle={plansError}
+        />
+      );
+    }
     if (step === 1) {
+      if (plans.length === 0) {
+        return (
+          <StepMessage
+            title="Нет доступных тарифов"
+            subtitle="Попробуйте обновить позже или обратитесь в поддержку."
+          />
+        );
+      }
       return (
         <StepPlan
           plans={plans}
@@ -695,7 +730,7 @@ export function SubscriptionPurchaseModal({
       <View style={styles.overlay}>
         <Pressable style={styles.backdrop} onPress={handleClose} />
 
-        <View style={[styles.sheet, { maxHeight: sheetMaxHeight }]}>
+        <View style={[styles.sheet, { height: sheetMaxHeight, maxHeight: sheetMaxHeight }]}>
           <View style={styles.header}>
             <Text style={styles.title}>Управление тарифом</Text>
             <Pressable onPress={handleClose} style={styles.closeButton} hitSlop={8}>
@@ -705,22 +740,20 @@ export function SubscriptionPurchaseModal({
 
           <StepIndicator step={step} total={totalSteps} />
 
-          <View style={styles.scrollHost}>
-            <ScrollView
-              style={styles.scroll}
-              contentContainerStyle={styles.content}
-              showsVerticalScrollIndicator
-              keyboardShouldPersistTaps="handled"
-              keyboardDismissMode="on-drag"
-              nestedScrollEnabled
-              bounces
-            >
-              {stepContent()}
-            </ScrollView>
-          </View>
+          <ScrollView
+            style={[styles.scroll, { maxHeight: scrollMaxHeight }]}
+            contentContainerStyle={styles.content}
+            showsVerticalScrollIndicator
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
+            nestedScrollEnabled
+            bounces
+          >
+            {stepContent()}
+          </ScrollView>
 
           {/* Sticky footer */}
-          <View style={[styles.footer, { paddingBottom: 12 + Math.max(insets.bottom, 0) }]}>
+          <View style={[styles.footer, { paddingBottom: footerPaddingBottom }]}>
             <View style={styles.footerRow}>
               <Pressable
                 onPress={goBackOrClose}
@@ -778,11 +811,6 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     flexDirection: 'column',
   },
-  scrollHost: {
-    flexShrink: 1,
-    minHeight: 0,
-    flexGrow: 1,
-  },
   header: {
     paddingHorizontal: 14,
     paddingVertical: 10,
@@ -830,13 +858,27 @@ const styles = StyleSheet.create({
     borderRadius: 999,
   },
   scroll: {
-    flex: 1,
+    flexGrow: 0,
+    flexShrink: 1,
   },
   content: {
     paddingHorizontal: 14,
     paddingTop: 12,
-    paddingBottom: 24,
-    flexGrow: 1,
+    paddingBottom: 16,
+  },
+  messageTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#111',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  messageSubtitle: {
+    fontSize: 13,
+    color: '#666',
+    fontWeight: '600',
+    textAlign: 'center',
+    lineHeight: 18,
   },
   balanceHintOk: {
     marginTop: 6,

@@ -10,7 +10,10 @@ import {
   Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '@src/auth/AuthContext';
+import { useTabBarHeight } from '@src/contexts/TabBarHeightContext';
+import { BOTTOM_NAV_CONTENT_FALLBACK_HEIGHT } from '@src/constants/bottomNavLayout';
 import { ScreenContainer } from '@src/components/ScreenContainer';
 import { Card } from '@src/components/Card';
 import { StatusBadge } from '@src/components/StatusBadge';
@@ -34,16 +37,14 @@ import {
   splitTariffComparisonColumns,
 } from 'shared/subscriptionPlanFeatures';
 
-/** Экран под Stack header «Подписки»: не дублировать top safe area (он уже учтён навигацией) и уменьшить зазор до первой карточки. */
-const SUBSCRIPTIONS_SCROLL_CONTENT_STYLE = {
-  paddingHorizontal: 16,
-  paddingTop: 8,
-  paddingBottom: 90,
-  flexGrow: 1,
-} as const;
+const SCROLL_EXTRA_BOTTOM = 24;
 
 export default function SubscriptionsScreen() {
   const { user } = useAuth();
+  const insets = useSafeAreaInsets();
+  const { tabBarHeight } = useTabBarHeight();
+  const measuredTabBarHeight = tabBarHeight > 0 ? tabBarHeight : BOTTOM_NAV_CONTENT_FALLBACK_HEIGHT;
+  const scrollPaddingBottom = insets.bottom + measuredTabBarHeight + SCROLL_EXTRA_BOTTOM;
   const { refresh: refreshMasterFeatures } = useMasterFeatures();
   const [subscription, setSubscription] = useState<Subscription | null>(null);
   const [loading, setLoading] = useState(true);
@@ -276,7 +277,14 @@ export default function SubscriptionsScreen() {
 
   if (error) {
     return (
-      <ScreenContainer compactTop scrollable scrollViewProps={{ contentContainerStyle: SUBSCRIPTIONS_SCROLL_CONTENT_STYLE }}>
+      <ScreenContainer
+        compactTop
+        scrollable
+        scrollViewProps={{
+          contentContainerStyle: { paddingBottom: scrollPaddingBottom },
+          showsVerticalScrollIndicator: true,
+        }}
+      >
         <View style={styles.centerContainer}>
           <Text style={styles.errorTitle}>Ошибка</Text>
           <Text style={styles.errorText}>{error}</Text>
@@ -288,7 +296,14 @@ export default function SubscriptionsScreen() {
 
   if (!subscription) {
     return (
-      <ScreenContainer compactTop scrollable scrollViewProps={{ contentContainerStyle: SUBSCRIPTIONS_SCROLL_CONTENT_STYLE }}>
+      <ScreenContainer
+        compactTop
+        scrollable
+        scrollViewProps={{
+          contentContainerStyle: { paddingBottom: scrollPaddingBottom },
+          showsVerticalScrollIndicator: true,
+        }}
+      >
         <View style={styles.centerContainer}>
           <Text style={styles.emptyTitle}>Подписка не активна</Text>
           <Text style={styles.emptyText}>
@@ -305,13 +320,12 @@ export default function SubscriptionsScreen() {
       compactTop
       scrollable
       scrollViewProps={{
-        contentContainerStyle: SUBSCRIPTIONS_SCROLL_CONTENT_STYLE,
+        contentContainerStyle: { paddingBottom: scrollPaddingBottom },
+        showsVerticalScrollIndicator: true,
         refreshControl: (
           <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} colors={['#4CAF50']} />
         ),
-        nestedScrollEnabled: true,
         keyboardShouldPersistTaps: 'handled',
-        directionalLockEnabled: true,
       }}
     >
       {renderSubscriptionInfo()}
