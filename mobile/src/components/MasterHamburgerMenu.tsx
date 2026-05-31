@@ -1,6 +1,7 @@
 import React, { type ComponentProps } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Modal, ScrollView, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Modal, ScrollView, ActivityIndicator, Dimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { useAuth } from '@src/auth/AuthContext';
 import { useMasterFeatures } from '@src/hooks/useMasterFeatures';
@@ -48,8 +49,12 @@ interface MasterHamburgerMenuProps {
 }
 
 export function MasterHamburgerMenu({ visible, onClose }: MasterHamburgerMenuProps) {
+  const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const { features, loading } = useMasterFeatures();
+  const sheetMaxHeight = Math.round(Dimensions.get('window').height * 0.82);
+  const menuScrollPaddingBottom = Math.max(insets.bottom, 12) + 16;
+  const menuScrollMaxHeight = Math.max(200, sheetMaxHeight - 56);
   const [plans, setPlans] = React.useState<SubscriptionPlan[]>([]);
   const [plansLoading, setPlansLoading] = React.useState(false);
   const [canWorkInSalon, setCanWorkInSalon] = React.useState<boolean | null>(null);
@@ -216,7 +221,7 @@ export function MasterHamburgerMenu({ visible, onClose }: MasterHamburgerMenuPro
           activeOpacity={1}
           onPress={() => onClose('overlay_press')}
         />
-        <View style={styles.sheet}>
+        <View style={[styles.sheet, { maxHeight: sheetMaxHeight }]}>
           {/* Заголовок */}
           <View style={styles.header}>
             <Text style={styles.title}>Меню</Text>
@@ -227,9 +232,14 @@ export function MasterHamburgerMenu({ visible, onClose }: MasterHamburgerMenuPro
 
           {/* Список пунктов меню */}
           <ScrollView
-            style={styles.menuList}
-            contentContainerStyle={styles.menuListContent}
-            showsVerticalScrollIndicator={false}
+            style={[styles.menuList, { maxHeight: menuScrollMaxHeight }]}
+            contentContainerStyle={[
+              styles.menuListContent,
+              { paddingBottom: menuScrollPaddingBottom },
+            ]}
+            showsVerticalScrollIndicator
+            nestedScrollEnabled
+            bounces
           >
             {visibleMenuItems.map((item) => {
               const disabledByFeature = isItemDisabled(item);
@@ -310,7 +320,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
-    maxHeight: '82%',
     width: '100%',
     overflow: 'hidden',
   },
@@ -337,10 +346,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   menuList: {
-    flexGrow: 1,
+    flexGrow: 0,
+    flexShrink: 1,
   },
   menuListContent: {
-    paddingBottom: 12,
+    paddingTop: 4,
   },
   menuItem: {
     paddingHorizontal: 16,

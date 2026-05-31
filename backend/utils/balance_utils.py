@@ -19,9 +19,62 @@ from models import (
     SubscriptionPlan,
     SubscriptionFreeze,
 )
+from constants import DURATION_DAYS
 
 
 # Функции конвертации удалены - теперь все работает напрямую с рублями
+
+
+def compute_subscription_days_remaining(
+    *,
+    balance_rub: float,
+    daily_rate: float,
+    start_date: Optional[datetime],
+    end_date: Optional[datetime],
+    price: float,
+    now_utc: Optional[datetime] = None,
+) -> int:
+    """
+    Остаток дней подписки для UI (/api/subscriptions/my).
+
+    Пакет 1/3/6/12 мес (price ≈ daily_rate × период): срок по end_date — период уже оплачен
+    (в т.ч. apply-upgrade-balance / покупка пакета).
+
+    Иначе: min(дни по остатку баланса, календарные дни) — подписка «живёт», пока хватает баланса
+    на ежедневное списание.
+    """
+    now = now_utc or datetime.utcnow()
+    calendar_days = 0
+    if end_date:
+        try:
+            calendar_days = max(0, int(((end_date - now).total_seconds() + 86399) // 86400))
+        except Exception:
+            calendar_days = 0
+
+    daily = float(daily_rate or 0.0)
+    if daily <= 0:
+        return calendar_days
+
+    charge_per_day = max(0, int(round(daily)))
+    balance_days = int(float(balance_rub) // charge_per_day) if charge_per_day > 0 else 0
+
+    total_period_days = 0
+    if start_date and end_date:
+        try:
+            total_period_days = max(1, int((end_date - start_date).total_seconds() // 86400))
+        except Exception:
+            total_period_days = 0
+
+    standard_periods = set(DURATION_DAYS.values())
+    is_prepaid_package = (
+        total_period_days in standard_periods
+        and float(price or 0.0) >= daily * total_period_days * 0.8
+    )
+    if is_prepaid_package:
+        return max(0, calendar_days)
+    if end_date is not None:
+        return max(0, min(balance_days, calendar_days))
+    return max(0, balance_days)
 
 
 def get_or_create_user_balance(db: Session, user_id: int, do_commit: bool = True) -> UserBalance:

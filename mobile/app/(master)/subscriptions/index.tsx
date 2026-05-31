@@ -26,7 +26,7 @@ import {
   getStatusLabel,
   getStatusColor,
   isExpiringSoon,
-  getDaysRemaining,
+  getDisplayDaysRemaining,
 } from '@src/services/api/subscriptions';
 import { SubscriptionPurchaseModal } from '@src/components/subscriptions/SubscriptionPurchaseModal';
 import { formatMoney } from '@src/utils/money';
@@ -120,7 +120,7 @@ export default function SubscriptionsScreen() {
 
     const statusColor = getStatusColor(subscription.status as SubscriptionStatus);
     const statusLabel = getStatusLabel(subscription.status as SubscriptionStatus);
-    const daysRemaining = getDaysRemaining(subscription.end_date);
+    const daysRemaining = getDisplayDaysRemaining(subscription);
     const expiringSoon = isExpiringSoon(subscription.end_date, 7);
 
     const planName = subscription.plan_name || 'Free';

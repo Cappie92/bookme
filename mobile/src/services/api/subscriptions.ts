@@ -237,3 +237,11 @@ export function getDaysRemaining(endDate: string): number {
   return Math.max(0, diffDays);
 }
 
+/** Дни до окончания: приоритет API (учёт баланса/пакета), иначе по end_date. */
+export function getDisplayDaysRemaining(subscription: Subscription): number {
+  if (typeof subscription.days_remaining === 'number') {
+    return Math.max(0, subscription.days_remaining);
+  }
+  return getDaysRemaining(subscription.end_date);
+}
+

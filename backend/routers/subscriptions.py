@@ -43,6 +43,7 @@ from utils.balance_utils import (
     reserve_full_subscription_price,
     get_user_available_balance,
     add_balance_transaction_no_commit,
+    compute_subscription_days_remaining,
 )
 
 router = APIRouter(
@@ -147,38 +148,37 @@ async def get_my_subscription(
     price = float(getattr(subscription, "price", 0.0) or 0.0)
     spent_amount = max(0.0, price - float(reserved_amount or 0.0))
 
-    # days_remaining: min(balance_days, calendar_days) — реальная доступность ограничена и балансом, и датой
     user_balance = get_or_create_user_balance(db, current_user.id)
     balance_rub = float(user_balance.balance or 0.0)
+    days_remaining = compute_subscription_days_remaining(
+        balance_rub=balance_rub,
+        daily_rate=daily_rate,
+        start_date=subscription.start_date,
+        end_date=subscription.end_date,
+        price=price,
+        now_utc=now_utc,
+    )
 
-    calendar_days = None
-    if subscription.end_date:
-        try:
-            calendar_days = max(0, int(((subscription.end_date - datetime.utcnow()).total_seconds() + 86399) // 86400))
-        except Exception:
-            calendar_days = 0
-
-    if daily_rate > 0:
-        charge_per_day = max(0, int(round(daily_rate)))
-        balance_days = int(balance_rub // charge_per_day) if charge_per_day > 0 else 0
-        if calendar_days is not None:
-            days_remaining = max(0, min(balance_days, calendar_days))
-        else:
-            days_remaining = max(0, balance_days)
-    else:
-        balance_days = None
-        days_remaining = calendar_days if calendar_days is not None else 0
-
-    # DIAG: временный лог для проверки days_remaining — удалить после диагностики
     if get_settings().SUBSCRIPTION_DAYS_DEBUG.strip() == "1":
+        calendar_days_dbg = None
+        if subscription.end_date:
+            try:
+                calendar_days_dbg = max(
+                    0, int(((subscription.end_date - now_utc).total_seconds() + 86399) // 86400)
+                )
+            except Exception:
+                calendar_days_dbg = 0
+        balance_days_dbg = (
+            int(balance_rub // max(1, int(round(daily_rate)))) if daily_rate > 0 else None
+        )
         logger.info(
             "subscription/my days_remaining user_id=%s balance_rub=%.2f daily_rate=%.2f "
             "balance_days=%s calendar_days=%s days_remaining=%s plan_name=%s",
             current_user.id,
             balance_rub,
             daily_rate,
-            balance_days,
-            calendar_days,
+            balance_days_dbg,
+            calendar_days_dbg,
             days_remaining,
             plan_name,
         )
