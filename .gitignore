@@ -117,7 +117,7 @@ gitleaks-report.json
 # Local/server cleanup artifacts
 db-backups/
 db-snapshots/
-dedato/
+/dedato/
 docker-compose.prod.yml.before_volume_switch_*
 quarantine_dedato_sensitive_*/
 

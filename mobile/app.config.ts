@@ -73,7 +73,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     android: {
       adaptiveIcon: {
         foregroundImage: './assets/adaptive-icon.png',
-        backgroundColor: '#ffffff',
+        backgroundColor: '#4CAF50',
       },
       package: 'ru.dedato.mobile',
       versionCode: 1,

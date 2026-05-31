@@ -11,4 +11,8 @@
 -keep class com.swmansion.reanimated.** { *; }
 -keep class com.facebook.react.turbomodule.** { *; }
 
+# Application entry points (release minify optional)
+-keep class ru.dedato.mobile.MainApplication { *; }
+-keep class ru.dedato.mobile.MainActivity { *; }
+
 # Add any project specific keep options here:
