@@ -8,16 +8,26 @@
       "distribution": "internal"
     },
     "preview": {
-      "distribution": "internal"
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "API_URL": "https://dedato.ru",
+        "WEB_URL": "https://dedato.ru",
+        "APP_UNIVERSAL_LINK_HOSTS": "dedato.ru,www.dedato.ru"
+      }
     },
     "production": {
       "android": {
-        "buildType": "apk"
+        "buildType": "app-bundle"
       },
       "ios": {
         "simulator": false
       },
       "env": {
+        "API_URL": "https://dedato.ru",
+        "WEB_URL": "https://dedato.ru",
         "APP_UNIVERSAL_LINK_HOSTS": "dedato.ru,www.dedato.ru"
       }
     }
@@ -26,4 +36,3 @@
     "production": {}
   }
 }
-

@@ -73,7 +73,8 @@ API_URL=http://<IP_ТВОЕЙ_МАШИНЫ>:8000
 **Важно:** 
 - Убедись, что backend запущен и доступен по этому IP
 - Убедись, что телефон и компьютер в одной Wi-Fi сети
-- Для production позже замени на публичный домен: `https://api.dedato.com`
+- Для **локальной** разработки: `http://127.0.0.1:8000` или LAN IP; Android-эмулятор — `API_URL_ANDROID=http://10.0.2.2:8000` (см. `.env.example`)
+- Для **EAS preview/production**: `API_URL` задаётся в `eas.json` (`https://dedato.ru`), не из `.env`
 
 ---
 

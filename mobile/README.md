@@ -222,8 +222,21 @@ npm run android
 В проекте настроены три профиля сборки (см. `eas.json`):
 
 - **development** — для разработки с development client
-- **preview** — для внутреннего тестирования
-- **production** — для продакшн-сборок
+- **preview** — внутреннее тестирование; Android **APK**; `API_URL` / `WEB_URL` из `eas.json` env
+- **production** — релиз в сторы; Android **AAB** (App Bundle); те же env для API
+
+### API_URL: local dev vs EAS
+
+| Среда | Источник |
+|-------|----------|
+| Локально (Metro / симулятор) | `mobile/.env` → `@env` (см. `.env.example`) |
+| EAS preview / production | `eas.json` → `env` → `app.config.ts` → `expo.extra` → `src/config/env.ts` |
+
+Для EAS Cloud задано: `API_URL=https://dedato.ru`, `WEB_URL=https://dedato.ru` (файл `.env` в git не попадает).
+
+На Android в **dev** опционально `API_URL_ANDROID` (эмулятор `10.0.2.2`, adb reverse) — только при `__DEV__`.
+
+В **production** пустой / localhost / `127.0.0.1` для `API_URL` запрещены (явная ошибка при старте).
 
 ### Команды сборки
 
@@ -236,10 +249,13 @@ npx eas build --profile development --platform android
 # Development сборка для iOS
 npx eas build --profile development --platform ios
 
-# Production сборка для Android (APK)
+# Preview: internal Android APK
+npx eas build --profile preview --platform android
+
+# Production: Google Play AAB
 npx eas build --profile production --platform android
 
-# Production сборка для iOS
+# Production: iOS (App Store)
 npx eas build --profile production --platform ios
 ```
 
@@ -272,7 +288,7 @@ npx eas submit --platform android
 
 1. ✅ **Идентификаторы** — замени `com.dedato.app` на реальные в `app.config.ts`
 2. ✅ **Иконки** — проверь размеры файлов в `assets/` (все должны быть 1024×1024 или больше)
-3. ✅ **API_URL** — настрой в `.env` для локального тестирования: `http://<IP_МАШИНЫ>:8000`
+3. ✅ **API_URL** — локально в `mobile/.env`; для EAS preview/production — `eas.json` (`https://dedato.ru`)
 
 ### Первая dev-сборка:
 

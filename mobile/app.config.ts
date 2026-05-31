@@ -28,6 +28,17 @@ export default ({ config }: ConfigContext): ExpoConfig => {
   const linkHosts = universalLinkHostsForNativeConfig();
   const associatedDomains = linkHosts.map((h) => `applinks:${h}`);
 
+  const apiUrl = (
+    process.env.API_URL ||
+    process.env.EXPO_PUBLIC_API_URL ||
+    ''
+  ).trim();
+  const webUrl = (
+    process.env.WEB_URL ||
+    process.env.EXPO_PUBLIC_WEB_URL ||
+    ''
+  ).trim();
+
   const httpsIntentData = linkHosts.map((host) => ({
     scheme: 'https' as const,
     host,
@@ -68,7 +79,6 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       versionCode: 1,
       edgeToEdgeEnabled: true,
       predictiveBackGestureEnabled: false,
-      usesCleartextTraffic: true,
       intentFilters: [
         {
           action: 'VIEW',
@@ -87,6 +97,11 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     web: {
       favicon: './assets/favicon.png',
     },
-    plugins: ['expo-router'],
+    plugins: ['expo-router', '@react-native-community/datetimepicker'],
+    extra: {
+      ...config.extra,
+      ...(apiUrl ? { API_URL: apiUrl } : {}),
+      ...(webUrl ? { WEB_URL: webUrl } : {}),
+    },
   };
 };
