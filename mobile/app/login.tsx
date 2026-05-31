@@ -7,6 +7,7 @@ import { logger } from '@src/utils/logger';
 import { normalizeRussianPhoneForApi } from '@src/utils/normalizeRussianPhoneForApi';
 import { getPublicBookingDraft, isDraftValidForPostLoginRedirect } from '@src/stores/publicBookingDraftStore';
 import { ScreenContainer } from '@src/components/ScreenContainer';
+import { PasswordInput } from '@src/components/ui/PasswordInput';
 import { cities, getTimezoneByCity } from '@src/data/cities';
 
 type TabType = 'login' | 'register';
@@ -31,8 +32,6 @@ export default function LoginScreen() {
   const [userRole, setUserRole] = useState<'client' | 'master'>('client');
   const [agree, setAgree] = useState(false);
   const [infoAgree, setInfoAgree] = useState(false);
-  const [showPassword, setShowPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [registerLoading, setRegisterLoading] = useState(false);
   const [registerErrors, setRegisterErrors] = useState<{
     email?: string;
@@ -420,16 +419,14 @@ export default function LoginScreen() {
 
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Пароль</Text>
-              <TextInput
+              <PasswordInput
                 testID="password-input"
                 accessibilityLabel="Пароль"
                 accessibilityHint="Введите пароль"
-                style={[styles.input, loginErrors.password && styles.inputError]}
                 placeholder="Пароль"
                 value={password}
                 onChangeText={handlePasswordChange}
-                secureTextEntry
-                autoCapitalize="none"
+                error={!!loginErrors.password}
                 editable={!loginLoading}
               />
               {loginErrors.password && <Text style={styles.errorText}>{loginErrors.password}</Text>}
@@ -605,69 +602,29 @@ export default function LoginScreen() {
 
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Пароль</Text>
-              <View style={[styles.passwordInputContainer, registerErrors.password && styles.passwordInputContainerError]}>
-                <TextInput
-                  testID="register-password-input"
-                  style={styles.passwordInput}
-                  placeholder="Минимум 6 символов"
-                  value={registerPassword}
-                  onChangeText={handleRegisterPasswordChange}
-                  secureTextEntry={!showPassword}
-                  autoCapitalize="none"
-                  editable={!registerLoading}
-                />
-                <TouchableOpacity
-                  style={styles.eyeIcon}
-                  onPress={() => setShowPassword(!showPassword)}
-                  disabled={registerLoading}
-                >
-                  <View style={styles.eyeIconContainer}>
-                    {showPassword ? (
-                      <View style={styles.eyeIconOpen}>
-                        <View style={styles.eyeIconPupil} />
-                      </View>
-                    ) : (
-                      <View style={styles.eyeIconClosed}>
-                        <View style={styles.eyeIconLine} />
-                      </View>
-                    )}
-                  </View>
-                </TouchableOpacity>
-              </View>
+              <PasswordInput
+                testID="register-password-input"
+                accessibilityLabel="Пароль"
+                placeholder="Минимум 6 символов"
+                value={registerPassword}
+                onChangeText={handleRegisterPasswordChange}
+                error={!!registerErrors.password}
+                editable={!registerLoading}
+              />
               {registerErrors.password && <Text style={styles.errorText}>{registerErrors.password}</Text>}
             </View>
 
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Подтвердите пароль</Text>
-              <View style={[styles.passwordInputContainer, registerErrors.confirmPassword && styles.passwordInputContainerError]}>
-                <TextInput
-                  testID="confirm-password-input"
-                  style={styles.passwordInput}
-                  placeholder="Повторите пароль"
-                  value={confirmPassword}
-                  onChangeText={handleConfirmPasswordChange}
-                  secureTextEntry={!showConfirmPassword}
-                  autoCapitalize="none"
-                  editable={!registerLoading}
-                />
-                <TouchableOpacity
-                  style={styles.eyeIcon}
-                  onPress={() => setShowConfirmPassword(!showConfirmPassword)}
-                  disabled={registerLoading}
-                >
-                  <View style={styles.eyeIconContainer}>
-                    {showConfirmPassword ? (
-                      <View style={styles.eyeIconOpen}>
-                        <View style={styles.eyeIconPupil} />
-                      </View>
-                    ) : (
-                      <View style={styles.eyeIconClosed}>
-                        <View style={styles.eyeIconLine} />
-                      </View>
-                    )}
-                  </View>
-                </TouchableOpacity>
-              </View>
+              <PasswordInput
+                testID="confirm-password-input"
+                accessibilityLabel="Подтверждение пароля"
+                placeholder="Повторите пароль"
+                value={confirmPassword}
+                onChangeText={handleConfirmPasswordChange}
+                error={!!registerErrors.confirmPassword}
+                editable={!registerLoading}
+              />
               {registerErrors.confirmPassword && <Text style={styles.errorText}>{registerErrors.confirmPassword}</Text>}
             </View>
 
@@ -847,64 +804,8 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     padding: 12,
     fontSize: 16,
+    color: '#2D2D2D',
     backgroundColor: '#fff',
-  },
-  passwordInputContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
-    backgroundColor: '#fff',
-  },
-  passwordInputContainerError: {
-    borderColor: '#f00',
-  },
-  passwordInput: {
-    flex: 1,
-    padding: 12,
-    paddingRight: 4,
-    fontSize: 16,
-  },
-  eyeIcon: {
-    padding: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  eyeIconContainer: {
-    width: 24,
-    height: 24,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  eyeIconOpen: {
-    width: 20,
-    height: 12,
-    borderWidth: 2,
-    borderColor: '#666',
-    borderRadius: 10,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  eyeIconPupil: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: '#666',
-  },
-  eyeIconClosed: {
-    width: 20,
-    height: 2,
-    borderTopWidth: 2,
-    borderTopColor: '#666',
-    borderRadius: 1,
-    position: 'relative',
-  },
-  eyeIconLine: {
-    width: 20,
-    height: 2,
-    backgroundColor: '#666',
-    borderRadius: 1,
   },
   inputError: {
     borderColor: '#f00',

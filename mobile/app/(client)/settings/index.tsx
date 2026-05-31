@@ -14,6 +14,7 @@ import { SecondaryButton } from '@src/components/SecondaryButton';
 import { env } from '@src/config/env';
 import { updateClientProfile, changePassword, deleteAccount } from '@src/services/api/profile';
 import { getContactPreferences, updateContactPreference } from '@src/services/contactPreferences';
+import { PasswordInput } from '@src/components/ui/PasswordInput';
 
 export default function SettingsScreen() {
   const pathname = usePathname();
@@ -31,15 +32,11 @@ export default function SettingsScreen() {
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
-  const [showNewPassword, setShowNewPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [changingPassword, setChangingPassword] = useState(false);
   
   // Состояния для удаления аккаунта
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deletePassword, setDeletePassword] = useState('');
-  const [showDeletePassword, setShowDeletePassword] = useState(false);
   const [deletingAccount, setDeletingAccount] = useState(false);
   const [showNotificationsModal, setShowNotificationsModal] = useState(false);
   const [notificationPrefs, setNotificationPrefs] = useState({
@@ -325,19 +322,6 @@ export default function SettingsScreen() {
     setNotificationPrefs(next);
   };
 
-  // Иконки для показа/скрытия пароля
-  const EyeIcon = ({ onPress, visible }: { onPress: () => void; visible: boolean }) => (
-    <TouchableOpacity onPress={onPress} style={styles.eyeIcon}>
-      <View style={styles.eyeIconInner}>
-        {visible ? (
-          <View style={styles.eyeOpen} />
-        ) : (
-          <View style={styles.eyeClosed} />
-        )}
-      </View>
-    </TouchableOpacity>
-  );
-
   return (
     <ScreenContainer scrollable>
       {/* Блок профиля */}
@@ -502,59 +486,38 @@ export default function SettingsScreen() {
             <ScrollView style={styles.modalScrollView}>
               <View style={styles.inputGroup}>
                 <Text style={styles.inputLabel}>Текущий пароль</Text>
-                <View style={styles.passwordInputContainer}>
-                  <TextInput
-                    style={styles.passwordInput}
-                    value={currentPassword}
-                    onChangeText={setCurrentPassword}
-                    placeholder="Введите текущий пароль"
-                    secureTextEntry={!showCurrentPassword}
-                    autoCapitalize="none"
-                    editable={!changingPassword}
-                  />
-                  <EyeIcon
-                    onPress={() => setShowCurrentPassword(!showCurrentPassword)}
-                    visible={showCurrentPassword}
-                  />
-                </View>
+                <PasswordInput
+                  value={currentPassword}
+                  onChangeText={setCurrentPassword}
+                  placeholder="Введите текущий пароль"
+                  accessibilityLabel="Текущий пароль"
+                  editable={!changingPassword}
+                  containerStyle={styles.passwordField}
+                />
               </View>
               
               <View style={styles.inputGroup}>
                 <Text style={styles.inputLabel}>Новый пароль</Text>
-                <View style={styles.passwordInputContainer}>
-                  <TextInput
-                    style={styles.passwordInput}
-                    value={newPassword}
-                    onChangeText={setNewPassword}
-                    placeholder="Минимум 6 символов"
-                    secureTextEntry={!showNewPassword}
-                    autoCapitalize="none"
-                    editable={!changingPassword}
-                  />
-                  <EyeIcon
-                    onPress={() => setShowNewPassword(!showNewPassword)}
-                    visible={showNewPassword}
-                  />
-                </View>
+                <PasswordInput
+                  value={newPassword}
+                  onChangeText={setNewPassword}
+                  placeholder="Минимум 6 символов"
+                  accessibilityLabel="Новый пароль"
+                  editable={!changingPassword}
+                  containerStyle={styles.passwordField}
+                />
               </View>
               
               <View style={styles.inputGroup}>
                 <Text style={styles.inputLabel}>Подтвердите новый пароль</Text>
-                <View style={styles.passwordInputContainer}>
-                  <TextInput
-                    style={styles.passwordInput}
-                    value={confirmPassword}
-                    onChangeText={setConfirmPassword}
-                    placeholder="Повторите новый пароль"
-                    secureTextEntry={!showConfirmPassword}
-                    autoCapitalize="none"
-                    editable={!changingPassword}
-                  />
-                  <EyeIcon
-                    onPress={() => setShowConfirmPassword(!showConfirmPassword)}
-                    visible={showConfirmPassword}
-                  />
-                </View>
+                <PasswordInput
+                  value={confirmPassword}
+                  onChangeText={setConfirmPassword}
+                  placeholder="Повторите новый пароль"
+                  accessibilityLabel="Подтверждение нового пароля"
+                  editable={!changingPassword}
+                  containerStyle={styles.passwordField}
+                />
               </View>
             </ScrollView>
 
@@ -593,21 +556,14 @@ export default function SettingsScreen() {
             
             <View style={styles.inputGroup}>
               <Text style={styles.inputLabel}>Введите пароль для подтверждения</Text>
-              <View style={styles.passwordInputContainer}>
-                <TextInput
-                  style={styles.passwordInput}
-                  value={deletePassword}
-                  onChangeText={setDeletePassword}
-                  placeholder="Введите пароль"
-                  secureTextEntry={!showDeletePassword}
-                  autoCapitalize="none"
-                  editable={!deletingAccount}
-                />
-                <EyeIcon
-                  onPress={() => setShowDeletePassword(!showDeletePassword)}
-                  visible={showDeletePassword}
-                />
-              </View>
+              <PasswordInput
+                value={deletePassword}
+                onChangeText={setDeletePassword}
+                placeholder="Введите пароль"
+                accessibilityLabel="Пароль для удаления аккаунта"
+                editable={!deletingAccount}
+                containerStyle={styles.passwordField}
+              />
             </View>
 
             <View style={styles.modalButtons}>
@@ -843,41 +799,8 @@ const styles = StyleSheet.create({
     padding: 12,
     fontSize: 14,
   },
-  passwordInputContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: 1,
+  passwordField: {
     borderColor: '#e0e0e0',
-    borderRadius: 8,
-    paddingRight: 12,
-  },
-  passwordInput: {
-    flex: 1,
-    padding: 12,
-    fontSize: 14,
-  },
-  eyeIcon: {
-    padding: 8,
-  },
-  eyeIconInner: {
-    width: 20,
-    height: 20,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  eyeOpen: {
-    width: 20,
-    height: 12,
-    borderWidth: 2,
-    borderColor: '#666',
-    borderRadius: 10,
-    borderTopWidth: 0,
-  },
-  eyeClosed: {
-    width: 20,
-    height: 2,
-    backgroundColor: '#666',
-    borderRadius: 1,
   },
   modalButtons: {
     flexDirection: 'row',
