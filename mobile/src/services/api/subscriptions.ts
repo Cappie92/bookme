@@ -94,6 +94,8 @@ export interface SubscriptionCalculationResponse {
   breakdown_text?: string | null;
   is_downgrade?: boolean | null;
   forced_upgrade_type?: string | null;
+  available_balance?: number | null;
+  can_pay_from_balance?: boolean | null;
 }
 
 function isNoSubscription404Payload(data: unknown): boolean {
@@ -154,6 +156,23 @@ export async function applyUpgradeFree(calculation_id: number): Promise<{ succes
   const response = await apiClient.post<{ success: boolean; subscription_id?: number; already_applied?: boolean }>(
     '/api/subscriptions/apply-upgrade-free',
     { calculation_id }
+  );
+  return response.data;
+}
+
+export async function applyUpgradeBalance(
+  calculation_id: number,
+  enable_auto_renewal?: boolean
+): Promise<{
+  success: boolean;
+  subscription_id?: number;
+  already_applied?: boolean;
+  balance_after?: number;
+  paid_from_balance?: number;
+}> {
+  const response = await apiClient.post(
+    '/api/subscriptions/apply-upgrade-balance',
+    { calculation_id, enable_auto_renewal: !!enable_auto_renewal }
   );
   return response.data;
 }

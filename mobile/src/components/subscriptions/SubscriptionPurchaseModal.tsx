@@ -9,6 +9,7 @@ import {
   Pressable,
   Switch,
   Alert,
+  Dimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -23,9 +24,15 @@ import {
   deleteSubscriptionCalculationSnapshot,
   SubscriptionCalculationResponse,
   applyUpgradeFree,
+  applyUpgradeBalance,
 } from '@src/services/api/subscriptions';
 import { initSubscriptionPayment } from '@src/services/api/payments';
 import { getPlanTitle } from '@src/utils/planTitle';
+import { env } from '@src/config/env';
+import {
+  sanitizePaymentRedirectUrl,
+  shouldPaySubscriptionFromBalance,
+} from '@src/utils/subscriptionPayment';
 
 type UpgradeType = 'immediate' | 'after_expiry';
 
@@ -228,6 +235,7 @@ function StepCheckout({
   onToggleAutoRenewal,
   showPaidButton,
   onPaid,
+  payFromBalance,
 }: {
   loadingCalculation: boolean;
   calculation: SubscriptionCalculationResponse | null;
@@ -235,6 +243,7 @@ function StepCheckout({
   onToggleAutoRenewal: (next: boolean) => void;
   showPaidButton: boolean;
   onPaid: () => void;
+  payFromBalance: boolean;
 }) {
   return (
     <View>
@@ -245,12 +254,23 @@ function StepCheckout({
       ) : calculation ? (
         <View>
           <View style={styles.table}>
+            {typeof calculation.available_balance === 'number' ? (
+              <View style={styles.tableRow}>
+                <Text style={styles.tableKey}>Баланс</Text>
+                <Text style={styles.tableVal} numberOfLines={1}>
+                  {formatMoney(calculation.available_balance)}
+                </Text>
+              </View>
+            ) : null}
             <View style={styles.tableRow}>
               <Text style={[styles.tableKey, styles.tableKeyStrong]}>К оплате</Text>
               <Text style={[styles.tableVal, styles.tableValStrong]} numberOfLines={1}>
                 {formatMoney(calculation.final_price)}
               </Text>
             </View>
+            {payFromBalance ? (
+              <Text style={styles.balanceHintOk}>Оплата с баланса, без перехода на карту</Text>
+            ) : null}
             <View style={styles.tableRow}>
               <Text style={styles.tableKey}>Стоимость</Text>
               <Text style={styles.tableVal} numberOfLines={1}>
@@ -458,8 +478,60 @@ export function SubscriptionPurchaseModal({
     }
   };
 
+  const payFromBalance = React.useMemo(() => {
+    if (!calculation) return false;
+    return shouldPaySubscriptionFromBalance({
+      finalPrice: calculation.final_price,
+      availableBalance: calculation.available_balance,
+      canPayFromBalance: calculation.can_pay_from_balance,
+      upgradeType: calculation.upgrade_type || upgradeType,
+    });
+  }, [calculation, upgradeType]);
+
   const handlePayment = async () => {
     if (!selectedPlan || !selectedDuration || !calculation) return;
+
+    if (Number(calculation.final_price) <= 0) {
+      try {
+        setLoadingPayment(true);
+        await applyUpgradeFree(calculation.calculation_id);
+        await onRefreshAfterPayment?.();
+        await handleClose();
+        Alert.alert('Готово', 'Тариф применён');
+      } catch (e: any) {
+        Alert.alert('Ошибка', e?.response?.data?.detail || 'Не удалось применить тариф');
+      } finally {
+        setLoadingPayment(false);
+      }
+      return;
+    }
+
+    if (payFromBalance) {
+      try {
+        setLoadingPayment(true);
+        const result = await applyUpgradeBalance(
+          calculation.calculation_id,
+          enableAutoRenewal
+        );
+        await onRefreshAfterPayment?.();
+        await handleClose();
+        const msg = result.already_applied
+          ? 'Тариф уже был применён ранее'
+          : `Тариф активирован. Списано ${formatMoney(result.paid_from_balance ?? calculation.final_price)} с баланса.`;
+        Alert.alert('Готово', msg);
+      } catch (e: any) {
+        const detail = e?.response?.data?.detail;
+        const text =
+          typeof detail === 'object' && detail?.message
+            ? `${detail.message} (нужно ${formatMoney(detail.required)}, на балансе ${formatMoney(detail.available)})`
+            : detail || 'Не удалось оплатить с баланса';
+        Alert.alert('Ошибка', String(text));
+      } finally {
+        setLoadingPayment(false);
+      }
+      return;
+    }
+
     try {
       setLoadingPayment(true);
       const payment = await initSubscriptionPayment({
@@ -501,11 +573,13 @@ export function SubscriptionPurchaseModal({
         setPaymentOpened(false);
         return;
       }
-      if (!payment?.payment_url) {
+      const rawUrl = payment?.payment_url;
+      if (!rawUrl) {
         Alert.alert('Ошибка', 'Не удалось получить ссылку на оплату');
         return;
       }
-      const canOpen = await Linking.canOpenURL(payment.payment_url);
+      const paymentUrl = sanitizePaymentRedirectUrl(rawUrl, env.WEB_URL, __DEV__);
+      const canOpen = await Linking.canOpenURL(paymentUrl);
       if (!canOpen) {
         Alert.alert('Ошибка', 'Не удалось открыть страницу оплаты');
         return;
@@ -519,7 +593,7 @@ export function SubscriptionPurchaseModal({
           console.log('🧾 [PAYMENT] Opening payment_url (parse failed)', payment.payment_url?.slice(0, 80));
         }
       }
-      await Linking.openURL(payment.payment_url);
+      await Linking.openURL(paymentUrl);
       setPaymentOpened(true);
     } catch (e: any) {
       Alert.alert('Ошибка', e?.response?.data?.detail || 'Не удалось инициализировать платеж');
@@ -538,9 +612,18 @@ export function SubscriptionPurchaseModal({
     !!selectedPlan &&
     !!selectedDuration &&
     !!calculation &&
-    (typeof calculation.final_price !== 'number' || calculation.final_price > 0) &&
     !loadingCalculation &&
     !loadingPayment;
+
+  const paymentCtaLabel = React.useMemo(() => {
+    if (loadingPayment) return 'Подождите…';
+    if (!calculation) return 'Перейти к оплате';
+    if (calculation.final_price <= 0) return 'Применить тариф';
+    if (payFromBalance) return 'Оплатить с баланса';
+    return 'Перейти к оплате';
+  }, [loadingPayment, calculation, payFromBalance]);
+
+  const sheetMaxHeight = Math.round(Dimensions.get('window').height * 0.88);
 
   const goNext = () => {
     if (step === 1 && canGoNextFromStep1) setStep(2);
@@ -588,6 +671,7 @@ export function SubscriptionPurchaseModal({
         enableAutoRenewal={enableAutoRenewal}
         onToggleAutoRenewal={setEnableAutoRenewal}
         showPaidButton={paymentOpened}
+        payFromBalance={payFromBalance}
         onPaid={async () => {
           try {
             await onRefreshAfterPayment?.();
@@ -611,7 +695,7 @@ export function SubscriptionPurchaseModal({
       <View style={styles.overlay}>
         <Pressable style={styles.backdrop} onPress={handleClose} />
 
-        <View style={styles.sheet}>
+        <View style={[styles.sheet, { maxHeight: sheetMaxHeight }]}>
           <View style={styles.header}>
             <Text style={styles.title}>Управление тарифом</Text>
             <Pressable onPress={handleClose} style={styles.closeButton} hitSlop={8}>
@@ -621,15 +705,19 @@ export function SubscriptionPurchaseModal({
 
           <StepIndicator step={step} total={totalSteps} />
 
-          <ScrollView
-            style={styles.scroll}
-            contentContainerStyle={styles.content}
-            showsVerticalScrollIndicator={false}
-            keyboardShouldPersistTaps="handled"
-            keyboardDismissMode="on-drag"
-          >
-            {stepContent()}
-          </ScrollView>
+          <View style={styles.scrollHost}>
+            <ScrollView
+              style={styles.scroll}
+              contentContainerStyle={styles.content}
+              showsVerticalScrollIndicator
+              keyboardShouldPersistTaps="handled"
+              keyboardDismissMode="on-drag"
+              nestedScrollEnabled
+              bounces
+            >
+              {stepContent()}
+            </ScrollView>
+          </View>
 
           {/* Sticky footer */}
           <View style={[styles.footer, { paddingBottom: 12 + Math.max(insets.bottom, 0) }]}>
@@ -663,9 +751,7 @@ export function SubscriptionPurchaseModal({
                     pressed && styles.pressed,
                   ]}
                 >
-                  <Text style={styles.footerPrimaryText}>
-                    {loadingPayment ? 'Переход…' : 'Перейти к оплате'}
-                  </Text>
+                  <Text style={styles.footerPrimaryText}>{paymentCtaLabel}</Text>
                 </Pressable>
               )}
             </View>
@@ -689,8 +775,13 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderTopLeftRadius: 18,
     borderTopRightRadius: 18,
-    maxHeight: '88%',
     overflow: 'hidden',
+    flexDirection: 'column',
+  },
+  scrollHost: {
+    flexShrink: 1,
+    minHeight: 0,
+    flexGrow: 1,
   },
   header: {
     paddingHorizontal: 14,
@@ -739,12 +830,19 @@ const styles = StyleSheet.create({
     borderRadius: 999,
   },
   scroll: {
-    flexGrow: 1,
+    flex: 1,
   },
   content: {
     paddingHorizontal: 14,
     paddingTop: 12,
-    paddingBottom: 12,
+    paddingBottom: 24,
+    flexGrow: 1,
+  },
+  balanceHintOk: {
+    marginTop: 6,
+    fontSize: 12,
+    color: '#2E7D32',
+    fontWeight: '700',
   },
   sectionLabel: {
     fontSize: 13,

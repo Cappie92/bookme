@@ -1277,6 +1277,8 @@ class SubscriptionCalculationResponse(BaseModel):
     # --- Правила применения (для UI/валидаций) ---
     is_downgrade: Optional[bool] = None
     forced_upgrade_type: Optional[str] = None
+    available_balance: Optional[float] = None
+    can_pay_from_balance: Optional[bool] = None
 
 
 class SubscriptionUpgradeRequest(BaseModel):

@@ -295,7 +295,9 @@ async def robokassa_stub_complete(
             },
             timeout=30,
         )
-    success_url = config.get("success_url") or "http://localhost:5173/payment/success"
+    from utils.robokassa import resolve_robokassa_redirect_urls
+
+    success_url, _ = resolve_robokassa_redirect_urls()
     return RedirectResponse(url=f"{success_url}?payment_id={payment.id}", status_code=302)
 
 

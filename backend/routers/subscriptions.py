@@ -18,6 +18,8 @@ from models import (
     SubscriptionPriceSnapshot,
     DailySubscriptionCharge,
     DailyChargeStatus,
+    UserBalance,
+    TransactionType,
 )
 from schemas import (
     SubscriptionCreate, 
@@ -38,7 +40,9 @@ from utils.balance_utils import (
     calculate_upgrade_cost,
     get_or_create_user_balance,
     withdraw_balance,
-    reserve_full_subscription_price
+    reserve_full_subscription_price,
+    get_user_available_balance,
+    add_balance_transaction_no_commit,
 )
 
 router = APIRouter(
@@ -1013,7 +1017,7 @@ async def calculate_subscription_cost(
         effective_upgrade_type = "after_expiry"
         forced_upgrade_type = "after_expiry"
 
-    # MVP: кредит из резерва отключён. Остаток = UserBalance.balance, резерв не используется.
+    # MVP: кредит из резерва отключён. Оплата с баланса — отдельный endpoint apply-upgrade-balance.
     credit_amount = 0.0
     final_price = max(0.0, float(total_price))
     requires_immediate_payment = final_price > 0
@@ -1021,7 +1025,26 @@ async def calculate_subscription_cost(
     current_plan_credit = 0.0
     credit_source = "none"
     current_plan_accrued = None
-    breakdown_text = "Отложенное применение: кредит не применяется" if effective_upgrade_type == "after_expiry" else "Кредит не применяется (MVP: депозит = баланс)"
+
+    available_balance = float(get_user_available_balance(db, current_user.id, do_commit=False))
+    can_pay_from_balance = (
+        effective_upgrade_type == "immediate"
+        and final_price > 0
+        and available_balance + 0.001 >= final_price
+    )
+    if effective_upgrade_type == "after_expiry":
+        breakdown_text = "Тариф применится после окончания текущей подписки. Оплата — картой или с баланса при достаточном остатке."
+    elif can_pay_from_balance:
+        breakdown_text = (
+            f"На балансе достаточно средств ({math.ceil(available_balance)} ₽) — можно оплатить без карты."
+        )
+    elif final_price > 0:
+        breakdown_text = (
+            f"К оплате {math.ceil(final_price)} ₽. На балансе {math.ceil(available_balance)} ₽"
+            + (" — недостаточно, нужна оплата картой." if available_balance < final_price else ".")
+        )
+    else:
+        breakdown_text = "Доплата не требуется — можно применить тариф без оплаты."
     
     # Рассчитываем даты начала и окончания (30/90/180/360 дней)
     start_date = None
@@ -1117,6 +1140,8 @@ async def calculate_subscription_cost(
         breakdown_text=breakdown_text,
         is_downgrade=is_downgrade,
         forced_upgrade_type=forced_upgrade_type,
+        available_balance=available_balance,
+        can_pay_from_balance=can_pay_from_balance,
     )
 
 
@@ -1266,13 +1291,170 @@ async def apply_upgrade_free(
         # get_db() не делает commit автоматически — фиксируем изменения здесь.
         db.commit()
         return result
-
     except HTTPException:
         db.rollback()
         raise
     except Exception:
         db.rollback()
         raise
+
+
+@router.post("/apply-upgrade-balance")
+async def apply_upgrade_balance(
+    payload: dict,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Оплатить immediate upgrade с баланса (final_price > 0, достаточно available_balance).
+    Без Robokassa. Логика применения подписки совпадает с robokassa result phase 2.
+    """
+    calculation_id = payload.get("calculation_id")
+    if not calculation_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="calculation_id is required")
+
+    enable_auto_renewal = bool(payload.get("enable_auto_renewal", False))
+    now = datetime.utcnow()
+
+    if current_user.role.value in ["salon"]:
+        subscription_type = SubscriptionType.SALON
+    elif current_user.role.value in ["master", "indie"]:
+        subscription_type = SubscriptionType.MASTER
+    else:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Неверная роль для подписки")
+
+    try:
+        with db.begin_nested():
+            snapshot = (
+                db.query(SubscriptionPriceSnapshot)
+                .filter(
+                    SubscriptionPriceSnapshot.id == int(calculation_id),
+                    SubscriptionPriceSnapshot.user_id == current_user.id,
+                )
+                .with_for_update()
+                .first()
+            )
+            if not snapshot:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Snapshot не найден")
+            if snapshot.expires_at and snapshot.expires_at <= now:
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Snapshot истек — пересчитайте стоимость")
+
+            final_price = float(getattr(snapshot, "final_price", 0.0) or 0.0)
+            if final_price <= 0.0:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Для нулевой суммы используйте /api/subscriptions/apply-upgrade-free",
+                )
+            if (snapshot.upgrade_type or "") != "immediate":
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Оплата с баланса доступна только для немедленного применения тарифа",
+                )
+            if bool(getattr(snapshot, "is_downgrade", False)) or (
+                getattr(snapshot, "forced_upgrade_type", None) == "after_expiry"
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Downgrade нельзя применить немедленно",
+                )
+
+            if getattr(snapshot, "applied_subscription_id", None):
+                ub = get_or_create_user_balance(db, current_user.id, do_commit=False)
+                return {
+                    "success": True,
+                    "already_applied": True,
+                    "subscription_id": snapshot.applied_subscription_id,
+                    "balance_after": float(ub.balance),
+                }
+
+            available = float(get_user_available_balance(db, current_user.id, do_commit=False))
+            if available + 0.001 < final_price:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={
+                        "message": "Недостаточно средств на балансе",
+                        "required": final_price,
+                        "available": available,
+                    },
+                )
+
+            user_balance = (
+                db.query(UserBalance).filter(UserBalance.user_id == current_user.id).with_for_update().first()
+            )
+            if not user_balance:
+                user_balance = UserBalance(user_id=current_user.id, balance=0, currency="RUB")
+                db.add(user_balance)
+                db.flush()
+
+            add_balance_transaction_no_commit(
+                db=db,
+                user_id=current_user.id,
+                amount=-final_price,
+                transaction_type=TransactionType.WITHDRAWAL,
+                description=f"Оплата подписки с баланса (snapshot {snapshot.id})",
+            )
+
+            current_subscription = get_effective_subscription(
+                db, current_user.id, subscription_type, now_utc=now
+            )
+            try:
+                if (db.info.get("effective_subscription") or {}).get("fixes"):
+                    db.flush()
+            except Exception:
+                pass
+
+            total_price_full = float(snapshot.total_price)
+            total_days = max(1, duration_months_to_days(int(snapshot.duration_months)))
+            daily_rate = int(math.ceil(total_price_full / total_days)) if total_days else 0
+
+            new_subscription = Subscription(
+                user_id=current_user.id,
+                subscription_type=subscription_type,
+                status=SubscriptionStatus.ACTIVE,
+                start_date=now,
+                end_date=now + timedelta(days=total_days),
+                price=total_price_full,
+                daily_rate=daily_rate,
+                payment_period=payload.get("payment_period") or "month",
+                is_active=True,
+                auto_renewal=enable_auto_renewal,
+                plan_id=snapshot.plan_id,
+            )
+            db.add(new_subscription)
+            db.flush()
+
+            new_res = SubscriptionReservation(
+                user_id=current_user.id,
+                subscription_id=new_subscription.id,
+                reserved_amount=0.0,
+            )
+            db.add(new_res)
+            db.flush()
+
+            if current_subscription:
+                current_subscription.status = SubscriptionStatus.EXPIRED
+                current_subscription.is_active = False
+
+            snapshot.applied_subscription_id = new_subscription.id
+            snapshot.applied_at = now
+
+            result = {
+                "success": True,
+                "already_applied": False,
+                "subscription_id": new_subscription.id,
+                "balance_after": float(user_balance.balance),
+                "paid_from_balance": final_price,
+            }
+
+        db.commit()
+        return result
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.exception("apply_upgrade_balance failed user_id=%s calculation_id=%s", current_user.id, calculation_id)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
 def cleanup_expired_snapshots(db: Session):

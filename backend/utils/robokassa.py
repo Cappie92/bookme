@@ -4,8 +4,8 @@
 import hashlib
 import logging
 import time
-from typing import Any, Dict, Optional
-from urllib.parse import urlencode
+from typing import Any, Dict, Optional, Tuple
+from urllib.parse import urlencode, urlparse
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +67,62 @@ def verify_signature(amount: float, invoice_id: str, signature: str, password: s
     return signature.lower() == expected_signature.lower()
 
 
+def _is_localhost_host(url: str) -> bool:
+    if not url:
+        return False
+    try:
+        host = (urlparse(url).hostname or "").lower()
+        return host in ("localhost", "127.0.0.1")
+    except Exception:
+        low = url.lower()
+        return "localhost" in low or "127.0.0.1" in low
+
+
+def resolve_robokassa_redirect_urls() -> Tuple[str, str]:
+    """
+    Success/Fail URL для Robokassa и stub-редиректа.
+
+    Приоритет: ROBOKASSA_SUCCESS_URL / FAIL_URL, если не localhost.
+    Иначе FRONTEND_URL + /payment/success|fail.
+    В development без настроек — localhost:5173 (совместимость с Vite).
+    """
+    from settings import get_settings
+
+    s = get_settings()
+    frontend = (s.FRONTEND_URL or "").strip().rstrip("/")
+    explicit_success = (s.ROBOKASSA_SUCCESS_URL or "").strip()
+    explicit_fail = (s.ROBOKASSA_FAIL_URL or "").strip()
+
+    def pick(explicit: str, path: str) -> str:
+        if explicit and not _is_localhost_host(explicit):
+            return explicit
+        if frontend and not _is_localhost_host(frontend):
+            return f"{frontend}{path}"
+        if explicit:
+            return explicit
+        return ""
+
+    success = pick(explicit_success, "/payment/success")
+    fail = pick(explicit_fail, "/payment/fail")
+
+    env = (s.ENVIRONMENT or "").strip().lower()
+    if env in ("production", "staging") and (not success or _is_localhost_host(success)):
+        if frontend and not _is_localhost_host(frontend):
+            success = f"{frontend}/payment/success"
+            fail = fail or f"{frontend}/payment/fail"
+        elif not success:
+            raise ValueError(
+                "ROBOKASSA_SUCCESS_URL or FRONTEND_URL must point to a public host in production/staging "
+                "(not localhost). Example: ROBOKASSA_SUCCESS_URL=https://dedato.ru/payment/success"
+            )
+
+    if not success:
+        success = "http://localhost:5173/payment/success"
+    if not fail:
+        fail = "http://localhost:5173/payment/fail"
+    return success, fail
+
+
 def get_robokassa_config() -> Dict[str, Any]:
     """
     Конфигурация Robokassa из env.
@@ -121,6 +177,7 @@ def get_robokassa_config() -> Dict[str, Any]:
         p2 = (s.ROBOKASSA_PASSWORD_2 or "").strip()
         credential_branch = "production_passwords"
 
+    success_url, fail_url = resolve_robokassa_redirect_urls()
     return {
         "merchant_login": (s.ROBOKASSA_MERCHANT_LOGIN or "").strip(),
         "password_1": p1,
@@ -128,8 +185,8 @@ def get_robokassa_config() -> Dict[str, Any]:
         "is_test": use_test,
         "credential_branch": credential_branch,
         "result_url": (s.ROBOKASSA_RESULT_URL or "").strip(),
-        "success_url": (s.ROBOKASSA_SUCCESS_URL or "").strip(),
-        "fail_url": (s.ROBOKASSA_FAIL_URL or "").strip(),
+        "success_url": success_url,
+        "fail_url": fail_url,
     }
 
 
