@@ -57,30 +57,32 @@ export function CategoryAccordion({
     <View style={styles.container}>
       <View style={styles.header}>
         <TouchableOpacity
-          style={styles.headerLeft}
+          style={styles.headerToggle}
           onPress={onToggle}
           activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityState={{ expanded: isExpanded }}
         >
-          <Text style={styles.categoryName}>{category.name}</Text>
+          <Text style={styles.categoryName} numberOfLines={1}>
+            {category.name}
+          </Text>
           <Text style={styles.categoryCount}> · {services.length}</Text>
-        </TouchableOpacity>
-        <View style={styles.headerRight}>
-          {!isUncategorized && (
-            <TouchableOpacity
-              style={styles.overflowButton}
-              onPress={handleOverflowPress}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            >
-              <Ionicons name="ellipsis-horizontal" size={20} color="#666" />
-            </TouchableOpacity>
-          )}
+          <View style={styles.headerToggleSpacer} />
           <Ionicons
             name={isExpanded ? 'chevron-down' : 'chevron-forward'}
             size={18}
             color="#666"
-            style={styles.chevron}
           />
-        </View>
+        </TouchableOpacity>
+        {!isUncategorized ? (
+          <TouchableOpacity
+            style={styles.overflowButton}
+            onPress={handleOverflowPress}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Ionicons name="ellipsis-horizontal" size={20} color="#666" />
+          </TouchableOpacity>
+        ) : null}
       </View>
       
       {isExpanded && (
@@ -126,31 +128,31 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#e0e0e0',
   },
-  headerLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  headerToggle: {
     flex: 1,
-  },
-  headerRight: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    minHeight: 28,
+    paddingRight: 4,
+  },
+  headerToggleSpacer: {
+    flex: 1,
+    minWidth: 8,
   },
   overflowButton: {
     padding: 4,
+    marginLeft: 4,
   },
   categoryName: {
     fontSize: 16,
     fontWeight: '600',
     color: '#333',
-    marginRight: 8,
+    flexShrink: 1,
   },
   categoryCount: {
     fontSize: 14,
     color: '#666',
-  },
-  chevron: {
-    marginLeft: 2,
+    flexShrink: 0,
   },
   content: {
     paddingVertical: 4,

@@ -1,10 +1,11 @@
-import React, { useState, useMemo, useRef, useEffect, type ReactElement } from 'react';
+import React, { useState, useMemo, useRef, useEffect, useCallback, memo, type ReactElement } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
+  Pressable,
   Dimensions,
   Alert,
   Platform,
@@ -13,7 +14,6 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { BOTTOM_NAV_CONTENT_FALLBACK_HEIGHT } from '@src/constants/bottomNavLayout';
 import { ScheduleWeek, Booking, ScheduleSlot, MasterSettings } from '@src/services/api/master';
 import { DayDrawer } from './DayDrawer';
 import { apiClient } from '@src/services/api/client';
@@ -35,6 +35,60 @@ const TIME_SLOT_HEIGHT = 40; // Высота слота 30 минут
 const START_HOUR = 0; // Начинаем с 0:00 (все 24 часа доступны)
 const END_HOUR = 23; // Заканчиваем в 23:00
 const INITIAL_SCROLL_HOUR = 7; // Начальная позиция скролла - 7:00
+
+type WeekSlotCellProps = {
+  isAvailable: boolean;
+  hasBooking: boolean;
+  bookingTimeLabel: string;
+  bookingServiceName: string;
+  isSelected: boolean;
+  onPress: () => void;
+  onLongPress: () => void;
+  onPressIn?: () => void;
+  onPressOut?: () => void;
+};
+
+const WeekSlotCell = memo(function WeekSlotCell({
+  isAvailable,
+  hasBooking,
+  bookingTimeLabel,
+  bookingServiceName,
+  isSelected,
+  onPress,
+  onLongPress,
+  onPressIn,
+  onPressOut,
+}: WeekSlotCellProps) {
+  return (
+    <Pressable
+      style={[
+        styles.slot,
+        isAvailable && styles.slotAvailable,
+        hasBooking && styles.slotBooked,
+        isSelected && styles.slotSelected,
+      ]}
+      onPress={onPress}
+      onLongPress={onLongPress}
+      onPressIn={onPressIn}
+      onPressOut={onPressOut}
+    >
+      {hasBooking ? (
+        <View style={styles.bookingBlock}>
+          <Text style={styles.bookingTime} numberOfLines={1}>
+            {bookingTimeLabel}
+          </Text>
+          <Text style={styles.bookingService} numberOfLines={1}>
+            {bookingServiceName}
+          </Text>
+        </View>
+      ) : null}
+    </Pressable>
+  );
+});
+
+function slotKeyFromParts(dateStr: string, hour: number, minute: number): string {
+  return `${dateStr}_${hour}_${minute}`;
+}
 
 export function WeekView({
   schedule,
@@ -58,8 +112,7 @@ export function WeekView({
   const daysScrollRef = useRef<ScrollView>(null);
   /** Блокирует ping-pong: scrollTo на втором ScrollView вызывает onScroll → снова scrollTo на первом → дёрганье. */
   const verticalScrollSyncLockRef = useRef(false);
-  
-  const bottomNavHeight = BOTTOM_NAV_CONTENT_FALLBACK_HEIGHT;
+  const footerPaddingBottom = Math.max(insets.bottom, 12) + 16;
 
   // Вычисляем даты недели
   const weekDates = useMemo(() => {
@@ -102,6 +155,11 @@ export function WeekView({
     return grouped;
   }, [bookings, weekDates]);
 
+  const weekDateStrings = useMemo(
+    () => weekDates.map((d) => d.toISOString().split('T')[0]),
+    [weekDates]
+  );
+
   // Генерируем временные слоты для всех 24 часов
   const timeSlots = useMemo(() => {
     const slots: Array<{ hour: number; minute: number; label: string }> = [];
@@ -120,6 +178,53 @@ export function WeekView({
     return slots;
   }, []);
 
+  /** Предрасчёт доступности и записей по ячейкам — без O(bookings) на каждый render. */
+  const slotGridMeta = useMemo(() => {
+    const availability = new Map<string, boolean>();
+    const bookingBySlot = new Map<string, Booking | null>();
+    const bookingTimeBySlot = new Map<string, string>();
+    const bookingServiceBySlot = new Map<string, string>();
+
+    for (const dateStr of weekDateStrings) {
+      const daySlots = slotsByDay[dateStr] || [];
+      for (const s of daySlots) {
+        availability.set(
+          slotKeyFromParts(dateStr, s.hour, s.minute),
+          !!(s.is_available ?? s.is_working)
+        );
+      }
+      const dayBookings = bookingsByDay[dateStr] || [];
+      for (const ts of timeSlots) {
+        const key = slotKeyFromParts(dateStr, ts.hour, ts.minute);
+        const slotStart = new Date(
+          `${dateStr}T${String(ts.hour).padStart(2, '0')}:${String(ts.minute).padStart(2, '0')}:00`
+        );
+        const slotEnd = new Date(slotStart.getTime() + 30 * 60 * 1000);
+        let hit: Booking | null = null;
+        for (const booking of dayBookings) {
+          const bookingStart = new Date(booking.start_time);
+          const bookingEnd = new Date(booking.end_time);
+          if (bookingStart < slotEnd && bookingEnd > slotStart) {
+            hit = booking;
+            break;
+          }
+        }
+        bookingBySlot.set(key, hit);
+        if (hit) {
+          bookingTimeBySlot.set(
+            key,
+            new Date(hit.start_time).toLocaleTimeString('ru-RU', {
+              hour: '2-digit',
+              minute: '2-digit',
+            })
+          );
+          bookingServiceBySlot.set(key, hit.service_name || '');
+        }
+      }
+    }
+    return { availability, bookingBySlot, bookingTimeBySlot, bookingServiceBySlot };
+  }, [weekDateStrings, slotsByDay, bookingsByDay, timeSlots]);
+
   // Вычисляем начальную позицию скролла (7:00)
   const initialScrollY = useMemo(() => {
     // Находим индекс слота для 7:00
@@ -136,47 +241,26 @@ export function WeekView({
     return `${startStr} - ${endStr}`;
   };
 
-  // Проверяем, доступен ли слот
-  const isSlotAvailable = (date: string, hour: number, minute: number): boolean => {
-    const daySlots = slotsByDay[date] || [];
-    const slot = daySlots.find(
-      (s) => s.hour === hour && s.minute === minute
-    );
-    return slot ? (slot.is_available ?? slot.is_working) : false;
-  };
-
-  // Получаем bookings для слота
-  const getBookingsForSlot = (date: string, hour: number, minute: number): Booking[] => {
-    const dayBookings = bookingsByDay[date] || [];
-    // Примечание: здесь date уже в формате YYYY-MM-DD, создаём datetime строку для парсинга
-    // Это безопасно, так как создаём ISO-подобную строку с временем, не просто YYYY-MM-DD
-    const slotStart = new Date(`${date}T${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}:00`);
-    const slotEnd = new Date(slotStart.getTime() + 30 * 60 * 1000);
-    
-    return dayBookings.filter((booking) => {
-      // Примечание: booking.start_time/end_time приходят из API как ISO datetime строки
-      // (не YYYY-MM-DD), поэтому new Date() здесь безопасен
-      const bookingStart = new Date(booking.start_time);
-      const bookingEnd = new Date(booking.end_time);
-      // Проверяем пересечение интервалов
-      return bookingStart < slotEnd && bookingEnd > slotStart;
-    });
-  };
+  const isSlotAvailable = useCallback(
+    (date: string, hour: number, minute: number): boolean =>
+      slotGridMeta.availability.get(slotKeyFromParts(date, hour, minute)) ?? false,
+    [slotGridMeta.availability]
+  );
 
   // Получаем все bookings для дня (для отображения в Day Drawer)
   const getDayBookings = (date: string): Booking[] => {
     return bookingsByDay[date] || [];
   };
 
-  const handleDayPress = (date: string) => {
+  const handleDayPress = useCallback((date: string) => {
     if (!isEditMode) {
       setSelectedDate(date);
     }
-  };
+  }, [isEditMode]);
 
-  const handleCloseDayDrawer = () => {
+  const handleCloseDayDrawer = useCallback(() => {
     setSelectedDate(null);
-  };
+  }, []);
 
   // Сохраняем состояние для UNDO
   const saveStateForUndo = () => {
@@ -216,7 +300,7 @@ export function WeekView({
     return () => clearTimeout(t);
   }, [initialScrollY, weekOffset]);
 
-  const handleTimeColumnScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+  const handleTimeColumnScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
     if (verticalScrollSyncLockRef.current) return;
     const y = e.nativeEvent.contentOffset.y;
     verticalScrollSyncLockRef.current = true;
@@ -224,9 +308,9 @@ export function WeekView({
     requestAnimationFrame(() => {
       verticalScrollSyncLockRef.current = false;
     });
-  };
+  }, []);
 
-  const handleDaysColumnScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+  const handleDaysColumnScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
     if (verticalScrollSyncLockRef.current) return;
     const y = e.nativeEvent.contentOffset.y;
     verticalScrollSyncLockRef.current = true;
@@ -234,7 +318,7 @@ export function WeekView({
     requestAnimationFrame(() => {
       verticalScrollSyncLockRef.current = false;
     });
-  };
+  }, []);
 
   // Обработка long press для начала выделения
   const handleSlotLongPress = (date: string, hour: number, minute: number) => {
@@ -523,7 +607,8 @@ export function WeekView({
             showsVerticalScrollIndicator={false}
             style={styles.timeScroll}
             onScroll={handleTimeColumnScroll}
-            scrollEventThrottle={32}
+            scrollEventThrottle={48}
+            removeClippedSubviews={Platform.OS === 'android'}
           >
             {timeSlots.map((slot, index) => (
               <View key={index} style={styles.timeSlot}>
@@ -577,58 +662,39 @@ export function WeekView({
               style={styles.daysScroll}
               contentContainerStyle={styles.daysScrollContent}
               onScroll={handleDaysColumnScroll}
-              scrollEventThrottle={32}
+              scrollEventThrottle={48}
+              removeClippedSubviews={Platform.OS === 'android'}
               refreshControl={refreshControl}
             >
               {/* Сетка слотов */}
               <View style={styles.grid}>
-            {weekDates.map((date, dayIndex) => {
-              const dateStr = date.toISOString().split('T')[0];
-              return (
-                <View key={dayIndex} style={styles.dayColumn}>
-                  {timeSlots.map((timeSlot, timeIndex) => {
-                    const isAvailable = isSlotAvailable(dateStr, timeSlot.hour, timeSlot.minute);
-                    const slotBookings = getBookingsForSlot(dateStr, timeSlot.hour, timeSlot.minute);
-                    const hasBooking = slotBookings.length > 0;
-                    const booking = slotBookings[0]; // Берем первую запись для отображения
-                    
+            {weekDateStrings.map((dateStr, dayIndex) => (
+                <View key={dateStr} style={styles.dayColumn}>
+                  {timeSlots.map((timeSlot) => {
+                    const key = slotKeyFromParts(dateStr, timeSlot.hour, timeSlot.minute);
+                    const booking = slotGridMeta.bookingBySlot.get(key);
+                    const hasBooking = !!booking;
                     return (
-                      <TouchableOpacity
-                        key={timeIndex}
-                        style={[
-                          styles.slot,
-                          isAvailable && styles.slotAvailable,
-                          hasBooking && styles.slotBooked,
-                          selectedSlots.has(`${dateStr}_${timeSlot.hour}_${timeSlot.minute}`) && styles.slotSelected,
-                        ]}
+                      <WeekSlotCell
+                        key={key}
+                        isAvailable={slotGridMeta.availability.get(key) ?? false}
+                        hasBooking={hasBooking}
+                        bookingTimeLabel={slotGridMeta.bookingTimeBySlot.get(key) || ''}
+                        bookingServiceName={slotGridMeta.bookingServiceBySlot.get(key) || ''}
+                        isSelected={selectedSlots.has(key)}
                         onPress={() => handleSlotPress(dateStr, timeSlot.hour, timeSlot.minute)}
                         onLongPress={() => handleSlotLongPress(dateStr, timeSlot.hour, timeSlot.minute)}
-                        onPressIn={() => {
-                          if (isEditMode && dragStart) {
-                            handleSlotMove(dateStr, timeSlot.hour, timeSlot.minute);
-                          }
-                        }}
-                        onPressOut={handleSlotRelease}
-                      >
-                        {hasBooking && (
-                          <View style={styles.bookingBlock}>
-                            <Text style={styles.bookingTime} numberOfLines={1}>
-                              {new Date(booking.start_time).toLocaleTimeString('ru-RU', { 
-                                hour: '2-digit', 
-                                minute: '2-digit' 
-                              })}
-                            </Text>
-                            <Text style={styles.bookingService} numberOfLines={1}>
-                              {booking.service_name}
-                            </Text>
-                          </View>
-                        )}
-                      </TouchableOpacity>
+                        onPressIn={
+                          isEditMode && dragStart
+                            ? () => handleSlotMove(dateStr, timeSlot.hour, timeSlot.minute)
+                            : undefined
+                        }
+                        onPressOut={isEditMode ? handleSlotRelease : undefined}
+                      />
                     );
                   })}
                 </View>
-              );
-            })}
+              ))}
               </View>
             </ScrollView>
           </ScrollView>
@@ -637,7 +703,7 @@ export function WeekView({
 
       {/* Кнопка редактирования / Панель инструментов */}
       {!isEditMode ? (
-        <View style={styles.footer}>
+        <View style={[styles.footer, { paddingBottom: footerPaddingBottom }]}>
           <TouchableOpacity
             style={styles.editButton}
             onPress={() => setIsEditMode(true)}
@@ -646,7 +712,7 @@ export function WeekView({
           </TouchableOpacity>
         </View>
       ) : (
-        <View style={styles.editToolbar}>
+        <View style={[styles.editToolbar, { paddingBottom: footerPaddingBottom }]}>
           <View style={styles.toolbarRow}>
             <TouchableOpacity
               style={[styles.toolbarButton, styles.toolbarButtonPrimary]}

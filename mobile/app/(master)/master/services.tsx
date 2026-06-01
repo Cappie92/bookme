@@ -1,6 +1,21 @@
 import { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Alert, Modal, TextInput, ScrollView, RefreshControl } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  ActivityIndicator,
+  Alert,
+  Modal,
+  TextInput,
+  ScrollView,
+  RefreshControl,
+  KeyboardAvoidingView,
+  Platform,
+  Dimensions,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ScreenContainer } from '@src/components/ScreenContainer';
 import { Card } from '@src/components/Card';
 import { PrimaryButton } from '@src/components/PrimaryButton';
@@ -21,9 +36,13 @@ import { formatMoney } from '@src/utils/money';
 import { FeatureLock } from '@src/components/FeatureLock';
 import { CategoryAccordion } from '@src/components/services/CategoryAccordion';
 import { ServiceRow } from '@src/components/services/ServiceRow';
-import { DurationPickerModal } from '@src/components/modals/DurationPickerModal';
+const PLACEHOLDER_COLOR = '#999';
+const INPUT_TEXT_COLOR = '#333';
+const MODAL_SHEET_MAX_HEIGHT = Math.round(Dimensions.get('window').height * 0.88);
 
 export default function MasterServicesScreen() {
+  const insets = useSafeAreaInsets();
+  const modalFooterPadding = Math.max(insets.bottom, 12) + 16;
   const [services, setServices] = useState<MasterService[]>([]);
   const [categories, setCategories] = useState<MasterServiceCategory[]>([]);
   const [loading, setLoading] = useState(true);
@@ -500,17 +519,35 @@ export default function MasterServicesScreen() {
       </ScrollView>
 
       {/* Модальное окно услуги */}
-      <Modal 
-        visible={showServiceModal} 
-        animationType="slide" 
+      <Modal
+        visible={showServiceModal}
+        animationType="slide"
         transparent
+        statusBarTranslucent
+        onRequestClose={() => {
+          setShowServiceModal(false);
+          setShowCategoryDropdown(false);
+          setShowDurationPicker(false);
+        }}
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
+        <KeyboardAvoidingView
+          style={styles.modalOverlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
+          <View style={[styles.modalContent, { maxHeight: MODAL_SHEET_MAX_HEIGHT }]}>
             <Text style={styles.modalTitle}>
               {editingService ? 'Редактировать услугу' : 'Создать услугу'}
             </Text>
             <ScrollView
+              style={styles.modalScroll}
+              contentContainerStyle={[
+                styles.modalScrollContent,
+                { paddingBottom: modalFooterPadding + 72 },
+              ]}
+              keyboardShouldPersistTaps="handled"
+              keyboardDismissMode="on-drag"
+              showsVerticalScrollIndicator
+              nestedScrollEnabled
               onScrollBeginDrag={() => {
                 setShowCategoryDropdown(false);
                 setShowDurationPicker(false);
@@ -520,21 +557,21 @@ export default function MasterServicesScreen() {
               <TextInput
                 style={styles.input}
                 placeholder="Название услуги *"
+                placeholderTextColor={PLACEHOLDER_COLOR}
                 value={serviceForm.name}
                 onChangeText={(text) => setServiceForm({ ...serviceForm, name: text })}
               />
               <TextInput
                 style={[styles.input, styles.textArea]}
-                placeholder="Описание"
+                placeholder="Описание услуги"
+                placeholderTextColor={PLACEHOLDER_COLOR}
                 value={serviceForm.description}
                 onChangeText={(text) => setServiceForm({ ...serviceForm, description: text })}
                 multiline
                 numberOfLines={3}
               />
-              
-              {/* Категория */}
+
               <View style={styles.categorySection}>
-                <Text style={styles.label}>Категория *</Text>
                 <View style={styles.dropdownContainer}>
                   <TouchableOpacity
                     style={[styles.selectButton, !serviceForm.category_id && styles.selectButtonEmpty]}
@@ -545,8 +582,8 @@ export default function MasterServicesScreen() {
                   >
                     <Text style={[styles.selectButtonText, !serviceForm.category_id && styles.selectButtonTextEmpty]}>
                       {serviceForm.category_id
-                        ? categories.find(c => c.id === serviceForm.category_id)?.name || 'Выберите категорию'
-                        : 'Выберите категорию'}
+                        ? categories.find(c => c.id === serviceForm.category_id)?.name || 'Выберите категорию *'
+                        : 'Выберите категорию *'}
                     </Text>
                     <Ionicons
                       name={showCategoryDropdown ? 'chevron-up' : 'chevron-down'}
@@ -591,7 +628,8 @@ export default function MasterServicesScreen() {
                 <View style={styles.newCategoryRow}>
                   <TextInput
                     style={[styles.input, styles.newCategoryInput]}
-                    placeholder="Новая категория"
+                    placeholder="Название новой категории"
+                    placeholderTextColor={PLACEHOLDER_COLOR}
                     value={newCategoryName}
                     onChangeText={setNewCategoryName}
                   />
@@ -607,16 +645,12 @@ export default function MasterServicesScreen() {
                 </View>
               </View>
 
-              {/* Длительность - модальный выбор */}
               <View style={styles.durationSection}>
-                <Text style={styles.label}>Длительность *</Text>
                 <TouchableOpacity
                   style={[styles.durationInput, !serviceForm.duration && styles.durationInputEmpty]}
                   onPress={() => {
-                    if (__DEV__) console.log('[DURATION] press');
                     setShowDurationPicker(true);
                     setShowCategoryDropdown(false);
-                    if (__DEV__) console.log('[DURATION] open - setShowDurationPicker(true)');
                   }}
                   activeOpacity={0.7}
                 >
@@ -629,7 +663,7 @@ export default function MasterServicesScreen() {
                             ? `${hours}ч${mins > 0 ? ` ${mins}мин` : ''}`
                             : `${mins}мин`;
                         })()
-                      : 'Выберите длительность'}
+                      : 'Длительность *'}
                   </Text>
                   <Ionicons name="chevron-forward" size={20} color="#666" style={styles.durationInputArrow} />
                 </TouchableOpacity>
@@ -637,13 +671,14 @@ export default function MasterServicesScreen() {
 
               <TextInput
                 style={styles.input}
-                placeholder="Цена (руб) *"
+                placeholder="Цена, ₽ *"
+                placeholderTextColor={PLACEHOLDER_COLOR}
                 value={serviceForm.price}
                 onChangeText={(text) => setServiceForm({ ...serviceForm, price: text })}
                 keyboardType="numeric"
               />
             </ScrollView>
-            <View style={styles.modalActions}>
+            <View style={[styles.modalActions, { paddingBottom: modalFooterPadding }]}>
               <SecondaryButton
                 title="Отмена"
                 onPress={() => {
@@ -663,8 +698,7 @@ export default function MasterServicesScreen() {
               />
             </View>
           </View>
-        </View>
-        
+
         {/* Модальное окно выбора длительности - поверх модалки услуги */}
         {showDurationPicker && (
           <View style={styles.durationPickerOverlay}>
@@ -676,7 +710,7 @@ export default function MasterServicesScreen() {
                 setShowDurationPicker(false);
               }}
             />
-            <View style={styles.durationPickerContent}>
+            <View style={[styles.durationPickerContent, { paddingBottom: modalFooterPadding }]}>
               <View style={styles.durationPickerHeader}>
                 <Text style={styles.durationPickerTitle}>Выберите длительность</Text>
                 <TouchableOpacity
@@ -736,30 +770,52 @@ export default function MasterServicesScreen() {
             </View>
           </View>
         )}
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* Модальное окно категории */}
-      <Modal visible={showCategoryModal} animationType="slide" transparent>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
+      <Modal
+        visible={showCategoryModal}
+        animationType="slide"
+        transparent
+        statusBarTranslucent
+        onRequestClose={() => setShowCategoryModal(false)}
+      >
+        <KeyboardAvoidingView
+          style={styles.modalOverlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
+          <View style={[styles.modalContent, { maxHeight: MODAL_SHEET_MAX_HEIGHT }]}>
             <Text style={styles.modalTitle}>
               {editingCategory ? 'Редактировать категорию' : 'Создать категорию'}
             </Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Название категории *"
-              value={categoryForm.name}
-              onChangeText={(text) => setCategoryForm({ ...categoryForm, name: text })}
-            />
-            <TextInput
-              style={[styles.input, styles.textArea]}
-              placeholder="Описание"
-              value={categoryForm.description}
-              onChangeText={(text) => setCategoryForm({ ...categoryForm, description: text })}
-              multiline
-              numberOfLines={3}
-            />
-            <View style={styles.modalActions}>
+            <ScrollView
+              style={styles.modalScroll}
+              contentContainerStyle={[
+                styles.modalScrollContent,
+                { paddingBottom: modalFooterPadding + 72 },
+              ]}
+              keyboardShouldPersistTaps="handled"
+              keyboardDismissMode="on-drag"
+            >
+              <TextInput
+                style={styles.input}
+                placeholder="Название категории *"
+                placeholderTextColor={PLACEHOLDER_COLOR}
+                value={categoryForm.name}
+                onChangeText={(text) => setCategoryForm({ ...categoryForm, name: text })}
+              />
+              <TextInput
+                style={[styles.input, styles.textArea]}
+                placeholder="Описание категории"
+                placeholderTextColor={PLACEHOLDER_COLOR}
+                value={categoryForm.description}
+                onChangeText={(text) => setCategoryForm({ ...categoryForm, description: text })}
+                multiline
+                numberOfLines={3}
+              />
+            </ScrollView>
+            <View style={[styles.modalActions, { paddingBottom: modalFooterPadding }]}>
               <SecondaryButton
                 title="Отмена"
                 onPress={() => {
@@ -776,7 +832,7 @@ export default function MasterServicesScreen() {
               />
             </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </ScreenContainer>
   );
@@ -960,14 +1016,22 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
-    padding: 20,
-    maxHeight: '80%',
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    overflow: 'hidden',
+  },
+  modalScroll: {
+    flexGrow: 0,
+    flexShrink: 1,
+  },
+  modalScrollContent: {
+    flexGrow: 1,
   },
   modalTitle: {
     fontSize: 20,
     fontWeight: 'bold',
     color: '#333',
-    marginBottom: 20,
+    marginBottom: 16,
   },
   input: {
     borderWidth: 1,
@@ -977,6 +1041,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     marginBottom: 16,
     backgroundColor: '#fff',
+    color: INPUT_TEXT_COLOR,
   },
   textArea: {
     minHeight: 80,
@@ -985,7 +1050,10 @@ const styles = StyleSheet.create({
   modalActions: {
     flexDirection: 'row',
     gap: 12,
-    marginTop: 20,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#eee',
+    backgroundColor: '#fff',
   },
   modalButton: {
     flex: 1,
@@ -1065,7 +1133,6 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     maxHeight: '70%',
-    paddingBottom: 20,
   },
   durationPickerHeader: {
     flexDirection: 'row',

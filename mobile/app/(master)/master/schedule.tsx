@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ActivityIndicator, RefreshControl } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useTabBarHeight } from '@src/contexts/TabBarHeightContext';
+import { BOTTOM_NAV_CONTENT_FALLBACK_HEIGHT } from '@src/constants/bottomNavLayout';
 import { SegmentedControl } from '@src/components/SegmentedControl';
 import { WeekView } from '@src/components/schedule/WeekView';
 import { DayView } from '@src/components/schedule/DayView';
@@ -14,6 +16,9 @@ export default function MasterScheduleScreen() {
   const { features } = useMasterFeatures();
   const hasExtendedStats = features?.has_extended_stats === true;
   const insets = useSafeAreaInsets();
+  const { tabBarHeight } = useTabBarHeight();
+  const tabBarClearance =
+    (tabBarHeight > 0 ? tabBarHeight : BOTTOM_NAV_CONTENT_FALLBACK_HEIGHT) + Math.max(insets.bottom, 0);
   const [selectedTab, setSelectedTab] = useState<TabIndex>(0);
   const [schedule, setSchedule] = useState<ScheduleWeek | null>(null);
   const [bookings, setBookings] = useState<Booking[]>([]);
@@ -110,7 +115,7 @@ export default function MasterScheduleScreen() {
         />
       </View>
 
-      <View style={[styles.content, { marginBottom: 70 + insets.bottom }]}>
+      <View style={[styles.content, { marginBottom: tabBarClearance }]}>
         {selectedTab === 0 && schedule && (
           <WeekView
             schedule={schedule}

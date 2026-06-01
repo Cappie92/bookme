@@ -11,7 +11,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   Booking,
   ScheduleSlot,
@@ -142,6 +142,8 @@ export function DayDrawer({
   masterSettings,
   hasExtendedStats = false,
 }: DayDrawerProps) {
+  const insets = useSafeAreaInsets();
+  const sheetBottomPadding = Math.max(insets.bottom, 12) + 16;
   const [cancelSheetBookingId, setCancelSheetBookingId] = useState<number | null>(null);
   const [noteSheetBooking, setNoteSheetBooking] = useState<Booking | null>(null);
   const [saving, setSaving] = useState(false);
@@ -336,7 +338,7 @@ export function DayDrawer({
 
               <ScrollView
                 style={styles.timeline}
-                contentContainerStyle={styles.timelineContent}
+                contentContainerStyle={[styles.timelineContent, { paddingBottom: sheetBottomPadding }]}
                 showsVerticalScrollIndicator={true}
                 keyboardShouldPersistTaps="handled"
                 nestedScrollEnabled
@@ -379,7 +381,7 @@ export function DayDrawer({
                 )}
               </ScrollView>
 
-              <View style={styles.actions}>
+              <View style={[styles.actions, { paddingBottom: sheetBottomPadding }]}>
                 <TouchableOpacity
                   style={[styles.actionButton, saving && styles.actionButtonDisabled]}
                   onPress={openAvailabilityPicker}
@@ -469,7 +471,7 @@ export function DayDrawer({
               </View>
             </View>
 
-            <View style={styles.pickerActions}>
+            <View style={[styles.pickerActions, { paddingBottom: sheetBottomPadding }]}>
               <TouchableOpacity style={styles.pickerBtnGhost} onPress={() => setOpenRangeVisible(false)}>
                 <Text style={styles.pickerBtnGhostText}>Отмена</Text>
               </TouchableOpacity>
@@ -505,7 +507,7 @@ export function DayDrawer({
                 );
               })}
             </ScrollView>
-            <View style={styles.pickerActions}>
+            <View style={[styles.pickerActions, { paddingBottom: sheetBottomPadding }]}>
               <TouchableOpacity style={styles.pickerBtnGhost} onPress={() => setClosePickerVisible(false)}>
                 <Text style={styles.pickerBtnGhostText}>Отмена</Text>
               </TouchableOpacity>

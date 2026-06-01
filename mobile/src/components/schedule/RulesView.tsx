@@ -1,5 +1,6 @@
 import React, { useState, useEffect, type ReactElement } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getScheduleRules, createScheduleRule } from '@src/services/api/master';
 import { RuleBuilderModal } from './RuleBuilderModal';
 
@@ -15,6 +16,8 @@ export function RulesView({
   refreshControl,
   externalReloadToken = 0,
 }: RulesViewProps = {}) {
+  const insets = useSafeAreaInsets();
+  const footerPaddingBottom = Math.max(insets.bottom, 12) + 16;
   const [rules, setRules] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [showRuleBuilder, setShowRuleBuilder] = useState(false);
@@ -88,6 +91,7 @@ export function RulesView({
     <View style={styles.container}>
       <ScrollView
         style={styles.content}
+        contentContainerStyle={[styles.contentInner, { paddingBottom: footerPaddingBottom + 72 }]}
         showsVerticalScrollIndicator={false}
         refreshControl={refreshControl}
       >
@@ -187,7 +191,7 @@ export function RulesView({
       </ScrollView>
 
       {/* Кнопка создания правила */}
-      <View style={styles.footer}>
+      <View style={[styles.footer, { paddingBottom: footerPaddingBottom }]}>
         <TouchableOpacity
           style={styles.createButton}
           onPress={() => setShowRuleBuilder(true)}
@@ -228,6 +232,8 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
+  },
+  contentInner: {
     padding: 20,
   },
   emptyState: {

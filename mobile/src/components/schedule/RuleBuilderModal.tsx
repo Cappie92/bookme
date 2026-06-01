@@ -729,7 +729,10 @@ export function RuleBuilderModal({ visible, onClose, onPreview, weekDates = [], 
               {/* Контент с скроллом */}
               <ScrollView 
                 style={styles.scrollView}
-                contentContainerStyle={styles.contentContainer}
+                contentContainerStyle={[
+                  styles.contentContainer,
+                  { paddingBottom: Math.max(insets.bottom, 16) + 72 },
+                ]}
                 showsVerticalScrollIndicator={false}
                 keyboardShouldPersistTaps="handled"
               >
@@ -1125,7 +1128,7 @@ export function RuleBuilderModal({ visible, onClose, onPreview, weekDates = [], 
                 </ScrollView>
 
                 {/* Футер с кнопкой (фиксированный внизу) */}
-                <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 20) }]}>
+                <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 16) + 12 }]}>
                   <TouchableOpacity style={styles.createButton} onPress={handleCreate}>
                     <Text style={styles.createButtonText}>Создать расписание</Text>
                   </TouchableOpacity>
