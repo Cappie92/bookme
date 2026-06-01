@@ -112,7 +112,10 @@ export function WeekView({
   const daysScrollRef = useRef<ScrollView>(null);
   /** Блокирует ping-pong: scrollTo на втором ScrollView вызывает onScroll → снова scrollTo на первом → дёрганье. */
   const verticalScrollSyncLockRef = useRef(false);
-  const footerPaddingBottom = Math.max(insets.bottom, 12) + 16;
+  /** Синхронизация только при жесте пользователя — меньше scrollTo и дёрганья. */
+  const verticalScrollSourceRef = useRef<'time' | 'days' | null>(null);
+  const footerPaddingBottom = Math.max(insets.bottom, 8) + 8;
+  const showEditFooter = isEditMode;
 
   // Вычисляем даты недели
   const weekDates = useMemo(() => {
@@ -300,8 +303,12 @@ export function WeekView({
     return () => clearTimeout(t);
   }, [initialScrollY, weekOffset]);
 
+  const endVerticalScrollSync = useCallback(() => {
+    verticalScrollSourceRef.current = null;
+  }, []);
+
   const handleTimeColumnScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
-    if (verticalScrollSyncLockRef.current) return;
+    if (verticalScrollSyncLockRef.current || verticalScrollSourceRef.current !== 'time') return;
     const y = e.nativeEvent.contentOffset.y;
     verticalScrollSyncLockRef.current = true;
     daysScrollRef.current?.scrollTo({ y, animated: false });
@@ -311,7 +318,7 @@ export function WeekView({
   }, []);
 
   const handleDaysColumnScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
-    if (verticalScrollSyncLockRef.current) return;
+    if (verticalScrollSyncLockRef.current || verticalScrollSourceRef.current !== 'days') return;
     const y = e.nativeEvent.contentOffset.y;
     verticalScrollSyncLockRef.current = true;
     timeScrollRef.current?.scrollTo({ y, animated: false });
@@ -483,6 +490,40 @@ export function WeekView({
     setLocalSchedule({ ...localSchedule, slots: updatedSlots });
   };
 
+  const handleSlotPressRef = useRef(handleSlotPress);
+  handleSlotPressRef.current = handleSlotPress;
+  const handleSlotLongPressRef = useRef(handleSlotLongPress);
+  handleSlotLongPressRef.current = handleSlotLongPress;
+  const handleSlotMoveRef = useRef(handleSlotMove);
+  handleSlotMoveRef.current = handleSlotMove;
+  const handleSlotReleaseRef = useRef(handleSlotRelease);
+  handleSlotReleaseRef.current = handleSlotRelease;
+
+  const slotInteractionHandlers = useMemo(() => {
+    const onPress = new Map<string, () => void>();
+    const onLongPress = new Map<string, () => void>();
+    const onPressIn = new Map<string, () => void>();
+    for (const dateStr of weekDateStrings) {
+      for (const timeSlot of timeSlots) {
+        const key = slotKeyFromParts(dateStr, timeSlot.hour, timeSlot.minute);
+        onPress.set(key, () => {
+          handleSlotPressRef.current(dateStr, timeSlot.hour, timeSlot.minute);
+        });
+        onLongPress.set(key, () => {
+          handleSlotLongPressRef.current(dateStr, timeSlot.hour, timeSlot.minute);
+        });
+        onPressIn.set(key, () => {
+          handleSlotMoveRef.current(dateStr, timeSlot.hour, timeSlot.minute);
+        });
+      }
+    }
+    return { onPress, onLongPress, onPressIn };
+  }, [weekDateStrings, timeSlots]);
+
+  const stableSlotRelease = useCallback(() => {
+    handleSlotReleaseRef.current();
+  }, []);
+
   // Сохранение изменений
   const handleSave = async () => {
     try {
@@ -592,9 +633,16 @@ export function WeekView({
         <TouchableOpacity onPress={() => onWeekChange(weekOffset + 1)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
           <Ionicons name="chevron-forward" size={28} color="#333" />
         </TouchableOpacity>
-        <TouchableOpacity onPress={() => onWeekChange(0)}>
-          <Text style={styles.todayButton}>Сегодня</Text>
-        </TouchableOpacity>
+        <View style={styles.headerActions}>
+          {!isEditMode ? (
+            <TouchableOpacity onPress={() => setIsEditMode(true)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <Text style={styles.editHeaderButton}>Изменить</Text>
+            </TouchableOpacity>
+          ) : null}
+          <TouchableOpacity onPress={() => onWeekChange(0)}>
+            <Text style={styles.todayButton}>Сегодня</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* Сетка расписания */}
@@ -607,7 +655,12 @@ export function WeekView({
             showsVerticalScrollIndicator={false}
             style={styles.timeScroll}
             onScroll={handleTimeColumnScroll}
-            scrollEventThrottle={48}
+            onScrollBeginDrag={() => {
+              verticalScrollSourceRef.current = 'time';
+            }}
+            onScrollEndDrag={endVerticalScrollSync}
+            onMomentumScrollEnd={endVerticalScrollSync}
+            scrollEventThrottle={64}
             removeClippedSubviews={Platform.OS === 'android'}
           >
             {timeSlots.map((slot, index) => (
@@ -660,9 +713,17 @@ export function WeekView({
               directionalLockEnabled={Platform.OS === 'ios'}
               showsVerticalScrollIndicator={false}
               style={styles.daysScroll}
-              contentContainerStyle={styles.daysScrollContent}
+              contentContainerStyle={[
+                styles.daysScrollContent,
+                showEditFooter ? { paddingBottom: 8 } : null,
+              ]}
               onScroll={handleDaysColumnScroll}
-              scrollEventThrottle={48}
+              onScrollBeginDrag={() => {
+                verticalScrollSourceRef.current = 'days';
+              }}
+              onScrollEndDrag={endVerticalScrollSync}
+              onMomentumScrollEnd={endVerticalScrollSync}
+              scrollEventThrottle={64}
               removeClippedSubviews={Platform.OS === 'android'}
               refreshControl={refreshControl}
             >
@@ -682,14 +743,14 @@ export function WeekView({
                         bookingTimeLabel={slotGridMeta.bookingTimeBySlot.get(key) || ''}
                         bookingServiceName={slotGridMeta.bookingServiceBySlot.get(key) || ''}
                         isSelected={selectedSlots.has(key)}
-                        onPress={() => handleSlotPress(dateStr, timeSlot.hour, timeSlot.minute)}
-                        onLongPress={() => handleSlotLongPress(dateStr, timeSlot.hour, timeSlot.minute)}
+                        onPress={slotInteractionHandlers.onPress.get(key)!}
+                        onLongPress={slotInteractionHandlers.onLongPress.get(key)!}
                         onPressIn={
                           isEditMode && dragStart
-                            ? () => handleSlotMove(dateStr, timeSlot.hour, timeSlot.minute)
+                            ? slotInteractionHandlers.onPressIn.get(key)
                             : undefined
                         }
-                        onPressOut={isEditMode ? handleSlotRelease : undefined}
+                        onPressOut={isEditMode ? stableSlotRelease : undefined}
                       />
                     );
                   })}
@@ -701,17 +762,8 @@ export function WeekView({
         </View>
       </View>
 
-      {/* Кнопка редактирования / Панель инструментов */}
-      {!isEditMode ? (
-        <View style={[styles.footer, { paddingBottom: footerPaddingBottom }]}>
-          <TouchableOpacity
-            style={styles.editButton}
-            onPress={() => setIsEditMode(true)}
-          >
-            <Text style={styles.editButtonText}>Изменить</Text>
-          </TouchableOpacity>
-        </View>
-      ) : (
+      {/* Панель инструментов — только в режиме редактирования */}
+      {showEditFooter ? (
         <View style={[styles.editToolbar, { paddingBottom: footerPaddingBottom }]}>
           <View style={styles.toolbarRow}>
             <TouchableOpacity
@@ -759,7 +811,7 @@ export function WeekView({
             </TouchableOpacity>
           </View>
         </View>
-      )}
+      ) : null}
 
       {/* Day Drawer */}
       {selectedDate && (
@@ -795,6 +847,16 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#333',
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  editHeaderButton: {
+    fontSize: 14,
+    color: '#4CAF50',
+    fontWeight: '600',
   },
   todayButton: {
     fontSize: 14,

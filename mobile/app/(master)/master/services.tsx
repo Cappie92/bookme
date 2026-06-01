@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -10,9 +10,9 @@ import {
   TextInput,
   ScrollView,
   RefreshControl,
-  KeyboardAvoidingView,
   Platform,
   Dimensions,
+  Keyboard,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -38,11 +38,38 @@ import { CategoryAccordion } from '@src/components/services/CategoryAccordion';
 import { ServiceRow } from '@src/components/services/ServiceRow';
 const PLACEHOLDER_COLOR = '#999';
 const INPUT_TEXT_COLOR = '#333';
-const MODAL_SHEET_MAX_HEIGHT = Math.round(Dimensions.get('window').height * 0.88);
+const WINDOW_HEIGHT = Dimensions.get('window').height;
+const MODAL_SHEET_MAX_HEIGHT = Math.round(WINDOW_HEIGHT * 0.88);
+const MODAL_SCROLL_CONTENT_PADDING_BOTTOM = 20;
+
+function useModalKeyboardHeight(active: boolean): number {
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+
+  useEffect(() => {
+    if (!active) {
+      setKeyboardHeight(0);
+      return;
+    }
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const onShow = Keyboard.addListener(showEvent, (e) => {
+      setKeyboardHeight(Math.max(0, Math.round(e.endCoordinates?.height ?? 0)));
+    });
+    const onHide = Keyboard.addListener(hideEvent, () => {
+      setKeyboardHeight(0);
+    });
+    return () => {
+      onShow.remove();
+      onHide.remove();
+    };
+  }, [active]);
+
+  return keyboardHeight;
+}
 
 export default function MasterServicesScreen() {
   const insets = useSafeAreaInsets();
-  const modalFooterPadding = Math.max(insets.bottom, 12) + 16;
+  const modalFooterPaddingBottom = Math.max(insets.bottom, 8) + 8;
   const [services, setServices] = useState<MasterService[]>([]);
   const [categories, setCategories] = useState<MasterServiceCategory[]>([]);
   const [loading, setLoading] = useState(true);
@@ -52,6 +79,21 @@ export default function MasterServicesScreen() {
   // Модальные окна
   const [showServiceModal, setShowServiceModal] = useState(false);
   const [showCategoryModal, setShowCategoryModal] = useState(false);
+  const serviceKeyboardHeight = useModalKeyboardHeight(showServiceModal);
+  const categoryKeyboardHeight = useModalKeyboardHeight(showCategoryModal);
+
+  const serviceSheetMaxHeight = useMemo(() => {
+    if (serviceKeyboardHeight <= 0) return MODAL_SHEET_MAX_HEIGHT;
+    const capped = WINDOW_HEIGHT - serviceKeyboardHeight - insets.top - 12;
+    return Math.min(MODAL_SHEET_MAX_HEIGHT, Math.max(280, capped));
+  }, [serviceKeyboardHeight, insets.top]);
+
+  const categorySheetMaxHeight = useMemo(() => {
+    if (categoryKeyboardHeight <= 0) return MODAL_SHEET_MAX_HEIGHT;
+    const capped = WINDOW_HEIGHT - categoryKeyboardHeight - insets.top - 12;
+    return Math.min(MODAL_SHEET_MAX_HEIGHT, Math.max(220, capped));
+  }, [categoryKeyboardHeight, insets.top]);
+
   const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
   const [showDurationPicker, setShowDurationPicker] = useState(false);
   const [editingService, setEditingService] = useState<MasterService | null>(null);
@@ -530,11 +572,14 @@ export default function MasterServicesScreen() {
           setShowDurationPicker(false);
         }}
       >
-        <KeyboardAvoidingView
-          style={styles.modalOverlay}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        >
-          <View style={[styles.modalContent, { maxHeight: MODAL_SHEET_MAX_HEIGHT }]}>
+        <View style={styles.modalOverlay}>
+          <View
+            style={[
+              styles.modalContent,
+              { maxHeight: serviceSheetMaxHeight },
+              serviceKeyboardHeight > 0 ? { height: serviceSheetMaxHeight } : null,
+            ]}
+          >
             <Text style={styles.modalTitle}>
               {editingService ? 'Редактировать услугу' : 'Создать услугу'}
             </Text>
@@ -542,10 +587,10 @@ export default function MasterServicesScreen() {
               style={styles.modalScroll}
               contentContainerStyle={[
                 styles.modalScrollContent,
-                { paddingBottom: modalFooterPadding + 72 },
+                { paddingBottom: MODAL_SCROLL_CONTENT_PADDING_BOTTOM },
               ]}
               keyboardShouldPersistTaps="handled"
-              keyboardDismissMode="on-drag"
+              keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
               showsVerticalScrollIndicator
               nestedScrollEnabled
               onScrollBeginDrag={() => {
@@ -678,7 +723,12 @@ export default function MasterServicesScreen() {
                 keyboardType="numeric"
               />
             </ScrollView>
-            <View style={[styles.modalActions, { paddingBottom: modalFooterPadding }]}>
+            <View
+              style={[
+                styles.modalActions,
+                { paddingBottom: modalFooterPaddingBottom },
+              ]}
+            >
               <SecondaryButton
                 title="Отмена"
                 onPress={() => {
@@ -710,7 +760,7 @@ export default function MasterServicesScreen() {
                 setShowDurationPicker(false);
               }}
             />
-            <View style={[styles.durationPickerContent, { paddingBottom: modalFooterPadding }]}>
+            <View style={[styles.durationPickerContent, { paddingBottom: modalFooterPaddingBottom }]}>
               <View style={styles.durationPickerHeader}>
                 <Text style={styles.durationPickerTitle}>Выберите длительность</Text>
                 <TouchableOpacity
@@ -770,7 +820,7 @@ export default function MasterServicesScreen() {
             </View>
           </View>
         )}
-        </KeyboardAvoidingView>
+        </View>
       </Modal>
 
       {/* Модальное окно категории */}
@@ -781,11 +831,14 @@ export default function MasterServicesScreen() {
         statusBarTranslucent
         onRequestClose={() => setShowCategoryModal(false)}
       >
-        <KeyboardAvoidingView
-          style={styles.modalOverlay}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        >
-          <View style={[styles.modalContent, { maxHeight: MODAL_SHEET_MAX_HEIGHT }]}>
+        <View style={styles.modalOverlay}>
+          <View
+            style={[
+              styles.modalContent,
+              { maxHeight: categorySheetMaxHeight },
+              categoryKeyboardHeight > 0 ? { height: categorySheetMaxHeight } : null,
+            ]}
+          >
             <Text style={styles.modalTitle}>
               {editingCategory ? 'Редактировать категорию' : 'Создать категорию'}
             </Text>
@@ -793,10 +846,11 @@ export default function MasterServicesScreen() {
               style={styles.modalScroll}
               contentContainerStyle={[
                 styles.modalScrollContent,
-                { paddingBottom: modalFooterPadding + 72 },
+                { paddingBottom: MODAL_SCROLL_CONTENT_PADDING_BOTTOM },
               ]}
               keyboardShouldPersistTaps="handled"
-              keyboardDismissMode="on-drag"
+              keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+              showsVerticalScrollIndicator
             >
               <TextInput
                 style={styles.input}
@@ -815,7 +869,12 @@ export default function MasterServicesScreen() {
                 numberOfLines={3}
               />
             </ScrollView>
-            <View style={[styles.modalActions, { paddingBottom: modalFooterPadding }]}>
+            <View
+              style={[
+                styles.modalActions,
+                { paddingBottom: modalFooterPaddingBottom },
+              ]}
+            >
               <SecondaryButton
                 title="Отмена"
                 onPress={() => {
@@ -832,7 +891,7 @@ export default function MasterServicesScreen() {
               />
             </View>
           </View>
-        </KeyboardAvoidingView>
+        </View>
       </Modal>
     </ScreenContainer>
   );
@@ -1016,22 +1075,22 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
-    paddingHorizontal: 20,
     paddingTop: 20,
     overflow: 'hidden',
   },
   modalScroll: {
-    flexGrow: 0,
     flexShrink: 1,
+    flexGrow: 1,
   },
   modalScrollContent: {
-    flexGrow: 1,
+    paddingHorizontal: 20,
   },
   modalTitle: {
     fontSize: 20,
     fontWeight: 'bold',
     color: '#333',
     marginBottom: 16,
+    paddingHorizontal: 20,
   },
   input: {
     borderWidth: 1,
@@ -1051,6 +1110,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 12,
     paddingTop: 12,
+    paddingHorizontal: 20,
     borderTopWidth: 1,
     borderTopColor: '#eee',
     backgroundColor: '#fff',
