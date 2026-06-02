@@ -246,7 +246,8 @@ def calculate_discount_amount(
     max_discount_amount: Optional[float],
 ) -> float:
     discount_amount = base_price * (discount_percent / 100.0)
-    if max_discount_amount is not None:
+    # None и 0 — без ограничения по сумме; лимит только при положительном значении.
+    if max_discount_amount is not None and max_discount_amount > 0:
         discount_amount = min(discount_amount, max_discount_amount)
     return max(discount_amount, 0.0)
 

@@ -1333,3 +1333,11 @@ def test_first_visit_matched_when_only_cancelled_booking(db, master, client_user
     _, best = evaluate_discount_candidates(master.id, client_user.id, None, payload, db)
     assert best is not None
     assert best["condition_type"] == "first_visit"
+
+
+def test_calculate_discount_amount_max_limits():
+    from utils.loyalty_discounts import calculate_discount_amount
+
+    assert calculate_discount_amount(1000, 20, None) == 200
+    assert calculate_discount_amount(1000, 20, 0) == 200
+    assert calculate_discount_amount(1000, 20, 100) == 100
