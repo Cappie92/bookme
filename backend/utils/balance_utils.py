@@ -415,8 +415,14 @@ def calculate_upgrade_cost(
 
 def process_daily_charge(db: Session, subscription_id: int, charge_date: date = None) -> Dict[str, Any]:
     """Ежедневное списание за подписку.
-    MVP: UserBalance.balance = остаток депозита подписки (не «общий кошелёк»).
-    Списание: balance -= daily_rate. При balance < daily_rate — деактивация, запись FAILED + reason.
+
+    Модель баланса (после оплаты пакета с баланса):
+    - ``user_balances.balance`` — общая сумма на счёте (уменьшается при daily charge).
+    - ``subscription_reservations.reserved_amount`` — зарезервировано под активную подписку (уменьшается синхронно).
+    - ``available_balance`` = balance − sum(reserved); при списании из резерва available не меняется.
+
+    Пример: balance=50_000, reserved=6_120, available=43_880 → charge 34 →
+    balance=49_966, reserved=6_086, available=43_880.
     """
     if charge_date is None:
         charge_date = date.today()
@@ -476,16 +482,30 @@ def process_daily_charge(db: Session, subscription_id: int, charge_date: date = 
             "freeze_id": active_freeze.id
         }
     
-    # MVP: списание из UserBalance.balance (депозит). Резерв не используется.
     daily_rate = subscription.daily_rate
     user_balance = get_or_create_user_balance(db, subscription.user_id)
-    balance_before = user_balance.balance
+    balance_before = float(user_balance.balance or 0)
+
+    reservation = db.query(SubscriptionReservation).filter(
+        SubscriptionReservation.subscription_id == subscription_id
+    ).first()
+    reserved_before = float(reservation.reserved_amount or 0) if reservation else 0.0
 
     # charge_amount = int(round(daily_rate)) — целые рубли (совместимость со старыми подписками)
     charge_amount = max(0, int(round(float(daily_rate or 0))))
 
-    if balance_before < charge_amount:
+    if charge_amount <= 0:
+        return {"success": False, "error": "daily_rate is zero"}
+
+    # Списание идёт из резерва подписки; available (balance − reserved) не трогаем отдельно.
+    if reserved_before > 0:
+        insufficient = reserved_before < charge_amount
+        reason = "daily_rate > reserved_amount (недостаточно зарезервированных средств)"
+    else:
+        insufficient = balance_before < charge_amount
         reason = "daily_rate > balance (недостаточно средств на депозите)"
+
+    if insufficient:
         is_active_before = bool(subscription.is_active)
         charge_record = DailySubscriptionCharge(
             subscription_id=subscription_id,
@@ -528,17 +548,17 @@ def process_daily_charge(db: Session, subscription_id: int, charge_date: date = 
         subscription_id=subscription_id
     )
 
-    reservation = db.query(SubscriptionReservation).filter(
-        SubscriptionReservation.subscription_id == subscription_id
-    ).first()
-    if reservation and float(reservation.reserved_amount or 0) > 0:
+    if reservation:
         reservation.reserved_amount = max(
-            0.0, float(reservation.reserved_amount) - float(charge_amount)
+            0.0, float(reservation.reserved_amount or 0) - float(charge_amount)
         )
 
-    # Получаем обновленный баланс после транзакции
     user_balance = get_or_create_user_balance(db, subscription.user_id)
-    balance_after = user_balance.balance
+    balance_after = float(user_balance.balance or 0)
+    reserved_after = (
+        float(reservation.reserved_amount or 0) if reservation else 0.0
+    )
+    available_after = get_user_available_balance(db, subscription.user_id, do_commit=False)
 
     # Создаем запись о списании (charge_amount — целые рубли)
     charge_record = DailySubscriptionCharge(
@@ -579,9 +599,13 @@ def process_daily_charge(db: Session, subscription_id: int, charge_date: date = 
     return {
         "success": True,
         "daily_rate": daily_rate,
+        "charge_amount": charge_amount,
         "balance_before": balance_before,
         "balance_after": balance_after,
-        "charge_id": charge_record.id
+        "reserved_before": reserved_before,
+        "reserved_after": reserved_after,
+        "available_after": available_after,
+        "charge_id": charge_record.id,
     }
 
 
