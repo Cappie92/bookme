@@ -40,6 +40,7 @@ from utils.balance_utils import (
     calculate_upgrade_cost,
     get_or_create_user_balance,
     withdraw_balance,
+    move_available_to_reserve,
     reserve_full_subscription_price,
     get_user_available_balance,
     add_balance_transaction_no_commit,
@@ -1386,13 +1387,9 @@ async def apply_upgrade_balance(
                 db.add(user_balance)
                 db.flush()
 
-            add_balance_transaction_no_commit(
-                db=db,
-                user_id=current_user.id,
-                amount=-final_price,
-                transaction_type=TransactionType.WITHDRAWAL,
-                description=f"Оплата подписки с баланса (snapshot {snapshot.id})",
-            )
+            total_price_full = float(snapshot.total_price)
+            total_days = max(1, duration_months_to_days(int(snapshot.duration_months)))
+            daily_rate = int(math.ceil(total_price_full / total_days)) if total_days else 0
 
             current_subscription = get_effective_subscription(
                 db, current_user.id, subscription_type, now_utc=now
@@ -1402,10 +1399,6 @@ async def apply_upgrade_balance(
                     db.flush()
             except Exception:
                 pass
-
-            total_price_full = float(snapshot.total_price)
-            total_days = max(1, duration_months_to_days(int(snapshot.duration_months)))
-            daily_rate = int(math.ceil(total_price_full / total_days)) if total_days else 0
 
             new_subscription = Subscription(
                 user_id=current_user.id,
@@ -1423,13 +1416,37 @@ async def apply_upgrade_balance(
             db.add(new_subscription)
             db.flush()
 
-            new_res = SubscriptionReservation(
-                user_id=current_user.id,
-                subscription_id=new_subscription.id,
-                reserved_amount=0.0,
-            )
-            db.add(new_res)
-            db.flush()
+            package_purchase = abs(final_price - total_price_full) < 0.01
+            if package_purchase:
+                if not move_available_to_reserve(
+                    db, new_subscription, total_price_full, do_commit=False
+                ):
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail={
+                            "message": "Недостаточно средств на балансе для резервирования подписки",
+                            "required": total_price_full,
+                            "available": float(
+                                get_user_available_balance(db, current_user.id, do_commit=False)
+                            ),
+                        },
+                    )
+            else:
+                add_balance_transaction_no_commit(
+                    db=db,
+                    user_id=current_user.id,
+                    amount=-final_price,
+                    transaction_type=TransactionType.WITHDRAWAL,
+                    description=f"Оплата подписки с баланса (snapshot {snapshot.id})",
+                )
+                db.add(
+                    SubscriptionReservation(
+                        user_id=current_user.id,
+                        subscription_id=new_subscription.id,
+                        reserved_amount=total_price_full,
+                    )
+                )
+                db.flush()
 
             if current_subscription:
                 current_subscription.status = SubscriptionStatus.EXPIRED
@@ -1438,11 +1455,12 @@ async def apply_upgrade_balance(
             snapshot.applied_subscription_id = new_subscription.id
             snapshot.applied_at = now
 
+            ub_after = get_or_create_user_balance(db, current_user.id, do_commit=False)
             result = {
                 "success": True,
                 "already_applied": False,
                 "subscription_id": new_subscription.id,
-                "balance_after": float(user_balance.balance),
+                "balance_after": float(ub_after.balance),
                 "paid_from_balance": final_price,
             }
 

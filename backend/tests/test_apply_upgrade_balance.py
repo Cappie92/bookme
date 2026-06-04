@@ -204,8 +204,12 @@ def test_apply_upgrade_balance_three_months_days_remaining(client, db):
     data = my.json()
     assert data["days_remaining"] >= period_days - 3
     assert data["days_remaining"] <= period_days + 2
-    balance_after = float(resp.json()["balance_after"])
-    balance_days = int(balance_after // max(1, daily_rate))
+    assert float(data.get("reserved_amount") or 0) == pytest.approx(total_price, abs=0.01)
+    assert float(resp.json()["balance_after"]) == pytest.approx(5000.0, abs=0.01)
+    from utils.balance_utils import get_user_available_balance
+
+    available = float(get_user_available_balance(db, user.id))
+    balance_days = int(available // max(1, daily_rate))
     assert balance_days < period_days - 10
 
 

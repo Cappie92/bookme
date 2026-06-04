@@ -528,6 +528,14 @@ def process_daily_charge(db: Session, subscription_id: int, charge_date: date = 
         subscription_id=subscription_id
     )
 
+    reservation = db.query(SubscriptionReservation).filter(
+        SubscriptionReservation.subscription_id == subscription_id
+    ).first()
+    if reservation and float(reservation.reserved_amount or 0) > 0:
+        reservation.reserved_amount = max(
+            0.0, float(reservation.reserved_amount) - float(charge_amount)
+        )
+
     # Получаем обновленный баланс после транзакции
     user_balance = get_or_create_user_balance(db, subscription.user_id)
     balance_after = user_balance.balance

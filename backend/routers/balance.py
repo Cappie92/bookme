@@ -39,7 +39,8 @@ async def get_balance(
         currency=user_balance.currency,
         balance_kopecks=user_balance.balance,  # Оставляем для обратной совместимости, но теперь это рубли
         available_balance=available,
-        reserved_total=reserved_total
+        reserved_total=reserved_total,
+        reserved_balance=reserved_total,
     )
 
 

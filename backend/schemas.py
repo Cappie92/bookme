@@ -1321,6 +1321,7 @@ class BalanceOut(BaseModel):
     balance_kopecks: float  # Оставляем для обратной совместимости, но теперь это рубли
     available_balance: Optional[float] = None
     reserved_total: Optional[float] = None
+    reserved_balance: Optional[float] = None  # alias для mobile (== reserved_total)
 
     class Config:
         from_attributes = True
