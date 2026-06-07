@@ -40,6 +40,8 @@ from models import (
     BalanceTransaction,
     Booking,
     BookingStatus,
+    DailyChargeStatus,
+    DailySubscriptionCharge,
     Income,
     BookingConfirmation,
     Master,
@@ -287,9 +289,17 @@ def collect_cleanup_plan(db: Session) -> Dict[str, Any]:
         cat_ids = [c.id for c in db.query(MasterServiceCategory).filter(MasterServiceCategory.master_id.in_(master_ids)).all()]
 
     reservation_ids: List[int] = []
+    daily_charge_ids: List[int] = []
     if sub_ids:
         reservation_ids = [
             r.id for r in db.query(SubscriptionReservation).filter(SubscriptionReservation.subscription_id.in_(sub_ids)).all()
+        ]
+        # Только charges smoke-подписок (sub_ids), не трогаем чужие subscription_id.
+        daily_charge_ids = [
+            c.id
+            for c in db.query(DailySubscriptionCharge)
+            .filter(DailySubscriptionCharge.subscription_id.in_(sub_ids))
+            .all()
         ]
 
     return {
@@ -302,6 +312,7 @@ def collect_cleanup_plan(db: Session) -> Dict[str, Any]:
         "master_services": ms_ids,
         "master_service_categories": cat_ids,
         "master_schedules": schedule_ids,
+        "daily_subscription_charges": daily_charge_ids,
         "subscriptions": sub_ids,
         "subscription_reservations": reservation_ids,
         "payments": payment_ids,
@@ -315,7 +326,9 @@ def print_cleanup_plan(plan: Dict[str, Any]) -> None:
     for key, ids in plan.items():
         n = len(ids) if isinstance(ids, list) else ids
         print(f"  {key}: {n}")
-        if isinstance(ids, list) and ids and len(ids) <= 15:
+        if key == "daily_subscription_charges" and isinstance(ids, list) and ids:
+            print(f"    ids={ids}")
+        elif isinstance(ids, list) and ids and len(ids) <= 15:
             print(f"    ids={ids}")
 
 
@@ -336,6 +349,10 @@ def cleanup_smoke_data(db: Session) -> None:
         )
     if plan["payments"]:
         db.query(Payment).filter(Payment.id.in_(plan["payments"])).delete(synchronize_session=False)
+    if plan["daily_subscription_charges"]:
+        db.query(DailySubscriptionCharge).filter(
+            DailySubscriptionCharge.id.in_(plan["daily_subscription_charges"])
+        ).delete(synchronize_session=False)
     if plan["subscription_reservations"]:
         db.query(SubscriptionReservation).filter(SubscriptionReservation.id.in_(plan["subscription_reservations"])).delete(
             synchronize_session=False
@@ -1303,6 +1320,13 @@ def print_verification_report(db: Session, seed: Dict[str, Any]) -> None:
     print("  GET /api/master/stats/extended?period=week&offset=0&compare_period=true")
     print("\n=== Mobile smoke ===")
     print("  Login master -> Stats -> week KPI/top; Finance; Subscriptions (Premium active)")
+
+    print("\n=== Daily charge smoke (after reseed) ===")
+    print("  Reseed resets balance/reserve/subscription and deletes daily_subscription_charges for smoke subs.")
+    print("  docker-compose -f docker-compose.prod.yml exec -T backend python3 scripts/smoke_daily_charge_one.py")
+    print("  Expected BEFORE charge: balance=50000 reserved=6120 available=43880")
+    print("  Expected AFTER charge:  balance=49966 reserved=6086  available=43880 (daily_rate=34)")
+    print("  If existing charge for today remains, process_daily_charge skips — re-run reseed or check cleanup plan.")
 
 
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
