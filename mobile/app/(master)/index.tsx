@@ -1,35 +1,42 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
-import { View, Text, StyleSheet, ActivityIndicator, ScrollView, Alert, RefreshControl } from 'react-native';
+import { View, Text, StyleSheet, ActivityIndicator, ScrollView, TouchableOpacity, Alert, RefreshControl } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { useScrollBottomPadding } from '@src/hooks/useScrollBottomPadding';
-import { HomeHeaderCard } from '@src/components/master/home/HomeHeaderCard';
-import { QuickActionsGrid } from '@src/components/master/home/QuickActionsGrid';
-import { TodayBookingsCard } from '@src/components/master/home/TodayBookingsCard';
-import { AttentionCard } from '@src/components/master/home/AttentionCard';
-import { PromotionCard } from '@src/components/master/home/PromotionCard';
-import { UpcomingBookingsPreview } from '@src/components/master/home/UpcomingBookingsPreview';
-import { StatsTeaserCard } from '@src/components/master/home/StatsTeaserCard';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useTabBarHeight } from '@src/contexts/TabBarHeightContext';
+import { BOTTOM_NAV_CONTENT_FALLBACK_HEIGHT } from '@src/constants/bottomNavLayout';
 import { useAuth } from '@src/auth/AuthContext';
 import { router } from 'expo-router';
 import { Card } from '@src/components/Card';
 import { SecondaryButton } from '@src/components/SecondaryButton';
+import { StatusBadge } from '@src/components/StatusBadge';
 import { AllBookingsModal } from '@src/components/dashboard/AllBookingsModal';
+import { WeeklyStatsCharts } from '@src/components/dashboard/WeeklyStatsCharts';
 import { getUserBookings, getPastBookings, Booking, getStatusLabel, getStatusColor } from '@src/services/api/bookings';
 import { getFutureBookingsPaged, getPastAppointmentsPaged } from '@src/services/api/master';
-import { fetchCurrentSubscription, Subscription } from '@src/services/api/subscriptions';
-import { getBalance, getBookingsLimit, getMasterSettings, getMasterServices, getWeeklySchedule, confirmBooking, confirmPreVisitBooking, cancelBookingConfirmation, getDashboardStats, Balance, BookingsLimit, MasterSettings, DashboardStats } from '@src/services/api/master';
+import { getPastStatusLabel, getPastStatusColor } from '@src/utils/bookingStatusDisplay';
+import { fetchCurrentSubscription, Subscription, getStatusLabel as getSubscriptionStatusLabel, getStatusColor as getSubscriptionStatusColor, getDaysRemaining } from '@src/services/api/subscriptions';
+import { getBalance, getBookingsLimit, getMasterSettings, getMasterServices, getWeeklySchedule, confirmBooking, confirmPreVisitBooking, cancelBookingConfirmation, getDashboardStats, Balance, BookingsLimit, MasterSettings, ScheduleWeek, DashboardStats } from '@src/services/api/master';
 import { refreshMasterFeaturesGlobally } from '@src/utils/masterFeaturesRefresh';
+import { formatMoney } from '@src/utils/money';
+import { canPreVisitConfirmBooking, canConfirmPostVisit, canCancelBooking, debugConfirmUI } from '@src/utils/bookingOutcome';
 import { CancelReasonSheet } from '@src/components/bookings/CancelReasonSheet';
 import { NoteSheet } from '@src/components/bookings/NoteSheet';
 import { BookingCardCompact } from '@src/components/bookings/BookingCardCompact';
+import { stripIndiePrefix } from '@src/utils/stripIndiePrefix';
+import { getPlanTitle } from '@src/utils/planTitle';
 import { logger } from '@src/utils/logger';
+import { Ionicons } from '@expo/vector-icons';
 
 interface AttentionItem {
   id: string;
   title: string;
   route: string;
+}
+
+function isFuturePending(status: string | undefined): boolean {
+  const s = String(status || '').toLowerCase();
+  return s === 'created' || s === 'awaiting_confirmation';
 }
 
 function isFutureCancelled(status: string | undefined): boolean {
@@ -39,7 +46,8 @@ function isFutureCancelled(status: string | undefined): boolean {
 
 export default function HomeScreen() {
   const { user } = useAuth();
-  const scrollViewPaddingBottom = useScrollBottomPadding(40);
+  const insets = useSafeAreaInsets();
+  const { tabBarHeight } = useTabBarHeight();
 
   // Client никогда не попадает сюда (route groups) — редирект оставлен как fallback
   useEffect(() => {
@@ -50,8 +58,6 @@ export default function HomeScreen() {
 
   // Ближайшие записи
   const [upcomingBookings, setUpcomingBookings] = useState<Booking[]>([]);
-  /** Полный список future page 1 — для «Сегодня» и AttentionCard */
-  const [allUpcomingBookings, setAllUpcomingBookings] = useState<Booking[]>([]);
   
   // Прошедшие записи
   const [pastBookings, setPastBookings] = useState<Booking[]>([]);
@@ -64,6 +70,7 @@ export default function HomeScreen() {
   
   // Требует внимания
   const [attentionItems, setAttentionItems] = useState<AttentionItem[]>([]);
+  const [attentionExpanded, setAttentionExpanded] = useState(false);
   
   // Модалка всех записей: future | past
   const [showAllBookingsModal, setShowAllBookingsModal] = useState(false);
@@ -76,6 +83,7 @@ export default function HomeScreen() {
   
   // Статистика услуг
   const [servicesStats, setServicesStats] = useState<DashboardStats | null>(null);
+  const [servicesStatsTab, setServicesStatsTab] = useState<'bookings' | 'earnings'>('bookings');
   
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -152,16 +160,15 @@ export default function HomeScreen() {
         })) as Booking[];
         // Дашборд: ровно 3, только awaiting_confirmation/confirmed/created, без cancelled
         // Сортировка СТРОГО по start_time ASC, без группировки по статусу
-        const allNonCancelled = normalized
+        const eligible = normalized
           .filter((b) => !isFutureCancelled(b.status))
-          .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime());
-        setAllUpcomingBookings(allNonCancelled);
-
-        const eligible = allNonCancelled.filter((b) => {
-          const s = String(b.status || '').toLowerCase();
-          return s === 'awaiting_confirmation' || s === 'confirmed' || s === 'created';
-        });
-        const dashboardList = eligible.slice(0, 3);
+          .filter((b) => {
+            const s = String(b.status || '').toLowerCase();
+            return s === 'awaiting_confirmation' || s === 'confirmed' || s === 'created';
+          });
+        const dashboardList = eligible
+          .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime())
+          .slice(0, 3);
         if (dashboardList.length > 0) {
           const times = dashboardList.map((x) => ({ id: x.id, status: x.status, start_time: x.start_time }));
           const mono = dashboardList.every(
@@ -182,7 +189,6 @@ export default function HomeScreen() {
     } catch (err) {
       logger.warn('Не удалось загрузить будущие записи:', err);
       setUpcomingBookings([]);
-      setAllUpcomingBookings([]);
     }
   };
 
@@ -388,6 +394,11 @@ export default function HomeScreen() {
     }
   };
 
+  // Вычисляем значения для safe-area (до раннего return)
+  const measuredTabBarHeight = tabBarHeight ?? BOTTOM_NAV_CONTENT_FALLBACK_HEIGHT;
+  const BOTTOM_PADDING = 16;
+  const scrollViewPaddingBottom = insets.bottom + measuredTabBarHeight + BOTTOM_PADDING;
+
   if (loading) {
     return (
       <SafeAreaView style={styles.safeAreaContainer} edges={['top', 'left', 'right']}>
@@ -422,56 +433,264 @@ export default function HomeScreen() {
           <RefreshControl refreshing={refreshing} onRefresh={() => loadData({ pullRefresh: true })} />
         }
       >
-        {isMaster ? (
-          <>
-            <HomeHeaderCard
-              userName={user?.full_name?.trim() || 'мастер'}
-              subscription={subscription}
-              onSubscriptionPress={() => router.push('/subscriptions')}
-            />
-            <QuickActionsGrid />
-            <TodayBookingsCard bookings={allUpcomingBookings} />
-            <AttentionCard
-              futureBookings={allUpcomingBookings}
-              pastBookings={pastBookings}
-              master={masterSettings?.master ?? null}
-              setupSources={attentionItems}
-              hasExtendedStats={subscription?.features?.has_extended_stats === true}
-              onConfirmPreVisit={handleConfirmPreVisit}
-              onConfirmPostVisit={handleConfirmPostVisit}
-            />
-            <PromotionCard masterSettings={masterSettings} />
-            <UpcomingBookingsPreview bookings={allUpcomingBookings} />
-            <StatsTeaserCard
-              stats={servicesStats}
-              hasExtendedStats={subscription?.features?.has_extended_stats === true}
-            />
-          </>
-        ) : (
-          <Card style={styles.card}>
-            <Text style={styles.cardTitle}>Будущие записи</Text>
-            {upcomingBookings.length === 0 ? (
-              <Text style={styles.emptyText}>Нет предстоящих записей</Text>
-            ) : (
-              <View style={styles.bookingsList}>
-                {upcomingBookings.map((booking) => (
+        {/* Карточка "Будущие записи" */}
+        <Card style={styles.card}>
+          <Text style={styles.cardTitle}>Будущие записи</Text>
+          {upcomingBookings.length === 0 ? (
+            <Text style={styles.emptyText}>Нет предстоящих записей</Text>
+          ) : (
+            <View style={styles.bookingsList}>
+              {upcomingBookings.map((booking) => {
+                const master = masterSettings?.master ?? null;
+                const showPreVisit = canPreVisitConfirmBooking(
+                  booking,
+                  master,
+                  new Date(),
+                  subscription?.features?.has_extended_stats === true
+                );
+                debugConfirmUI(booking, master, 'Dashboard Ближайшие');
+                return (
                   <BookingCardCompact
                     key={booking.id}
                     booking={booking}
                     statusLabel={getStatusLabel(booking.status)}
                     statusColor={getStatusColor(booking.status)}
+                    showConfirm={showPreVisit}
+                    onPressConfirm={showPreVisit ? () => handleConfirmPreVisit(booking.id) : undefined}
                     onPressCancel={() => setCancelSheetBookingId(booking.id)}
                     onNotePress={(b) => setNoteSheetBooking(b)}
                   />
-                ))}
+                );
+              })}
+            </View>
+          )}
+          <SecondaryButton
+            title="Все записи"
+            onPress={() => { setAllBookingsModalMode('future'); setShowAllBookingsModal(true); }}
+            style={styles.secondaryButton}
+          />
+        </Card>
+
+        {/* Карточка "Прошедшие записи" - только для мастеров, всегда показывать */}
+        {isMaster && (
+          <Card style={styles.card}>
+            <Text style={styles.cardTitle}>Прошедшие записи</Text>
+            {pastBookings.length === 0 ? (
+              <Text style={styles.emptyText}>Нет прошедших записей</Text>
+            ) : (
+              <View style={styles.bookingsList}>
+                {pastBookings.map((booking) => {
+                  const master = masterSettings?.master ?? null;
+                  const showPostVisit = canConfirmPostVisit(booking, master);
+                  debugConfirmUI(booking, master, 'Dashboard Прошедшие');
+                return (
+                  <BookingCardCompact
+                    key={booking.id}
+                    booking={booking}
+                    statusLabel={getPastStatusLabel(booking.status)}
+                    statusColor={getPastStatusColor(booking.status)}
+                    showConfirm={showPostVisit}
+                    onPressConfirm={() => handleConfirmPostVisit(booking.id)}
+                    onPressCancel={() => setCancelSheetBookingId(booking.id)}
+                    onNotePress={(b) => setNoteSheetBooking(b)}
+                  />
+                );
+                })}
               </View>
             )}
             <SecondaryButton
               title="Все записи"
-              onPress={() => { setAllBookingsModalMode('future'); setShowAllBookingsModal(true); }}
+              onPress={() => { setAllBookingsModalMode('past'); setShowAllBookingsModal(true); }}
               style={styles.secondaryButton}
             />
           </Card>
+        )}
+
+        {/* Карточка "Подписка" - только для мастеров */}
+        {isMaster && (balance || subscription || bookingsLimit) && (
+          <Card style={styles.card}>
+            <Text style={styles.cardTitle}>Подписка</Text>
+            <View style={styles.financeContent}>
+              {balance && (
+                <View style={styles.financeRow}>
+                  <Text style={styles.financeLabel}>Баланс</Text>
+                  <Text style={styles.financeValue}>{formatMoney(balance.available_balance ?? 0)}</Text>
+                </View>
+              )}
+              {subscription?.end_date != null && (
+                <View style={styles.financeRow}>
+                  <Text style={styles.financeLabel}>Дней осталось</Text>
+                  <View style={styles.daysRemainingCol}>
+                    <Text
+                      style={[
+                        styles.financeValue,
+                        (subscription.days_remaining ?? getDaysRemaining(subscription.end_date)) === 0 &&
+                        (subscription.daily_rate ?? 0) > 0 &&
+                        (subscription.plan_name ?? '').toLowerCase() !== 'free'
+                          ? styles.financeValueZero
+                          : null,
+                      ]}
+                    >
+                      {subscription.days_remaining != null
+                        ? subscription.days_remaining
+                        : getDaysRemaining(subscription.end_date)}
+                    </Text>
+                    {(subscription.days_remaining ?? getDaysRemaining(subscription.end_date)) === 0 &&
+                    (subscription.daily_rate ?? 0) > 0 &&
+                    (subscription.plan_name ?? '').toLowerCase() !== 'free' && (
+                      <Text style={styles.zeroDaysHint}>
+                        Пополните баланс, чтобы подписка не отключилась
+                      </Text>
+                    )}
+                  </View>
+                </View>
+              )}
+              {subscription && (
+                <View style={styles.financeRow}>
+                  <Text style={styles.financeLabel}>Подписка</Text>
+                  <View style={styles.subscriptionRow}>
+                    <Text style={styles.subscriptionName}>
+                      {getPlanTitle({
+                        plan_display_name: subscription?.plan_display_name,
+                        plan_name: subscription?.plan_name ?? undefined,
+                      }) || 'Базовый план'}
+                    </Text>
+                    <StatusBadge
+                      label={getSubscriptionStatusLabel(subscription.status)}
+                      color={getSubscriptionStatusColor(subscription.status)}
+                    />
+                  </View>
+                </View>
+              )}
+              {bookingsLimit && !bookingsLimit.is_unlimited && bookingsLimit.plan_name === 'Free' && (
+                <View style={styles.financeRow}>
+                  <Text style={styles.financeLabel}>Активные записи</Text>
+                  <Text style={styles.financeValue}>
+                    {bookingsLimit.current_bookings} / {bookingsLimit.limit}
+                  </Text>
+                </View>
+              )}
+            </View>
+            <SecondaryButton
+              title="Управление подпиской"
+              onPress={() => router.push('/subscriptions')}
+              style={styles.secondaryButton}
+            />
+          </Card>
+        )}
+
+        {/* Карточка "Требует внимания" - только для мастеров */}
+        {isMaster && (
+          <Card style={styles.card}>
+            <Text style={styles.cardTitle}>Требует внимания</Text>
+            {attentionItems.length === 0 ? (
+              <Text style={styles.emptyText}>Все в порядке</Text>
+            ) : (
+              <>
+                <View style={styles.attentionList}>
+                  {attentionItems.slice(0, 3).map((item) => (
+                    <TouchableOpacity
+                      key={item.id}
+                      style={styles.attentionItem}
+                      onPress={() => router.push(item.route as any)}
+                    >
+                      <Text style={styles.attentionText}>{item.title}</Text>
+                      <Ionicons name="chevron-forward" size={18} color="#999" style={styles.attentionChevron} />
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                {attentionItems.length > 3 && (
+                  <TouchableOpacity
+                    style={styles.expandButton}
+                    onPress={() => setAttentionExpanded(!attentionExpanded)}
+                  >
+                    <Text style={styles.expandButtonText}>
+                      {attentionExpanded ? 'Скрыть' : `Ещё ${attentionItems.length - 3}`}
+                    </Text>
+                  </TouchableOpacity>
+                )}
+                {attentionExpanded && attentionItems.length > 3 && (
+                  <View style={styles.attentionList}>
+                    {attentionItems.slice(3).map((item) => (
+                      <TouchableOpacity
+                        key={item.id}
+                        style={styles.attentionItem}
+                        onPress={() => router.push(item.route as any)}
+                      >
+                        <Text style={styles.attentionText}>{item.title}</Text>
+                        <Ionicons name="chevron-forward" size={18} color="#999" style={styles.attentionChevron} />
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                )}
+              </>
+            )}
+          </Card>
+        )}
+
+        {/* Карточка "Статистика услуг" - только для мастеров */}
+        {isMaster && servicesStats && (
+          <Card style={styles.card}>
+            <View style={styles.servicesStatsHeader}>
+              <Text style={styles.cardTitle}>Статистика услуг</Text>
+              <View style={styles.segmentedControlContainer}>
+                <TouchableOpacity
+                  style={[styles.segmentButton, servicesStatsTab === 'bookings' && styles.segmentButtonActive]}
+                  onPress={() => setServicesStatsTab('bookings')}
+                >
+                  <Text style={[styles.segmentButtonText, servicesStatsTab === 'bookings' && styles.segmentButtonTextActive]}>
+                    По записям
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.segmentButton, servicesStatsTab === 'earnings' && styles.segmentButtonActive]}
+                  onPress={() => setServicesStatsTab('earnings')}
+                >
+                  <Text style={[styles.segmentButtonText, servicesStatsTab === 'earnings' && styles.segmentButtonTextActive]}>
+                    По доходу
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+            {servicesStatsTab === 'bookings' ? (
+              servicesStats.top_services_by_bookings && servicesStats.top_services_by_bookings.length > 0 ? (
+                <View style={styles.servicesList}>
+                  {servicesStats.top_services_by_bookings.slice(0, 5).map((service, index) => (
+                    <View key={service.service_id} style={styles.serviceItem}>
+                      <View style={styles.serviceItemLeft}>
+                        <Text style={styles.serviceRank}>#{index + 1}</Text>
+                        <Text style={styles.serviceName}>{stripIndiePrefix(service.service_name)}</Text>
+                      </View>
+                      <Text style={styles.serviceValue}>{service.booking_count} записей</Text>
+                    </View>
+                  ))}
+                </View>
+              ) : (
+                <Text style={styles.emptyText}>Нет данных за период</Text>
+              )
+            ) : (
+              servicesStats.top_services_by_earnings && servicesStats.top_services_by_earnings.length > 0 ? (
+                <View style={styles.servicesList}>
+                  {servicesStats.top_services_by_earnings.slice(0, 5).map((service, index) => (
+                    <View key={service.service_id} style={styles.serviceItem}>
+                      <View style={styles.serviceItemLeft}>
+                        <Text style={styles.serviceRank}>#{index + 1}</Text>
+                        <Text style={styles.serviceName}>{stripIndiePrefix(service.service_name)}</Text>
+                      </View>
+                      <Text style={styles.serviceValue}>{formatMoney(service.total_earnings ?? 0)}</Text>
+                    </View>
+                  ))}
+                </View>
+              ) : (
+                <Text style={styles.emptyText}>Нет данных за период</Text>
+              )
+            )}
+          </Card>
+        )}
+
+        {/* Графики «Статистика за неделю» - только для мастеров */}
+        {isMaster && servicesStats?.weeks_data && servicesStats.weeks_data.length > 0 && (
+          <WeeklyStatsCharts weeksData={servicesStats.weeks_data} />
         )}
       </ScrollView>
 
