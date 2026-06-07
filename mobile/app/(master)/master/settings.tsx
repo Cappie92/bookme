@@ -178,7 +178,7 @@ export default function MasterSettingsScreen() {
             setLoggingOut(true);
             try {
               await logout();
-              router.replace('/login');
+              router.replace('/welcome');
             } catch (error) {
               console.error('Ошибка выхода:', error);
               Alert.alert('Ошибка', 'Не удалось выйти из аккаунта');

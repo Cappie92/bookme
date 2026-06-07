@@ -217,6 +217,7 @@ function AuthGate({ children, rootInstanceId }: { children: React.ReactNode; roo
     const t = target.replace(/^\//, '');
     if (pathStr === target || pathStr === t) return true;
     if (target === '/login' && pathStr.includes('login')) return true;
+    if (target === '/welcome' && pathStr.includes('welcome')) return true;
     if (target === '/client/dashboard' && (pathStr.includes('client/dashboard') || pathStr.includes('client')))
       return true;
     if (target === '/' && (pathStr === '/' || pathStr === '' || pathStr.includes('(master)'))) return true;
@@ -271,12 +272,14 @@ function AuthGate({ children, rootInstanceId }: { children: React.ReactNode; roo
         return;
       }
       if (!inPublic && !didRedirectRef.current) {
-        if (!pathStr.includes('login')) {
+        const onWelcomeScreen = first === 'welcome' || pathStr.includes('welcome');
+        const onLoginScreenUnauth = first === 'login' || pathStr.includes('login');
+        if (!onWelcomeScreen && !onLoginScreenUnauth) {
           didRedirectRef.current = true;
-          authTrace('[AuthGate] redirect → /login (not authenticated)');
-          logger.debug('auth', '[AuthGate] redirect → /login (not authenticated)');
+          authTrace('[AuthGate] redirect → /welcome (not authenticated)');
+          logger.debug('auth', '[AuthGate] redirect → /welcome (not authenticated)');
           try {
-            router.replace('/login');
+            router.replace('/welcome');
           } catch (e) {
             logger.debug('auth', '[AuthGate] router.replace error', e);
           }
@@ -360,7 +363,7 @@ function AuthGate({ children, rootInstanceId }: { children: React.ReactNode; roo
     didRedirectRef.current = true;
     setReadyWithReason(true, 'handleLogout');
     try {
-      router.replace('/login');
+      router.replace('/welcome');
     } catch {}
   };
 
@@ -371,7 +374,7 @@ function AuthGate({ children, rootInstanceId }: { children: React.ReactNode; roo
     didRedirectRef.current = true;
     setReadyWithReason(true, 'handleHardReset');
     try {
-      router.replace('/login');
+      router.replace('/welcome');
     } catch {}
   };
 
@@ -405,6 +408,7 @@ export default function RootLayout() {
         <TabBarHeightProvider>
           <AuthGate rootInstanceId={rootInstanceIdRef.current}>
             <Stack screenOptions={{ headerShown: false }}>
+              <Stack.Screen name="welcome" />
               <Stack.Screen name="login" />
               <Stack.Screen name="(master)" />
               <Stack.Screen name="(client)" />

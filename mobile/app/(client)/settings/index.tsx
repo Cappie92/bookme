@@ -54,7 +54,7 @@ export default function SettingsScreen() {
     if (user) return;
     if (didRedirectRef.current) return;
     didRedirectRef.current = true;
-    router.replace('/login');
+    router.replace('/welcome');
   }, [isLoading, user]);
 
   useEffect(() => {
@@ -172,7 +172,7 @@ export default function SettingsScreen() {
             setLoggingOut(true);
             try {
               await logout();
-              router.replace('/login');
+              router.replace('/welcome');
             } catch (error) {
               console.error('Ошибка выхода:', error);
               Alert.alert('Ошибка', 'Не удалось выйти из аккаунта');
@@ -303,7 +303,7 @@ export default function SettingsScreen() {
               await deleteAccount({ password: deletePassword });
               Alert.alert('Успешно', 'Аккаунт удален');
               await logout();
-              router.replace('/login');
+              router.replace('/welcome');
             } catch (error: any) {
               console.error('Ошибка удаления аккаунта:', error);
               const errorMessage = error.response?.data?.detail || error.message || 'Не удалось удалить аккаунт. Проверьте пароль.';

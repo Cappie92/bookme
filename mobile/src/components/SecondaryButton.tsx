@@ -9,6 +9,7 @@ interface SecondaryButtonProps {
   style?: ViewStyle;
   textStyle?: TextStyle;
   icon?: ReactNode;
+  testID?: string;
 }
 
 export function SecondaryButton({
@@ -19,9 +20,11 @@ export function SecondaryButton({
   style,
   textStyle,
   icon,
+  testID,
 }: SecondaryButtonProps) {
   return (
     <TouchableOpacity
+      testID={testID}
       style={[
         styles.button,
         (disabled || loading) && styles.buttonDisabled,

@@ -9,6 +9,15 @@ appId: host.exp.Exponent
 - waitForAnimationToEnd
 - waitForAnimationToEnd
 
+# Стартовый экран welcome: переход к форме входа
+- tapOn:
+    id: "welcome-login-button"
+    optional: true
+- tapOn:
+    text: "Войти"
+    optional: true
+- waitForAnimationToEnd
+
 # Тапаем на поле ввода телефона (используем testID для надежности)
 - tapOn:
     id: "phone-input"

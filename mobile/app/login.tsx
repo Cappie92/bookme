@@ -338,6 +338,15 @@ export default function LoginScreen() {
       >
             <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
               <View style={styles.container}>
+        <TouchableOpacity
+          style={styles.backToWelcome}
+          onPress={() => router.push('/welcome')}
+          accessibilityRole="button"
+          accessibilityLabel="На главную"
+        >
+          <Ionicons name="chevron-back" size={18} color="#4CAF50" />
+          <Text style={styles.backToWelcomeText}>На главную</Text>
+        </TouchableOpacity>
         <View style={styles.logoContainer}>
           <Image
             source={require('../assets/dedato_trnsp.png')}
@@ -716,6 +725,19 @@ const styles = StyleSheet.create({
     flex: 1,
     padding: 20,
     paddingTop: 60,
+  },
+  backToWelcome: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    marginBottom: 4,
+    marginTop: -36,
+  },
+  backToWelcomeText: {
+    fontSize: 15,
+    color: '#4CAF50',
+    fontWeight: '500',
+    marginLeft: 2,
   },
   logoContainer: {
     alignItems: 'center',
