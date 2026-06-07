@@ -16,6 +16,102 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+def catch_up_missed_daily_charges(
+    up_to_date: date = None,
+    db: Optional[Session] = None,
+) -> dict:
+    """
+    Доначислить пропущенные daily charges: от последнего SUCCESS (или start_date)
+    до up_to_date включительно. Идемпотентно — уже списанные даты пропускаются.
+    """
+    if up_to_date is None:
+        up_to_date = date.today()
+
+    own_db = db is None
+    if own_db:
+        db = next(get_db())
+
+    results = {
+        "up_to_date": up_to_date.isoformat(),
+        "subscriptions_processed": 0,
+        "charges_applied": 0,
+        "charges_skipped": 0,
+        "errors": [],
+    }
+
+    try:
+        subscriptions = (
+            db.query(Subscription)
+            .filter(Subscription.is_active == True)
+            .all()
+        )
+        results["subscriptions_processed"] = len(subscriptions)
+
+        for subscription in subscriptions:
+            if not subscription.start_date or not subscription.end_date:
+                continue
+
+            start_d = subscription.start_date.date()
+            end_exclusive = subscription.end_date.date()
+
+            last_success = (
+                db.query(DailySubscriptionCharge)
+                .filter(
+                    DailySubscriptionCharge.subscription_id == subscription.id,
+                    DailySubscriptionCharge.status == DailyChargeStatus.SUCCESS,
+                )
+                .order_by(DailySubscriptionCharge.charge_date.desc())
+                .first()
+            )
+
+            cur = (last_success.charge_date + timedelta(days=1)) if last_success else start_d
+
+            while cur <= up_to_date:
+                if cur < start_d:
+                    cur += timedelta(days=1)
+                    continue
+                if cur >= end_exclusive:
+                    break
+
+                try:
+                    result = process_daily_charge(db, subscription.id, cur)
+                except Exception as e:
+                    results["errors"].append(
+                        {
+                            "subscription_id": subscription.id,
+                            "charge_date": cur.isoformat(),
+                            "error": str(e),
+                        }
+                    )
+                    break
+
+                if result.get("success"):
+                    if result.get("skipped"):
+                        results["charges_skipped"] += 1
+                    else:
+                        results["charges_applied"] += 1
+                else:
+                    err = result.get("error") or "unknown"
+                    if err == "Списание за эту дату уже произведено":
+                        results["charges_skipped"] += 1
+                    else:
+                        results["errors"].append(
+                            {
+                                "subscription_id": subscription.id,
+                                "charge_date": cur.isoformat(),
+                                "error": err,
+                            }
+                        )
+                        break
+
+                cur += timedelta(days=1)
+
+        return results
+    finally:
+        if own_db:
+            db.close()
+
+
 def get_active_subscriptions_for_date(db: Session, charge_date: date) -> List[Subscription]:
     """Получить все активные подписки для указанной даты"""
     # В БД даты подписок хранятся как DateTime (UTC). Приводим charge_date к UTC boundary.
@@ -267,18 +363,19 @@ async def run_daily_charges_task():
     
     while True:
         try:
-            # Ждем до следующего дня в 00:01
+            # Catch-up при старте и после каждого цикла: пропущенные дни + сегодня (идемпотентно).
+            catch_result = catch_up_missed_daily_charges()
+            logger.info("Catch-up ежедневных списаний: %s", catch_result)
+
+            result = process_all_daily_charges()
+            logger.info("Ежедневные списания выполнены: %s", result)
+
             now = datetime.now()
             next_run = now.replace(hour=0, minute=1, second=0, microsecond=0) + timedelta(days=1)
-            
-            wait_seconds = (next_run - now).total_seconds()
-            logger.info(f"Следующий запуск ежедневных списаний в {next_run}")
-            
+            wait_seconds = max(1.0, (next_run - now).total_seconds())
+            logger.info("Следующий запуск ежедневных списаний в %s", next_run)
+
             await asyncio.sleep(wait_seconds)
-            
-            # Выполняем списания
-            result = process_all_daily_charges()
-            logger.info(f"Ежедневные списания выполнены: {result}")
             
         except asyncio.CancelledError:
             logger.info("Задача ежедневных списаний остановлена")

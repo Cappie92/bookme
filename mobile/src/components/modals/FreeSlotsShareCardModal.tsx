@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
   Alert,
   Share,
+  useWindowDimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -44,10 +45,6 @@ import {
   showShareError,
 } from '@src/utils/freeSlotsShareImage';
 
-const PREVIEW_SCALE = 0.32;
-const PREVIEW_W = FREE_SLOTS_CARD_WIDTH * PREVIEW_SCALE;
-const PREVIEW_H = FREE_SLOTS_CARD_HEIGHT * PREVIEW_SCALE;
-
 type PeriodKey = 'today' | 'tomorrow' | 'week';
 
 interface FreeSlotsShareCardModalProps {
@@ -65,6 +62,8 @@ export function FreeSlotsShareCardModal({
   bookingUrl,
   masterNameFallback = '',
 }: FreeSlotsShareCardModalProps) {
+  const { width: screenWidth } = useWindowDimensions();
+  const previewWidth = Math.max(240, Math.min(screenWidth - 56, 360));
   const cardCaptureRef = useRef<View>(null);
   const [loading, setLoading] = useState(false);
   const [imageBusy, setImageBusy] = useState(false);
@@ -302,29 +301,13 @@ export function FreeSlotsShareCardModal({
                 })}
               </ScrollView>
 
-              <Text style={styles.previewCaption}>Превью (масштаб уменьшен)</Text>
+              <Text style={styles.previewCaption}>Превью</Text>
               <View style={styles.previewFrame}>
-                <View style={[styles.previewClip, { width: PREVIEW_W, height: PREVIEW_H }]}>
-                  <View
-                    style={[
-                      styles.previewScaledInner,
-                      {
-                        width: FREE_SLOTS_CARD_WIDTH,
-                        height: FREE_SLOTS_CARD_HEIGHT,
-                        marginLeft: -(FREE_SLOTS_CARD_WIDTH - PREVIEW_W) / 2,
-                        marginTop: -(FREE_SLOTS_CARD_HEIGHT - PREVIEW_H) / 2,
-                        transform: [{ scale: PREVIEW_SCALE }],
-                      },
-                    ]}
-                  >
-                    <FreeSlotsShareCardImage {...cardImageProps} />
-                  </View>
-                </View>
-              </View>
-
-              {/* Полноразмерная 9:16 карточка для ViewShot (как web offscreen portal) */}
-              <View style={styles.offscreenCapture} pointerEvents="none">
-                <FreeSlotsShareCardImage ref={cardCaptureRef} {...cardImageProps} />
+                <FreeSlotsShareCardImage
+                  layoutMode="preview"
+                  previewWidth={previewWidth}
+                  {...cardImageProps}
+                />
               </View>
 
               {imageBusy ? (
@@ -398,6 +381,17 @@ export function FreeSlotsShareCardModal({
               <Text style={styles.actionHelper}>Для истории выберите Instagram → История</Text>
             </ScrollView>
           )}
+
+          {/* Capture-слой отдельно от preview: full 1080×1920 offscreen для ViewShot */}
+          {!loading && !error ? (
+            <View style={styles.offscreenCapture} pointerEvents="none" accessibilityElementsHidden>
+              <FreeSlotsShareCardImage
+                ref={cardCaptureRef}
+                layoutMode="capture"
+                {...cardImageProps}
+              />
+            </View>
+          ) : null}
         </SafeAreaView>
       </View>
     </Modal>
@@ -479,20 +473,17 @@ const styles = StyleSheet.create({
     borderColor: '#e5e7eb',
     backgroundColor: '#f3f4f6',
     paddingVertical: 8,
-  },
-  previewClip: {
+    paddingHorizontal: 8,
     overflow: 'hidden',
-  },
-  previewScaledInner: {
-    transformOrigin: 'top left',
   },
   offscreenCapture: {
     position: 'absolute',
-    left: -20000,
+    left: -FREE_SLOTS_CARD_WIDTH - 100,
     top: 0,
     width: FREE_SLOTS_CARD_WIDTH,
     height: FREE_SLOTS_CARD_HEIGHT,
     opacity: 1,
+    zIndex: -1,
   },
   imageBusyRow: {
     flexDirection: 'row',

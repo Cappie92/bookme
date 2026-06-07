@@ -1,5 +1,5 @@
-import React, { forwardRef } from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import React, { forwardRef, useMemo } from 'react';
+import { View, Text, StyleSheet, type ViewStyle } from 'react-native';
 import { Image } from 'expo-image';
 import { env } from '@src/config/env';
 import { resolveBackendUploadUrl } from '@src/utils/resolveBackendUploadUrl';
@@ -8,65 +8,205 @@ import { resolveBackendUploadUrl } from '@src/utils/resolveBackendUploadUrl';
 export const FREE_SLOTS_CARD_WIDTH = 1080;
 export const FREE_SLOTS_CARD_HEIGHT = 1920;
 
+export type FreeSlotsCardLayoutMode = 'capture' | 'preview';
+
 export type FreeSlotsShareCardImageProps = {
   masterName: string;
   dateLabel: string;
   hourLabels: string[];
   shortLink: string;
   avatarUrl?: string | null;
+  layoutMode?: FreeSlotsCardLayoutMode;
+  /** Ширина preview (только layoutMode=preview). */
+  previewWidth?: number;
 };
+
+function scaleValue(value: number, scale: number): number {
+  return Math.round(value * scale);
+}
+
+function buildScaledStyles(scale: number) {
+  const s = (n: number) => scaleValue(n, scale);
+  return StyleSheet.create({
+    card: {
+      backgroundColor: '#f9f7f6',
+      padding: s(56),
+      flexDirection: 'column',
+    },
+    sectionLabel: {
+      fontSize: s(28),
+      color: '#6b7280',
+      fontWeight: '500',
+      marginBottom: s(24),
+    },
+    headerRow: {
+      flexDirection: 'row',
+      gap: s(32),
+      alignItems: 'flex-start',
+    },
+    avatarBox: {
+      width: s(200),
+      height: s(200),
+      borderRadius: s(16),
+      overflow: 'hidden',
+      backgroundColor: '#e5e7eb',
+      borderWidth: 1,
+      borderColor: '#e5e7eb',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    avatarImage: {
+      width: '100%',
+      height: '100%',
+    },
+    avatarPlaceholder: {
+      fontSize: s(22),
+      color: '#9ca3af',
+      textAlign: 'center',
+      paddingHorizontal: s(16),
+    },
+    nameCol: {
+      flex: 1,
+      paddingTop: s(8),
+      minWidth: 0,
+    },
+    masterName: {
+      fontSize: s(56),
+      fontWeight: '700',
+      color: '#111827',
+      lineHeight: s(64),
+    },
+    greenLine: {
+      marginTop: s(48),
+      height: Math.max(2, s(6)),
+      width: s(112),
+      backgroundColor: '#4CAF50',
+      borderRadius: 999,
+    },
+    dateLabel: {
+      marginTop: s(56),
+      fontSize: s(44),
+      fontWeight: '600',
+      color: '#1f2937',
+      lineHeight: s(52),
+      textTransform: 'capitalize',
+    },
+    slotsCol: {
+      marginTop: s(56),
+      gap: s(20),
+    },
+    slotPill: {
+      backgroundColor: '#ffffff',
+      borderWidth: Math.max(1, s(2)),
+      borderColor: '#e5e7eb',
+      borderRadius: s(16),
+      paddingVertical: s(24),
+      paddingHorizontal: s(32),
+      alignItems: 'center',
+      shadowColor: '#000',
+      shadowOpacity: 0.06,
+      shadowRadius: s(4),
+      shadowOffset: { width: 0, height: s(2) },
+      elevation: 2,
+    },
+    slotPillText: {
+      fontSize: s(52),
+      fontWeight: '600',
+      color: '#111827',
+    },
+    footer: {
+      marginTop: 'auto',
+      paddingTop: s(64),
+    },
+    footerRow: {
+      flexDirection: 'row',
+      alignItems: 'flex-end',
+      justifyContent: 'space-between',
+      gap: s(40),
+    },
+    footerText: {
+      flex: 1,
+      fontSize: s(32),
+      color: '#6b7280',
+      lineHeight: s(44),
+    },
+    footerLink: {
+      color: '#2f7d32',
+      fontWeight: '600',
+    },
+    logo: {
+      width: s(200),
+      height: s(84),
+    },
+  });
+}
 
 export const FreeSlotsShareCardImage = forwardRef<View, FreeSlotsShareCardImageProps>(
   function FreeSlotsShareCardImage(
-    { masterName, dateLabel, hourLabels, shortLink, avatarUrl },
+    {
+      masterName,
+      dateLabel,
+      hourLabels,
+      shortLink,
+      avatarUrl,
+      layoutMode = 'capture',
+      previewWidth = 320,
+    },
     ref
   ) {
     const photoUri = avatarUrl ? resolveBackendUploadUrl(avatarUrl) : null;
     const webBase = (env.WEB_URL || 'https://dedato.ru').replace(/\/+$/, '');
     const logoUri = `${webBase}/dedato-logo-card.png`;
 
-    return (
-      <View ref={ref} collapsable={false} style={styles.card}>
-        <Text style={styles.sectionLabel}>Свободные часы</Text>
+    const scale =
+      layoutMode === 'capture' ? 1 : Math.max(0.2, previewWidth / FREE_SLOTS_CARD_WIDTH);
+    const scaledStyles = useMemo(() => buildScaledStyles(scale), [scale]);
 
-        <View style={styles.headerRow}>
-          <View style={styles.avatarBox}>
+    const cardSizeStyle: ViewStyle =
+      layoutMode === 'capture'
+        ? { width: FREE_SLOTS_CARD_WIDTH, height: FREE_SLOTS_CARD_HEIGHT }
+        : { width: previewWidth, aspectRatio: 9 / 16 };
+
+    return (
+      <View ref={ref} collapsable={false} style={[scaledStyles.card, cardSizeStyle]}>
+        <Text style={scaledStyles.sectionLabel}>Свободные часы</Text>
+
+        <View style={scaledStyles.headerRow}>
+          <View style={scaledStyles.avatarBox}>
             {photoUri ? (
-              <Image source={{ uri: photoUri }} style={styles.avatarImage} contentFit="cover" />
+              <Image source={{ uri: photoUri }} style={scaledStyles.avatarImage} contentFit="cover" />
             ) : (
-              <Text style={styles.avatarPlaceholder}>Нет фото</Text>
+              <Text style={scaledStyles.avatarPlaceholder}>Нет фото</Text>
             )}
           </View>
-          <View style={styles.nameCol}>
-            <Text style={styles.masterName} numberOfLines={3}>
+          <View style={scaledStyles.nameCol}>
+            <Text style={scaledStyles.masterName} numberOfLines={3}>
               {masterName}
             </Text>
           </View>
         </View>
 
-        <View style={styles.greenLine} />
+        <View style={scaledStyles.greenLine} />
 
-        {dateLabel ? (
-          <Text style={styles.dateLabel}>{dateLabel}</Text>
-        ) : null}
+        {dateLabel ? <Text style={scaledStyles.dateLabel}>{dateLabel}</Text> : null}
 
-        <View style={styles.slotsCol}>
+        <View style={scaledStyles.slotsCol}>
           {hourLabels.map((label, i) => (
-            <View key={`${label}-${i}`} style={styles.slotPill}>
-              <Text style={styles.slotPillText}>{label}</Text>
+            <View key={`${label}-${i}`} style={scaledStyles.slotPill}>
+              <Text style={scaledStyles.slotPillText}>{label}</Text>
             </View>
           ))}
         </View>
 
-        <View style={styles.footer}>
-          <View style={styles.footerRow}>
-            <Text style={styles.footerText}>
+        <View style={scaledStyles.footer}>
+          <View style={scaledStyles.footerRow}>
+            <Text style={scaledStyles.footerText}>
               Запись:{' '}
-              <Text style={styles.footerLink}>{shortLink || 'dedato.ru/m/…'}</Text>
+              <Text style={scaledStyles.footerLink}>{shortLink || 'dedato.ru/m/…'}</Text>
             </Text>
             <Image
               source={{ uri: logoUri }}
-              style={styles.logo}
+              style={scaledStyles.logo}
               contentFit="contain"
               accessibilityLabel="DeDato"
             />
@@ -76,118 +216,3 @@ export const FreeSlotsShareCardImage = forwardRef<View, FreeSlotsShareCardImageP
     );
   }
 );
-
-const styles = StyleSheet.create({
-  card: {
-    width: FREE_SLOTS_CARD_WIDTH,
-    height: FREE_SLOTS_CARD_HEIGHT,
-    backgroundColor: '#f9f7f6',
-    padding: 56,
-    flexDirection: 'column',
-  },
-  sectionLabel: {
-    fontSize: 28,
-    color: '#6b7280',
-    fontWeight: '500',
-    marginBottom: 24,
-  },
-  headerRow: {
-    flexDirection: 'row',
-    gap: 32,
-    alignItems: 'flex-start',
-  },
-  avatarBox: {
-    width: 200,
-    height: 200,
-    borderRadius: 16,
-    overflow: 'hidden',
-    backgroundColor: '#e5e7eb',
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarImage: {
-    width: '100%',
-    height: '100%',
-  },
-  avatarPlaceholder: {
-    fontSize: 22,
-    color: '#9ca3af',
-    textAlign: 'center',
-    paddingHorizontal: 16,
-  },
-  nameCol: {
-    flex: 1,
-    paddingTop: 8,
-    minWidth: 0,
-  },
-  masterName: {
-    fontSize: 56,
-    fontWeight: '700',
-    color: '#111827',
-    lineHeight: 64,
-  },
-  greenLine: {
-    marginTop: 48,
-    height: 6,
-    width: 112,
-    backgroundColor: '#4CAF50',
-    borderRadius: 999,
-  },
-  dateLabel: {
-    marginTop: 56,
-    fontSize: 44,
-    fontWeight: '600',
-    color: '#1f2937',
-    lineHeight: 52,
-    textTransform: 'capitalize',
-  },
-  slotsCol: {
-    marginTop: 56,
-    gap: 20,
-  },
-  slotPill: {
-    backgroundColor: '#ffffff',
-    borderWidth: 2,
-    borderColor: '#e5e7eb',
-    borderRadius: 16,
-    paddingVertical: 24,
-    paddingHorizontal: 32,
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOpacity: 0.06,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 2,
-  },
-  slotPillText: {
-    fontSize: 52,
-    fontWeight: '600',
-    color: '#111827',
-  },
-  footer: {
-    marginTop: 'auto',
-    paddingTop: 64,
-  },
-  footerRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    justifyContent: 'space-between',
-    gap: 40,
-  },
-  footerText: {
-    flex: 1,
-    fontSize: 32,
-    color: '#6b7280',
-    lineHeight: 44,
-  },
-  footerLink: {
-    color: '#2f7d32',
-    fontWeight: '600',
-  },
-  logo: {
-    width: 200,
-    height: 84,
-  },
-});

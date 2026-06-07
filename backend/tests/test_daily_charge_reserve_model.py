@@ -2,8 +2,6 @@
 from datetime import datetime, timedelta
 
 from auth import get_password_hash
-from datetime import timedelta
-
 from models import (
     Master,
     Subscription,
@@ -14,6 +12,9 @@ from models import (
     UserBalance,
     UserRole,
 )
+from datetime import timedelta
+
+from services.daily_charges import catch_up_missed_daily_charges
 from utils.balance_utils import (
     get_user_available_balance,
     get_user_reserved_total,
@@ -102,6 +103,22 @@ def test_daily_charge_twice_decreases_reserved_by_68(db):
     assert result2["balance_after"] == 49932.0
     assert result2["reserved_after"] == 6052.0
     assert result2["available_after"] == 43880.0
+
+    db.expire_all()
+    ub = db.query(UserBalance).filter(UserBalance.user_id == user.id).first()
+    assert float(ub.balance) == 49932.0
+    assert get_user_reserved_total(db, user.id) == 6052.0
+    assert get_user_available_balance(db, user.id) == 43880.0
+
+
+def test_catch_up_missed_daily_charges_applies_two_days(db):
+    """Без SUCCESS charges catch-up списывает 2 дня подряд."""
+    user, sub = _master_with_reserve(db)
+    day0 = datetime.utcnow().date()
+    day1 = day0 + timedelta(days=1)
+
+    r = catch_up_missed_daily_charges(up_to_date=day1, db=db)
+    assert r["charges_applied"] >= 2, r
 
     db.expire_all()
     ub = db.query(UserBalance).filter(UserBalance.user_id == user.id).first()
