@@ -15,7 +15,5 @@ declare module '@env' {
   export const DEBUG_MOBILE_ERRORS: string | undefined;
   /** Dev: ring-buffer auth lifecycle trace (storage, bootstrap, /me, destructive ops, AuthGate) — копируется из DBG. */
   export const DEBUG_AUTH_TRACE: string | undefined;
-  /** Release smoke: показать MASTER_HOME_V2 marker на главной (1/true/yes). */
-  export const EXPO_PUBLIC_SHOW_HOME_BUILD_MARKER: string | undefined;
 }
 
