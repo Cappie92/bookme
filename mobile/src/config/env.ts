@@ -13,6 +13,7 @@ import {
   DEBUG_LOGS,
   DEBUG_MOBILE_ERRORS,
   DEBUG_AUTH_TRACE,
+  EXPO_PUBLIC_SHOW_HOME_BUILD_MARKER,
 } from '@env';
 import { buildMobileEnvUrls } from './resolveMobileEnv';
 
@@ -81,6 +82,7 @@ export const env = {
   DEBUG_LOGS: parseBool(DEBUG_LOGS),
   DEBUG_MOBILE_ERRORS: parseBool(DEBUG_MOBILE_ERRORS),
   DEBUG_AUTH_TRACE: parseBool(DEBUG_AUTH_TRACE),
+  SHOW_HOME_BUILD_MARKER: parseBool(EXPO_PUBLIC_SHOW_HOME_BUILD_MARKER),
   SHOW_DBG_FLOATING_PANEL: isDbgFloatingPanelEnabled(),
 } as const;
 

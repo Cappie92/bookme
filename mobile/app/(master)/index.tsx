@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import { View, Text, StyleSheet, ActivityIndicator, ScrollView, Alert, RefreshControl } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
@@ -25,6 +25,12 @@ import { CancelReasonSheet } from '@src/components/bookings/CancelReasonSheet';
 import { NoteSheet } from '@src/components/bookings/NoteSheet';
 import { BookingCardCompact } from '@src/components/bookings/BookingCardCompact';
 import { logger } from '@src/utils/logger';
+import { env } from '@src/config/env';
+import { isMasterAppRole, normalizeAppRole } from '@src/utils/masterRole';
+import {
+  MASTER_HOME_BUILD_ID,
+  shouldShowMasterHomeBuildMarker,
+} from '@src/constants/masterHomeBuild';
 
 interface AttentionItem {
   id: string;
@@ -83,6 +89,24 @@ export default function HomeScreen() {
   /** Короткая подсказка после pre-visit confirm (без Alert и без полного loadData) */
   const [inlineSuccess, setInlineSuccess] = useState<string | null>(null);
 
+  const userRole = normalizeAppRole(user?.role);
+  const isMasterUser = isMasterAppRole(user?.role);
+  const homeDiagLoggedRef = useRef(false);
+
+  useEffect(() => {
+    if (!env.DEBUG_DASHBOARD && !shouldShowMasterHomeBuildMarker()) return;
+    if (homeDiagLoggedRef.current) return;
+    homeDiagLoggedRef.current = true;
+    console.log('[MASTER HOME V2] render', {
+      buildId: MASTER_HOME_BUILD_ID,
+      userId: user?.id,
+      role: user?.role,
+      userRole,
+      isMasterUser,
+      loading,
+    });
+  }, [user?.id, user?.role, userRole, isMasterUser, loading]);
+
   useFocusEffect(
     useCallback(() => {
       if (!user) return;
@@ -106,8 +130,8 @@ export default function HomeScreen() {
         return;
       }
 
-      const userRole = typeof user?.role === 'string' ? user.role.toLowerCase() : String(user?.role || '').toLowerCase();
-      const isMaster = userRole === 'master' || userRole === 'indie';
+      const loadRole = normalizeAppRole(user?.role);
+      const isMaster = isMasterAppRole(user?.role);
 
       if (isMaster) {
         let settings: MasterSettings | null = null;
@@ -117,16 +141,16 @@ export default function HomeScreen() {
           logger.error('Failed to load master settings', err);
         }
         await Promise.all([
-          loadUpcomingBookings(userRole),
-          loadPastBookings(userRole, settings),
+          loadUpcomingBookings(loadRole),
+          loadPastBookings(loadRole, settings),
           loadFinanceData(),
           loadAttentionItems(settings),
           loadServicesStats(),
         ]);
         refreshMasterFeaturesGlobally(user?.id).catch(() => {});
       } else {
-        await loadUpcomingBookings(userRole);
-        await loadPastBookings(userRole);
+        await loadUpcomingBookings(loadRole);
+        await loadPastBookings(loadRole);
       }
     } catch (err: any) {
       setError(err.message || 'Ошибка загрузки данных');
@@ -342,14 +366,14 @@ export default function HomeScreen() {
   /** Обновление списков/графиков без полного экрана «Загрузка…» и без лишних блоков */
   const refreshMasterListsAndCharts = async () => {
     if (!user) return;
-    const userRole = typeof user?.role === 'string' ? user.role.toLowerCase() : String(user?.role || '').toLowerCase();
-    if (userRole !== 'master' && userRole !== 'indie') return;
+    const refreshRole = normalizeAppRole(user?.role);
+    if (!isMasterAppRole(user?.role)) return;
     try {
       const settings = await getMasterSettings();
       setMasterSettings(settings);
       await Promise.all([
-        loadUpcomingBookings(userRole),
-        loadPastBookings(userRole, settings),
+        loadUpcomingBookings(refreshRole),
+        loadPastBookings(refreshRole, settings),
         loadServicesStats(),
       ]);
       const limit = await getBookingsLimit().catch(() => null);
@@ -400,9 +424,6 @@ export default function HomeScreen() {
     );
   }
 
-  const userRole = typeof user?.role === 'string' ? user.role.toLowerCase() : String(user?.role || '').toLowerCase();
-  const isMaster = userRole === 'master' || userRole === 'indie';
-
   return (
     <SafeAreaView style={styles.safeAreaContainer} edges={['top', 'left', 'right']}>
       <StatusBar style="auto" />
@@ -422,7 +443,14 @@ export default function HomeScreen() {
           <RefreshControl refreshing={refreshing} onRefresh={() => loadData({ pullRefresh: true })} />
         }
       >
-        {isMaster ? (
+        {shouldShowMasterHomeBuildMarker() ? (
+          <Text testID="master-home-v2-marker" style={styles.homeBuildMarker}>
+            MASTER_HOME_V2 {MASTER_HOME_BUILD_ID}
+            {isMasterUser ? '' : ` · role=${userRole || '?'}`}
+          </Text>
+        ) : null}
+
+        {isMasterUser ? (
           <>
             <HomeHeaderCard
               userName={user?.full_name?.trim() || 'мастер'}
@@ -476,7 +504,7 @@ export default function HomeScreen() {
       </ScrollView>
 
       {/* Модальное окно "Все записи" — только для master, чтобы client никогда не монтировал и не дергал getMasterSettings */}
-      {isMaster && (
+      {isMasterUser && (
         <AllBookingsModal
           visible={showAllBookingsModal}
           onClose={() => setShowAllBookingsModal(false)}
@@ -524,6 +552,11 @@ const styles = StyleSheet.create({
   scrollContent: {
     padding: 16,
     paddingTop: 16, // Небольшой отступ сверху для контента (SafeAreaView уже дал отступ для status bar)
+  },
+  homeBuildMarker: {
+    fontSize: 11,
+    color: '#9CA3AF',
+    marginBottom: 8,
   },
   centerContainer: {
     flex: 1,
