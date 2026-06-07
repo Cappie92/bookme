@@ -28,6 +28,10 @@ import {
 } from '@src/services/api/subscriptions';
 import { initSubscriptionPayment } from '@src/services/api/payments';
 import { getPlanTitle } from '@src/utils/planTitle';
+import {
+  getPlanPeriodSavings,
+  type SubscriptionDurationMonths,
+} from '@src/utils/subscriptionPeriodSavings';
 import { env } from '@src/config/env';
 import {
   sanitizePaymentRedirectUrl,
@@ -153,6 +157,8 @@ function StepPlan({
   );
 }
 
+const BRAND_GREEN = '#4CAF50';
+
 function StepPeriod({
   selectedPlan,
   currentPlanLabel,
@@ -172,6 +178,11 @@ function StepPeriod({
   onChangeUpgradeType: (nextType: UpgradeType) => void;
   isDowngrade: boolean;
 }) {
+  const selectedSavings =
+    selectedPlan && selectedDuration
+      ? getPlanPeriodSavings(selectedPlan, selectedDuration)
+      : null;
+
   return (
     <View>
       <Text style={styles.sectionLabel}>Период</Text>
@@ -188,6 +199,8 @@ function StepPeriod({
       <View style={styles.segmented}>
         {DURATIONS.map((m) => {
           const active = selectedDuration === m;
+          const periodSavings =
+            selectedPlan != null ? getPlanPeriodSavings(selectedPlan, m as SubscriptionDurationMonths) : null;
           return (
             <Pressable
               key={m}
@@ -195,11 +208,29 @@ function StepPeriod({
               style={[styles.segment, active && styles.segmentActive]}
             >
               <Text style={[styles.segmentText, active && styles.segmentTextActive]}>{m} мес</Text>
+              {periodSavings ? (
+                <Text style={[styles.segmentSavings, active && styles.segmentSavingsActive]}>
+                  −{periodSavings.savingsPercent}%
+                </Text>
+              ) : null}
             </Pressable>
           );
         })}
       </View>
-      <Text style={styles.hint}>Цена зависит от периода</Text>
+
+      {selectedDuration && selectedDuration > 1 ? (
+        selectedSavings ? (
+          <View style={styles.savingsBanner}>
+            <Text style={styles.savingsBannerText}>
+              Выгода за период: {formatMoney(selectedSavings.savingsRub)} · {selectedSavings.savingsPercent}%
+            </Text>
+          </View>
+        ) : (
+          <Text style={styles.hint}>Без скидки</Text>
+        )
+      ) : (
+        <Text style={styles.hint}>Цена зависит от периода</Text>
+      )}
 
       {isDowngrade ? (
         <Text style={styles.breakdownHint}>
@@ -301,7 +332,14 @@ function StepCheckout({
 
             <View style={styles.switchRowCompact}>
               <Text style={styles.switchLabel}>Автопродление</Text>
-              <Switch value={enableAutoRenewal} onValueChange={onToggleAutoRenewal} />
+              <Switch
+                value={enableAutoRenewal}
+                onValueChange={onToggleAutoRenewal}
+                trackColor={{ false: '#D1D5DB', true: BRAND_GREEN }}
+                thumbColor="#FFFFFF"
+                ios_backgroundColor="#D1D5DB"
+                style={styles.autoRenewalSwitch}
+              />
             </View>
           </View>
 
@@ -999,6 +1037,30 @@ const styles = StyleSheet.create({
   segmentTextActive: {
     color: '#4CAF50',
   },
+  segmentSavings: {
+    marginTop: 2,
+    fontSize: 10,
+    color: '#666',
+    fontWeight: '700',
+  },
+  segmentSavingsActive: {
+    color: '#2E7D32',
+  },
+  savingsBanner: {
+    marginTop: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    backgroundColor: '#E8F5E9',
+    borderWidth: 1,
+    borderColor: '#C8E6C9',
+  },
+  savingsBannerText: {
+    fontSize: 13,
+    color: '#1B5E20',
+    fontWeight: '800',
+    textAlign: 'center',
+  },
   hint: {
     marginTop: 8,
     fontSize: 12,
@@ -1110,11 +1172,16 @@ const styles = StyleSheet.create({
   switchRowCompact: {
     marginTop: 10,
     paddingTop: 10,
+    paddingBottom: 4,
     borderTopWidth: 1,
     borderTopColor: '#f0f0f0',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    gap: 12,
+  },
+  autoRenewalSwitch: {
+    transform: [{ scaleX: 1.08 }, { scaleY: 1.08 }],
   },
   switchLabel: {
     fontSize: 14,

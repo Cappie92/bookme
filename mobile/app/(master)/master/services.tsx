@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -13,6 +13,7 @@ import {
   Platform,
   Dimensions,
   Keyboard,
+  KeyboardAvoidingView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -36,11 +37,22 @@ import { formatMoney } from '@src/utils/money';
 import { FeatureLock } from '@src/components/FeatureLock';
 import { CategoryAccordion } from '@src/components/services/CategoryAccordion';
 import { ServiceRow } from '@src/components/services/ServiceRow';
+import { EntityActionSheet } from '@src/components/services/EntityActionSheet';
 const PLACEHOLDER_COLOR = '#999';
 const INPUT_TEXT_COLOR = '#333';
 const WINDOW_HEIGHT = Dimensions.get('window').height;
 const MODAL_SHEET_MAX_HEIGHT = Math.round(WINDOW_HEIGHT * 0.88);
-const MODAL_SCROLL_CONTENT_PADDING_BOTTOM = 20;
+const MODAL_SCROLL_CONTENT_PADDING_BOTTOM = 16;
+const MODAL_TITLE_BLOCK_HEIGHT = 52;
+const MODAL_ACTIONS_BLOCK_HEIGHT = 60;
+
+type ServiceMenuTarget = { kind: 'service'; service: MasterService };
+type CategoryMenuTarget = { kind: 'category'; category: MasterServiceCategory };
+type MenuSheetTarget = ServiceMenuTarget | CategoryMenuTarget;
+
+type ServiceConfirmTarget = { kind: 'service'; serviceId: number; name: string };
+type CategoryConfirmTarget = { kind: 'category'; categoryId: number; name: string };
+type ConfirmSheetTarget = ServiceConfirmTarget | CategoryConfirmTarget;
 
 function useModalKeyboardHeight(active: boolean): number {
   const [keyboardHeight, setKeyboardHeight] = useState(0);
@@ -50,17 +62,29 @@ function useModalKeyboardHeight(active: boolean): number {
       setKeyboardHeight(0);
       return;
     }
-    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
-    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
-    const onShow = Keyboard.addListener(showEvent, (e) => {
-      setKeyboardHeight(Math.max(0, Math.round(e.endCoordinates?.height ?? 0)));
-    });
-    const onHide = Keyboard.addListener(hideEvent, () => {
-      setKeyboardHeight(0);
-    });
+    const applyHeight = (height: number) => {
+      setKeyboardHeight(Math.max(0, Math.round(height)));
+    };
+    const subs: { remove: () => void }[] = [];
+    if (Platform.OS === 'ios') {
+      subs.push(
+        Keyboard.addListener('keyboardWillShow', (e) => applyHeight(e.endCoordinates?.height ?? 0))
+      );
+      subs.push(Keyboard.addListener('keyboardWillHide', () => applyHeight(0)));
+    } else {
+      subs.push(
+        Keyboard.addListener('keyboardDidShow', (e) => applyHeight(e.endCoordinates?.height ?? 0))
+      );
+      subs.push(Keyboard.addListener('keyboardDidHide', () => applyHeight(0)));
+      subs.push(
+        Keyboard.addListener('keyboardDidChangeFrame', (e) => {
+          const h = e.endCoordinates?.height ?? 0;
+          if (h > 0) applyHeight(h);
+        })
+      );
+    }
     return () => {
-      onShow.remove();
-      onHide.remove();
+      subs.forEach((s) => s.remove());
     };
   }, [active]);
 
@@ -96,8 +120,75 @@ export default function MasterServicesScreen() {
 
   const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
   const [showDurationPicker, setShowDurationPicker] = useState(false);
+  const serviceScrollRef = useRef<ScrollView>(null);
+  const categoryScrollRef = useRef<ScrollView>(null);
+  const serviceFieldOffsetsRef = useRef<Record<string, number>>({});
+  const categoryFieldOffsetsRef = useRef<Record<string, number>>({});
+  const focusedServiceFieldRef = useRef<string | null>(null);
+  const focusedCategoryFieldRef = useRef<string | null>(null);
+
+  const scrollServiceFieldIntoView = useCallback(
+    (fieldKey: string) => {
+      const y = serviceFieldOffsetsRef.current[fieldKey];
+      if (y == null) return;
+      const sheetHeight =
+        serviceKeyboardHeight > 0 ? serviceSheetMaxHeight : MODAL_SHEET_MAX_HEIGHT;
+      const scrollViewport =
+        sheetHeight - MODAL_TITLE_BLOCK_HEIGHT - MODAL_ACTIONS_BLOCK_HEIGHT - modalFooterPaddingBottom;
+      const fieldHeight = 52;
+      const targetY = Math.max(0, y + fieldHeight - scrollViewport + 24);
+      const delays = Platform.OS === 'android' ? [80, 260] : [60];
+      delays.forEach((delay, index) => {
+        setTimeout(() => {
+          serviceScrollRef.current?.scrollTo({
+            y: targetY,
+            animated: index > 0,
+          });
+        }, delay);
+      });
+    },
+    [serviceKeyboardHeight, serviceSheetMaxHeight, modalFooterPaddingBottom]
+  );
+
+  const scrollCategoryFieldIntoView = useCallback(
+    (fieldKey: string) => {
+      const y = categoryFieldOffsetsRef.current[fieldKey];
+      if (y == null) return;
+      const sheetHeight =
+        categoryKeyboardHeight > 0 ? categorySheetMaxHeight : MODAL_SHEET_MAX_HEIGHT;
+      const scrollViewport =
+        sheetHeight - MODAL_TITLE_BLOCK_HEIGHT - MODAL_ACTIONS_BLOCK_HEIGHT - modalFooterPaddingBottom;
+      const fieldHeight = 52;
+      const targetY = Math.max(0, y + fieldHeight - scrollViewport + 24);
+      const delays = Platform.OS === 'android' ? [80, 260] : [60];
+      delays.forEach((delay, index) => {
+        setTimeout(() => {
+          categoryScrollRef.current?.scrollTo({
+            y: targetY,
+            animated: index > 0,
+          });
+        }, delay);
+      });
+    },
+    [categoryKeyboardHeight, categorySheetMaxHeight, modalFooterPaddingBottom]
+  );
+
+  useEffect(() => {
+    if (serviceKeyboardHeight > 0 && focusedServiceFieldRef.current) {
+      scrollServiceFieldIntoView(focusedServiceFieldRef.current);
+    }
+  }, [serviceKeyboardHeight, scrollServiceFieldIntoView]);
+
+  useEffect(() => {
+    if (categoryKeyboardHeight > 0 && focusedCategoryFieldRef.current) {
+      scrollCategoryFieldIntoView(focusedCategoryFieldRef.current);
+    }
+  }, [categoryKeyboardHeight, scrollCategoryFieldIntoView]);
   const [editingService, setEditingService] = useState<MasterService | null>(null);
   const [editingCategory, setEditingCategory] = useState<MasterServiceCategory | null>(null);
+  const [menuSheet, setMenuSheet] = useState<MenuSheetTarget | null>(null);
+  const [confirmSheet, setConfirmSheet] = useState<ConfirmSheetTarget | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
   
   // Форма услуги
   const [serviceForm, setServiceForm] = useState({
@@ -352,26 +443,45 @@ export default function MasterServicesScreen() {
     }
   };
 
-  const handleDeleteService = (serviceId: number) => {
-    Alert.alert(
-      'Удаление услуги',
-      'Вы уверены, что хотите удалить эту услугу?',
-      [
-        { text: 'Отмена', style: 'cancel' },
-        {
-          text: 'Удалить',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await deleteMasterService(serviceId);
-              loadData();
-            } catch (err: any) {
-              Alert.alert('Ошибка', err.message || 'Не удалось удалить услугу');
-            }
-          },
-        },
-      ]
-    );
+  const handleDeleteService = async (serviceId: number) => {
+    setDeleteLoading(true);
+    try {
+      await deleteMasterService(serviceId);
+      setConfirmSheet(null);
+      loadData();
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Не удалось удалить услугу';
+      Alert.alert('Ошибка', message);
+    } finally {
+      setDeleteLoading(false);
+    }
+  };
+
+  const handleDeleteCategory = async (categoryId: number) => {
+    setDeleteLoading(true);
+    try {
+      await deleteMasterServiceCategory(categoryId);
+      setConfirmSheet(null);
+      loadData();
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Не удалось удалить категорию';
+      Alert.alert('Ошибка', message);
+    } finally {
+      setDeleteLoading(false);
+    }
+  };
+
+  const handleServiceMenuPress = (service: MasterService) => {
+    setMenuSheet({ kind: 'service', service });
+  };
+
+  const handleCategoryMenuPress = (category: MasterServiceCategory) => {
+    setMenuSheet({ kind: 'category', category });
+  };
+
+  const closeMenuSheet = () => setMenuSheet(null);
+  const closeConfirmSheet = () => {
+    if (!deleteLoading) setConfirmSheet(null);
   };
 
   const handleCreateCategory = () => {
@@ -435,28 +545,6 @@ export default function MasterServicesScreen() {
     }
   };
 
-  const handleDeleteCategory = (categoryId: number) => {
-    Alert.alert(
-      'Удаление категории',
-      'Все услуги в этой категории будут перемещены в "Без категории". Продолжить?',
-      [
-        { text: 'Отмена', style: 'cancel' },
-        {
-          text: 'Удалить',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await deleteMasterServiceCategory(categoryId);
-              loadData();
-            } catch (err: any) {
-              Alert.alert('Ошибка', err.message || 'Не удалось удалить категорию');
-            }
-          },
-        },
-      ]
-    );
-  };
-
   const getServicesByCategory = (categoryId: number | null) => {
     return services.filter(s => (s.category_id === categoryId) || (categoryId === null && !s.category_id));
   };
@@ -515,13 +603,11 @@ export default function MasterServicesScreen() {
             services={getServicesByCategory(null)}
             isExpanded={expandedCategories.has(0)}
             onToggle={() => toggleCategory(0)}
-            onEditCategory={() => {}}
-            onDeleteCategory={() => {}}
+            onCategoryMenuPress={() => {}}
             renderService={(service) => (
               <ServiceRow
                 service={service}
-                onEdit={handleEditService}
-                onDelete={handleDeleteService}
+                onMenuPress={handleServiceMenuPress}
               />
             )}
             onCreateService={handleCreateService}
@@ -538,13 +624,11 @@ export default function MasterServicesScreen() {
               services={categoryServices}
               isExpanded={expandedCategories.has(category.id)}
               onToggle={() => toggleCategory(category.id)}
-              onEditCategory={handleEditCategory}
-              onDeleteCategory={handleDeleteCategory}
+              onCategoryMenuPress={handleCategoryMenuPress}
               renderService={(service) => (
                 <ServiceRow
                   service={service}
-                  onEdit={handleEditService}
-                  onDelete={handleDeleteService}
+                  onMenuPress={handleServiceMenuPress}
                 />
               )}
               onCreateService={handleCreateService}
@@ -573,22 +657,32 @@ export default function MasterServicesScreen() {
         }}
       >
         <View style={styles.modalOverlay}>
-          <View
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
             style={[
-              styles.modalContent,
-              { maxHeight: serviceSheetMaxHeight },
-              serviceKeyboardHeight > 0 ? { height: serviceSheetMaxHeight } : null,
+              styles.modalKeyboardHost,
+              Platform.OS === 'android' && serviceKeyboardHeight > 0
+                ? { marginBottom: serviceKeyboardHeight }
+                : null,
             ]}
           >
-            <Text style={styles.modalTitle}>
-              {editingService ? 'Редактировать услугу' : 'Создать услугу'}
-            </Text>
-            <ScrollView
-              style={styles.modalScroll}
-              contentContainerStyle={[
-                styles.modalScrollContent,
-                { paddingBottom: MODAL_SCROLL_CONTENT_PADDING_BOTTOM },
+            <View
+              style={[
+                styles.modalContent,
+                { maxHeight: serviceSheetMaxHeight },
+                serviceKeyboardHeight > 0 ? { height: serviceSheetMaxHeight } : null,
               ]}
+            >
+              <Text style={styles.modalTitle}>
+                {editingService ? 'Редактировать услугу' : 'Создать услугу'}
+              </Text>
+              <ScrollView
+                ref={serviceScrollRef}
+                style={styles.modalScroll}
+                contentContainerStyle={[
+                  styles.modalScrollContent,
+                  { paddingBottom: MODAL_SCROLL_CONTENT_PADDING_BOTTOM },
+                ]}
               keyboardShouldPersistTaps="handled"
               keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
               showsVerticalScrollIndicator
@@ -599,22 +693,42 @@ export default function MasterServicesScreen() {
               }}
               scrollEventThrottle={16}
             >
-              <TextInput
-                style={styles.input}
-                placeholder="Название услуги *"
-                placeholderTextColor={PLACEHOLDER_COLOR}
-                value={serviceForm.name}
-                onChangeText={(text) => setServiceForm({ ...serviceForm, name: text })}
-              />
-              <TextInput
-                style={[styles.input, styles.textArea]}
-                placeholder="Описание услуги"
-                placeholderTextColor={PLACEHOLDER_COLOR}
-                value={serviceForm.description}
-                onChangeText={(text) => setServiceForm({ ...serviceForm, description: text })}
-                multiline
-                numberOfLines={3}
-              />
+              <View
+                onLayout={(e) => {
+                  serviceFieldOffsetsRef.current.name = e.nativeEvent.layout.y;
+                }}
+              >
+                <TextInput
+                  style={styles.input}
+                  placeholder="Название услуги *"
+                  placeholderTextColor={PLACEHOLDER_COLOR}
+                  value={serviceForm.name}
+                  onChangeText={(text) => setServiceForm({ ...serviceForm, name: text })}
+                  onFocus={() => {
+                    focusedServiceFieldRef.current = 'name';
+                    scrollServiceFieldIntoView('name');
+                  }}
+                />
+              </View>
+              <View
+                onLayout={(e) => {
+                  serviceFieldOffsetsRef.current.description = e.nativeEvent.layout.y;
+                }}
+              >
+                <TextInput
+                  style={[styles.input, styles.textArea]}
+                  placeholder="Описание услуги"
+                  placeholderTextColor={PLACEHOLDER_COLOR}
+                  value={serviceForm.description}
+                  onChangeText={(text) => setServiceForm({ ...serviceForm, description: text })}
+                  multiline
+                  numberOfLines={3}
+                  onFocus={() => {
+                    focusedServiceFieldRef.current = 'description';
+                    scrollServiceFieldIntoView('description');
+                  }}
+                />
+              </View>
 
               <View style={styles.categorySection}>
                 <View style={styles.dropdownContainer}>
@@ -671,13 +785,24 @@ export default function MasterServicesScreen() {
                   )}
                 </View>
                 <View style={styles.newCategoryRow}>
-                  <TextInput
-                    style={[styles.input, styles.newCategoryInput]}
-                    placeholder="Название новой категории"
-                    placeholderTextColor={PLACEHOLDER_COLOR}
-                    value={newCategoryName}
-                    onChangeText={setNewCategoryName}
-                  />
+                  <View
+                    style={styles.newCategoryInputWrap}
+                    onLayout={(e) => {
+                      serviceFieldOffsetsRef.current.newCategory = e.nativeEvent.layout.y;
+                    }}
+                  >
+                    <TextInput
+                      style={[styles.input, styles.newCategoryInput]}
+                      placeholder="Название новой категории"
+                      placeholderTextColor={PLACEHOLDER_COLOR}
+                      value={newCategoryName}
+                      onChangeText={setNewCategoryName}
+                      onFocus={() => {
+                        focusedServiceFieldRef.current = 'newCategory';
+                        scrollServiceFieldIntoView('newCategory');
+                      }}
+                    />
+                  </View>
                   <TouchableOpacity
                     style={[styles.addCategoryButton, (!newCategoryName.trim() || creatingCategory) && styles.addCategoryButtonDisabled]}
                     onPress={handleCreateCategoryInServiceModal}
@@ -714,14 +839,24 @@ export default function MasterServicesScreen() {
                 </TouchableOpacity>
               </View>
 
-              <TextInput
-                style={styles.input}
-                placeholder="Цена, ₽ *"
-                placeholderTextColor={PLACEHOLDER_COLOR}
-                value={serviceForm.price}
-                onChangeText={(text) => setServiceForm({ ...serviceForm, price: text })}
-                keyboardType="numeric"
-              />
+              <View
+                onLayout={(e) => {
+                  serviceFieldOffsetsRef.current.price = e.nativeEvent.layout.y;
+                }}
+              >
+                <TextInput
+                  style={styles.input}
+                  placeholder="Цена, ₽ *"
+                  placeholderTextColor={PLACEHOLDER_COLOR}
+                  value={serviceForm.price}
+                  onChangeText={(text) => setServiceForm({ ...serviceForm, price: text })}
+                  keyboardType="numeric"
+                  onFocus={() => {
+                    focusedServiceFieldRef.current = 'price';
+                    scrollServiceFieldIntoView('price');
+                  }}
+                />
+              </View>
             </ScrollView>
             <View
               style={[
@@ -747,7 +882,8 @@ export default function MasterServicesScreen() {
                 style={styles.modalButton}
               />
             </View>
-          </View>
+            </View>
+          </KeyboardAvoidingView>
 
         {/* Модальное окно выбора длительности - поверх модалки услуги */}
         {showDurationPicker && (
@@ -832,42 +968,72 @@ export default function MasterServicesScreen() {
         onRequestClose={() => setShowCategoryModal(false)}
       >
         <View style={styles.modalOverlay}>
-          <View
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
             style={[
-              styles.modalContent,
-              { maxHeight: categorySheetMaxHeight },
-              categoryKeyboardHeight > 0 ? { height: categorySheetMaxHeight } : null,
+              styles.modalKeyboardHost,
+              Platform.OS === 'android' && categoryKeyboardHeight > 0
+                ? { marginBottom: categoryKeyboardHeight }
+                : null,
             ]}
           >
-            <Text style={styles.modalTitle}>
-              {editingCategory ? 'Редактировать категорию' : 'Создать категорию'}
-            </Text>
-            <ScrollView
-              style={styles.modalScroll}
-              contentContainerStyle={[
-                styles.modalScrollContent,
-                { paddingBottom: MODAL_SCROLL_CONTENT_PADDING_BOTTOM },
+            <View
+              style={[
+                styles.modalContent,
+                { maxHeight: categorySheetMaxHeight },
+                categoryKeyboardHeight > 0 ? { height: categorySheetMaxHeight } : null,
               ]}
+            >
+              <Text style={styles.modalTitle}>
+                {editingCategory ? 'Редактировать категорию' : 'Создать категорию'}
+              </Text>
+              <ScrollView
+                ref={categoryScrollRef}
+                style={styles.modalScroll}
+                contentContainerStyle={[
+                  styles.modalScrollContent,
+                  { paddingBottom: MODAL_SCROLL_CONTENT_PADDING_BOTTOM },
+                ]}
               keyboardShouldPersistTaps="handled"
               keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
               showsVerticalScrollIndicator
             >
-              <TextInput
-                style={styles.input}
-                placeholder="Название категории *"
-                placeholderTextColor={PLACEHOLDER_COLOR}
-                value={categoryForm.name}
-                onChangeText={(text) => setCategoryForm({ ...categoryForm, name: text })}
-              />
-              <TextInput
-                style={[styles.input, styles.textArea]}
-                placeholder="Описание категории"
-                placeholderTextColor={PLACEHOLDER_COLOR}
-                value={categoryForm.description}
-                onChangeText={(text) => setCategoryForm({ ...categoryForm, description: text })}
-                multiline
-                numberOfLines={3}
-              />
+              <View
+                onLayout={(e) => {
+                  categoryFieldOffsetsRef.current.name = e.nativeEvent.layout.y;
+                }}
+              >
+                <TextInput
+                  style={styles.input}
+                  placeholder="Название категории *"
+                  placeholderTextColor={PLACEHOLDER_COLOR}
+                  value={categoryForm.name}
+                  onChangeText={(text) => setCategoryForm({ ...categoryForm, name: text })}
+                  onFocus={() => {
+                    focusedCategoryFieldRef.current = 'name';
+                    scrollCategoryFieldIntoView('name');
+                  }}
+                />
+              </View>
+              <View
+                onLayout={(e) => {
+                  categoryFieldOffsetsRef.current.description = e.nativeEvent.layout.y;
+                }}
+              >
+                <TextInput
+                  style={[styles.input, styles.textArea]}
+                  placeholder="Описание категории"
+                  placeholderTextColor={PLACEHOLDER_COLOR}
+                  value={categoryForm.description}
+                  onChangeText={(text) => setCategoryForm({ ...categoryForm, description: text })}
+                  multiline
+                  numberOfLines={3}
+                  onFocus={() => {
+                    focusedCategoryFieldRef.current = 'description';
+                    scrollCategoryFieldIntoView('description');
+                  }}
+                />
+              </View>
             </ScrollView>
             <View
               style={[
@@ -890,9 +1056,81 @@ export default function MasterServicesScreen() {
                 style={styles.modalButton}
               />
             </View>
-          </View>
+            </View>
+          </KeyboardAvoidingView>
         </View>
       </Modal>
+
+      <EntityActionSheet
+        visible={menuSheet !== null}
+        onClose={closeMenuSheet}
+        title={
+          menuSheet?.kind === 'service'
+            ? menuSheet.service.name
+            : menuSheet?.kind === 'category'
+              ? menuSheet.category.name
+              : ''
+        }
+        message="Выберите действие"
+        variant="actions"
+        onEdit={() => {
+          if (!menuSheet) return;
+          if (menuSheet.kind === 'service') {
+            closeMenuSheet();
+            void handleEditService(menuSheet.service);
+          } else {
+            closeMenuSheet();
+            handleEditCategory(menuSheet.category);
+          }
+        }}
+        onDelete={() => {
+          if (!menuSheet) return;
+          if (menuSheet.kind === 'service') {
+            setMenuSheet(null);
+            setConfirmSheet({
+              kind: 'service',
+              serviceId: menuSheet.service.id,
+              name: menuSheet.service.name,
+            });
+          } else {
+            setMenuSheet(null);
+            setConfirmSheet({
+              kind: 'category',
+              categoryId: menuSheet.category.id,
+              name: menuSheet.category.name,
+            });
+          }
+        }}
+      />
+
+      <EntityActionSheet
+        visible={confirmSheet !== null}
+        onClose={closeConfirmSheet}
+        title={
+          confirmSheet?.kind === 'service'
+            ? 'Удаление услуги'
+            : confirmSheet?.kind === 'category'
+              ? 'Удаление категории'
+              : ''
+        }
+        message={
+          confirmSheet?.kind === 'service'
+            ? `Вы уверены, что хотите удалить услугу «${confirmSheet.name}»?`
+            : confirmSheet?.kind === 'category'
+              ? 'Все услуги в этой категории будут перемещены в «Без категории». Продолжить?'
+              : ''
+        }
+        variant="confirm"
+        deleting={deleteLoading}
+        onConfirmDelete={() => {
+          if (!confirmSheet) return;
+          if (confirmSheet.kind === 'service') {
+            void handleDeleteService(confirmSheet.serviceId);
+          } else {
+            void handleDeleteCategory(confirmSheet.categoryId);
+          }
+        }}
+      />
     </ScreenContainer>
   );
 }
@@ -1071,12 +1309,17 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
     justifyContent: 'flex-end',
   },
+  modalKeyboardHost: {
+    width: '100%',
+    justifyContent: 'flex-end',
+  },
   modalContent: {
     backgroundColor: '#fff',
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     paddingTop: 20,
     overflow: 'hidden',
+    width: '100%',
   },
   modalScroll: {
     flexShrink: 1,
@@ -1134,6 +1377,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 8,
     alignItems: 'center',
+  },
+  newCategoryInputWrap: {
+    flex: 1,
   },
   newCategoryInput: {
     flex: 1,

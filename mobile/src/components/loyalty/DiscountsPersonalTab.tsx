@@ -1,8 +1,21 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, TextInput, ScrollView, Alert } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  TextInput,
+  ScrollView,
+  Alert,
+  Platform,
+  KeyboardAvoidingView,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Card } from '@src/components/Card';
 import { PrimaryButton } from '@src/components/PrimaryButton';
+import { MasterClientPhonePickerField } from '@src/components/master/MasterClientPhonePickerField';
+import { useModalKeyboardHeight } from '@src/hooks/useModalKeyboardHeight';
+import { hasMaxDiscountAmountLimit } from '@src/utils/personalDiscountAmount';
 import type { PersonalDiscount } from '@src/types/loyalty_discounts';
 import type { PersonalDiscountForm } from '@src/types/loyalty_discounts';
 
@@ -20,6 +33,7 @@ export function DiscountsPersonalTab({
   createDisabled = false,
 }: DiscountsPersonalTabProps) {
   const [showForm, setShowForm] = useState(false);
+  const keyboardHeight = useModalKeyboardHeight(showForm);
   const [form, setForm] = useState<PersonalDiscountForm>({
     client_phone: '',
     discount_percent: '',
@@ -29,7 +43,7 @@ export function DiscountsPersonalTab({
 
   const handleSubmit = async () => {
     if (!form.client_phone || !form.discount_percent) {
-      Alert.alert('Ошибка', 'Заполните номер телефона и размер скидки');
+      Alert.alert('Ошибка', 'Укажите клиента и размер скидки');
       return;
     }
 
@@ -87,115 +101,132 @@ export function DiscountsPersonalTab({
         )}
       </View>
 
-      {/* Форма создания */}
       {showForm && (
-        <Card style={styles.formCard}>
-          <Text style={styles.formTitle}>Добавить персональную скидку</Text>
-          
-          <View style={styles.form}>
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>Номер телефона клиента *</Text>
-              <TextInput
-                style={styles.input}
-                value={form.client_phone}
-                onChangeText={(text) => setForm({ ...form, client_phone: text })}
-                placeholder="+7 (999) 123-45-67"
-                keyboardType="phone-pad"
-              />
-            </View>
-
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>Размер скидки (%) *</Text>
-              <View style={styles.percentInputContainer}>
-                <TextInput
-                  style={styles.percentInput}
-                  value={form.discount_percent}
-                  onChangeText={(text) => setForm({ ...form, discount_percent: text })}
-                  keyboardType="numeric"
-                  placeholder="0"
-                  maxLength={5}
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={[
+            styles.formKeyboardHost,
+            Platform.OS === 'android' && keyboardHeight > 0
+              ? { marginBottom: keyboardHeight }
+              : null,
+          ]}
+        >
+          <Card style={styles.formCard}>
+            <Text style={styles.formTitle}>Добавить персональную скидку</Text>
+            <ScrollView
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+              nestedScrollEnabled
+            >
+              <View style={styles.form}>
+                <MasterClientPhonePickerField
+                  value={form.client_phone}
+                  onChangeText={(text) => setForm({ ...form, client_phone: text })}
                 />
-                <Text style={styles.percentSymbol}>%</Text>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.label}>Размер скидки (%) *</Text>
+                  <View style={styles.percentInputContainer}>
+                    <TextInput
+                      style={styles.percentInput}
+                      value={form.discount_percent}
+                      onChangeText={(text) => setForm({ ...form, discount_percent: text })}
+                      keyboardType="numeric"
+                      placeholder="0"
+                      maxLength={5}
+                    />
+                    <Text style={styles.percentSymbol}>%</Text>
+                  </View>
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.label}>Максимальная сумма скидки, ₽</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={form.max_discount_amount}
+                    onChangeText={(text) => setForm({ ...form, max_discount_amount: text })}
+                    keyboardType="numeric"
+                    placeholder="Пусто или 0 — без ограничения"
+                  />
+                  <Text style={styles.inputHint}>
+                    Оставьте поле пустым или укажите 0 ₽, если не хотите ограничивать скидку по сумме.
+                  </Text>
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.label}>Описание</Text>
+                  <TextInput
+                    style={[styles.input, styles.textArea]}
+                    value={form.description}
+                    onChangeText={(text) => setForm({ ...form, description: text })}
+                    placeholder="Описание скидки (необязательно)"
+                    multiline
+                    numberOfLines={3}
+                  />
+                </View>
+
+                <View style={styles.formActions}>
+                  <PrimaryButton
+                    title="Создать скидку"
+                    onPress={handleSubmit}
+                    style={styles.submitButton}
+                  />
+                  <TouchableOpacity
+                    style={styles.cancelButton}
+                    onPress={() => {
+                      setShowForm(false);
+                      setForm({
+                        client_phone: '',
+                        discount_percent: '',
+                        max_discount_amount: '',
+                        description: '',
+                      });
+                    }}
+                  >
+                    <Text style={styles.cancelButtonText}>Отмена</Text>
+                  </TouchableOpacity>
+                </View>
               </View>
-            </View>
-
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>Максимальная сумма скидки (руб.)</Text>
-              <TextInput
-                style={styles.input}
-                value={form.max_discount_amount}
-                onChangeText={(text) => setForm({ ...form, max_discount_amount: text })}
-                keyboardType="numeric"
-                placeholder="Оставьте пустым для неограниченной скидки"
-              />
-            </View>
-
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>Описание</Text>
-              <TextInput
-                style={[styles.input, styles.textArea]}
-                value={form.description}
-                onChangeText={(text) => setForm({ ...form, description: text })}
-                placeholder="Описание скидки (необязательно)"
-                multiline
-                numberOfLines={3}
-              />
-            </View>
-
-            <View style={styles.formActions}>
-              <PrimaryButton
-                title="Создать скидку"
-                onPress={handleSubmit}
-                style={styles.submitButton}
-              />
-              <TouchableOpacity
-                style={styles.cancelButton}
-                onPress={() => {
-                  setShowForm(false);
-                  setForm({ client_phone: '', discount_percent: '', max_discount_amount: '', description: '' });
-                }}
-              >
-                <Text style={styles.cancelButtonText}>Отмена</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </Card>
+            </ScrollView>
+          </Card>
+        </KeyboardAvoidingView>
       )}
 
-      {/* Список персональных скидок (только is_active) */}
       {(() => {
         const activeList = discounts.filter((d) => d.is_active);
         return activeList.length > 0 ? (
-        <ScrollView style={styles.discountsList}>
-          {activeList.map((discount) => (
-            <Card key={discount.id} style={styles.discountCard}>
-              <View style={styles.discountContent}>
-                <View style={styles.discountInfo}>
-                  <Text style={styles.discountPhone}>{discount.client_phone}</Text>
-                  {discount.description && (
-                    <Text style={styles.discountDescription}>{discount.description}</Text>
-                  )}
-                  <Text style={styles.discountPercent}>
-                    Скидка: {discount.discount_percent}%
-                    {discount.max_discount_amount && ` (макс. ${discount.max_discount_amount} руб.)`}
-                  </Text>
+          <ScrollView style={styles.discountsList} keyboardShouldPersistTaps="handled">
+            {activeList.map((discount) => (
+              <Card key={discount.id} style={styles.discountCard}>
+                <View style={styles.discountContent}>
+                  <View style={styles.discountInfo}>
+                    <Text style={styles.discountPhone}>{discount.client_phone}</Text>
+                    {discount.description && (
+                      <Text style={styles.discountDescription}>{discount.description}</Text>
+                    )}
+                    <Text style={styles.discountPercent}>
+                      Скидка: {discount.discount_percent}%
+                      {hasMaxDiscountAmountLimit(discount.max_discount_amount)
+                        ? ` (макс. ${discount.max_discount_amount} ₽)`
+                        : ''}
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    style={styles.deleteButton}
+                    onPress={() => handleDelete(discount.id)}
+                  >
+                    <Ionicons name="trash-outline" size={22} color="#d32f2f" />
+                  </TouchableOpacity>
                 </View>
-                <TouchableOpacity
-                  style={styles.deleteButton}
-                  onPress={() => handleDelete(discount.id)}
-                >
-                  <Ionicons name="trash-outline" size={22} color="#d32f2f" />
-                </TouchableOpacity>
-              </View>
-            </Card>
-          ))}
-        </ScrollView>
+              </Card>
+            ))}
+          </ScrollView>
         ) : (
-        !showForm && (
-          <Card style={styles.emptyCard}>
-            <Text style={styles.emptyText}>Персональные скидки не настроены</Text>
-          </Card>
-        )
+          !showForm && (
+            <Card style={styles.emptyCard}>
+              <Text style={styles.emptyText}>Персональные скидки не настроены</Text>
+            </Card>
+          )
         );
       })()}
     </View>
@@ -203,10 +234,6 @@ export function DiscountsPersonalTab({
 }
 
 const styles = StyleSheet.create({
-  /**
-   * Горизонтальный padding даёт родитель (`loyalty.tsx` → `styles.content`, padding 16).
-   * Двойные 16+16 давали «рыхлый» край относительно mobile web — здесь только вертикаль.
-   */
   container: {
     paddingVertical: 12,
     paddingHorizontal: 0,
@@ -238,6 +265,9 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
+  formKeyboardHost: {
+    marginBottom: 8,
+  },
   formCard: {
     padding: 16,
     marginBottom: 24,
@@ -268,6 +298,12 @@ const styles = StyleSheet.create({
     padding: 12,
     fontSize: 14,
     backgroundColor: '#fff',
+  },
+  inputHint: {
+    fontSize: 12,
+    color: '#888',
+    marginTop: 6,
+    lineHeight: 17,
   },
   textArea: {
     minHeight: 80,
@@ -301,16 +337,21 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   cancelButton: {
-    paddingVertical: 16,
+    paddingVertical: 14,
     paddingHorizontal: 24,
     borderRadius: 8,
     backgroundColor: '#E0E0E0',
     justifyContent: 'center',
+    alignItems: 'center',
+    minHeight: 48,
   },
   cancelButtonText: {
     color: '#666',
     fontSize: 16,
     fontWeight: '600',
+    lineHeight: 20,
+    textAlign: 'center',
+    includeFontPadding: false,
   },
   discountsList: {
     gap: 12,

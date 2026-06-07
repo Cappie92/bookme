@@ -140,7 +140,7 @@ export default function MasterScheduleScreen() {
             hasExtendedStats={hasExtendedStats}
           />
         )}
-        {selectedTab === 2 && schedule && (
+        {selectedTab === 2 && (
           <RulesView
             onRuleCreated={() => loadData({ silent: true })}
             refreshControl={scheduleRefreshControl}

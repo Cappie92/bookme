@@ -1,5 +1,21 @@
-import { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert, ScrollView, TextInput, Switch } from 'react-native';
+import { useState, useEffect, useRef, useMemo } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  ActivityIndicator,
+  Alert,
+  ScrollView,
+  TextInput,
+  Switch,
+  Platform,
+  KeyboardAvoidingView,
+} from 'react-native';
+import { useModalKeyboardHeight } from '@src/hooks/useModalKeyboardHeight';
+import { parseMaxDiscountAmountForApi } from '@src/utils/personalDiscountAmount';
+import { useScrollBottomPadding } from '@src/hooks/useScrollBottomPadding';
+import { formatLoyaltyAccrualSummaryLines } from '@src/utils/loyaltyAccrualSummary';
 import { Ionicons } from '@expo/vector-icons';
 import { ScreenContainer } from '@src/components/ScreenContainer';
 import { Card } from '@src/components/Card';
@@ -66,13 +82,15 @@ type MainTabType = 'discounts' | 'points';
 type DiscountTabType = 'quick' | 'complex' | 'personal';
 
 export default function MasterLoyaltyScreen() {
+  const scrollPaddingBottom = useScrollBottomPadding(24);
   const { features, loading: featuresLoading } = useMasterFeatures();
   const { token, isAuthenticated, isLoading: authLoading } = useAuth();
   const [plans, setPlans] = useState<any[]>([]);
   
   // Верхние табы: Скидки / Баллы
   const [mainTab, setMainTab] = useState<MainTabType>('discounts');
-  
+  const pointsKeyboardHeight = useModalKeyboardHeight(mainTab === 'points');
+
   // Подтабы для Скидок
   const [discountTab, setDiscountTab] = useState<DiscountTabType>('quick');
   
@@ -117,6 +135,11 @@ export default function MasterLoyaltyScreen() {
   /** Форма начисления/срока/оплаты баллами (только при включённой программе) */
   const [pointsAccrualSettingsExpanded, setPointsAccrualSettingsExpanded] = useState(true);
   const prevIsEnabledRef = useRef<boolean | undefined>(undefined);
+
+  const accrualSummaryLines = useMemo(() => {
+    if (!settings) return [];
+    return formatLoyaltyAccrualSummaryLines(settings);
+  }, [settings]);
 
   const [stats, setStats] = useState<LoyaltyStats | null>(null);
   const [statsLoading, setStatsLoading] = useState(false);
@@ -612,7 +635,7 @@ export default function MasterLoyaltyScreen() {
       await createPersonalDiscount({
         client_phone: form.client_phone,
         discount_percent: parseFloat(form.discount_percent),
-        max_discount_amount: form.max_discount_amount ? parseFloat(form.max_discount_amount) : null,
+        max_discount_amount: parseMaxDiscountAmountForApi(form.max_discount_amount),
         description: form.description || null,
         is_active: true,
       });
@@ -715,7 +738,12 @@ export default function MasterLoyaltyScreen() {
       : 'Раздел «Лояльность» доступен в подписке.';
 
     return (
-      <ScreenContainer scrollable>
+      <ScreenContainer
+        scrollable
+        scrollViewProps={{
+          contentContainerStyle: { paddingBottom: scrollPaddingBottom },
+        }}
+      >
         <DemoAccessBanner
           description={description}
           ctaText="Перейти к тарифам"
@@ -759,7 +787,12 @@ export default function MasterLoyaltyScreen() {
   }
 
   return (
-    <ScreenContainer scrollable>
+    <ScreenContainer
+      scrollable
+      scrollViewProps={{
+        contentContainerStyle: { paddingBottom: scrollPaddingBottom },
+      }}
+    >
       <View style={styles.header}>
         <Text style={styles.title}>Система лояльности</Text>
       </View>
@@ -878,7 +911,21 @@ export default function MasterLoyaltyScreen() {
 
       {/* Контент для таба "Баллы" (одна страница) */}
       {mainTab === 'points' && settings && (
-        <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+        <KeyboardAvoidingView
+          style={styles.pointsKeyboardHost}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}
+        >
+        <ScrollView
+          style={styles.content}
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={{
+            paddingBottom:
+              scrollPaddingBottom +
+              (Platform.OS === 'android' ? pointsKeyboardHeight : 0),
+          }}
+          keyboardShouldPersistTaps="handled"
+        >
           {/* Сообщения об ошибках и успехе */}
           {settingsError && (
             <Card style={styles.errorCard}>
@@ -929,6 +976,29 @@ export default function MasterLoyaltyScreen() {
                   />
                 </View>
               </TouchableOpacity>
+            )}
+
+            {((settings.is_enabled && !pointsAccrualSettingsExpanded) || !settings.is_enabled) &&
+              accrualSummaryLines.length > 0 && (
+              <View
+                style={[
+                  styles.pointsAccrualSummary,
+                  !settings.is_enabled && styles.pointsAccrualSummaryDisabled,
+                ]}
+                accessibilityRole="summary"
+              >
+                {accrualSummaryLines.map((line) => (
+                  <Text
+                    key={line}
+                    style={[
+                      styles.pointsAccrualSummaryLine,
+                      !settings.is_enabled && styles.pointsAccrualSummaryLineDisabled,
+                    ]}
+                  >
+                    {line}
+                  </Text>
+                ))}
+              </View>
             )}
 
             {settings.is_enabled && pointsAccrualSettingsExpanded && (
@@ -1194,6 +1264,7 @@ export default function MasterLoyaltyScreen() {
             )}
           </View>
         </ScrollView>
+        </KeyboardAvoidingView>
       )}
 
       {/* Модалка фильтров истории */}
@@ -1301,6 +1372,9 @@ const styles = StyleSheet.create({
   },
   content: {
     padding: 16,
+  },
+  pointsKeyboardHost: {
+    flex: 1,
   },
   lockedCard: {
     padding: 32,
@@ -1415,6 +1489,24 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#4CAF50',
+  },
+  pointsAccrualSummary: {
+    backgroundColor: '#F1F8F4',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 16,
+    gap: 4,
+  },
+  pointsAccrualSummaryLine: {
+    fontSize: 13,
+    color: '#2E7D32',
+    lineHeight: 18,
+  },
+  pointsAccrualSummaryDisabled: {
+    backgroundColor: '#F5F5F5',
+  },
+  pointsAccrualSummaryLineDisabled: {
+    color: '#666',
   },
   settingsContainer: {
     gap: 20,

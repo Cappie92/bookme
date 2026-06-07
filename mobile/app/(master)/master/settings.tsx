@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert, Modal, TextInput, ScrollView, RefreshControl } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Clipboard from 'expo-clipboard';
 import { ScreenContainer } from '@src/components/ScreenContainer';
 import { Card } from '@src/components/Card';
@@ -8,6 +9,13 @@ import { SettingsBlock } from '@src/components/SettingsBlock';
 import { EditProfileModal } from '@src/components/modals/EditProfileModal';
 import { EditWorkSettingsModal } from '@src/components/modals/EditWorkSettingsModal';
 import { EditWebsiteModal } from '@src/components/modals/EditWebsiteModal';
+import { FreeSlotsShareCardModal } from '@src/components/modals/FreeSlotsShareCardModal';
+import { isoToBirthDateDisplay } from '@src/utils/birthDateInput';
+import {
+  buildMasterPublicBookingUrl,
+  buildMasterPublicRoutePath,
+} from '@src/utils/masterPublicBooking';
+import { normalizeMasterDomainSlug } from '@src/utils/masterDomainSlug';
 import { getMasterSettings, MasterSettings } from '@src/services/api/master';
 import { useAuth } from '@src/auth/AuthContext';
 import { router, usePathname } from 'expo-router';
@@ -18,10 +26,16 @@ import { PrimaryButton } from '@src/components/PrimaryButton';
 import { SecondaryButton } from '@src/components/SecondaryButton';
 import { PasswordInput } from '@src/components/ui/PasswordInput';
 import { isSalonFeaturesEnabled as getSalonFeaturesEnabled } from '@src/config/features';
+import { useTabBarHeight } from '@src/contexts/TabBarHeightContext';
+import { BOTTOM_NAV_CONTENT_FALLBACK_HEIGHT } from '@src/constants/bottomNavLayout';
 
 export default function MasterSettingsScreen() {
   const pathname = usePathname();
   const { logout } = useAuth();
+  const insets = useSafeAreaInsets();
+  const { tabBarHeight } = useTabBarHeight();
+  const measuredTabBarHeight = tabBarHeight > 0 ? tabBarHeight : BOTTOM_NAV_CONTENT_FALLBACK_HEIGHT;
+  const scrollPaddingBottom = Math.max(insets.bottom, 8) + measuredTabBarHeight + 16;
   const [settings, setSettings] = useState<MasterSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -33,6 +47,7 @@ export default function MasterSettingsScreen() {
   const [editProfileVisible, setEditProfileVisible] = useState(false);
   const [editWorkVisible, setEditWorkVisible] = useState(false);
   const [editWebsiteVisible, setEditWebsiteVisible] = useState(false);
+  const [freeSlotsVisible, setFreeSlotsVisible] = useState(false);
   
   // Состояния для смены пароля
   const [showPasswordModal, setShowPasswordModal] = useState(false);
@@ -78,18 +93,20 @@ export default function MasterSettingsScreen() {
     []
   );
 
-  const normalizeBaseUrl = (base: string | undefined | null): string => {
-    const b = String(base || '').trim();
-    if (!b) return '';
-    return b.endsWith('/') ? b.slice(0, -1) : b;
-  };
+  const publicBookingUrl = useMemo(
+    () => buildMasterPublicBookingUrl(settings?.master?.domain, env.WEB_URL),
+    [settings?.master?.domain]
+  );
 
-  const publicBookingUrl = useMemo(() => {
-    const webBase = normalizeBaseUrl(env.WEB_URL);
-    const slug =
-      settings?.master?.domain != null ? String(settings.master.domain).trim() : '';
-    return webBase && slug ? `${webBase}/m/${slug}` : null;
-  }, [settings?.master?.domain]);
+  const publicRoutePath = useMemo(
+    () => buildMasterPublicRoutePath(settings?.master?.domain),
+    [settings?.master?.domain]
+  );
+
+  const masterSlug = useMemo(
+    () => normalizeMasterDomainSlug(settings?.master?.domain || ''),
+    [settings?.master?.domain]
+  );
 
   const formatDate = (dateString: string | null | undefined): string => {
     if (!dateString) return '—';
@@ -204,7 +221,7 @@ export default function MasterSettingsScreen() {
         ),
         contentContainerStyle: {
           padding: 0,
-          paddingBottom: 90,
+          paddingBottom: scrollPaddingBottom,
           flexGrow: 1,
         },
       }}
@@ -275,7 +292,9 @@ export default function MasterSettingsScreen() {
             <View style={styles.infoRow}>
               <Text style={styles.infoLabel}>Дата рождения:</Text>
               <Text style={styles.infoValue}>
-                {settings.user.birth_date ? formatDate(settings.user.birth_date) : '—'}
+                {settings.user.birth_date
+                  ? isoToBirthDateDisplay(settings.user.birth_date) || formatDate(settings.user.birth_date)
+                  : '—'}
               </Text>
             </View>
             <View style={styles.infoRow}>
@@ -291,18 +310,6 @@ export default function MasterSettingsScreen() {
           onEdit={() => setEditWorkVisible(true)}
         >
           <View style={styles.infoBlock}>
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Самостоятельная работа:</Text>
-              <Text style={styles.infoValue}>
-                {settings.master.can_work_independently ? 'Да' : 'Нет'}
-              </Text>
-            </View>
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Работа в салоне:</Text>
-              <Text style={styles.infoValue}>
-                {settings.master.can_work_in_salon ? 'Да' : 'Нет'}
-              </Text>
-            </View>
             <View style={styles.infoRow}>
               <Text style={styles.infoLabel}>Подтверждение записей:</Text>
               <Text style={styles.infoValue}>
@@ -351,6 +358,41 @@ export default function MasterSettingsScreen() {
                   {settings.master.site_description ? 'Настроен' : 'Не настроен'}
                 </Text>
               </View>
+              {publicBookingUrl ? (
+                <View style={styles.websiteActions}>
+                  <TouchableOpacity
+                    style={styles.websiteActionBtn}
+                    onPress={() => {
+                      if (publicRoutePath) router.push(publicRoutePath as `/m/${string}`);
+                    }}
+                  >
+                    <Ionicons name="open-outline" size={18} color="#2e7d32" />
+                    <Text style={styles.websiteActionText}>Открыть страницу мастера</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.websiteActionBtn}
+                    onPress={async () => {
+                      if (!publicBookingUrl) return;
+                      try {
+                        await Clipboard.setStringAsync(publicBookingUrl);
+                        Alert.alert('Готово', 'Ссылка скопирована');
+                      } catch {
+                        Alert.alert('Ошибка', 'Не удалось скопировать ссылку');
+                      }
+                    }}
+                  >
+                    <Ionicons name="copy-outline" size={18} color="#2e7d32" />
+                    <Text style={styles.websiteActionText}>Скопировать ссылку</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.websiteActionBtn}
+                    onPress={() => setFreeSlotsVisible(true)}
+                  >
+                    <Ionicons name="share-social-outline" size={18} color="#2e7d32" />
+                    <Text style={styles.websiteActionText}>Карточка со свободными слотами</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : null}
             </View>
           </SettingsBlock>
         )}
@@ -476,6 +518,16 @@ export default function MasterSettingsScreen() {
         onSave={() => loadSettings('refresh')}
         frontendBaseUrl={env.WEB_URL}
       />
+
+      {masterSlug && publicBookingUrl ? (
+        <FreeSlotsShareCardModal
+          visible={freeSlotsVisible}
+          onClose={() => setFreeSlotsVisible(false)}
+          slug={masterSlug}
+          bookingUrl={publicBookingUrl}
+          masterNameFallback={settings?.user?.full_name || ''}
+        />
+      ) : null}
     </ScreenContainer>
   );
 }
@@ -572,6 +624,27 @@ const styles = StyleSheet.create({
     color: '#333',
     flex: 1,
   },
+  websiteActions: {
+    marginTop: 12,
+    gap: 8,
+  },
+  websiteActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#c8e6c9',
+    backgroundColor: '#f1f8f1',
+  },
+  websiteActionText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#2e7d32',
+    flex: 1,
+  },
   passwordSection: {
     marginTop: 24,
     marginBottom: 16,
@@ -590,7 +663,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   logoutSection: {
-    marginBottom: 24,
+    marginBottom: 0,
   },
   logoutButton: {
     backgroundColor: '#F44336',

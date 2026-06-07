@@ -3,14 +3,12 @@ import {
   View,
   Text,
   StyleSheet,
-  ScrollView,
+  FlatList,
   TouchableOpacity,
   Pressable,
   Dimensions,
   Alert,
   Platform,
-  type NativeSyntheticEvent,
-  type NativeScrollEvent,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -23,7 +21,7 @@ interface WeekViewProps {
   bookings: Booking[];
   weekOffset: number;
   onWeekChange: (offset: number) => void;
-  onScheduleUpdated?: () => void;
+  onScheduleUpdated?: () => void | Promise<void>;
   masterSettings?: MasterSettings | null;
   refreshControl?: ReactElement;
   hasExtendedStats?: boolean;
@@ -90,6 +88,131 @@ function slotKeyFromParts(dateStr: string, hour: number, minute: number): string
   return `${dateStr}_${hour}_${minute}`;
 }
 
+type TimeSlotRow = { hour: number; minute: number; label: string };
+
+type SlotGridMeta = {
+  availability: Map<string, boolean>;
+  bookingBySlot: Map<string, Booking | null>;
+  bookingTimeBySlot: Map<string, string>;
+  bookingServiceBySlot: Map<string, string>;
+};
+
+type SlotHandlers = {
+  onPress: Map<string, () => void>;
+  onLongPress: Map<string, () => void>;
+  onPressIn: Map<string, () => void>;
+};
+
+/** Payload открытых слотов для PUT /api/master/schedule/weekly */
+function buildWeeklyOpenSlotsPayload(slots: ScheduleSlot[]) {
+  return slots
+    .filter((slot) => !!(slot.is_available ?? slot.is_working))
+    .map((slot) => {
+      const date = slot.date || slot.schedule_date;
+      const hour =
+        slot.hour !== undefined ? slot.hour : parseInt((slot.start_time || '0:0').split(':')[0], 10);
+      const minute =
+        slot.minute !== undefined ? slot.minute : parseInt((slot.start_time || '0:0').split(':')[1], 10);
+
+      let dateStr = date as string;
+      if (date instanceof Date) {
+        dateStr = date.toISOString().split('T')[0];
+      } else if (typeof date === 'string') {
+        const dateMatch = date.match(/^\d{4}-\d{2}-\d{2}/);
+        if (!dateMatch) {
+          const dateObj = new Date(date);
+          if (!isNaN(dateObj.getTime())) {
+            dateStr = dateObj.toISOString().split('T')[0];
+          }
+        }
+      }
+
+      if (isNaN(hour) || hour < 0 || hour > 23) return null;
+      if (isNaN(minute) || minute < 0 || minute > 59) return null;
+      if (!dateStr || !dateStr.match(/^\d{4}-\d{2}-\d{2}$/)) return null;
+
+      return {
+        schedule_date: dateStr,
+        hour,
+        minute,
+        is_working: true,
+        has_conflict: slot.has_conflict || false,
+        is_frozen: slot.is_frozen || false,
+      };
+    })
+    .filter((slot): slot is NonNullable<typeof slot> => slot !== null);
+}
+
+type WeekGridRowProps = {
+  timeSlot: TimeSlotRow;
+  weekDateStrings: readonly string[];
+  slotGridMeta: SlotGridMeta;
+  selectedSlots: Set<string>;
+  isEditMode: boolean;
+  dragStart: { date: string; hour: number; minute: number } | null;
+  slotInteractionHandlers: SlotHandlers;
+  onSlotRelease: () => void;
+};
+
+function weekGridRowPropsEqual(prev: WeekGridRowProps, next: WeekGridRowProps): boolean {
+  if (prev.timeSlot !== next.timeSlot) return false;
+  if (prev.weekDateStrings !== next.weekDateStrings) return false;
+  if (prev.slotGridMeta !== next.slotGridMeta) return false;
+  if (prev.isEditMode !== next.isEditMode) return false;
+  if (prev.dragStart !== next.dragStart) return false;
+  if (prev.slotInteractionHandlers !== next.slotInteractionHandlers) return false;
+  if (prev.onSlotRelease !== next.onSlotRelease) return false;
+  for (const dateStr of prev.weekDateStrings) {
+    const key = slotKeyFromParts(dateStr, prev.timeSlot.hour, prev.timeSlot.minute);
+    if (prev.selectedSlots.has(key) !== next.selectedSlots.has(key)) return false;
+  }
+  return true;
+}
+
+const WeekGridRow = memo(function WeekGridRow({
+  timeSlot,
+  weekDateStrings,
+  slotGridMeta,
+  selectedSlots,
+  isEditMode,
+  dragStart,
+  slotInteractionHandlers,
+  onSlotRelease,
+}: WeekGridRowProps) {
+  return (
+    <View style={styles.unifiedRow}>
+      {/* Метка времени в той же строке, что и ячейки дней — единый вертикальный скролл без desync. */}
+      <View style={styles.timeSlot}>
+        {timeSlot.minute === 0 ? <Text style={styles.timeLabel}>{timeSlot.label}</Text> : null}
+      </View>
+      <View style={styles.gridRow}>
+      {weekDateStrings.map((dateStr) => {
+        const key = slotKeyFromParts(dateStr, timeSlot.hour, timeSlot.minute);
+        const booking = slotGridMeta.bookingBySlot.get(key);
+        const hasBooking = !!booking;
+        return (
+          <View key={key} style={styles.dayColumn}>
+            <WeekSlotCell
+              isAvailable={slotGridMeta.availability.get(key) ?? false}
+              hasBooking={hasBooking}
+              bookingTimeLabel={slotGridMeta.bookingTimeBySlot.get(key) || ''}
+              bookingServiceName={slotGridMeta.bookingServiceBySlot.get(key) || ''}
+              isSelected={selectedSlots.has(key)}
+              onPress={slotInteractionHandlers.onPress.get(key)!}
+              onLongPress={slotInteractionHandlers.onLongPress.get(key)!}
+              onPressIn={
+                isEditMode && dragStart ? slotInteractionHandlers.onPressIn.get(key) : undefined
+              }
+              onPressOut={isEditMode ? onSlotRelease : undefined}
+            />
+          </View>
+        );
+      })}
+      </View>
+    </View>
+  );
+}, weekGridRowPropsEqual);
+
 export function WeekView({
   schedule,
   bookings,
@@ -108,12 +231,18 @@ export function WeekView({
   const [dragStart, setDragStart] = useState<{ date: string; hour: number; minute: number } | null>(null);
   const [localSchedule, setLocalSchedule] = useState<ScheduleWeek>(schedule);
   const [undoStack, setUndoStack] = useState<ScheduleWeek[]>([]);
-  const timeScrollRef = useRef<ScrollView>(null);
-  const daysScrollRef = useRef<ScrollView>(null);
-  /** Блокирует ping-pong: scrollTo на втором ScrollView вызывает onScroll → снова scrollTo на первом → дёрганье. */
-  const verticalScrollSyncLockRef = useRef(false);
-  /** Синхронизация только при жесте пользователя — меньше scrollTo и дёрганья. */
-  const verticalScrollSourceRef = useRef<'time' | 'days' | null>(null);
+  const [actionSaving, setActionSaving] = useState(false);
+  const gridScrollRef = useRef<FlatList<TimeSlotRow>>(null);
+  const gridRowContextRef = useRef({
+    weekDateStrings: [] as string[],
+    slotGridMeta: null as unknown as SlotGridMeta,
+    selectedSlots: new Set<string>(),
+    isEditMode: false,
+    dragStart: null as { date: string; hour: number; minute: number } | null,
+    slotInteractionHandlers: null as unknown as SlotHandlers,
+    onSlotRelease: () => {},
+  });
+  const [gridListRevision, setGridListRevision] = useState(0);
   const footerPaddingBottom = Math.max(insets.bottom, 8) + 8;
   const showEditFooter = isEditMode;
 
@@ -228,12 +357,12 @@ export function WeekView({
     return { availability, bookingBySlot, bookingTimeBySlot, bookingServiceBySlot };
   }, [weekDateStrings, slotsByDay, bookingsByDay, timeSlots]);
 
-  // Вычисляем начальную позицию скролла (7:00)
-  const initialScrollY = useMemo(() => {
-    // Находим индекс слота для 7:00
-    const initialIndex = timeSlots.findIndex(slot => slot.hour === INITIAL_SCROLL_HOUR && slot.minute === 0);
-    return initialIndex >= 0 ? initialIndex * TIME_SLOT_HEIGHT : 0;
+  const initialScrollIndex = useMemo(() => {
+    const idx = timeSlots.findIndex((slot) => slot.hour === INITIAL_SCROLL_HOUR && slot.minute === 0);
+    return idx >= 0 ? idx : 0;
   }, [timeSlots]);
+
+  const initialScrollY = initialScrollIndex * TIME_SLOT_HEIGHT;
 
   // Форматируем дату для заголовка
   const formatWeekTitle = () => {
@@ -288,44 +417,13 @@ export function WeekView({
     setLocalSchedule(schedule);
   }, [schedule]);
 
-  // Стартовый скролл к ~7:00 (один раз при смене недели / offset; lock убирает ping-pong с onScroll).
   useEffect(() => {
     if (initialScrollY <= 0) return;
     const t = setTimeout(() => {
-      if (!timeScrollRef.current || !daysScrollRef.current) return;
-      verticalScrollSyncLockRef.current = true;
-      timeScrollRef.current.scrollTo({ y: initialScrollY, animated: false });
-      daysScrollRef.current.scrollTo({ y: initialScrollY, animated: false });
-      requestAnimationFrame(() => {
-        verticalScrollSyncLockRef.current = false;
-      });
+      gridScrollRef.current?.scrollToOffset({ offset: initialScrollY, animated: false });
     }, 80);
     return () => clearTimeout(t);
   }, [initialScrollY, weekOffset]);
-
-  const endVerticalScrollSync = useCallback(() => {
-    verticalScrollSourceRef.current = null;
-  }, []);
-
-  const handleTimeColumnScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
-    if (verticalScrollSyncLockRef.current || verticalScrollSourceRef.current !== 'time') return;
-    const y = e.nativeEvent.contentOffset.y;
-    verticalScrollSyncLockRef.current = true;
-    daysScrollRef.current?.scrollTo({ y, animated: false });
-    requestAnimationFrame(() => {
-      verticalScrollSyncLockRef.current = false;
-    });
-  }, []);
-
-  const handleDaysColumnScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
-    if (verticalScrollSyncLockRef.current || verticalScrollSourceRef.current !== 'days') return;
-    const y = e.nativeEvent.contentOffset.y;
-    verticalScrollSyncLockRef.current = true;
-    timeScrollRef.current?.scrollTo({ y, animated: false });
-    requestAnimationFrame(() => {
-      verticalScrollSyncLockRef.current = false;
-    });
-  }, []);
 
   // Обработка long press для начала выделения
   const handleSlotLongPress = (date: string, hour: number, minute: number) => {
@@ -399,12 +497,12 @@ export function WeekView({
 
   // Применение действия к выбранным слотам с автоматическим сохранением
   const applyActionToSelectedSlots = async (action: 'open' | 'close') => {
-    if (selectedSlots.size === 0) return;
-    
-    const slotsToUpdate = Array.from(selectedSlots);
+    if (selectedSlots.size === 0 || actionSaving) return;
+
+    const previousSchedule = localSchedule;
     const updatedSlots = localSchedule.slots.map((slot) => {
-      const slotKey = `${slot.date || slot.schedule_date}_${slot.hour}_${slot.minute}`;
-      if (selectedSlots.has(slotKey)) {
+      const key = `${slot.date || slot.schedule_date}_${slot.hour}_${slot.minute}`;
+      if (selectedSlots.has(key)) {
         return {
           ...slot,
           is_available: action === 'open',
@@ -413,53 +511,29 @@ export function WeekView({
       }
       return slot;
     });
-    
-    setLocalSchedule({ ...localSchedule, slots: updatedSlots });
+
+    const nextSchedule = { ...localSchedule, slots: updatedSlots };
+    setLocalSchedule(nextSchedule);
     setSelectedSlots(new Set());
     setDragStart(null);
     setEditAction(null);
-    
-    // Автоматически сохраняем изменения
-    try {
-      const slotsToSave = updatedSlots
-        .filter(slot => {
-          const slotKey = `${slot.date || slot.schedule_date}_${slot.hour}_${slot.minute}`;
-          return slotsToUpdate.includes(slotKey) && action === 'open';
-        })
-        .map(slot => {
-          const date = slot.date || slot.schedule_date;
-          let dateStr = date;
-          if (date instanceof Date) {
-            dateStr = date.toISOString().split('T')[0];
-          } else if (typeof date === 'string') {
-            const dateMatch = date.match(/^\d{4}-\d{2}-\d{2}/);
-            if (!dateMatch) {
-              const dateObj = new Date(date);
-              if (!isNaN(dateObj.getTime())) {
-                dateStr = dateObj.toISOString().split('T')[0];
-              }
-            }
-          }
-          
-          return {
-            schedule_date: dateStr,
-            hour: slot.hour,
-            minute: slot.minute,
-            is_working: action === 'open',
-            has_conflict: slot.has_conflict || false,
-            is_frozen: slot.is_frozen || false,
-          };
-        });
 
-      if (slotsToSave.length > 0) {
-        await apiClient.put('/api/master/schedule/weekly', { slots: slotsToSave });
-        if (onScheduleUpdated) {
-          onScheduleUpdated();
-        }
-      }
-    } catch (error: any) {
+    setActionSaving(true);
+    try {
+      const slotsToSave = buildWeeklyOpenSlotsPayload(updatedSlots);
+      await apiClient.put('/api/master/schedule/weekly', { slots: slotsToSave });
+      await onScheduleUpdated?.();
+    } catch (error: unknown) {
       console.error('Ошибка автоматического сохранения:', error);
-      Alert.alert('Ошибка', 'Не удалось сохранить изменения');
+      setLocalSchedule(previousSchedule);
+      const ax = error as { response?: { data?: { detail?: string } }; message?: string };
+      const detail = ax?.response?.data?.detail;
+      Alert.alert(
+        'Ошибка',
+        typeof detail === 'string' ? detail : ax?.message || 'Не удалось сохранить изменения'
+      );
+    } finally {
+      setActionSaving(false);
     }
   };
 
@@ -523,6 +597,50 @@ export function WeekView({
   const stableSlotRelease = useCallback(() => {
     handleSlotReleaseRef.current();
   }, []);
+
+  gridRowContextRef.current = {
+    weekDateStrings: weekDateStrings,
+    slotGridMeta,
+    selectedSlots,
+    isEditMode,
+    dragStart,
+    slotInteractionHandlers,
+    onSlotRelease: stableSlotRelease,
+  };
+
+  useEffect(() => {
+    setGridListRevision((v) => v + 1);
+  }, [slotGridMeta, selectedSlots, isEditMode, dragStart, slotInteractionHandlers, weekDateStrings]);
+
+  const renderWeekGridRow = useCallback(({ item: timeSlot }: { item: TimeSlotRow }) => {
+    const ctx = gridRowContextRef.current;
+    return (
+      <WeekGridRow
+        timeSlot={timeSlot}
+        weekDateStrings={ctx.weekDateStrings}
+        slotGridMeta={ctx.slotGridMeta}
+        selectedSlots={ctx.selectedSlots}
+        isEditMode={ctx.isEditMode}
+        dragStart={ctx.dragStart}
+        slotInteractionHandlers={ctx.slotInteractionHandlers}
+        onSlotRelease={ctx.onSlotRelease}
+      />
+    );
+  }, []);
+
+  const weekGridKeyExtractor = useCallback(
+    (item: TimeSlotRow) => `${item.hour}-${item.minute}`,
+    []
+  );
+
+  const getWeekRowLayout = useCallback(
+    (_: TimeSlotRow[] | null | undefined, index: number) => ({
+      length: TIME_SLOT_HEIGHT,
+      offset: TIME_SLOT_HEIGHT * index,
+      index,
+    }),
+    []
+  );
 
   // Сохранение изменений
   const handleSave = async () => {
@@ -645,121 +763,59 @@ export function WeekView({
         </View>
       </View>
 
-      {/* Сетка расписания */}
+      {/*
+        Одна вертикальная FlatList: метка времени и 7 дневных ячеек в одной строке (WeekGridRow).
+        Раньше отдельный ScrollView для шкалы времени + sync через scrollTo давал рассинхрон
+        при быстром скролле (запись 06:00 визуально у 21:00). Не возвращать dual-scroll.
+      */}
       <View style={styles.gridContainer}>
-        {/* Колонка времени (sticky) */}
-        <View style={styles.timeColumn}>
-          <View style={styles.timeHeader} />
-          <ScrollView
-            ref={timeScrollRef}
-            showsVerticalScrollIndicator={false}
-            style={styles.timeScroll}
-            onScroll={handleTimeColumnScroll}
-            onScrollBeginDrag={() => {
-              verticalScrollSourceRef.current = 'time';
-            }}
-            onScrollEndDrag={endVerticalScrollSync}
-            onMomentumScrollEnd={endVerticalScrollSync}
-            scrollEventThrottle={64}
-            removeClippedSubviews={Platform.OS === 'android'}
-          >
-            {timeSlots.map((slot, index) => (
-              <View key={index} style={styles.timeSlot}>
-                {slot.minute === 0 && (
-                  <Text style={styles.timeLabel}>{slot.label}</Text>
-                )}
-              </View>
-            ))}
-          </ScrollView>
-        </View>
-
-        {/* Колонки дней */}
-        <View style={styles.daysContainer}>
-          {/* Заголовки дней (sticky) */}
+        <View style={styles.weekHeaderRow}>
+          <View style={styles.timeHeaderSpacer} />
           <View style={styles.daysHeaderSticky}>
             {weekDates.map((date, index) => {
               const dateStr = date.toISOString().split('T')[0];
               const dayName = date.toLocaleDateString('ru-RU', { weekday: 'short' });
               const dayNumber = date.getDate();
               const isToday = dateStr === new Date().toISOString().split('T')[0];
-              
+
               return (
                 <TouchableOpacity
                   key={index}
                   style={[styles.dayHeader, isToday && styles.dayHeaderToday]}
                   onPress={() => handleDayPress(dateStr)}
                 >
-                  <Text style={[styles.dayName, isToday && styles.dayNameToday]}>
-                    {dayName}
-                  </Text>
-                  <Text style={[styles.dayNumber, isToday && styles.dayNumberToday]}>
-                    {dayNumber}
-                  </Text>
+                  <Text style={[styles.dayName, isToday && styles.dayNameToday]}>{dayName}</Text>
+                  <Text style={[styles.dayNumber, isToday && styles.dayNumberToday]}>{dayNumber}</Text>
                 </TouchableOpacity>
               );
             })}
           </View>
-
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            style={styles.daysHorizontalScroll}
-            nestedScrollEnabled
-            directionalLockEnabled={Platform.OS === 'ios'}
-          >
-            <ScrollView
-              ref={daysScrollRef}
-              nestedScrollEnabled
-              directionalLockEnabled={Platform.OS === 'ios'}
-              showsVerticalScrollIndicator={false}
-              style={styles.daysScroll}
-              contentContainerStyle={[
-                styles.daysScrollContent,
-                showEditFooter ? { paddingBottom: 8 } : null,
-              ]}
-              onScroll={handleDaysColumnScroll}
-              onScrollBeginDrag={() => {
-                verticalScrollSourceRef.current = 'days';
-              }}
-              onScrollEndDrag={endVerticalScrollSync}
-              onMomentumScrollEnd={endVerticalScrollSync}
-              scrollEventThrottle={64}
-              removeClippedSubviews={Platform.OS === 'android'}
-              refreshControl={refreshControl}
-            >
-              {/* Сетка слотов */}
-              <View style={styles.grid}>
-            {weekDateStrings.map((dateStr, dayIndex) => (
-                <View key={dateStr} style={styles.dayColumn}>
-                  {timeSlots.map((timeSlot) => {
-                    const key = slotKeyFromParts(dateStr, timeSlot.hour, timeSlot.minute);
-                    const booking = slotGridMeta.bookingBySlot.get(key);
-                    const hasBooking = !!booking;
-                    return (
-                      <WeekSlotCell
-                        key={key}
-                        isAvailable={slotGridMeta.availability.get(key) ?? false}
-                        hasBooking={hasBooking}
-                        bookingTimeLabel={slotGridMeta.bookingTimeBySlot.get(key) || ''}
-                        bookingServiceName={slotGridMeta.bookingServiceBySlot.get(key) || ''}
-                        isSelected={selectedSlots.has(key)}
-                        onPress={slotInteractionHandlers.onPress.get(key)!}
-                        onLongPress={slotInteractionHandlers.onLongPress.get(key)!}
-                        onPressIn={
-                          isEditMode && dragStart
-                            ? slotInteractionHandlers.onPressIn.get(key)
-                            : undefined
-                        }
-                        onPressOut={isEditMode ? stableSlotRelease : undefined}
-                      />
-                    );
-                  })}
-                </View>
-              ))}
-              </View>
-            </ScrollView>
-          </ScrollView>
         </View>
+
+        <FlatList
+          ref={gridScrollRef}
+          data={timeSlots}
+          extraData={gridListRevision}
+          keyExtractor={weekGridKeyExtractor}
+          renderItem={renderWeekGridRow}
+          getItemLayout={getWeekRowLayout}
+          initialScrollIndex={initialScrollIndex}
+          onScrollToIndexFailed={(info) => {
+            gridScrollRef.current?.scrollToOffset({
+              offset: Math.max(0, info.averageItemLength * info.index),
+              animated: false,
+            });
+          }}
+          showsVerticalScrollIndicator
+          style={styles.gridScroll}
+          contentContainerStyle={showEditFooter ? styles.daysScrollContentWithFooter : styles.daysScrollContent}
+          removeClippedSubviews={Platform.OS === 'android'}
+          refreshControl={refreshControl}
+          initialNumToRender={12}
+          maxToRenderPerBatch={8}
+          windowSize={7}
+          updateCellsBatchingPeriod={50}
+        />
       </View>
 
       {/* Панель инструментов — только в режиме редактирования */}
@@ -767,7 +823,12 @@ export function WeekView({
         <View style={[styles.editToolbar, { paddingBottom: footerPaddingBottom }]}>
           <View style={styles.toolbarRow}>
             <TouchableOpacity
-              style={[styles.toolbarButton, styles.toolbarButtonPrimary]}
+              style={[
+                styles.toolbarButton,
+                styles.toolbarButtonPrimary,
+                (actionSaving || selectedSlots.size === 0) && styles.toolbarButtonDisabled,
+              ]}
+              disabled={actionSaving || selectedSlots.size === 0}
               onPress={async () => {
                 if (selectedSlots.size === 0) {
                   Alert.alert('Предупреждение', 'Выберите слоты для открытия');
@@ -777,10 +838,17 @@ export function WeekView({
                 await applyActionToSelectedSlots('open');
               }}
             >
-              <Text style={styles.toolbarButtonText}>Открыть</Text>
+              <Text style={styles.toolbarButtonText}>
+                {actionSaving ? '…' : 'Открыть'}
+              </Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={[styles.toolbarButton, styles.toolbarButtonDanger]}
+              style={[
+                styles.toolbarButton,
+                styles.toolbarButtonDanger,
+                (actionSaving || selectedSlots.size === 0) && styles.toolbarButtonDisabled,
+              ]}
+              disabled={actionSaving || selectedSlots.size === 0}
               onPress={async () => {
                 if (selectedSlots.size === 0) {
                   Alert.alert('Предупреждение', 'Выберите слоты для закрытия');
@@ -790,7 +858,9 @@ export function WeekView({
                 await applyActionToSelectedSlots('close');
               }}
             >
-              <Text style={styles.toolbarButtonText}>Закрыть</Text>
+              <Text style={styles.toolbarButtonText}>
+                {actionSaving ? '…' : 'Закрыть'}
+              </Text>
             </TouchableOpacity>
           </View>
           <View style={styles.toolbarRow}>
@@ -822,6 +892,7 @@ export function WeekView({
           slots={slotsByDay[selectedDate] || []}
           onClose={handleCloseDayDrawer}
           onCancelSuccess={onScheduleUpdated}
+          onScheduleUpdated={onScheduleUpdated}
           masterSettings={masterSettings}
           hasExtendedStats={hasExtendedStats}
         />
@@ -865,50 +936,49 @@ const styles = StyleSheet.create({
   },
   gridContainer: {
     flex: 1,
-    flexDirection: 'row',
-  },
-  timeColumn: {
-    width: 60,
-    borderRightWidth: 1,
-    borderRightColor: '#e0e0e0',
-  },
-  timeScroll: {
-    flex: 1,
-  },
-  daysContainer: {
-    flex: 1,
     flexDirection: 'column',
   },
-  daysHeaderSticky: {
+  weekHeaderRow: {
     flexDirection: 'row',
-    height: 60,
     borderBottomWidth: 1,
     borderBottomColor: '#e0e0e0',
     backgroundColor: '#fff',
-    zIndex: 10,
-    position: 'relative',
   },
-  daysHorizontalScroll: {
+  timeHeaderSpacer: {
+    width: 60,
+    height: 60,
+    borderRightWidth: 1,
+    borderRightColor: '#e0e0e0',
+  },
+  daysHeaderSticky: {
+    flex: 1,
+    flexDirection: 'row',
+    height: 60,
+    backgroundColor: '#fff',
+  },
+  gridScroll: {
     flex: 1,
   },
-  daysScroll: {
-    flex: 1,
+  unifiedRow: {
+    flexDirection: 'row',
+    height: TIME_SLOT_HEIGHT,
+    borderRightWidth: 1,
+    borderRightColor: '#e0e0e0',
   },
   daysScrollContent: {
     paddingBottom: 0,
   },
-  timeHeader: {
-    height: 60,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
-    backgroundColor: '#fff',
-    zIndex: 10,
+  daysScrollContentWithFooter: {
+    paddingBottom: 8,
   },
   timeSlot: {
+    width: 60,
     height: TIME_SLOT_HEIGHT,
     justifyContent: 'flex-start',
     paddingLeft: 8,
     paddingTop: 4,
+    borderRightWidth: 1,
+    borderRightColor: '#e0e0e0',
   },
   timeLabel: {
     fontSize: 12,
@@ -942,8 +1012,10 @@ const styles = StyleSheet.create({
   dayNumberToday: {
     color: '#1976D2',
   },
-  grid: {
+  gridRow: {
+    flex: 1,
     flexDirection: 'row',
+    height: TIME_SLOT_HEIGHT,
   },
   dayColumn: {
     width: DAY_COLUMN_WIDTH,
@@ -1049,6 +1121,9 @@ const styles = StyleSheet.create({
   },
   toolbarButtonTextDisabled: {
     opacity: 0.5,
+  },
+  toolbarButtonDisabled: {
+    opacity: 0.55,
   },
 });
 

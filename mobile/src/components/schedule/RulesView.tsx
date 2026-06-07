@@ -1,6 +1,5 @@
-import React, { useState, useEffect, type ReactElement } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import React, { useState, useEffect, useCallback, type ReactElement } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { getScheduleRules, createScheduleRule } from '@src/services/api/master';
 import { RuleBuilderModal } from './RuleBuilderModal';
 
@@ -16,29 +15,41 @@ export function RulesView({
   refreshControl,
   externalReloadToken = 0,
 }: RulesViewProps = {}) {
-  const insets = useSafeAreaInsets();
-  const footerPaddingBottom = Math.max(insets.bottom, 12) + 16;
+  /** Отступ tab bar задаёт schedule.tsx (tabBarClearance); здесь только минимальный воздух под кнопкой */
+  const footerPaddingBottom = 8;
+  const footerPaddingTop = 8;
+  const footerButtonHeight = 44;
+  const footerBlockHeight = footerPaddingTop + footerButtonHeight + footerPaddingBottom;
   const [rules, setRules] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [showRuleBuilder, setShowRuleBuilder] = useState(false);
 
-  const loadRules = async (opts?: { silent?: boolean }) => {
+  const loadRules = useCallback(async (opts?: { silent?: boolean }) => {
     const silent = opts?.silent === true;
     try {
-      if (!silent) setLoading(true);
+      if (!silent) {
+        setLoading(true);
+        setLoadError(null);
+      }
       const data = await getScheduleRules();
       setRules(data);
-    } catch (error: any) {
+      setLoadError(null);
+    } catch (error: unknown) {
       console.error('Ошибка загрузки правил:', error);
-      Alert.alert('Ошибка', 'Не удалось загрузить правила расписания');
+      const ax = error as { response?: { data?: { detail?: string } }; message?: string };
+      const detail = ax?.response?.data?.detail;
+      setLoadError(
+        typeof detail === 'string' ? detail : ax?.message || 'Не удалось загрузить правила расписания'
+      );
     } finally {
-      if (!silent) setLoading(false);
+      setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
-    loadRules({ silent: externalReloadToken > 0 });
-  }, [externalReloadToken]);
+    void loadRules({ silent: externalReloadToken > 0 });
+  }, [externalReloadToken, loadRules]);
 
   const handleRuleCreated = () => {
     setShowRuleBuilder(false);
@@ -87,11 +98,22 @@ export function RulesView({
     );
   }
 
+  if (loadError) {
+    return (
+      <View style={styles.centerContainer}>
+        <Text style={styles.errorText}>{loadError}</Text>
+        <TouchableOpacity style={styles.retryButton} onPress={() => loadRules()}>
+          <Text style={styles.retryButtonText}>Повторить</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       <ScrollView
         style={styles.content}
-        contentContainerStyle={[styles.contentInner, { paddingBottom: footerPaddingBottom + 72 }]}
+        contentContainerStyle={[styles.contentInner, { paddingBottom: footerBlockHeight }]}
         showsVerticalScrollIndicator={false}
         refreshControl={refreshControl}
       >
@@ -191,7 +213,12 @@ export function RulesView({
       </ScrollView>
 
       {/* Кнопка создания правила */}
-      <View style={[styles.footer, { paddingBottom: footerPaddingBottom }]}>
+      <View
+        style={[
+          styles.footer,
+          { paddingTop: footerPaddingTop, paddingBottom: footerPaddingBottom },
+        ]}
+      >
         <TouchableOpacity
           style={styles.createButton}
           onPress={() => setShowRuleBuilder(true)}
@@ -230,6 +257,24 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#666',
   },
+  errorText: {
+    fontSize: 15,
+    color: '#F44336',
+    textAlign: 'center',
+    marginBottom: 16,
+    paddingHorizontal: 24,
+  },
+  retryButton: {
+    backgroundColor: '#4CAF50',
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 8,
+  },
+  retryButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
   content: {
     flex: 1,
   },
@@ -237,10 +282,9 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   emptyState: {
-    flex: 1,
-    justifyContent: 'center',
+    paddingVertical: 24,
+    paddingHorizontal: 24,
     alignItems: 'center',
-    padding: 40,
   },
   emptyTitle: {
     fontSize: 18,
@@ -305,15 +349,15 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   footer: {
-    padding: 20,
+    paddingHorizontal: 16,
     borderTopWidth: 1,
     borderTopColor: '#e0e0e0',
     backgroundColor: '#fff',
   },
   createButton: {
     backgroundColor: '#4CAF50',
-    paddingVertical: 14,
-    paddingHorizontal: 24,
+    paddingVertical: 10,
+    paddingHorizontal: 20,
     borderRadius: 8,
     alignItems: 'center',
   },

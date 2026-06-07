@@ -17,7 +17,7 @@ import { getFutureBookingsPaged, getPastAppointmentsPaged } from '@src/services/
 import { getPastStatusLabel, getPastStatusColor } from '@src/utils/bookingStatusDisplay';
 import { fetchCurrentSubscription, Subscription, getStatusLabel as getSubscriptionStatusLabel, getStatusColor as getSubscriptionStatusColor, getDaysRemaining } from '@src/services/api/subscriptions';
 import { getBalance, getBookingsLimit, getMasterSettings, getMasterServices, getWeeklySchedule, confirmBooking, confirmPreVisitBooking, cancelBookingConfirmation, getDashboardStats, Balance, BookingsLimit, MasterSettings, ScheduleWeek, DashboardStats } from '@src/services/api/master';
-import { useMasterFeatures } from '@src/hooks/useMasterFeatures';
+import { refreshMasterFeaturesGlobally } from '@src/utils/masterFeaturesRefresh';
 import { formatMoney } from '@src/utils/money';
 import { canPreVisitConfirmBooking, canConfirmPostVisit, canCancelBooking, debugConfirmUI } from '@src/utils/bookingOutcome';
 import { CancelReasonSheet } from '@src/components/bookings/CancelReasonSheet';
@@ -48,7 +48,6 @@ export default function HomeScreen() {
   const { user } = useAuth();
   const insets = useSafeAreaInsets();
   const { tabBarHeight } = useTabBarHeight();
-  const { features } = useMasterFeatures();
 
   // Client никогда не попадает сюда (route groups) — редирект оставлен как fallback
   useEffect(() => {
@@ -132,6 +131,7 @@ export default function HomeScreen() {
           loadAttentionItems(settings),
           loadServicesStats(),
         ]);
+        refreshMasterFeaturesGlobally(user?.id).catch(() => {});
       } else {
         await loadUpcomingBookings(userRole);
         await loadPastBookings(userRole);
@@ -442,7 +442,12 @@ export default function HomeScreen() {
             <View style={styles.bookingsList}>
               {upcomingBookings.map((booking) => {
                 const master = masterSettings?.master ?? null;
-                const showPreVisit = canPreVisitConfirmBooking(booking, master, new Date(), features?.has_extended_stats === true);
+                const showPreVisit = canPreVisitConfirmBooking(
+                  booking,
+                  master,
+                  new Date(),
+                  subscription?.features?.has_extended_stats === true
+                );
                 debugConfirmUI(booking, master, 'Dashboard Ближайшие');
                 return (
                   <BookingCardCompact
@@ -547,7 +552,7 @@ export default function HomeScreen() {
                     <Text style={styles.subscriptionName}>
                       {getPlanTitle({
                         plan_display_name: subscription?.plan_display_name,
-                        plan_name: subscription?.plan_name ?? features?.plan_name ?? undefined,
+                        plan_name: subscription?.plan_name ?? undefined,
                       }) || 'Базовый план'}
                     </Text>
                     <StatusBadge
@@ -696,7 +701,7 @@ export default function HomeScreen() {
           onClose={() => setShowAllBookingsModal(false)}
           onConfirmSuccess={() => refreshMasterListsAndCharts()}
           initialMode={allBookingsModalMode}
-          hasExtendedStats={features?.has_extended_stats === true}
+          hasExtendedStats={subscription?.features?.has_extended_stats === true}
         />
       )}
 

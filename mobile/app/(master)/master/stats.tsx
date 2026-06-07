@@ -2,6 +2,9 @@ import { useMemo, useState, useEffect, useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, RefreshControl, ScrollView, Pressable, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useTabBarHeight } from '@src/contexts/TabBarHeightContext';
+import { BOTTOM_NAV_CONTENT_FALLBACK_HEIGHT } from '@src/constants/bottomNavLayout';
 import { ScreenContainer } from '@src/components/ScreenContainer';
 import { Card } from '@src/components/Card';
 import { PrimaryButton } from '@src/components/PrimaryButton';
@@ -21,6 +24,8 @@ import {
   toIncomeBarLinePoint,
 } from '@src/utils/masterDashboardChartPoints';
 import { logger } from '@src/utils/logger';
+
+const SCROLL_EXTRA_BOTTOM = 40;
 
 const RU_MONTHS_FULL = [
   'Январь',
@@ -128,6 +133,13 @@ function EmptyState({
 }
 
 export default function MasterStatsScreen() {
+  const insets = useSafeAreaInsets();
+  const { tabBarHeight } = useTabBarHeight();
+  const measuredTabBarHeight = tabBarHeight > 0 ? tabBarHeight : BOTTOM_NAV_CONTENT_FALLBACK_HEIGHT;
+  const scrollPaddingBottom = useMemo(
+    () => Math.max(insets.bottom, 8) + measuredTabBarHeight + SCROLL_EXTRA_BOTTOM,
+    [insets.bottom, measuredTabBarHeight]
+  );
   const { features, loading: featuresLoading, source, refresh } = useMasterFeatures();
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
@@ -407,7 +419,7 @@ export default function MasterStatsScreen() {
       scrollable
       scrollViewProps={{
         refreshControl: <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />,
-        contentContainerStyle: { paddingBottom: 90 },
+        contentContainerStyle: { paddingBottom: scrollPaddingBottom },
         nestedScrollEnabled: true,
         keyboardShouldPersistTaps: 'handled',
         directionalLockEnabled: true,

@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { View, Text, StyleSheet, Modal, ScrollView, TextInput, TouchableOpacity, Switch, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { PrimaryButton } from '../PrimaryButton';
 import { MasterSettings, putMasterProfileFormData } from '@src/services/api/master';
+import { buildFullAddress, openYandexMapsSearch, validateMasterAddress } from '@src/utils/masterAddress';
 interface EditWorkSettingsModalProps {
   visible: boolean;
   onClose: () => void;
@@ -12,7 +13,10 @@ interface EditWorkSettingsModalProps {
   isSalonFeaturesEnabled?: boolean;
 }
 
-export function EditWorkSettingsModal({ 
+/** Скрыто до реализации salon/independent flows в mobile. */
+const SHOW_INDEPENDENT_SALON_WORK_UI = false;
+
+export function EditWorkSettingsModal({
   visible, 
   onClose, 
   settings, 
@@ -50,6 +54,11 @@ export function EditWorkSettingsModal({
     }
   }, [settings, visible]);
 
+  const fullAddressForMaps = useMemo(
+    () => buildFullAddress(settings?.master?.city, form.address),
+    [settings?.master?.city, form.address]
+  );
+
   const validate = (): boolean => {
     const newErrors: { [key: string]: string } = {};
 
@@ -57,8 +66,17 @@ export function EditWorkSettingsModal({
       newErrors.experience_years = 'Опыт работы должен быть положительным числом';
     }
 
+    const addrCheck = validateMasterAddress(form.address || '');
+    if (addrCheck.error) {
+      newErrors.address = addrCheck.error;
+    }
+
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
+  };
+
+  const openYandexMaps = () => {
+    void openYandexMapsSearch(settings?.master?.city, form.address);
   };
 
   const handleSave = async () => {
@@ -123,32 +141,36 @@ export function EditWorkSettingsModal({
             showsVerticalScrollIndicator={true}
           >
             <View style={styles.form}>
-              <View style={styles.field}>
-                <View style={styles.switchRow}>
-                  <Text style={styles.label}>Самостоятельная работа</Text>
-                  <Switch
-                    value={form.can_work_independently}
-                    onValueChange={(value) => setForm({ ...form, can_work_independently: value })}
-                    disabled={!isSalonFeaturesEnabled}
-                  />
-                </View>
-                {!isSalonFeaturesEnabled && (
-                  <Text style={styles.hint}>
-                    Мастер работает только индивидуально. Функции работы в салоне отключены в настройках администратора.
-                  </Text>
-                )}
-              </View>
-
-              {isSalonFeaturesEnabled && (
-                <View style={styles.field}>
-                  <View style={styles.switchRow}>
-                    <Text style={styles.label}>Работа в салоне</Text>
-                    <Switch
-                      value={form.can_work_in_salon}
-                      onValueChange={(value) => setForm({ ...form, can_work_in_salon: value })}
-                    />
+              {SHOW_INDEPENDENT_SALON_WORK_UI && (
+                <>
+                  <View style={styles.field}>
+                    <View style={styles.switchRow}>
+                      <Text style={styles.label}>Самостоятельная работа</Text>
+                      <Switch
+                        value={form.can_work_independently}
+                        onValueChange={(value) => setForm({ ...form, can_work_independently: value })}
+                        disabled={!isSalonFeaturesEnabled}
+                      />
+                    </View>
+                    {!isSalonFeaturesEnabled && (
+                      <Text style={styles.hint}>
+                        Мастер работает только индивидуально. Функции работы в салоне отключены в настройках администратора.
+                      </Text>
+                    )}
                   </View>
-                </View>
+
+                  {isSalonFeaturesEnabled && (
+                    <View style={styles.field}>
+                      <View style={styles.switchRow}>
+                        <Text style={styles.label}>Работа в салоне</Text>
+                        <Switch
+                          value={form.can_work_in_salon}
+                          onValueChange={(value) => setForm({ ...form, can_work_in_salon: value })}
+                        />
+                      </View>
+                    </View>
+                  )}
+                </>
               )}
 
               <View style={styles.field}>
@@ -175,18 +197,32 @@ export function EditWorkSettingsModal({
                 </View>
               </View>
 
-              {form.can_work_independently && (
+              {(SHOW_INDEPENDENT_SALON_WORK_UI ? form.can_work_independently : true) && (
                 <>
                   <View style={styles.field}>
                     <Text style={styles.label}>Адрес</Text>
                     <TextInput
-                      style={[styles.input, styles.textArea]}
+                      style={[styles.input, styles.textArea, errors.address && styles.inputError]}
                       value={form.address}
-                      onChangeText={(text) => setForm({ ...form, address: text })}
-                      placeholder="Укажите ваш адрес"
+                      onChangeText={(text) => {
+                        setForm({ ...form, address: text });
+                        if (errors.address) setErrors({ ...errors, address: '' });
+                      }}
+                      placeholder="Например: Москва, ул. Тверская, 10"
                       multiline
                       numberOfLines={2}
                     />
+                    <Text style={styles.helperText}>
+                      Укажите город, улицу и дом. После сохранения проверьте, что адрес корректно
+                      открывается в Яндекс Картах.
+                    </Text>
+                    {errors.address ? <Text style={styles.errorText}>{errors.address}</Text> : null}
+                    {fullAddressForMaps ? (
+                      <TouchableOpacity style={styles.yandexBtn} onPress={openYandexMaps}>
+                        <Ionicons name="map-outline" size={18} color="#2e7d32" />
+                        <Text style={styles.yandexBtnText}>Проверить в Яндекс Картах</Text>
+                      </TouchableOpacity>
+                    ) : null}
                   </View>
                 </>
               )}
@@ -381,6 +417,29 @@ const styles = StyleSheet.create({
     color: '#666',
     marginTop: 8,
     fontStyle: 'italic',
+  },
+  helperText: {
+    fontSize: 12,
+    color: '#666',
+    marginTop: 8,
+    lineHeight: 17,
+  },
+  yandexBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#c8e6c9',
+    backgroundColor: '#f1f8f4',
+    gap: 8,
+  },
+  yandexBtnText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#2e7d32',
   },
   footer: {
     padding: 20,

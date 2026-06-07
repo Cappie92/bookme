@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, Modal, TouchableOpacity, TextInput, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, TextInput } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { PrimaryButton } from '@src/components/PrimaryButton';
+import { KeyboardAwareBottomSheet } from '@src/components/common/KeyboardAwareBottomSheet';
 
 interface HistoryFiltersModalProps {
   visible: boolean;
@@ -28,7 +28,6 @@ export function HistoryFiltersModal({
   onApply,
   onReset,
 }: HistoryFiltersModalProps) {
-  // Draft filters (то, что вводится в модалке, не влияет на запросы)
   const [draftFilters, setDraftFilters] = useState({
     clientId: '',
     transactionType: '' as 'earned' | 'spent' | '',
@@ -36,7 +35,6 @@ export function HistoryFiltersModal({
     endDate: '',
   });
 
-  // Синхронизируем draftFilters с переданными filters при открытии модалки
   useEffect(() => {
     if (visible) {
       setDraftFilters({
@@ -66,148 +64,127 @@ export function HistoryFiltersModal({
   };
 
   return (
-    <Modal
+    <KeyboardAwareBottomSheet
       visible={visible}
-      transparent
-      animationType="slide"
       onRequestClose={onClose}
+      footer={
+        <View style={styles.footerRow}>
+          <TouchableOpacity style={styles.footerButton} onPress={onClose}>
+            <Text style={styles.footerButtonText}>Закрыть</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.footerButton} onPress={handleReset}>
+            <Text style={styles.footerButtonText}>Сбросить</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.footerButton, styles.footerButtonPrimary]} onPress={handleApply}>
+            <Text style={[styles.footerButtonText, styles.footerButtonTextPrimary]}>Применить</Text>
+          </TouchableOpacity>
+        </View>
+      }
     >
-      <View style={styles.overlay}>
-        <View style={styles.modalContainer}>
-          {/* Заголовок */}
-          <View style={styles.header}>
-            <Text style={styles.title}>Фильтры истории</Text>
-            <TouchableOpacity onPress={onClose} hitSlop={8}>
-              <Ionicons name="close" size={26} color="#666" />
+      <View style={styles.header}>
+        <Text style={styles.title}>Фильтры истории</Text>
+        <TouchableOpacity onPress={onClose} hitSlop={8}>
+          <Ionicons name="close" size={26} color="#666" />
+        </TouchableOpacity>
+      </View>
+
+      <View style={styles.filtersContainer}>
+        <View style={styles.filterRow}>
+          <Text style={styles.filterLabel}>Клиент (ID)</Text>
+          <TextInput
+            style={styles.filterInput}
+            value={draftFilters.clientId}
+            onChangeText={(text) => setDraftFilters({ ...draftFilters, clientId: text })}
+            placeholder="ID клиента"
+            keyboardType="numeric"
+          />
+        </View>
+
+        <View style={styles.filterRow}>
+          <Text style={styles.filterLabel}>Тип операции</Text>
+          <View style={styles.filterSelectContainer}>
+            <TouchableOpacity
+              style={[
+                styles.filterSelectOption,
+                draftFilters.transactionType === '' && styles.filterSelectOptionActive,
+              ]}
+              onPress={() => setDraftFilters({ ...draftFilters, transactionType: '' })}
+            >
+              <Text
+                style={[
+                  styles.filterSelectText,
+                  draftFilters.transactionType === '' && styles.filterSelectTextActive,
+                ]}
+              >
+                Все
+              </Text>
             </TouchableOpacity>
-          </View>
-
-          {/* Контент */}
-          <ScrollView style={styles.content}>
-            <View style={styles.filtersContainer}>
-              <View style={styles.filterRow}>
-                <Text style={styles.filterLabel}>Клиент (ID)</Text>
-                <TextInput
-                  style={styles.filterInput}
-                  value={draftFilters.clientId}
-                  onChangeText={(text) => setDraftFilters({ ...draftFilters, clientId: text })}
-                  placeholder="ID клиента"
-                  keyboardType="numeric"
-                />
-              </View>
-
-              <View style={styles.filterRow}>
-                <Text style={styles.filterLabel}>Тип операции</Text>
-                <View style={styles.filterSelectContainer}>
-                  <TouchableOpacity
-                    style={[
-                      styles.filterSelectOption,
-                      draftFilters.transactionType === '' && styles.filterSelectOptionActive,
-                    ]}
-                    onPress={() => setDraftFilters({ ...draftFilters, transactionType: '' })}
-                  >
-                    <Text
-                      style={[
-                        styles.filterSelectText,
-                        draftFilters.transactionType === '' && styles.filterSelectTextActive,
-                      ]}
-                    >
-                      Все
-                    </Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[
-                      styles.filterSelectOption,
-                      draftFilters.transactionType === 'earned' && styles.filterSelectOptionActive,
-                    ]}
-                    onPress={() => setDraftFilters({ ...draftFilters, transactionType: 'earned' })}
-                  >
-                    <Text
-                      style={[
-                        styles.filterSelectText,
-                        draftFilters.transactionType === 'earned' && styles.filterSelectTextActive,
-                      ]}
-                    >
-                      Начисление
-                    </Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[
-                      styles.filterSelectOption,
-                      draftFilters.transactionType === 'spent' && styles.filterSelectOptionActive,
-                    ]}
-                    onPress={() => setDraftFilters({ ...draftFilters, transactionType: 'spent' })}
-                  >
-                    <Text
-                      style={[
-                        styles.filterSelectText,
-                        draftFilters.transactionType === 'spent' && styles.filterSelectTextActive,
-                      ]}
-                    >
-                      Списание
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-
-              <View style={styles.filterRow}>
-                <Text style={styles.filterLabel}>Дата начала</Text>
-                <TextInput
-                  style={styles.filterInput}
-                  value={draftFilters.startDate}
-                  onChangeText={(text) => setDraftFilters({ ...draftFilters, startDate: text })}
-                  placeholder="YYYY-MM-DD"
-                />
-              </View>
-
-              <View style={styles.filterRow}>
-                <Text style={styles.filterLabel}>Дата конца</Text>
-                <TextInput
-                  style={styles.filterInput}
-                  value={draftFilters.endDate}
-                  onChangeText={(text) => setDraftFilters({ ...draftFilters, endDate: text })}
-                  placeholder="YYYY-MM-DD"
-                />
-              </View>
-            </View>
-          </ScrollView>
-
-          {/* Футер с кнопками */}
-          <View style={styles.footer}>
-            <TouchableOpacity style={styles.footerButton} onPress={onClose}>
-              <Text style={styles.footerButtonText}>Закрыть</Text>
+            <TouchableOpacity
+              style={[
+                styles.filterSelectOption,
+                draftFilters.transactionType === 'earned' && styles.filterSelectOptionActive,
+              ]}
+              onPress={() => setDraftFilters({ ...draftFilters, transactionType: 'earned' })}
+            >
+              <Text
+                style={[
+                  styles.filterSelectText,
+                  draftFilters.transactionType === 'earned' && styles.filterSelectTextActive,
+                ]}
+              >
+                Начисление
+              </Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.footerButton} onPress={handleReset}>
-              <Text style={styles.footerButtonText}>Сбросить</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.footerButton, styles.footerButtonPrimary]} onPress={handleApply}>
-              <Text style={[styles.footerButtonText, styles.footerButtonTextPrimary]}>Применить</Text>
+            <TouchableOpacity
+              style={[
+                styles.filterSelectOption,
+                draftFilters.transactionType === 'spent' && styles.filterSelectOptionActive,
+              ]}
+              onPress={() => setDraftFilters({ ...draftFilters, transactionType: 'spent' })}
+            >
+              <Text
+                style={[
+                  styles.filterSelectText,
+                  draftFilters.transactionType === 'spent' && styles.filterSelectTextActive,
+                ]}
+              >
+                Списание
+              </Text>
             </TouchableOpacity>
           </View>
         </View>
+
+        <View style={styles.filterRow}>
+          <Text style={styles.filterLabel}>Дата начала</Text>
+          <TextInput
+            style={styles.filterInput}
+            value={draftFilters.startDate}
+            onChangeText={(text) => setDraftFilters({ ...draftFilters, startDate: text })}
+            placeholder="YYYY-MM-DD"
+          />
+        </View>
+
+        <View style={styles.filterRow}>
+          <Text style={styles.filterLabel}>Дата конца</Text>
+          <TextInput
+            style={styles.filterInput}
+            value={draftFilters.endDate}
+            onChangeText={(text) => setDraftFilters({ ...draftFilters, endDate: text })}
+            placeholder="YYYY-MM-DD"
+          />
+        </View>
       </View>
-    </Modal>
+    </KeyboardAwareBottomSheet>
   );
 }
 
 const styles = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'flex-end',
-  },
-  modalContainer: {
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    maxHeight: '80%',
-    flex: 1,
-  },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 16,
+    marginBottom: 12,
+    paddingBottom: 8,
     borderBottomWidth: 1,
     borderBottomColor: '#E0E0E0',
   },
@@ -216,15 +193,11 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#333',
   },
-  content: {
-    flex: 1,
-    padding: 16,
-  },
   filtersContainer: {
-    gap: 16,
+    gap: 8,
   },
   filterRow: {
-    marginBottom: 16,
+    marginBottom: 12,
   },
   filterLabel: {
     fontSize: 14,
@@ -265,13 +238,11 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: '600',
   },
-  footer: {
+  footerRow: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
-    gap: 12,
-    padding: 16,
-    borderTopWidth: 1,
-    borderTopColor: '#E0E0E0',
+    flexWrap: 'wrap',
+    gap: 8,
   },
   footerButton: {
     paddingVertical: 10,

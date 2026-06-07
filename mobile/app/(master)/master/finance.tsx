@@ -25,7 +25,24 @@ import { getCheapestPlanForFeature } from '@src/utils/featureAccess';
 import { DemoAccessBanner } from '@src/components/DemoAccessBanner';
 import { fetchAvailableSubscriptions, SubscriptionType } from '@src/services/api/subscriptions';
 import { parseLocalDate } from '@src/utils/date';
+import {
+  chartDateToYmd,
+  finalizeChartPoint,
+  findFirstNonZeroIncomeExpenseIndex,
+  getChartConfirmedIncome,
+  getChartExpectedIncome,
+  getChartExpenseValue,
+  getChartProfitValue,
+  toIncomeExpenseChartPoint,
+  type ProfitChartPoint,
+} from '@src/utils/accountingChartPoint';
 import { useAuth } from '@src/auth/AuthContext';
+import {
+  FINANCE_DIAG_ENABLED,
+  logFinanceDiag,
+  logIncomeExpenseChartDiag,
+  logNetProfitChartDiag,
+} from '@src/debug/financeDiag';
 import { useTabBarHeight } from '@src/contexts/TabBarHeightContext';
 import { BOTTOM_NAV_CONTENT_FALLBACK_HEIGHT } from '@src/constants/bottomNavLayout';
 import {
@@ -61,10 +78,10 @@ const PERIOD_OPTIONS: Array<{ value: AccountingPeriod; label: string }> = [
 ];
 
 const SORT_OPTIONS = [
-  { value: 'date_desc', label: 'Дата (новые сначала)', field: 'date', order: 'desc' },
-  { value: 'date_asc', label: 'Дата (старые сначала)', field: 'date', order: 'asc' },
-  { value: 'amount_desc', label: 'Сумма (по убыванию)', field: 'amount', order: 'desc' },
-  { value: 'amount_asc', label: 'Сумма (по возрастанию)', field: 'amount', order: 'asc' },
+  { value: 'date_desc', label: 'Дата (новые сначала)', shortLabel: 'Дата ↓', field: 'date', order: 'desc' },
+  { value: 'date_asc', label: 'Дата (старые сначала)', shortLabel: 'Дата ↑', field: 'date', order: 'asc' },
+  { value: 'amount_desc', label: 'Сумма (по убыванию)', shortLabel: 'Сумма ↓', field: 'amount', order: 'desc' },
+  { value: 'amount_asc', label: 'Сумма (по возрастанию)', shortLabel: 'Сумма ↑', field: 'amount', order: 'asc' },
 ];
 
 const FLOATING_BAR_HEIGHT = 60;
@@ -256,18 +273,40 @@ const parseDate = (d: string): Date | null => {
   if (!d || typeof d !== 'string') return null;
   const trimmed = d.trim();
   if (!trimmed) return null;
-  
-  // Try YYYY-MM-DD format first
-  if (/^\d{4}-\d{2}-\d{2}/.test(trimmed)) {
-    const datePart = trimmed.slice(0, 10);
-    const parsed = parseLocalDate(datePart);
-    if (parsed && !isNaN(parsed.getTime())) return parsed;
+
+  const ymd = chartDateToYmd(trimmed);
+  if (ymd) {
+    const parsed = parseLocalDate(ymd);
+    if (!isNaN(parsed.getTime())) return parsed;
   }
-  
-  // Try ISO format
+
   const iso = new Date(trimmed);
   if (!isNaN(iso.getTime())) return iso;
-  
+
+  return null;
+};
+
+/** Границы периода из ответа GET /accounting/summary (календарные дни, без UTC-сдвига). */
+const parseAccountingSummaryBound = (value: unknown): Date | null => {
+  if (value == null) return null;
+  if (value instanceof Date && !isNaN(value.getTime())) {
+    const d = new Date(value);
+    d.setHours(0, 0, 0, 0);
+    return d;
+  }
+  const text = String(value).trim();
+  if (!text) return null;
+  const ymd = chartDateToYmd(text);
+  if (ymd) {
+    const d = parseLocalDate(ymd);
+    d.setHours(0, 0, 0, 0);
+    return d;
+  }
+  const iso = new Date(text);
+  if (!isNaN(iso.getTime())) {
+    iso.setHours(0, 0, 0, 0);
+    return iso;
+  }
   return null;
 };
 
@@ -447,31 +486,25 @@ const normalizeDaily = (raw: ChartPoint[]): Map<string, ChartPoint> => {
   const dailyMap = new Map<string, ChartPoint>();
   
   for (const point of raw) {
-    if (!point.date) continue;
-    const date = parseDate(point.date);
-    if (!date) continue;
-    
-    const isoKey = toISODate(date);
+    const ymd = chartDateToYmd(point.date);
+    if (!ymd) continue;
+    const enriched = finalizeChartPoint(point);
+
+    const isoKey = ymd;
     const existing = dailyMap.get(isoKey);
     
     if (existing) {
-      // Sum values for same day
-      dailyMap.set(isoKey, {
+      const merged = {
         date: isoKey,
-        expected_income: (Number(existing.expected_income) || 0) + (Number(point.expected_income) || 0),
-        income: (Number(existing.income) || 0) + (Number(point.income) || 0),
-        expense: (Number(existing.expense) || 0) + (Number(point.expense) || 0),
-        net_profit: (Number(existing.net_profit) || 0) + (Number(point.net_profit) || 0),
-      });
+        expected_income: (Number(existing.expected_income) || 0) + enriched.expected_income,
+        income: (Number(existing.income) || 0) + enriched.income,
+        expense: (Number(existing.expense) || 0) + enriched.expense,
+        net_profit: 0,
+      };
+      merged.net_profit = chartPointNetProfit(merged);
+      dailyMap.set(isoKey, merged);
     } else {
-      // First point for this day
-      dailyMap.set(isoKey, {
-        date: isoKey,
-        expected_income: Number(point.expected_income) || 0,
-        income: Number(point.income) || 0,
-        expense: Number(point.expense) || 0,
-        net_profit: Number(point.net_profit) || 0,
-      });
+      dailyMap.set(isoKey, enriched);
     }
   }
   
@@ -545,13 +578,15 @@ const bucketize = (
       const dailyPoint = dailyMap.get(iso);
       
       points.push(
-        dailyPoint || {
-          date: iso,
-          expected_income: 0,
-          income: 0,
-          expense: 0,
-          net_profit: 0,
-        }
+        finalizeChartPoint(
+          dailyPoint || {
+            date: iso,
+            expected_income: 0,
+            income: 0,
+            expense: 0,
+            net_profit: 0,
+          }
+        )
       );
       labelForIndex.push(financeAxisLabelFromRange(current, current));
       hitBoxes.push({ startX: index, endX: index + 1 });
@@ -620,13 +655,12 @@ const bucketize = (
             weekPoint.expected_income += Number(dailyPoint.expected_income) || 0;
             weekPoint.income += Number(dailyPoint.income) || 0;
             weekPoint.expense += Number(dailyPoint.expense) || 0;
-            weekPoint.net_profit += Number(dailyPoint.net_profit) || 0;
           }
         }
         dayInWeek = addDays(dayInWeek, 1);
       }
-      
-      points.push(weekPoint);
+      weekPoint.net_profit = chartPointNetProfit(weekPoint);
+      points.push(finalizeChartPoint(weekPoint));
       labelForIndex.push(financeAxisLabelFromRange(currentWeekStart, weekEnd));
       hitBoxes.push({ startX: index, endX: index + 1 });
       
@@ -694,7 +728,8 @@ const bucketize = (
       const rangeStartClamped =
         currentMonthStart.getTime() < rangeStartDay.getTime() ? rangeStartDay : currentMonthStart;
       if (rangeStartClamped.getTime() > actualEnd.getTime()) {
-        points.push(monthPoint);
+        monthPoint.net_profit = chartPointNetProfit(monthPoint);
+        points.push(finalizeChartPoint(monthPoint));
         labelForIndex.push(financeAxisLabelFromRange(currentMonthStart, monthEnd));
         hitBoxes.push({ startX: index, endX: index + 1 });
         currentMonthStart = new Date(currentMonthStart.getFullYear(), currentMonthStart.getMonth() + 1, 1);
@@ -710,12 +745,11 @@ const bucketize = (
           monthPoint.expected_income += Number(dailyPoint.expected_income) || 0;
           monthPoint.income += Number(dailyPoint.income) || 0;
           monthPoint.expense += Number(dailyPoint.expense) || 0;
-          monthPoint.net_profit += Number(dailyPoint.net_profit) || 0;
         }
         dayInMonth = addDays(dayInMonth, 1);
       }
-      
-      points.push(monthPoint);
+      monthPoint.net_profit = chartPointNetProfit(monthPoint);
+      points.push(finalizeChartPoint(monthPoint));
       labelForIndex.push(financeAxisLabelFromRange(currentMonthStart, monthEnd));
       hitBoxes.push({ startX: index, endX: index + 1 });
       
@@ -768,12 +802,11 @@ const bucketize = (
           quarterPoint.expected_income += Number(dailyPoint.expected_income) || 0;
           quarterPoint.income += Number(dailyPoint.income) || 0;
           quarterPoint.expense += Number(dailyPoint.expense) || 0;
-          quarterPoint.net_profit += Number(dailyPoint.net_profit) || 0;
         }
         dayInQuarter = addDays(dayInQuarter, 1);
       }
-      
-      points.push(quarterPoint);
+      quarterPoint.net_profit = chartPointNetProfit(quarterPoint);
+      points.push(finalizeChartPoint(quarterPoint));
       labelForIndex.push(financeAxisLabelFromRange(currentQuarterStart, quarterEnd));
       hitBoxes.push({ startX: index, endX: index + 1 });
       
@@ -811,12 +844,11 @@ const bucketize = (
           yearPoint.expected_income += Number(dailyPoint.expected_income) || 0;
           yearPoint.income += Number(dailyPoint.income) || 0;
           yearPoint.expense += Number(dailyPoint.expense) || 0;
-          yearPoint.net_profit += Number(dailyPoint.net_profit) || 0;
         }
         dayInYear = addDays(dayInYear, 1);
       }
-      
-      points.push(yearPoint);
+      yearPoint.net_profit = chartPointNetProfit(yearPoint);
+      points.push(finalizeChartPoint(yearPoint));
       labelForIndex.push(financeAxisLabelFromRange(currentYearStart, yearEnd));
       hitBoxes.push({ startX: index, endX: index + 1 });
       
@@ -826,6 +858,17 @@ const bucketize = (
   }
   
   return { points, labelForIndex, hitBoxes };
+};
+
+/** Единая серия bucket’ов для «Доходы и расходы» и «Общая прибыль». */
+const buildFinanceChartBuckets = (
+  data: ChartPoint[],
+  period: 'day' | 'week' | 'month' | 'quarter' | 'year',
+  rangeStart: Date,
+  rangeEnd: Date
+): BucketizeResult => {
+  const dailyMap = normalizeDaily(data);
+  return bucketize(dailyMap, period, rangeStart, rangeEnd);
 };
 
 // ============================================================================
@@ -895,10 +938,10 @@ const densifyChartData = (
   // Parse and sort raw data
   const parsed: Array<{ date: Date; point: ChartPoint }> = [];
   for (const point of raw) {
-    if (!point.date) continue;
-    const date = parseDate(point.date);
-    if (!date) continue;
-    parsed.push({ date, point });
+    const ymd = chartDateToYmd(point.date);
+    if (!ymd) continue;
+    const date = parseLocalDate(ymd);
+    parsed.push({ date, point: finalizeChartPoint(point) });
   }
   parsed.sort((a, b) => a.date.getTime() - b.date.getTime());
   
@@ -938,22 +981,17 @@ const densifyChartData = (
     const existing = pointMap.get(isoKey);
     if (existing) {
       // Merge: sum values if multiple points for same day
-      pointMap.set(isoKey, {
+      const merged = {
         date: isoKey,
         expected_income: (Number(existing.expected_income) || 0) + (Number(point.expected_income) || 0),
         income: (Number(existing.income) || 0) + (Number(point.income) || 0),
         expense: (Number(existing.expense) || 0) + (Number(point.expense) || 0),
-        net_profit: (Number(existing.net_profit) || 0) + (Number(point.net_profit) || 0),
-      });
+        net_profit: 0,
+      };
+      merged.net_profit = chartPointNetProfit(merged);
+      pointMap.set(isoKey, merged);
     } else {
-      // Normalize point date to YYYY-MM-DD and ensure all numeric fields are numbers
-      pointMap.set(isoKey, {
-        date: isoKey,
-        expected_income: Number(point.expected_income) || 0,
-        income: Number(point.income) || 0,
-        expense: Number(point.expense) || 0,
-        net_profit: Number(point.net_profit) || 0,
-      });
+      pointMap.set(isoKey, finalizeChartPoint({ ...point, date: isoKey }));
     }
   });
   
@@ -1232,267 +1270,231 @@ const arrayBufferToBase64 = (buffer: ArrayBuffer) => {
   return output;
 };
 
-function TripleLineChart({ 
-  title, 
-  data, 
+function TripleLineChart({
+  title,
+  data,
   period,
   rangeStart,
   rangeEnd,
-  anchorDate,
-}: { 
-  title: string; 
-  data: ChartPoint[]; 
+}: {
+  title: string;
+  data: ChartPoint[];
   period: 'day' | 'week' | 'month' | 'quarter' | 'year';
   rangeStart?: Date | null;
   rangeEnd?: Date | null;
   anchorDate?: Date | null;
 }) {
-  const logOnceRef = useRef<string | null>(null);
   const [chartLayout, setChartLayout] = useState<{ width: number } | null>(null);
-  
-  // Normalize to daily, then bucketize by period
-  const dailyMap = useMemo(() => normalizeDaily(data), [data]);
-  const bucketized = useMemo(() => {
-    if (!rangeStart || !rangeEnd) {
-      if (__DEV__) {
-        console.warn('[FINANCE DIAG] TripleBarChart: rangeStart or rangeEnd missing');
-      }
-      return { points: [], labelForIndex: [], hitBoxes: [] };
-    }
-    
-    // Diagnostic logs
-    if (__DEV__) {
-      const dailyMin = dailyMap.size > 0 ? Array.from(dailyMap.keys()).sort()[0] : 'N/A';
-      const dailyMax = dailyMap.size > 0 ? Array.from(dailyMap.keys()).sort().reverse()[0] : 'N/A';
-      console.log('[FINANCE DIAG] TripleBarChart before bucketize:', {
-        period,
-        rangeStart: toISODate(rangeStart),
-        rangeEnd: toISODate(rangeEnd),
-        anchorDate: anchorDate ? toISODate(anchorDate) : 'null',
-        dailyMapSize: dailyMap.size,
-        dailyMin,
-        dailyMax,
-        rawDataLength: data.length,
-      });
-    }
-    
-    const result = bucketize(dailyMap, period, rangeStart, rangeEnd);
-    
-    if (__DEV__) {
-      // Calculate expected buckets based on period
-      let expectedBuckets: number;
-      if (period === 'day') {
-        expectedBuckets = 30;
-      } else if (period === 'week') {
-        expectedBuckets = 12;
-      } else if (period === 'month') {
-        expectedBuckets = 12;
-      } else if (period === 'quarter') {
-        expectedBuckets = 8;
-      } else if (period === 'year') {
-        expectedBuckets = 5;
-      } else {
-        expectedBuckets = 0;
-      }
-      
-      const computedBuckets = result.points.length;
-      const matches = expectedBuckets === computedBuckets;
-      
-      console.log('[FINANCE DIAG] TripleBarChart after bucketize:', {
-        period,
-        rangeStart: toISODate(rangeStart),
-        rangeEnd: toISODate(rangeEnd),
-        expectedBuckets,
-        computedBuckets,
-        matches,
-        pointsLength: result.points.length,
-        labelsLength: result.labelForIndex.length,
-        hitBoxesLength: result.hitBoxes.length,
-        firstPointDate: result.points[0]?.date || 'N/A',
-        lastPointDate: result.points[result.points.length - 1]?.date || 'N/A',
-        firstLabel: result.labelForIndex[0] || 'N/A',
-        lastLabel: result.labelForIndex[result.labelForIndex.length - 1] || 'N/A',
-      });
-      
-      if (!matches) {
-        console.warn('[FINANCE DIAG] TripleBarChart: expectedBuckets !== computedBuckets!', {
-          expectedBuckets,
-          computedBuckets,
-          period,
-        });
-      }
-    }
-    
-    return result;
-  }, [dailyMap, period, rangeStart, rangeEnd, anchorDate, data.length]);
-  
-  const { points, labelForIndex, hitBoxes } = bucketized;
-
-  const CHART_HEIGHT = 160;
-  const BAR_AREA_HEIGHT = 140;
-
-  if (__DEV__) {
-    const logKey = `${period}-${rangeStart?.getTime()}-${rangeEnd?.getTime()}-${data.length}-${points.length}`;
-    if (logOnceRef.current !== logKey) {
-      logOnceRef.current = logKey;
-      const rangeDays = rangeStart && rangeEnd 
-        ? differenceInDays(rangeEnd, rangeStart) + 1 
-        : 'N/A';
-      console.log('[FINANCE DIAG] TripleBarChart:', {
-        period,
-        anchorDate: anchorDate ? toISODate(anchorDate) : 'null',
-        rangeStart: rangeStart ? toISODate(rangeStart) : 'null',
-        rangeEnd: rangeEnd ? toISODate(rangeEnd) : 'null',
-        rangeDays,
-        rawDataLength: data.length,
-        dailyMapSize: dailyMap.size,
-        bucketizedPointsLength: points.length,
-        first14Labels: labelForIndex.slice(0, 14),
-        first14Dates: points.slice(0, 14).map(p => p.date),
-      });
-    }
-  }
-  
-  const maxValue = useMemo(() => {
-    const values = points.flatMap((d) => [d.expected_income || 0, d.income || 0, d.expense || 0]);
-    const max = Math.max(0, ...values);
-    const result = max <= 0 ? 1 : max;
-    
-    if (__DEV__) {
-      const maxIncome = Math.max(0, ...points.map(d => d.income || 0));
-      const maxExpected = Math.max(0, ...points.map(d => d.expected_income || 0));
-      const maxExpense = Math.max(0, ...points.map(d => d.expense || 0));
-      console.log('[FINANCE DIAG] TripleBarChart scale:', {
-        maxIncome,
-        maxExpected,
-        maxExpense,
-        scaleMax: result,
-        pointsLength: points.length,
-        sampleValues: points.slice(0, 5).map(d => ({
-          date: d.date,
-          income: d.income || 0,
-          expected: d.expected_income || 0,
-          expense: d.expense || 0,
-        })),
-      });
-    }
-    
-    return result;
-  }, [points]);
-  
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
-  const selected = selectedIndex !== null ? points[selectedIndex] : null;
-  
-  // Scroll management
   const scrollViewRef = useRef<ScrollView>(null);
   const lastScrollXRef = useRef<number>(0);
-  const didUserScrollRef = useRef<boolean>(false);
   const autoScrollKeyRef = useRef<string>('');
-  
-  // Calculate dimensions with safe defaults
-  const plotWidth = (chartLayout?.width && chartLayout.width > 0) ? chartLayout.width : 350;
+
+  const bucketized = useMemo(() => {
+    if (!rangeStart || !rangeEnd) {
+      return { points: [] as ChartPoint[], labelForIndex: [] as string[] };
+    }
+
+    const rangeStartDay = new Date(rangeStart);
+    rangeStartDay.setHours(0, 0, 0, 0);
+    const rangeEndDay = new Date(rangeEnd);
+    rangeEndDay.setHours(0, 0, 0, 0);
+    const dayCount = differenceInDays(rangeEndDay, rangeStartDay) + 1;
+    const allDailyYmd = data.length > 0 && data.every((p) => chartDateToYmd(p.date));
+
+    // Плотная дневная сетка (densify) — не пересобираем bucketize (риск потери income на коротких периодах).
+    if (allDailyYmd && data.length === dayCount) {
+      const points = data.map((p) => toIncomeExpenseChartPoint(p));
+      const labelForIndex = points.map((p) => {
+        const ymd = chartDateToYmd(p.date);
+        const d = ymd ? parseLocalDate(ymd) : new Date();
+        return financeAxisLabelFromRange(d, d);
+      });
+      return { points, labelForIndex };
+    }
+
+    const result = buildFinanceChartBuckets(data, period, rangeStart, rangeEnd);
+    return {
+      ...result,
+      points: result.points.map((p) => toIncomeExpenseChartPoint(p)),
+    };
+  }, [period, rangeStart, rangeEnd, data]);
+
+  const { points, labelForIndex } = bucketized;
+
+  const resolvedConfirmed = useMemo(
+    () => points.map((p) => getChartConfirmedIncome(p)),
+    [points]
+  );
+  const resolvedExpected = useMemo(
+    () => points.map((p) => getChartExpectedIncome(p)),
+    [points]
+  );
+  const resolvedExpense = useMemo(() => points.map((p) => getChartExpenseValue(p)), [points]);
+
+  const firstNonZeroIdx = useMemo(() => findFirstNonZeroIncomeExpenseIndex(points), [points]);
+
+  const CHART_HEIGHT = 160;
+  const CHART_TOP_PADDING = 14;
+  const CHART_BOTTOM_PADDING = 20;
+  const BAR_AREA_HEIGHT = CHART_HEIGHT - CHART_TOP_PADDING - CHART_BOTTOM_PADDING;
+
+  const maxValue = useMemo(() => {
+    const values = points.flatMap((p) => [
+      getChartExpectedIncome(p),
+      getChartConfirmedIncome(p),
+      getChartExpenseValue(p),
+    ]);
+    const max = values.length ? Math.max(0, ...values) : 0;
+    return max <= 0 ? 1 : max;
+  }, [points]);
+
+  const currentAutoScrollKey = `${period}-${rangeStart?.getTime()}-${rangeEnd?.getTime()}-${data.length}`;
+  const autoScrollLayoutKey = `${currentAutoScrollKey}-w${chartLayout?.width ?? 0}`;
+  const selected = selectedIndex !== null ? points[selectedIndex] : null;
+  const selectedConfirmed = selected != null ? getChartConfirmedIncome(selected) : null;
+  const selectedExpected = selected != null ? getChartExpectedIncome(selected) : null;
+  const selectedExpense = selected != null ? getChartExpenseValue(selected) : null;
+
+  useEffect(() => {
+    setSelectedIndex(firstNonZeroIdx >= 0 ? firstNonZeroIdx : null);
+  }, [currentAutoScrollKey, firstNonZeroIdx]);
+
+  useEffect(() => {
+    logIncomeExpenseChartDiag('render', {
+      rangeStart: rangeStart ? toISODate(rangeStart) : null,
+      rangeEnd: rangeEnd ? toISODate(rangeEnd) : null,
+      inputFirst10: data.slice(0, 10).map((p) => ({
+        date: p.date,
+        income: p.income,
+        expected_income: p.expected_income,
+        expense: p.expense,
+      })),
+      resolvedConfirmedFirst10: resolvedConfirmed.slice(0, 10),
+      resolvedExpectedFirst10: resolvedExpected.slice(0, 10),
+      resolvedExpenseFirst10: resolvedExpense.slice(0, 10),
+      maxValue,
+      firstNonZeroIdx,
+      selectedIndex,
+      selectedDate: selected?.date ?? null,
+      selectedConfirmed,
+      selectedExpected,
+      selectedExpense,
+    });
+  }, [
+    data,
+    points,
+    resolvedConfirmed,
+    resolvedExpected,
+    resolvedExpense,
+    maxValue,
+    firstNonZeroIdx,
+    selectedIndex,
+    selected,
+    selectedConfirmed,
+    selectedExpected,
+    selectedExpense,
+    rangeStart,
+    rangeEnd,
+  ]);
+
+  const plotWidth = chartLayout?.width && chartLayout.width > 0 ? chartLayout.width : 350;
   const { bucketWidth, contentWidth, scrollEnabled: chartScrollEnabled } = getChartBucketLayout(
     plotWidth,
     points.length
   );
 
-  // Auto-scroll to end on period/timeOffset change
-  const currentAutoScrollKey = `${period}-${rangeStart?.getTime()}-${rangeEnd?.getTime()}`;
-  const shouldAutoScroll = autoScrollKeyRef.current !== currentAutoScrollKey;
-  
+  const shouldAutoScroll = autoScrollKeyRef.current !== autoScrollLayoutKey;
+
   useEffect(() => {
-    // Reset user scroll flag when period/timeOffset changes
-    if (autoScrollKeyRef.current !== currentAutoScrollKey) {
-      didUserScrollRef.current = false;
-    }
-    
-    if (!scrollViewRef.current) return;
+    if (!scrollViewRef.current || !chartLayout?.width) return;
     if (contentWidth <= plotWidth + 0.5) {
       lastScrollXRef.current = 0;
-      autoScrollKeyRef.current = currentAutoScrollKey;
+      autoScrollKeyRef.current = autoScrollLayoutKey;
       scrollViewRef.current.scrollTo({ x: 0, animated: false });
       return;
     }
-    if (shouldAutoScroll && contentWidth > plotWidth) {
-      const scrollX = Math.max(0, contentWidth - plotWidth);
-      lastScrollXRef.current = scrollX;
-      autoScrollKeyRef.current = currentAutoScrollKey;
-      
-      if (__DEV__) {
-        const safeBucketWidth = typeof bucketWidth === 'number' && !isNaN(bucketWidth) ? bucketWidth : 0;
-        const safeContentWidth = typeof contentWidth === 'number' && !isNaN(contentWidth) ? contentWidth : 0;
-        console.log('[FINANCE DIAG] TripleBarChart auto-scroll:', {
-          period,
-          pointsLength: points.length,
-          plotWidth,
-          bucketWidth: safeBucketWidth,
-          contentWidth: safeContentWidth,
-          initialScrollX: scrollX,
-        });
-      }
-      
-      scrollViewRef.current.scrollTo({ x: scrollX, animated: false });
-    }
-  }, [shouldAutoScroll, contentWidth, plotWidth, period, currentAutoScrollKey, points.length, bucketWidth]);
-  
-  const handleScroll = (event: any) => {
-    const scrollX = event.nativeEvent.contentOffset.x;
+    if (!shouldAutoScroll) return;
+
+    const scrollX =
+      firstNonZeroIdx >= 0
+        ? Math.min(firstNonZeroIdx * bucketWidth, Math.max(0, contentWidth - plotWidth))
+        : 0;
+
     lastScrollXRef.current = scrollX;
-    if (!didUserScrollRef.current && Math.abs(scrollX) > 1) {
-      didUserScrollRef.current = true;
-    }
+    autoScrollKeyRef.current = autoScrollLayoutKey;
+    scrollViewRef.current.scrollTo({ x: scrollX, animated: false });
+
+    logIncomeExpenseChartDiag('auto-scroll', {
+      scrollX,
+      firstNonZeroIdx,
+      contentWidth,
+      plotWidth,
+      chartLayoutWidth: chartLayout.width,
+    });
+  }, [
+    shouldAutoScroll,
+    contentWidth,
+    plotWidth,
+    autoScrollLayoutKey,
+    chartLayout?.width,
+    firstNonZeroIdx,
+    bucketWidth,
+  ]);
+
+  const handleScroll = (event: { nativeEvent: { contentOffset: { x: number } } }) => {
+    lastScrollXRef.current = event.nativeEvent.contentOffset.x;
   };
-  
-  if (__DEV__ && chartLayout) {
-    const logKey = `${period}-${points.length}-${plotWidth}`;
-    if (logOnceRef.current !== logKey) {
-      logOnceRef.current = logKey;
-      const safeBucketWidth = typeof bucketWidth === 'number' && !isNaN(bucketWidth) && bucketWidth > 0 ? bucketWidth : 0;
-      const safeContentWidth = typeof contentWidth === 'number' && !isNaN(contentWidth) && contentWidth > 0 ? contentWidth : 0;
-      
-      console.log('[FINANCE DIAG] TripleBarChart viewport:', {
-        period,
-        pointsLength: points.length,
-        plotWidth,
-        bucketWidth: safeBucketWidth > 0 ? safeBucketWidth.toFixed(1) : '0 (not measured)',
-        contentWidth: safeContentWidth > 0 ? safeContentWidth.toFixed(1) : '0 (not measured)',
-        visibleBuckets: VISIBLE_BUCKETS,
-        lineMode: true,
-      });
-    }
-  }
-  
-  // Early return if layout not measured yet
-  if (!chartLayout || !chartLayout.width || chartLayout.width <= 0 || bucketWidth <= 0) {
+
+  if (points.length === 0) {
     return (
       <View>
         {title ? <Text style={styles.chartTitle}>{title}</Text> : null}
         <View
           onLayout={(e) => {
             const width = e.nativeEvent.layout.width;
-            if (width > 0) {
-              setChartLayout({ width });
-            }
+            if (width > 0) setChartLayout({ width });
           }}
           style={{ height: CHART_HEIGHT }}
         />
       </View>
     );
   }
-  
+
+  const baseY = CHART_HEIGHT - CHART_BOTTOM_PADDING;
+  const toY = (value: number) =>
+    baseY - (maxValue > 0 ? (Math.max(0, value) / maxValue) * BAR_AREA_HEIGHT : 0);
+  const cx = (idx: number) => idx * bucketWidth + bucketWidth / 2;
+
+  const series = [
+    {
+      getValue: getChartExpectedIncome,
+      color: BAR_COLORS.expected,
+      lineWidth: 1.75,
+      opacity: 0.92,
+    },
+    {
+      getValue: getChartExpenseValue,
+      color: BAR_COLORS.expense,
+      lineWidth: 2,
+      opacity: 1,
+    },
+    {
+      getValue: getChartConfirmedIncome,
+      color: BAR_COLORS.income,
+      lineWidth: 2.6,
+      opacity: 1,
+    },
+  ];
+
   return (
     <View>
       {title ? <Text style={styles.chartTitle}>{title}</Text> : null}
       <View
+        style={styles.chartPlotWrap}
         onLayout={(e) => {
           const width = e.nativeEvent.layout.width;
-          setChartLayout({ width });
-          // Restore scroll position if available
-          if (scrollViewRef.current && lastScrollXRef.current > 0) {
-            setTimeout(() => {
-              scrollViewRef.current?.scrollTo({ x: lastScrollXRef.current, animated: false });
-            }, 0);
-          }
+          if (width > 0) setChartLayout({ width });
         }}
       >
         <ScrollView
@@ -1504,142 +1506,110 @@ function TripleLineChart({
           scrollEventThrottle={16}
           contentContainerStyle={{ height: CHART_HEIGHT }}
         >
-          <View style={[styles.chartBarsRow, { 
-            width: contentWidth, 
-            height: CHART_HEIGHT,
-            position: 'relative',
-          }]}>
-            {/* Линии и точки: SVG (корректная геометрия без View+rotate) */}
-            {(() => {
-              const baseY = CHART_HEIGHT - 20;
-              const toY = (value: number) =>
-                baseY - (maxValue > 0 ? Math.max(0, value) / maxValue * BAR_AREA_HEIGHT : 0);
-              const cx = (idx: number) => idx * bucketWidth + bucketWidth / 2;
-              // Порядок отрисовки: сначала фоновые серии, подтверждённые доходы — сверху; легенда/tooltip — подтверждённые → ожидаемые → расходы
-              const series = [
-                { key: 'expected_income' as const, color: BAR_COLORS.expected, lineWidth: 1.75, opacity: 0.92 },
-                { key: 'expense' as const, color: BAR_COLORS.expense, lineWidth: 2, opacity: 1 },
-                { key: 'income' as const, color: BAR_COLORS.income, lineWidth: 2.6, opacity: 1 },
-              ];
+          <View
+            style={{
+              width: contentWidth,
+              height: CHART_HEIGHT,
+              position: 'relative',
+            }}
+          >
+            {points.map((_, idx) => (
+              <Pressable
+                key={`hit-${idx}`}
+                style={{
+                  position: 'absolute',
+                  left: idx * bucketWidth,
+                  top: 0,
+                  width: bucketWidth,
+                  height: CHART_HEIGHT,
+                  zIndex: 3,
+                }}
+                onPress={() => setSelectedIndex((cur) => (cur === idx ? null : idx))}
+              />
+            ))}
 
-              return (
-                <>
-                  <Svg
-                    width={contentWidth}
-                    height={CHART_HEIGHT}
-                    style={{ position: 'absolute', left: 0, top: 0, zIndex: 1 }}
-                    pointerEvents="none"
-                  >
-                    {series.map((s) =>
-                      points.map((d, idx) => {
-                        if (idx === 0) return null;
-                        const prev = points[idx - 1];
-                        const x1 = cx(idx - 1);
-                        const y1 = toY(Number(prev[s.key]) || 0);
-                        const x2 = cx(idx);
-                        const y2 = toY(Number(d[s.key]) || 0);
-                        return (
-                          <Line
-                            key={`line-${s.key}-${idx}`}
-                            x1={x1}
-                            y1={y1}
-                            x2={x2}
-                            y2={y2}
-                            stroke={s.color}
-                            strokeWidth={s.lineWidth}
-                            strokeOpacity={s.opacity}
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                          />
-                        );
-                      })
-                    )}
-                    {series.map((s) =>
-                      points.map((d, idx) => {
-                        const isActive = selectedIndex === idx;
-                        const cy = toY(Number(d[s.key]) || 0);
-                        return (
-                          <Circle
-                            key={`dot-${s.key}-${d.date}-${idx}`}
-                            cx={cx(idx)}
-                            cy={cy}
-                            r={isActive ? 5 : 3.5}
-                            fill={s.color}
-                            fillOpacity={s.opacity}
-                            stroke="#fff"
-                            strokeWidth={isActive ? 2 : 1.5}
-                          />
-                        );
-                      })
-                    )}
-                  </Svg>
-                  {points.map((_, idx) => {
-                    const label = labelForIndex[idx] || '';
-                    return (
-                      <View
-                        key={`lbl-${idx}`}
-                        pointerEvents="none"
-                        style={{
-                          position: 'absolute',
-                          left: idx * bucketWidth,
-                          bottom: 0,
-                          width: bucketWidth,
-                          height: 20,
-                          justifyContent: 'flex-end',
-                          alignItems: 'center',
-                          zIndex: 2,
-                        }}
-                      >
-                        <Text style={styles.chartLabel} numberOfLines={1}>
-                          {label || '\u00A0'}
-                        </Text>
-                      </View>
-                    );
-                  })}
-                </>
-              );
-            })()}
-            
-            {/* Hit boxes - top layer (for click handling) */}
-            {points.map((_, idx) => {
-              const left = idx * bucketWidth;
-              return (
-                <Pressable
-                  key={`hit-${idx}`}
-                  style={[
-                    styles.chartHitBox,
-                    {
-                      position: 'absolute',
-                      left,
-                      top: 0,
-                      bottom: 0,
-                      width: bucketWidth,
-                      height: CHART_HEIGHT,
-                      backgroundColor: 'transparent',
-                      zIndex: 3,
-                    },
-                  ]}
-                  onPress={() => setSelectedIndex((cur) => (cur === idx ? null : idx))}
-                />
-              );
-            })}
+            <Svg
+              width={contentWidth}
+              height={CHART_HEIGHT}
+              style={{ position: 'absolute', left: 0, top: 0, zIndex: 1 }}
+              pointerEvents="none"
+            >
+              {series.map((s, si) =>
+                points.map((d, idx) => {
+                  if (idx === 0) return null;
+                  const prev = points[idx - 1];
+                  return (
+                    <Line
+                      key={`ie-line-${si}-${idx}`}
+                      x1={cx(idx - 1)}
+                      y1={toY(s.getValue(prev))}
+                      x2={cx(idx)}
+                      y2={toY(s.getValue(d))}
+                      stroke={s.color}
+                      strokeWidth={s.lineWidth}
+                      strokeOpacity={s.opacity}
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  );
+                })
+              )}
+              {series.map((s, si) =>
+                points.map((d, idx) => {
+                  const active = selectedIndex === idx;
+                  return (
+                    <Circle
+                      key={`ie-dot-${si}-${idx}-${d.date}`}
+                      cx={cx(idx)}
+                      cy={toY(s.getValue(d))}
+                      r={active ? 5 : 3.5}
+                      fill={s.color}
+                      fillOpacity={s.opacity}
+                      stroke="#fff"
+                      strokeWidth={active ? 2 : 1.5}
+                    />
+                  );
+                })
+              )}
+            </Svg>
+
+            {points.map((_, idx) => (
+              <View
+                key={`lbl-${idx}`}
+                pointerEvents="none"
+                style={{
+                  position: 'absolute',
+                  left: idx * bucketWidth,
+                  bottom: 0,
+                  width: bucketWidth,
+                  height: 20,
+                  justifyContent: 'flex-end',
+                  alignItems: 'center',
+                  zIndex: 2,
+                }}
+              >
+                <Text style={styles.chartLabel} numberOfLines={1}>
+                  {labelForIndex[idx] || '\u00A0'}
+                </Text>
+              </View>
+            ))}
           </View>
         </ScrollView>
       </View>
-      {selected && (
+      {selected != null && (
         <View style={styles.chartTooltip}>
           <Text style={styles.chartTooltipTitle}>{formatDateFull(selected.date)}</Text>
           <View style={styles.chartTooltipRow}>
             <Text style={styles.chartTooltipLabel}>Подтверждённые</Text>
-            <Text style={styles.chartTooltipValue}>{formatMoney2(selected.income || 0)}</Text>
+            <Text style={styles.chartTooltipValue}>{formatMoney2(selectedConfirmed ?? 0)}</Text>
           </View>
           <View style={styles.chartTooltipRow}>
             <Text style={styles.chartTooltipLabel}>Ожидаемые</Text>
-            <Text style={styles.chartTooltipValue}>{formatMoney2(selected.expected_income || 0)}</Text>
+            <Text style={styles.chartTooltipValue}>{formatMoney2(selectedExpected ?? 0)}</Text>
           </View>
           <View style={styles.chartTooltipRow}>
             <Text style={styles.chartTooltipLabel}>Расходы</Text>
-            <Text style={styles.chartTooltipValue}>{formatMoney2(selected.expense || 0)}</Text>
+            <Text style={styles.chartTooltipValue}>{formatMoney2(selectedExpense ?? 0)}</Text>
           </View>
         </View>
       )}
@@ -1661,14 +1631,14 @@ function TripleLineChart({
   );
 }
 
-function NetProfitChart({ 
-  data, 
+function NetProfitChart({
+  data,
   period,
   rangeStart,
   rangeEnd,
   anchorDate,
-}: { 
-  data: ChartPoint[]; 
+}: {
+  data: ProfitChartPoint[];
   period: 'day' | 'week' | 'month' | 'quarter' | 'year';
   rangeStart?: Date | null;
   rangeEnd?: Date | null;
@@ -1676,206 +1646,131 @@ function NetProfitChart({
 }) {
   const [layout, setLayout] = useState<{ w: number } | null>(null);
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
-  const logOnceRef = useRef<string | null>(null);
-  const autoscaleLogRef = useRef(false);
-  
-  // Normalize to daily, then bucketize by period
-  const dailyMap = useMemo(() => normalizeDaily(data), [data]);
+  const scrollViewRef = useRef<ScrollView>(null);
+  const lastScrollXRef = useRef<number>(0);
+  const autoScrollKeyRef = useRef<string>('');
+
   const bucketized = useMemo(() => {
     if (!rangeStart || !rangeEnd) {
-      if (__DEV__) {
-        console.warn('[FINANCE DIAG] NetProfitChart: rangeStart or rangeEnd missing');
-      }
-      return { points: [], labelForIndex: [], hitBoxes: [] };
+      return { points: [] as ProfitChartPoint[], labelForIndex: [] as string[], hitBoxes: [] };
     }
-    
-    // Diagnostic logs
-    if (__DEV__) {
-      const dailyMin = dailyMap.size > 0 ? Array.from(dailyMap.keys()).sort()[0] : 'N/A';
-      const dailyMax = dailyMap.size > 0 ? Array.from(dailyMap.keys()).sort().reverse()[0] : 'N/A';
-      console.log('[FINANCE DIAG] NetProfitChart before bucketize:', {
-        period,
-        rangeStart: toISODate(rangeStart),
-        rangeEnd: toISODate(rangeEnd),
-        anchorDate: anchorDate ? toISODate(anchorDate) : 'null',
-        dailyMapSize: dailyMap.size,
-        dailyMin,
-        dailyMax,
-        rawDataLength: data.length,
-      });
-    }
-    
-    const result = bucketize(dailyMap, period, rangeStart, rangeEnd);
-    
-    if (__DEV__) {
-      // Calculate expected buckets based on period
-      let expectedBuckets: number;
-      if (period === 'day') {
-        expectedBuckets = 30;
-      } else if (period === 'week') {
-        expectedBuckets = 12;
-      } else if (period === 'month') {
-        expectedBuckets = 12;
-      } else if (period === 'quarter') {
-        expectedBuckets = 8;
-      } else if (period === 'year') {
-        expectedBuckets = 5;
-      } else {
-        expectedBuckets = 0;
-      }
-      
-      const computedBuckets = result.points.length;
-      const matches = expectedBuckets === computedBuckets;
-      
-      console.log('[FINANCE DIAG] NetProfitChart after bucketize:', {
-        period,
-        rangeStart: toISODate(rangeStart),
-        rangeEnd: toISODate(rangeEnd),
-        expectedBuckets,
-        computedBuckets,
-        matches,
-        pointsLength: result.points.length,
-        labelsLength: result.labelForIndex.length,
-        hitBoxesLength: result.hitBoxes.length,
-        firstPointDate: result.points[0]?.date || 'N/A',
-        lastPointDate: result.points[result.points.length - 1]?.date || 'N/A',
-        firstLabel: result.labelForIndex[0] || 'N/A',
-        lastLabel: result.labelForIndex[result.labelForIndex.length - 1] || 'N/A',
-      });
-      
-      if (!matches) {
-        console.warn('[FINANCE DIAG] NetProfitChart: expectedBuckets !== computedBuckets!', {
-          expectedBuckets,
-          computedBuckets,
-          period,
-        });
-      }
-    }
-    
-    return result;
-  }, [dailyMap, period, rangeStart, rangeEnd, anchorDate, data.length]);
-  
-  const { points: bucketPoints, labelForIndex, hitBoxes } = bucketized;
-  
-  if (__DEV__) {
-    const logKey = `${period}-${rangeStart?.getTime()}-${rangeEnd?.getTime()}-${data.length}-${bucketPoints.length}`;
-    if (logOnceRef.current !== logKey) {
-      logOnceRef.current = logKey;
-      const rangeDays = rangeStart && rangeEnd 
-        ? differenceInDays(rangeEnd, rangeStart) + 1 
-        : 'N/A';
-      console.log('[FINANCE DIAG] NetProfitChart:', {
-        period,
-        anchorDate: anchorDate ? toISODate(anchorDate) : 'null',
-        rangeStart: rangeStart ? toISODate(rangeStart) : 'null',
-        rangeEnd: rangeEnd ? toISODate(rangeEnd) : 'null',
-        rangeDays,
-        rawDataLength: data.length,
-        dailyMapSize: dailyMap.size,
-        bucketizedPointsLength: bucketPoints.length,
-        first14Labels: labelForIndex.slice(0, 14),
-        first14Dates: bucketPoints.slice(0, 14).map(p => p.date),
-      });
-    }
-    if (!autoscaleLogRef.current) {
-      console.log('[FINANCE UI] net profit chart autoscale v=1');
-      autoscaleLogRef.current = true;
-    }
-  }
-  
-  const selected = selectedIndex !== null ? bucketPoints[selectedIndex] : null;
-  const NET_PLOT_HEIGHT = 130;
-  const NET_PADDING_TOP = 8;
-  const NET_PADDING_BOTTOM = 20;
-  const DOT_RADIUS = 3;
 
-  const values = useMemo(() => bucketPoints.map((d) => Number(d.net_profit) || 0), [bucketPoints]);
-  const min = useMemo(() => Math.min(...values), [values]);
-  const max = useMemo(() => Math.max(...values), [values]);
+    const rangeStartDay = new Date(rangeStart);
+    rangeStartDay.setHours(0, 0, 0, 0);
+    const rangeEndDay = new Date(rangeEnd);
+    rangeEndDay.setHours(0, 0, 0, 0);
+    const dayCount = differenceInDays(rangeEndDay, rangeStartDay) + 1;
+    const allDailyYmd = data.length > 0 && data.every((p) => chartDateToYmd(p.date));
+
+    // Уже плотная дневная сетка (densify) — не пересобираем через bucketize (риск потери profit).
+    if (period === 'day' && allDailyYmd && data.length === dayCount) {
+      const points = data.map((p) => {
+        const profit = getChartProfitValue(p);
+        return { ...p, profit, value: profit, net_profit: profit };
+      });
+      const labelForIndex = points.map((p) => {
+        const ymd = chartDateToYmd(p.date);
+        const d = ymd ? parseLocalDate(ymd) : new Date();
+        return financeAxisLabelFromRange(d, d);
+      });
+      return {
+        points,
+        labelForIndex,
+        hitBoxes: points.map((_, i) => ({ startX: i, endX: i + 1 })),
+      };
+    }
+
+    const result = buildFinanceChartBuckets(data, period, rangeStart, rangeEnd);
+    const points = result.points.map((p) => {
+      const profit = getChartProfitValue(p);
+      return { ...p, profit, value: profit, net_profit: profit };
+    });
+    return { ...result, points };
+  }, [period, rangeStart, rangeEnd, data]);
+
+  const { points: bucketPoints, labelForIndex } = bucketized;
+
+  const resolvedValues = useMemo(
+    () => bucketPoints.map((d) => getChartProfitValue(d)),
+    [bucketPoints]
+  );
+
+  const min = useMemo(() => (resolvedValues.length ? Math.min(...resolvedValues) : 0), [resolvedValues]);
+  const max = useMemo(() => (resolvedValues.length ? Math.max(...resolvedValues) : 0), [resolvedValues]);
+
   const paddedRange = useMemo(() => {
     const rawRange = max - min;
     const safeRange = rawRange === 0 ? Math.abs(max) || 1 : rawRange;
     const pad = safeRange * 0.15;
-    const result = {
-      minY: min - pad,
-      maxY: max + pad,
-    };
-    
-    if (__DEV__) {
-      console.log('[FINANCE DIAG] NetProfitChart scale:', {
-        min,
-        max,
-        rawRange,
-        safeRange,
-        pad,
-        paddedRange: result,
-        bucketizedPointsLength: bucketPoints.length,
-        sampleValues: bucketPoints.slice(0, 5).map(d => ({
-          date: d.date,
-          net_profit: d.net_profit || 0,
-        })),
-      });
-    }
-    
-    return result;
-  }, [min, max, bucketPoints]);
+    return { minY: min - pad, maxY: max + pad };
+  }, [min, max]);
 
-  // Scroll management
-  const scrollViewRef = useRef<ScrollView>(null);
-  const lastScrollXRef = useRef<number>(0);
-  const didUserScrollRef = useRef<boolean>(false);
-  const autoScrollKeyRef = useRef<string>('');
-  
+  const selected = selectedIndex !== null ? bucketPoints[selectedIndex] : null;
+  const selectedProfit = selected != null ? getChartProfitValue(selected) : null;
+
+  useEffect(() => {
+    logNetProfitChartDiag('render', {
+      period,
+      rangeStart: rangeStart ? toISODate(rangeStart) : null,
+      rangeEnd: rangeEnd ? toISODate(rangeEnd) : null,
+      inputFirst10: data.slice(0, 10).map((p) => ({
+        date: p.date,
+        profit: p.profit,
+        net_profit: p.net_profit,
+        income: p.income,
+        resolved: getChartProfitValue(p),
+      })),
+      resolvedValuesFirst10: resolvedValues.slice(0, 10),
+      maxValue: max,
+      minValue: min,
+      pointsLength: bucketPoints.length,
+      selectedIndex,
+      selectedDate: selected?.date ?? null,
+      selectedProfit,
+    });
+  }, [
+    data,
+    bucketPoints,
+    resolvedValues,
+    max,
+    min,
+    period,
+    rangeStart,
+    rangeEnd,
+    selectedIndex,
+    selected,
+    selectedProfit,
+  ]);
+
+  const NET_PLOT_HEIGHT = 130;
+  const NET_PADDING_TOP = 14;
+  const NET_PADDING_BOTTOM = 20;
+  const DOT_RADIUS = 3;
+
   const plotWidth = layout?.w || 350;
   const { bucketWidth, contentWidth, scrollEnabled: netChartScrollEnabled } = getChartBucketLayout(
     plotWidth,
     bucketPoints.length
   );
   const plotInnerHeight = NET_PLOT_HEIGHT - (NET_PADDING_TOP + NET_PADDING_BOTTOM + DOT_RADIUS * 2);
-  
-  // Calculate point positions
-  const points = useMemo(() => {
+
+  const plotPoints = useMemo(() => {
     if (bucketPoints.length === 0) return [];
+    const denom = paddedRange.maxY - paddedRange.minY || 1;
     return bucketPoints.map((d, i) => {
       const cx = i * bucketWidth + bucketWidth / 2;
-      const value = Number(d.net_profit) || 0;
-      const denom = paddedRange.maxY - paddedRange.minY || 1;
-      const rawT = (value - paddedRange.minY) / denom;
+      const profit = getChartProfitValue(d);
+      const rawT = (profit - paddedRange.minY) / denom;
       const t = Math.max(0, Math.min(1, rawT));
       const y = NET_PADDING_TOP + DOT_RADIUS + (1 - t) * plotInnerHeight;
-      return { i, cx, y, date: d.date };
+      return { i, cx, y, date: d.date, profit };
     });
   }, [bucketPoints, bucketWidth, paddedRange.maxY, paddedRange.minY, plotInnerHeight]);
 
-  const segments = useMemo(() => {
-    if (points.length < 2) return [];
-    return points.slice(1).map((p, idx) => {
-      const p1 = points[idx];
-      const p2 = p;
-      const dx = p2.cx - p1.cx;
-      const dy = p2.y - p1.y;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-      const angle = Math.atan2(dy, dx);
-      return {
-        key: `net-seg-${idx}`,
-        left: (p1.cx + p2.cx) / 2 - dist / 2,
-        top: (p1.y + p2.y) / 2,
-        width: dist,
-        rotate: `${angle}rad`,
-      };
-    });
-  }, [points]);
-  
-  // Auto-scroll to end on period/timeOffset change
-  const currentAutoScrollKey = `${period}-${rangeStart?.getTime()}-${rangeEnd?.getTime()}`;
+  const currentAutoScrollKey = `${period}-${rangeStart?.getTime()}-${rangeEnd?.getTime()}-${data.length}`;
   const shouldAutoScroll = autoScrollKeyRef.current !== currentAutoScrollKey;
-  
+
   useEffect(() => {
-    // Reset user scroll flag when period/timeOffset changes
-    if (autoScrollKeyRef.current !== currentAutoScrollKey) {
-      didUserScrollRef.current = false;
-    }
-    
     if (!scrollViewRef.current) return;
     if (contentWidth <= plotWidth + 0.5) {
       lastScrollXRef.current = 0;
@@ -1883,63 +1778,53 @@ function NetProfitChart({
       scrollViewRef.current.scrollTo({ x: 0, animated: false });
       return;
     }
-    if (shouldAutoScroll && contentWidth > plotWidth) {
-      const scrollX = Math.max(0, contentWidth - plotWidth);
-      lastScrollXRef.current = scrollX;
-      autoScrollKeyRef.current = currentAutoScrollKey;
-      
-      if (__DEV__) {
-        console.log('[FINANCE DIAG] NetProfitChart auto-scroll:', {
-          period,
-          pointsLength: bucketPoints.length,
-          plotWidth,
-          bucketWidth,
-          contentWidth,
-          initialScrollX: scrollX,
-        });
-      }
-      
-      scrollViewRef.current.scrollTo({ x: scrollX, animated: false });
-    }
-  }, [shouldAutoScroll, contentWidth, plotWidth, period, currentAutoScrollKey, bucketPoints.length, bucketWidth]);
-  
-  const handleScroll = (event: any) => {
-    const scrollX = event.nativeEvent.contentOffset.x;
+    if (!shouldAutoScroll) return;
+
+    const firstProfitIdx = bucketPoints.findIndex((p) => getChartProfitValue(p) > 0);
+    const scrollX =
+      firstProfitIdx >= 0
+        ? Math.min(firstProfitIdx * bucketWidth, Math.max(0, contentWidth - plotWidth))
+        : 0;
+
     lastScrollXRef.current = scrollX;
-    if (!didUserScrollRef.current && Math.abs(scrollX) > 1) {
-      didUserScrollRef.current = true;
-    }
+    autoScrollKeyRef.current = currentAutoScrollKey;
+    scrollViewRef.current.scrollTo({ x: scrollX, animated: false });
+
+    logNetProfitChartDiag('auto-scroll', {
+      scrollX,
+      firstProfitIdx,
+      contentWidth,
+      plotWidth,
+    });
+  }, [
+    shouldAutoScroll,
+    contentWidth,
+    plotWidth,
+    currentAutoScrollKey,
+    bucketPoints,
+    bucketWidth,
+  ]);
+
+  const handleScroll = (event: { nativeEvent: { contentOffset: { x: number } } }) => {
+    lastScrollXRef.current = event.nativeEvent.contentOffset.x;
   };
-  
-  if (__DEV__ && layout) {
-    const logKey = `${period}-${bucketPoints.length}-${plotWidth}`;
-    if (logOnceRef.current !== logKey) {
-      logOnceRef.current = logKey;
-      console.log('[FINANCE DIAG] NetProfitChart viewport:', {
-        period,
-        pointsLength: bucketPoints.length,
-        plotWidth,
-        bucketWidth: bucketWidth.toFixed(1),
-        contentWidth: contentWidth.toFixed(1),
-        visibleBuckets: VISIBLE_BUCKETS,
-      });
-    }
+
+  if (bucketPoints.length === 0) {
+    return (
+      <View
+        style={styles.netChart}
+        onLayout={(e) => setLayout({ w: e.nativeEvent.layout.width })}
+      >
+        <View style={{ height: NET_PLOT_HEIGHT }} />
+      </View>
+    );
   }
-  
+
   return (
     <View>
       <View
         style={styles.netChart}
-        onLayout={(e) => {
-          const width = e.nativeEvent.layout.width;
-          setLayout({ w: width });
-          // Restore scroll position if available
-          if (scrollViewRef.current && lastScrollXRef.current > 0) {
-            setTimeout(() => {
-              scrollViewRef.current?.scrollTo({ x: lastScrollXRef.current, animated: false });
-            }, 0);
-          }
-        }}
+        onLayout={(e) => setLayout({ w: e.nativeEvent.layout.width })}
       >
         <ScrollView
           ref={scrollViewRef}
@@ -1952,79 +1837,84 @@ function NetProfitChart({
           directionalLockEnabled={Platform.OS === 'ios'}
         >
           <View style={[styles.netPlotArea, { width: contentWidth, position: 'relative' }]}>
-            {/* Hit boxes - full height clickable zones */}
-            {bucketPoints.map((_, idx) => {
-              const left = idx * bucketWidth;
-              return (
-                <Pressable
-                  key={`net-hit-${idx}`}
-                  onPress={() => setSelectedIndex((cur) => (cur === idx ? null : idx))}
-                  style={[
-                    styles.netHitZone,
-                    {
-                      position: 'absolute',
-                      left,
-                      width: bucketWidth,
-                      top: 0,
-                      height: NET_PLOT_HEIGHT,
-                    },
-                  ]}
-                />
-              );
-            })}
-            
-            {/* Segments */}
-            {segments.map((s) => (
-              <View
-                key={s.key}
-                style={[
-                  styles.netLine,
-                  { left: s.left, top: s.top, width: s.width, transform: [{ rotateZ: s.rotate }] },
-                ]}
-                pointerEvents="none"
+            {bucketPoints.map((_, idx) => (
+              <Pressable
+                key={`net-hit-${idx}`}
+                onPress={() => setSelectedIndex((cur) => (cur === idx ? null : idx))}
+                style={{
+                  position: 'absolute',
+                  left: idx * bucketWidth,
+                  width: bucketWidth,
+                  top: 0,
+                  height: NET_PLOT_HEIGHT,
+                }}
               />
             ))}
-            
-            {/* Dots */}
-            {points.map((p) => (
+
+            <Svg
+              width={contentWidth}
+              height={NET_PLOT_HEIGHT}
+              style={{ position: 'absolute', left: 0, top: 0 }}
+              pointerEvents="none"
+            >
+              {plotPoints.length >= 2 &&
+                plotPoints.slice(1).map((p, idx) => {
+                  const p1 = plotPoints[idx];
+                  return (
+                    <Line
+                      key={`net-line-${idx}`}
+                      x1={p1.cx}
+                      y1={p1.y}
+                      x2={p.cx}
+                      y2={p.y}
+                      stroke={FINANCE_THEME.primaryGreen}
+                      strokeWidth={2.5}
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  );
+                })}
+              {plotPoints.map((p) => {
+                const active = selectedIndex === p.i;
+                return (
+                  <Circle
+                    key={`net-dot-${p.i}-${p.date}`}
+                    cx={p.cx}
+                    cy={p.y}
+                    r={active ? 5 : 3.5}
+                    fill={FINANCE_THEME.primaryGreen}
+                    stroke="#fff"
+                    strokeWidth={active ? 2 : 1.5}
+                  />
+                );
+              })}
+            </Svg>
+
+            {bucketPoints.map((_, idx) => (
               <View
-                key={`net-dot-${p.i}`}
-                style={[styles.netDot, { left: p.cx - 3, top: p.y - 3 }]}
+                key={`net-label-${idx}`}
                 pointerEvents="none"
-              />
+                style={{
+                  position: 'absolute',
+                  left: idx * bucketWidth,
+                  width: bucketWidth,
+                  top: NET_PLOT_HEIGHT - NET_PADDING_BOTTOM,
+                }}
+              >
+                <Text style={[styles.netLabelText, { textAlign: 'center' }]}>
+                  {labelForIndex[idx] || '\u00A0'}
+                </Text>
+              </View>
             ))}
-            
-            {/* X-axis labels */}
-            {bucketPoints.map((_, idx) => {
-              const label = labelForIndex[idx] || '';
-              const left = idx * bucketWidth;
-              return (
-                <View
-                  key={`net-label-${idx}`}
-                  style={[
-                    styles.netLabel,
-                    {
-                      position: 'absolute',
-                      left,
-                      width: bucketWidth,
-                      top: NET_PLOT_HEIGHT - NET_PADDING_BOTTOM,
-                    },
-                  ]}
-                  pointerEvents="none"
-                >
-                  <Text style={[styles.netLabelText, { textAlign: 'center' }]}>{label || '\u00A0'}</Text>
-                </View>
-              );
-            })}
           </View>
         </ScrollView>
       </View>
-      {selected && (
+      {selected != null && (
         <View style={styles.chartTooltip}>
           <Text style={styles.chartTooltipTitle}>{formatDateFull(selected.date)}</Text>
           <View style={styles.chartTooltipRow}>
             <Text style={styles.chartTooltipLabel}>Прибыль</Text>
-            <Text style={styles.chartTooltipValue}>{formatMoney2(selected.net_profit || 0)}</Text>
+            <Text style={styles.chartTooltipValue}>{formatMoney2(selectedProfit ?? 0)}</Text>
           </View>
         </View>
       )}
@@ -2055,7 +1945,7 @@ function SectionHeader({ title, showDemo }: { title: string; showDemo: boolean }
 
 export default function MasterFinanceScreen() {
   const { features, loading: featuresLoading } = useMasterFeatures();
-  const { logout } = useAuth();
+  const { user, logout } = useAuth();
   const insets = useSafeAreaInsets();
   const { tabBarHeight } = useTabBarHeight();
   const [plans, setPlans] = useState<any[]>([]);
@@ -2065,9 +1955,6 @@ export default function MasterFinanceScreen() {
   const [currentTaxRate, setCurrentTaxRate] = useState<TaxRateResponse | null>(null);
   const [editingExpense, setEditingExpense] = useState<AccountingOperation | null>(null);
   const [editingExpenseId, setEditingExpenseId] = useState<number | null>(null);
-  const [demoDismissed, setDemoDismissed] = useState(false);
-  /** Любая успешно загруженная финансовая активность за сессию — не откатываться в demo на пустом диапазоне */
-  const [hasSeenFinanceActivity, setHasSeenFinanceActivity] = useState(false);
 
   const [selectedPeriod, setSelectedPeriod] = useState<AccountingPeriod>('week');
   const [timeOffset, setTimeOffset] = useState(0);
@@ -2425,7 +2312,6 @@ export default function MasterFinanceScreen() {
   }, [operations, sortField, sortOrder]);
 
   const emptyText = 'Нет данных за период. Попробуйте выбрать другой период.';
-  const financeDataLoading = summaryLoading || operationsLoading;
   const hasRealOperations =
     !operationsLoading &&
     !operationsError &&
@@ -2449,28 +2335,9 @@ export default function MasterFinanceScreen() {
     !operationsLoading &&
     !summaryError &&
     !operationsError;
-  useEffect(() => {
-    if (financeDataLoading || hasSeenFinanceActivity) return;
-    if (!summaryError && summary) {
-      const chartLen = summary.chart_data?.length ?? 0;
-      if (hasRealSummaryTotals || chartLen > 0) setHasSeenFinanceActivity(true);
-    }
-    if (!operationsError && sortedOperations.length > 0) setHasSeenFinanceActivity(true);
-  }, [
-    financeDataLoading,
-    hasSeenFinanceActivity,
-    summary,
-    summaryError,
-    operationsError,
-    sortedOperations.length,
-    hasRealSummaryTotals,
-  ]);
-  const effectiveDemoMode =
-    !hasFinanceAccess ||
-    (!financeDataLoading &&
-      !hasSeenFinanceActivity &&
-      !hasRealData &&
-      !demoDismissed);
+
+  /** Пример данных — только без доступа к разделу «Финансы» (upsell). Платный мастер с пустыми данными видит empty state. */
+  const effectiveDemoMode = !hasFinanceAccess;
   const showEmptyCard =
     hasFinanceAccess && !effectiveDemoMode && isTrulyEmpty;
   const showPlaceholders =
@@ -2742,7 +2609,16 @@ export default function MasterFinanceScreen() {
     return { chartRangeStart: rangeStart, chartRangeEnd: rangeEnd, anchorDate: anchor };
   }, [useCustomDates, startDate, endDate, selectedPeriod, timeOffset, dayAnchorDate]);
 
-  /** Окно графика: для пресета «Неделя» — ровно start/end из ответа API (7 дней), не 12-недельный скролл */
+  /** Календарное окно сводки API — то же, что для total_income / net_profit */
+  const summaryChartRange = useMemo(() => {
+    if (effectiveDemoMode || !summary) return null;
+    const start = parseAccountingSummaryBound(summary.start_date);
+    const end = parseAccountingSummaryBound(summary.end_date);
+    if (!start || !end || start.getTime() > end.getTime()) return null;
+    return { start, end };
+  }, [effectiveDemoMode, summary?.start_date, summary?.end_date, summary]);
+
+  /** Окно графика: приоритет start/end из summary (не 12-недельный legacy-scroll) */
   const financeChartViewport = useMemo(() => {
     if (effectiveDemoMode || useCustomDates) {
       return {
@@ -2751,14 +2627,12 @@ export default function MasterFinanceScreen() {
         anchor: anchorDate,
       };
     }
-    if (selectedPeriod === 'week' && summary?.start_date && summary?.end_date) {
-      const s = parseDate(String(summary.start_date).slice(0, 10));
-      const e = parseDate(String(summary.end_date).slice(0, 10));
-      if (s && e) {
-        s.setHours(0, 0, 0, 0);
-        e.setHours(0, 0, 0, 0);
-        return { rangeStart: s, rangeEnd: e, anchor: s };
-      }
+    if (summaryChartRange) {
+      return {
+        rangeStart: summaryChartRange.start,
+        rangeEnd: summaryChartRange.end,
+        anchor: summaryChartRange.start,
+      };
     }
     return {
       rangeStart: chartRangeStart,
@@ -2768,9 +2642,7 @@ export default function MasterFinanceScreen() {
   }, [
     effectiveDemoMode,
     useCustomDates,
-    selectedPeriod,
-    summary?.start_date,
-    summary?.end_date,
+    summaryChartRange,
     chartRangeStart,
     chartRangeEnd,
     anchorDate,
@@ -2780,11 +2652,10 @@ export default function MasterFinanceScreen() {
     if (effectiveDemoMode) {
       return demoSummaryData?.chart_data || getDemoSummary().chart_data;
     }
-    const raw = summary?.chart_data || [];
-    const g = summary?.chart_axis_granularity ?? 'day';
-    const rs = financeChartViewport.rangeStart;
-    const re = financeChartViewport.rangeEnd;
-    if (g === 'day' && rs && re) {
+    const raw = (summary?.chart_data || []).map(finalizeChartPoint);
+    const rs = summaryChartRange?.start ?? financeChartViewport.rangeStart;
+    const re = summaryChartRange?.end ?? financeChartViewport.rangeEnd;
+    if (rs && re) {
       return densifyChartData(raw, rs, re);
     }
     return raw;
@@ -2792,10 +2663,30 @@ export default function MasterFinanceScreen() {
     effectiveDemoMode,
     demoSummaryData,
     summary?.chart_data,
-    summary?.chart_axis_granularity,
+    summaryChartRange,
     financeChartViewport.rangeStart,
     financeChartViewport.rangeEnd,
   ]);
+
+  /** Те же точки, что у income chart; profit = income − expense (для NetProfitChart / DEV). */
+  const incomeExpenseChartData = useMemo(
+    () => chartDataForDisplay.map((p) => toIncomeExpenseChartPoint(p)),
+    [chartDataForDisplay]
+  );
+
+  const profitChartData = useMemo(
+    (): ProfitChartPoint[] =>
+      chartDataForDisplay.map((p) => {
+        const profit = getChartProfitValue(p);
+        return {
+          ...finalizeChartPoint(p),
+          profit,
+          value: profit,
+          net_profit: profit,
+        };
+      }),
+    [chartDataForDisplay]
+  );
 
   /** Для длинного custom range — гранулярность графика (сводка по-прежнему с тем же API). */
   const customRangeDayCount = useMemo(() => {
@@ -2818,10 +2709,15 @@ export default function MasterFinanceScreen() {
     return selectedPeriod;
   }, [customRangeDayCount, selectedPeriod]);
 
-  /** Ось bucketize на native: по шагу данных из API, иначе legacy chartBucketPeriod */
+  /** Ось bucketize: совпадает с chart_axis_granularity API; короткие периоды — по дням */
   const nativeChartBucketPeriod = useMemo((): 'day' | 'week' | 'month' | 'quarter' | 'year' => {
     const g = effectiveSummary?.chart_axis_granularity;
     if (g === 'day') return 'day';
+    if (summaryChartRange) {
+      const days = differenceInDays(summaryChartRange.end, summaryChartRange.start) + 1;
+      if (days <= 31) return 'day';
+    }
+    if (selectedPeriod === 'week' && summaryChartRange) return 'day';
     if (g === 'week') return 'week';
     if (g === 'month') {
       if (selectedPeriod === 'quarter') return 'quarter';
@@ -2829,7 +2725,51 @@ export default function MasterFinanceScreen() {
       return 'month';
     }
     return chartBucketPeriod;
-  }, [effectiveSummary?.chart_axis_granularity, chartBucketPeriod, selectedPeriod]);
+  }, [
+    effectiveSummary?.chart_axis_granularity,
+    chartBucketPeriod,
+    selectedPeriod,
+    summaryChartRange,
+  ]);
+
+  useEffect(() => {
+    if (!FINANCE_DIAG_ENABLED || effectiveDemoMode || !summary) return;
+    const rs = summaryChartRange?.start;
+    const re = summaryChartRange?.end;
+    logFinanceDiag('chart pipeline', {
+      userId: user?.id ?? null,
+      userPhone: user?.phone ?? null,
+      userEmail: user?.email ?? null,
+      period: selectedPeriod,
+      timeOffset,
+      summaryStart: summary.start_date,
+      summaryEnd: summary.end_date,
+      summaryRange: rs && re ? `${toISODate(rs)}..${toISODate(re)}` : null,
+      chart_axis_granularity: summary.chart_axis_granularity,
+      nativeChartBucketPeriod,
+      confirmedIncome: summary.total_income,
+      expectedIncome: summary.total_expected_income,
+      expenses: summary.total_expense,
+      netProfit: summary.net_profit,
+      rawChartFirst10: (summary.chart_data || []).slice(0, 10),
+      chartDataForDisplayFirst10: chartDataForDisplay.slice(0, 10),
+      profitChartDataFirst10: profitChartData.slice(0, 10),
+      profitNonZeroCount: profitChartData.filter((p) => p.profit > 0).length,
+      profitNonZeroSample: profitChartData.filter((p) => p.profit > 0).slice(0, 5),
+    });
+  }, [
+    effectiveDemoMode,
+    summary,
+    summaryChartRange,
+    nativeChartBucketPeriod,
+    chartDataForDisplay,
+    profitChartData,
+    user?.id,
+    user?.phone,
+    user?.email,
+    selectedPeriod,
+    timeOffset,
+  ]);
 
   // Diagnostic logging
   useEffect(() => {
@@ -2863,9 +2803,10 @@ export default function MasterFinanceScreen() {
     chartRangeStart,
     chartRangeEnd,
   ]);
-  const selectedSortLabel =
-    SORT_OPTIONS.find((option) => option.field === sortField && option.order === sortOrder)?.label ||
-    'Сортировка';
+  const selectedSortOption =
+    SORT_OPTIONS.find((option) => option.field === sortField && option.order === sortOrder) ??
+    SORT_OPTIONS[0];
+  const selectedSortLabel = selectedSortOption.shortLabel;
   const periodNavLabel = useMemo(
     () => getFinancePeriodLabel(selectedPeriod, timeOffset, dayAnchorDate),
     [selectedPeriod, timeOffset, dayAnchorDate]
@@ -3188,8 +3129,8 @@ export default function MasterFinanceScreen() {
             <Text style={styles.neutralText}>{summaryError}</Text>
           ) : chartDataForDisplay.length > 0 ? (
             <TripleLineChart
-              title="" 
-              data={chartDataForDisplay} 
+              title=""
+              data={incomeExpenseChartData}
               period={nativeChartBucketPeriod}
               rangeStart={financeChartViewport.rangeStart}
               rangeEnd={financeChartViewport.rangeEnd}
@@ -3210,8 +3151,8 @@ export default function MasterFinanceScreen() {
           ) : chartDataForDisplay.length > 0 ? (
             <>
               <SectionHeader title="Общая прибыль" showDemo={effectiveDemoMode} />
-              <NetProfitChart 
-                data={chartDataForDisplay} 
+              <NetProfitChart
+                data={profitChartData}
                 period={nativeChartBucketPeriod}
                 rangeStart={financeChartViewport.rangeStart}
                 rangeEnd={financeChartViewport.rangeEnd}
@@ -3277,44 +3218,50 @@ export default function MasterFinanceScreen() {
             <View style={[styles.dropdownWrapper, styles.sortDropdownInRow]}>
               <TouchableOpacity
                 style={[styles.dropdownButtonSmall, styles.dropdownButtonInFiltersRow]}
-                onPress={() => setIsSortOpen((prev) => !prev)}
+                onPress={() => setIsSortOpen(true)}
+                accessibilityLabel={`Сортировка: ${selectedSortOption.label}`}
               >
                 <View style={styles.dropdownLabelRow}>
-                  <Text style={styles.dropdownText} numberOfLines={1}>
+                  <Text style={styles.dropdownText} numberOfLines={1} ellipsizeMode="tail">
                     {selectedSortLabel}
                   </Text>
                   <Ionicons name="chevron-down" size={16} color="#666" />
                 </View>
               </TouchableOpacity>
-              {isSortOpen && (
-                <View style={styles.dropdownMenu}>
-                  {SORT_OPTIONS.map((option) => {
-                    const active = sortField === option.field && sortOrder === option.order;
-                    return (
-                      <TouchableOpacity
-                        key={option.value}
-                        style={[styles.dropdownItem, active && styles.dropdownItemActive]}
-                        onPress={() => {
-                          setIsSortOpen(false);
-                          setSortField(option.field as typeof sortField);
-                          setSortOrder(option.order as typeof sortOrder);
-                        }}
-                      >
-                        <Text
-                          style={[
-                            styles.dropdownItemText,
-                            active && styles.dropdownItemTextActive,
-                          ]}
-                        >
-                          {option.label}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-              )}
             </View>
           </View>
+          <Modal
+            visible={isSortOpen}
+            transparent
+            animationType="fade"
+            onRequestClose={() => setIsSortOpen(false)}
+          >
+            <Pressable style={styles.sortModalOverlay} onPress={() => setIsSortOpen(false)}>
+              <Pressable style={styles.sortModalSheet} onPress={(e) => e.stopPropagation()}>
+                <Text style={styles.sortModalTitle}>Сортировка</Text>
+                {SORT_OPTIONS.map((option) => {
+                  const active = sortField === option.field && sortOrder === option.order;
+                  return (
+                    <TouchableOpacity
+                      key={option.value}
+                      style={[styles.sortModalOption, active && styles.sortModalOptionActive]}
+                      onPress={() => {
+                        setIsSortOpen(false);
+                        setSortField(option.field as typeof sortField);
+                        setSortOrder(option.order as typeof sortOrder);
+                      }}
+                    >
+                      <Text
+                        style={[styles.sortModalOptionText, active && styles.sortModalOptionTextActive]}
+                      >
+                        {option.label}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </Pressable>
+            </Pressable>
+          </Modal>
           <Text style={styles.sortHint}>Сортировка применяется только к текущей странице</Text>
 
           {operationsLoading && !effectiveDemoMode ? (
@@ -3434,21 +3381,12 @@ export default function MasterFinanceScreen() {
       {effectiveDemoMode && (
         <View style={[styles.demoFloatingBar, { bottom: floatingBarBottom, height: FLOATING_BAR_HEIGHT }]}>
           <Text style={styles.demoFloatingText}>Показан пример данных</Text>
-          {hasFinanceAccess ? (
-            <TouchableOpacity
-              style={styles.demoFloatingGhost}
-              onPress={() => setDemoDismissed(true)}
-            >
-              <Text style={styles.demoFloatingGhostText}>Скрыть пример</Text>
-            </TouchableOpacity>
-          ) : (
-            <TouchableOpacity
-              style={styles.demoFloatingPrimary}
-              onPress={() => router.push('/subscriptions')}
-            >
-              <Text style={styles.demoFloatingPrimaryText}>Перейти к тарифам</Text>
-            </TouchableOpacity>
-          )}
+          <TouchableOpacity
+            style={styles.demoFloatingPrimary}
+            onPress={() => router.push('/subscriptions')}
+          >
+            <Text style={styles.demoFloatingPrimaryText}>Перейти к тарифам</Text>
+          </TouchableOpacity>
         </View>
       )}
       <TaxRateModal
@@ -3767,6 +3705,8 @@ const styles = StyleSheet.create({
   dropdownButtonInFiltersRow: {
     alignSelf: 'stretch',
     width: '100%',
+    maxWidth: 84,
+    paddingHorizontal: 8,
   },
   dropdownDisabled: {
     opacity: 0.5,
@@ -3782,8 +3722,9 @@ const styles = StyleSheet.create({
   dropdownLabelRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-    maxWidth: '100%',
+    justifyContent: 'space-between',
+    gap: 2,
+    width: '100%',
   },
   modalOverlay: {
     flex: 1,
@@ -4117,6 +4058,9 @@ const styles = StyleSheet.create({
     color: '#333',
     marginBottom: 12,
   },
+  chartPlotWrap: {
+    paddingTop: 4,
+  },
   chartBarsRow: {
     flexDirection: 'row',
     alignItems: 'flex-end',
@@ -4227,21 +4171,61 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   filtersRow: {
+    flex: 1,
     flexDirection: 'row',
     gap: 6,
-    flexShrink: 0,
+    flexShrink: 1,
     alignItems: 'center',
+    minWidth: 0,
   },
   filtersAndSortRow: {
     flexDirection: 'row',
-    alignItems: 'flex-end',
+    alignItems: 'center',
     gap: 8,
     marginBottom: 4,
     flexWrap: 'nowrap',
   },
   sortDropdownInRow: {
+    flexGrow: 0,
+    flexShrink: 0,
+    width: 84,
+    maxWidth: 84,
+  },
+  sortModalOverlay: {
     flex: 1,
-    minWidth: 0,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'flex-end',
+  },
+  sortModalSheet: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 24,
+  },
+  sortModalTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#111',
+    marginBottom: 8,
+  },
+  sortModalOption: {
+    paddingVertical: 14,
+    paddingHorizontal: 4,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+  },
+  sortModalOptionActive: {
+    backgroundColor: '#F4F9F4',
+  },
+  sortModalOptionText: {
+    fontSize: 15,
+    color: '#333',
+  },
+  sortModalOptionTextActive: {
+    color: FINANCE_THEME.primaryGreen,
+    fontWeight: '600',
   },
   filterChip: {
     paddingHorizontal: 10,

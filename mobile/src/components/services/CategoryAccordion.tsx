@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Alert } from 'react-native';
+import React from 'react';
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { MasterServiceCategory, MasterService } from '@src/services/api/master';
 
@@ -8,8 +8,7 @@ interface CategoryAccordionProps {
   services: MasterService[];
   isExpanded: boolean;
   onToggle: () => void;
-  onEditCategory: (category: MasterServiceCategory) => void;
-  onDeleteCategory: (categoryId: number) => void;
+  onCategoryMenuPress: (category: MasterServiceCategory) => void;
   renderService: (service: MasterService) => React.ReactNode;
   onCreateService?: () => void;
 }
@@ -19,39 +18,11 @@ export function CategoryAccordion({
   services,
   isExpanded,
   onToggle,
-  onEditCategory,
-  onDeleteCategory,
+  onCategoryMenuPress,
   renderService,
   onCreateService,
 }: CategoryAccordionProps) {
-  const [showOverflow, setShowOverflow] = useState(false);
   const isUncategorized = category.id === 0;
-
-  const handleOverflowPress = () => {
-    Alert.alert(
-      category.name,
-      'Выберите действие',
-      [
-        { text: 'Отмена', style: 'cancel' },
-        {
-          text: 'Редактировать',
-          onPress: () => {
-            setShowOverflow(false);
-            onEditCategory(category);
-          },
-        },
-        {
-          text: 'Удалить',
-          style: 'destructive',
-          onPress: () => {
-            setShowOverflow(false);
-            onDeleteCategory(category.id);
-          },
-        },
-      ],
-      { cancelable: true }
-    );
-  };
 
   return (
     <View style={styles.container}>
@@ -77,7 +48,7 @@ export function CategoryAccordion({
         {!isUncategorized ? (
           <TouchableOpacity
             style={styles.overflowButton}
-            onPress={handleOverflowPress}
+            onPress={() => onCategoryMenuPress(category)}
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
             <Ionicons name="ellipsis-horizontal" size={20} color="#666" />

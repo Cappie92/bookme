@@ -4,6 +4,10 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getMasterFeatures, MasterFeatures } from '@src/services/api/master';
 import { useAuth } from '@src/auth/AuthContext';
 import { FEATURES_PREFIX } from '@src/utils/subscriptionCache';
+import {
+  refreshMasterFeaturesGlobally,
+  subscribeMasterFeaturesRefresh,
+} from '@src/utils/masterFeaturesRefresh';
 import { logger } from '@src/utils/logger';
 
 const CACHE_TTL = 15 * 60 * 1000; // 15 минут
@@ -16,7 +20,9 @@ interface CachedData<T> {
 }
 
 function isMasterRole(role: string | undefined): boolean {
-  return role === 'master' || role === 'indie';
+  if (!role) return false;
+  const normalized = role.toLowerCase();
+  return normalized === 'master' || normalized === 'indie';
 }
 
 /**
@@ -67,8 +73,8 @@ export function useMasterFeatures() {
           }
         }
 
-        const p = !forceRefresh && inFlightRef.p ? inFlightRef.p : getMasterFeatures();
-        if (!forceRefresh) inFlightRef.p = p;
+        const p = inFlightRef.p ?? getMasterFeatures();
+        inFlightRef.p = p;
         const data = await p;
         if (inFlightRef.p === p) inFlightRef.p = null;
 
@@ -115,7 +121,14 @@ export function useMasterFeatures() {
 
   /** Обязательно стабильная ссылка: иначе useFocusEffect([refresh]) на экранах вроде Статистики уходит в цикл refetch при каждом рендере */
   const refresh = useCallback(() => {
-    void loadFeatures(true);
+    void refreshMasterFeaturesGlobally(userId);
+  }, [userId]);
+
+  useEffect(() => {
+    const unsub = subscribeMasterFeaturesRefresh(() => {
+      void loadFeatures(true);
+    });
+    return unsub;
   }, [loadFeatures]);
 
   useEffect(() => {
@@ -128,7 +141,7 @@ export function useMasterFeatures() {
     }
     const sub = AppState.addEventListener('change', (next: AppStateStatus) => {
       if (next === 'active' && token && userId != null && isMasterRole(userRole)) {
-        void loadFeatures(true);
+        void refreshMasterFeaturesGlobally(userId);
       }
     });
     return () => sub.remove();

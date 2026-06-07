@@ -1,77 +1,15 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Alert, Platform, ActionSheetIOS } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { MasterService } from '@src/services/api/master';
 import { formatMoney } from '@src/utils/money';
 
 interface ServiceRowProps {
   service: MasterService;
-  onEdit: (service: MasterService) => void;
-  onDelete: (serviceId: number) => void;
+  onMenuPress: (service: MasterService) => void;
 }
 
-export function ServiceRow({ service, onEdit, onDelete }: ServiceRowProps) {
-  const handleOverflowPress = () => {
-    if (Platform.OS === 'ios') {
-      ActionSheetIOS.showActionSheetWithOptions(
-        {
-          options: ['Отмена', 'Редактировать', 'Удалить'],
-          destructiveButtonIndex: 2,
-          cancelButtonIndex: 0,
-        },
-        (buttonIndex) => {
-          if (buttonIndex === 1) {
-            onEdit(service);
-          } else if (buttonIndex === 2) {
-            Alert.alert(
-              'Удаление услуги',
-              'Вы уверены, что хотите удалить эту услугу?',
-              [
-                { text: 'Отмена', style: 'cancel' },
-                {
-                  text: 'Удалить',
-                  style: 'destructive',
-                  onPress: () => onDelete(service.id),
-                },
-              ]
-            );
-          }
-        }
-      );
-    } else {
-      Alert.alert(
-        service.name,
-        'Выберите действие',
-        [
-          { text: 'Отмена', style: 'cancel' },
-          {
-            text: 'Редактировать',
-            onPress: () => onEdit(service),
-          },
-          {
-            text: 'Удалить',
-            style: 'destructive',
-            onPress: () => {
-              Alert.alert(
-                'Удаление услуги',
-                'Вы уверены, что хотите удалить эту услугу?',
-                [
-                  { text: 'Отмена', style: 'cancel' },
-                  {
-                    text: 'Удалить',
-                    style: 'destructive',
-                    onPress: () => onDelete(service.id),
-                  },
-                ]
-              );
-            },
-          },
-        ],
-        { cancelable: true }
-      );
-    }
-  };
-
+export function ServiceRow({ service, onMenuPress }: ServiceRowProps) {
   return (
     <View style={styles.container}>
       <View style={styles.row}>
@@ -87,7 +25,7 @@ export function ServiceRow({ service, onEdit, onDelete }: ServiceRowProps) {
           </View>
           <TouchableOpacity
             style={styles.overflowButton}
-            onPress={handleOverflowPress}
+            onPress={() => onMenuPress(service)}
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             accessibilityLabel="Действия с услугой"
           >
@@ -147,4 +85,3 @@ const styles = StyleSheet.create({
     marginLeft: 4,
   },
 });
-

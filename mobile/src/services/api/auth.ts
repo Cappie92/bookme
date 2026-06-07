@@ -1,6 +1,7 @@
 import { isAxiosError } from 'axios';
 import { apiClient } from './client';
 import { normalizeRussianPhoneForApi } from '@src/utils/normalizeRussianPhoneForApi';
+import { AUTH_REQUEST_TIMEOUT_MS } from '@src/utils/apiNetworkError';
 
 // Типы для авторизации
 export interface LoginCredentials {
@@ -72,7 +73,9 @@ export async function login(credentials: LoginCredentials): Promise<LoginRespons
   const body = { phone: phoneForApi, password: credentials.password };
 
   try {
-    const response = await apiClient.post<LoginResponse>('/api/auth/login', body);
+    const response = await apiClient.post<LoginResponse>('/api/auth/login', body, {
+      timeout: AUTH_REQUEST_TIMEOUT_MS,
+    });
     return response.data;
   } catch (err: unknown) {
     if (__DEV__ && isAxiosError(err)) {

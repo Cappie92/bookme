@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -13,7 +13,12 @@ import {
   LayoutAnimation,
   Platform,
   UIManager,
+  Dimensions,
+  KeyboardAvoidingView,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useModalKeyboardHeight } from '@src/hooks/useModalKeyboardHeight';
+import { useScrollBottomPadding } from '@src/hooks/useScrollBottomPadding';
 import { Ionicons } from '@expo/vector-icons';
 import { ScreenContainer } from '@src/components/ScreenContainer';
 import { Card } from '@src/components/Card';
@@ -47,6 +52,8 @@ import {
 } from '@src/services/api/master';
 
 import { CANCELLATION_REASONS } from '@src/utils/bookingOutcome';
+import { MasterClientPhonePickerField } from '@src/components/master/MasterClientPhonePickerField';
+import { normalizeClientPhoneForApi } from '@src/utils/clientPhone';
 
 const PERIOD_OPTIONS = [
   { value: 30, label: '30 дней' },
@@ -57,6 +64,16 @@ const PERIOD_OPTIONS = [
   { value: null, label: 'Все время' },
 ];
 
+const WINDOW_HEIGHT = Dimensions.get('window').height;
+const MODAL_SHEET_MAX_HEIGHT = Math.round(WINDOW_HEIGHT * 0.88);
+
+function getCancelPeriodHelpText(periodDays: number | null): string {
+  if (periodDays == null) {
+    return 'Система учитывает все отмены клиента за всё время.';
+  }
+  return 'Система проверяет отмены клиента за выбранный период.';
+}
+
 function formatPhone(phone: string): string {
   if (phone.startsWith('+7') && phone.length >= 12) {
     return `+7 (${phone.slice(2, 5)}) ${phone.slice(5, 8)}-${phone.slice(8, 10)}-${phone.slice(10, 12)}`;
@@ -65,6 +82,10 @@ function formatPhone(phone: string): string {
 }
 
 export default function ClientRestrictionsScreen() {
+  const insets = useSafeAreaInsets();
+  const scrollPaddingBottom = useScrollBottomPadding(24);
+  const modalFooterPaddingBottom = Math.max(insets.bottom, 8) + 8;
+
   const { allowed, reasonText, cheapestPlanName } = useFeatureAccess('has_client_restrictions');
   const [segmentIndex, setSegmentIndex] = useState<number>(0); // 0 = Ограничения, 1 = Автоправила
   const [infoExpanded, setInfoExpanded] = useState(false);
@@ -88,6 +109,21 @@ export default function ClientRestrictionsScreen() {
     period_days: 30 as number | null,
     restriction_type: 'blacklist' as 'blacklist' | 'advance_payment_only',
   });
+
+  const restrictionKeyboardHeight = useModalKeyboardHeight(showRestrictionModal);
+  const ruleKeyboardHeight = useModalKeyboardHeight(showRuleModal);
+
+  const restrictionSheetMaxHeight = useMemo(() => {
+    if (restrictionKeyboardHeight <= 0) return MODAL_SHEET_MAX_HEIGHT;
+    const capped = WINDOW_HEIGHT - restrictionKeyboardHeight - insets.top - 12;
+    return Math.min(MODAL_SHEET_MAX_HEIGHT, Math.max(220, capped));
+  }, [restrictionKeyboardHeight, insets.top]);
+
+  const ruleSheetMaxHeight = useMemo(() => {
+    if (ruleKeyboardHeight <= 0) return MODAL_SHEET_MAX_HEIGHT;
+    const capped = WINDOW_HEIGHT - ruleKeyboardHeight - insets.top - 12;
+    return Math.min(MODAL_SHEET_MAX_HEIGHT, Math.max(280, capped));
+  }, [ruleKeyboardHeight, insets.top]);
 
   const loadData = useCallback(async () => {
     if (!allowed) return;
@@ -126,13 +162,13 @@ export default function ClientRestrictionsScreen() {
   };
 
   const handleSaveRestriction = async () => {
-    const phone = restrictionForm.client_phone.replace(/\D/g, '');
-    if (phone.length < 10) {
+    const normalizedPhone = normalizeClientPhoneForApi(restrictionForm.client_phone);
+    if (!normalizedPhone) {
       Alert.alert('Ошибка', 'Введите корректный номер телефона');
       return;
     }
     const payload = {
-      client_phone: phone.startsWith('7') ? `+${phone}` : `+7${phone}`,
+      client_phone: normalizedPhone,
       restriction_type: restrictionForm.restriction_type,
       reason: restrictionForm.reason || undefined,
     };
@@ -232,7 +268,12 @@ export default function ClientRestrictionsScreen() {
     const reasonLabels: Record<string, string> = { blacklist: 'Черный список', advance_payment_only: 'Только предоплата' };
 
     return (
-      <ScreenContainer scrollable>
+      <ScreenContainer
+        scrollable
+        scrollViewProps={{
+          contentContainerStyle: { paddingBottom: scrollPaddingBottom },
+        }}
+      >
         <DemoAccessBanner
           description={description}
           ctaText="Перейти к тарифам"
@@ -275,7 +316,12 @@ export default function ClientRestrictionsScreen() {
   }
 
   return (
-    <ScreenContainer scrollable>
+    <ScreenContainer
+      scrollable
+      scrollViewProps={{
+        contentContainerStyle: { paddingBottom: scrollPaddingBottom },
+      }}
+    >
       <View style={styles.header}>
         <View style={styles.headerTop}>
           <Text style={styles.title}>Ограничения клиентов</Text>
@@ -300,7 +346,7 @@ export default function ClientRestrictionsScreen() {
           <PrimaryButton title="Повторить" onPress={loadData} />
         </Card>
       ) : (
-        <ScrollView contentContainerStyle={styles.scrollContent} nestedScrollEnabled>
+        <ScrollView contentContainerStyle={styles.scrollContentInner} nestedScrollEnabled>
           <View style={styles.segmentWrap}>
             <SegmentedControl
               segments={[
@@ -421,103 +467,157 @@ export default function ClientRestrictionsScreen() {
       )}
 
       {/* Модалка ограничения */}
-      <Modal visible={showRestrictionModal} transparent animationType="slide">
+      <Modal visible={showRestrictionModal} transparent animationType="slide" statusBarTranslucent>
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>{editingRestriction ? 'Редактировать' : 'Добавить ограничение'}</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Телефон +7XXXXXXXXXX"
-              value={restrictionForm.client_phone}
-              onChangeText={(t) => setRestrictionForm((f) => ({ ...f, client_phone: t }))}
-              editable={!editingRestriction}
-              keyboardType="phone-pad"
-            />
-            <View style={styles.radioRow}>
-              {(['blacklist', 'advance_payment_only'] as const).map((t) => (
-                <TouchableOpacity
-                  key={t}
-                  onPress={() => setRestrictionForm((f) => ({ ...f, restriction_type: t }))}
-                  style={[styles.radio, restrictionForm.restriction_type === t && styles.radioActive]}
-                >
-                  <Text>{t === 'blacklist' ? 'Черный список' : 'Предоплата'}</Text>
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            style={[
+              styles.modalKeyboardHost,
+              Platform.OS === 'android' && restrictionKeyboardHeight > 0
+                ? { marginBottom: restrictionKeyboardHeight }
+                : null,
+            ]}
+          >
+            <View
+              style={[
+                styles.modalContent,
+                { maxHeight: restrictionSheetMaxHeight },
+                restrictionKeyboardHeight > 0 ? { height: restrictionSheetMaxHeight } : null,
+              ]}
+            >
+              <Text style={styles.modalTitle}>
+                {editingRestriction ? 'Редактировать' : 'Добавить ограничение'}
+              </Text>
+              <ScrollView
+                style={styles.modalScroll}
+                contentContainerStyle={styles.modalScrollContent}
+                keyboardShouldPersistTaps="handled"
+                keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+                showsVerticalScrollIndicator
+                nestedScrollEnabled
+              >
+                <MasterClientPhonePickerField
+                  value={restrictionForm.client_phone}
+                  onChangeText={(t) => setRestrictionForm((f) => ({ ...f, client_phone: t }))}
+                  editable={!editingRestriction}
+                />
+                <Text style={styles.label}>Тип ограничения</Text>
+                <View style={styles.radioRow}>
+                  {(['blacklist', 'advance_payment_only'] as const).map((t) => (
+                    <TouchableOpacity
+                      key={t}
+                      onPress={() => setRestrictionForm((f) => ({ ...f, restriction_type: t }))}
+                      style={[styles.radio, restrictionForm.restriction_type === t && styles.radioActive]}
+                    >
+                      <Text>{t === 'blacklist' ? 'Черный список' : 'Предоплата'}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                <Text style={styles.label}>Комментарий</Text>
+                <TextInput
+                  style={[styles.input, styles.textArea]}
+                  placeholder="Например: работает только по предоплате"
+                  value={restrictionForm.reason}
+                  onChangeText={(t) => setRestrictionForm((f) => ({ ...f, reason: t }))}
+                  multiline
+                />
+              </ScrollView>
+              <View style={[styles.modalButtons, { paddingBottom: modalFooterPaddingBottom }]}>
+                <TouchableOpacity onPress={resetRestrictionForm} style={styles.cancelBtn}>
+                  <Text style={styles.cancelBtnText}>Отмена</Text>
                 </TouchableOpacity>
-              ))}
+                <PrimaryButton
+                  title={saving ? '...' : 'Сохранить'}
+                  onPress={handleSaveRestriction}
+                  disabled={saving}
+                />
+              </View>
             </View>
-            <TextInput
-              style={[styles.input, styles.textArea]}
-              placeholder="Причина (необязательно)"
-              value={restrictionForm.reason}
-              onChangeText={(t) => setRestrictionForm((f) => ({ ...f, reason: t }))}
-              multiline
-            />
-            <View style={styles.modalButtons}>
-              <TouchableOpacity onPress={resetRestrictionForm} style={styles.cancelBtn}>
-                <Text>Отмена</Text>
-              </TouchableOpacity>
-              <PrimaryButton title={saving ? '...' : 'Сохранить'} onPress={handleSaveRestriction} disabled={saving} />
-            </View>
-          </View>
+          </KeyboardAvoidingView>
         </View>
       </Modal>
 
       {/* Модалка правила */}
-      <Modal visible={showRuleModal} transparent animationType="slide">
+      <Modal visible={showRuleModal} transparent animationType="slide" statusBarTranslucent>
         <View style={styles.modalOverlay}>
-          <ScrollView contentContainerStyle={styles.modalScroll}>
-            <View style={styles.modalContent}>
-              <Text style={styles.modalTitle}>{editingRule ? 'Редактировать правило' : 'Добавить правило'}</Text>
-              <Text style={styles.label}>Причина отмены</Text>
-              <View style={styles.verticalOptions}>
-                {Object.entries(CANCELLATION_REASONS).map(([val, lbl]) => (
-                  <TouchableOpacity
-                    key={val}
-                    onPress={() => setRuleForm((f) => ({ ...f, cancellation_reason: val }))}
-                    style={[styles.pickerOpt, ruleForm.cancellation_reason === val && styles.pickerOptActive]}
-                  >
-                    <Text style={styles.pickerText}>{lbl}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-              <Text style={styles.label}>Количество отмен</Text>
-              <TextInput
-                style={styles.input}
-                value={String(ruleForm.cancel_count)}
-                onChangeText={(t) => setRuleForm((f) => ({ ...f, cancel_count: parseInt(t, 10) || 1 }))}
-                keyboardType="number-pad"
-              />
-              <Text style={styles.label}>Период (дней)</Text>
-              <View style={styles.pickerRow}>
-                {PERIOD_OPTIONS.map((o) => (
-                  <TouchableOpacity
-                    key={String(o.value)}
-                    onPress={() => setRuleForm((f) => ({ ...f, period_days: o.value }))}
-                    style={[styles.pickerOpt, ruleForm.period_days === o.value && styles.pickerOptActive]}
-                  >
-                    <Text style={styles.pickerText}>{o.label}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-              <Text style={styles.label}>Тип ограничения</Text>
-              <View style={styles.radioRow}>
-                {(['blacklist', 'advance_payment_only'] as const).map((t) => (
-                  <TouchableOpacity
-                    key={t}
-                    onPress={() => setRuleForm((f) => ({ ...f, restriction_type: t }))}
-                    style={[styles.radio, ruleForm.restriction_type === t && styles.radioActive]}
-                  >
-                    <Text>{t === 'blacklist' ? 'Черный список' : 'Предоплата'}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-              <View style={styles.modalButtons}>
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            style={[
+              styles.modalKeyboardHost,
+              Platform.OS === 'android' && ruleKeyboardHeight > 0 ? { marginBottom: ruleKeyboardHeight } : null,
+            ]}
+          >
+            <View
+              style={[
+                styles.modalContent,
+                { maxHeight: ruleSheetMaxHeight },
+                ruleKeyboardHeight > 0 ? { height: ruleSheetMaxHeight } : null,
+              ]}
+            >
+              <Text style={styles.modalTitle}>
+                {editingRule ? 'Редактировать правило' : 'Добавить правило'}
+              </Text>
+              <ScrollView
+                style={styles.modalScroll}
+                contentContainerStyle={styles.modalScrollContent}
+                keyboardShouldPersistTaps="handled"
+                keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+                showsVerticalScrollIndicator
+                nestedScrollEnabled
+              >
+                <Text style={styles.label}>Причина отмены</Text>
+                <View style={styles.verticalOptions}>
+                  {Object.entries(CANCELLATION_REASONS).map(([val, lbl]) => (
+                    <TouchableOpacity
+                      key={val}
+                      onPress={() => setRuleForm((f) => ({ ...f, cancellation_reason: val }))}
+                      style={[styles.pickerOpt, ruleForm.cancellation_reason === val && styles.pickerOptActive]}
+                    >
+                      <Text style={styles.pickerText}>{lbl}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                <Text style={styles.label}>Отмен за период</Text>
+                <TextInput
+                  style={styles.input}
+                  value={String(ruleForm.cancel_count)}
+                  onChangeText={(t) => setRuleForm((f) => ({ ...f, cancel_count: parseInt(t, 10) || 1 }))}
+                  keyboardType="number-pad"
+                />
+                <Text style={styles.label}>Период проверки</Text>
+                <View style={styles.pickerRow}>
+                  {PERIOD_OPTIONS.map((o) => (
+                    <TouchableOpacity
+                      key={String(o.value)}
+                      onPress={() => setRuleForm((f) => ({ ...f, period_days: o.value }))}
+                      style={[styles.pickerOpt, ruleForm.period_days === o.value && styles.pickerOptActive]}
+                    >
+                      <Text style={styles.pickerText}>{o.label}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                <Text style={styles.helpText}>{getCancelPeriodHelpText(ruleForm.period_days)}</Text>
+                <Text style={styles.label}>Тип ограничения</Text>
+                <View style={styles.radioRow}>
+                  {(['blacklist', 'advance_payment_only'] as const).map((t) => (
+                    <TouchableOpacity
+                      key={t}
+                      onPress={() => setRuleForm((f) => ({ ...f, restriction_type: t }))}
+                      style={[styles.radio, ruleForm.restriction_type === t && styles.radioActive]}
+                    >
+                      <Text>{t === 'blacklist' ? 'Черный список' : 'Предоплата'}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </ScrollView>
+              <View style={[styles.modalButtons, { paddingBottom: modalFooterPaddingBottom }]}>
                 <TouchableOpacity onPress={resetRuleForm} style={styles.cancelBtn}>
-                  <Text>Отмена</Text>
+                  <Text style={styles.cancelBtnText}>Отмена</Text>
                 </TouchableOpacity>
                 <PrimaryButton title={saving ? '...' : 'Сохранить'} onPress={handleSaveRule} disabled={saving} />
               </View>
             </View>
-          </ScrollView>
+          </KeyboardAvoidingView>
         </View>
       </Modal>
     </ScreenContainer>
@@ -563,7 +663,7 @@ const styles = StyleSheet.create({
   sectionTitle: { fontSize: 16, fontWeight: '600', marginBottom: 12, color: '#333' },
   center: { padding: 40, alignItems: 'center' },
   errorText: { color: '#d32f2f', marginBottom: 12 },
-  scrollContent: { paddingBottom: 40 },
+  scrollContentInner: { paddingBottom: 8 },
   segmentWrap: { marginBottom: 12 },
   hint: { fontSize: 12, color: '#666', marginBottom: 12 },
   empty: { fontSize: 13, color: '#999', fontStyle: 'italic', marginVertical: 8 },
@@ -592,11 +692,37 @@ const styles = StyleSheet.create({
   lockTitle: { fontSize: 16, fontWeight: '800', color: '#111', marginBottom: 8 },
   lockText: { fontSize: 13, color: '#444', marginBottom: 16 },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  modalScroll: { flexGrow: 1, justifyContent: 'flex-end', paddingBottom: 24 },
-  modalContent: { backgroundColor: '#fff', borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 20 },
+  modalKeyboardHost: { width: '100%', justifyContent: 'flex-end' },
+  modalContent: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    paddingHorizontal: 20,
+    paddingTop: 20,
+  },
+  modalScroll: { flexGrow: 0 },
+  modalScrollContent: { paddingBottom: 12 },
   modalTitle: { fontSize: 18, fontWeight: '700', marginBottom: 16 },
-  modalButtons: { flexDirection: 'row', gap: 12, marginTop: 16 },
-  cancelBtn: { flex: 1, padding: 14, alignItems: 'center', backgroundColor: '#eee', borderRadius: 8 },
+  modalButtons: { flexDirection: 'row', gap: 12, marginTop: 8, paddingTop: 8 },
+  helpText: { fontSize: 12, color: '#666', marginTop: -4, marginBottom: 12, lineHeight: 18 },
+  cancelBtn: {
+    flex: 1,
+    minHeight: 48,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#eee',
+    borderRadius: 8,
+  },
+  cancelBtnText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    lineHeight: 20,
+    textAlign: 'center',
+    includeFontPadding: false,
+  },
   input: { borderWidth: 1, borderColor: '#ddd', borderRadius: 8, padding: 12, marginBottom: 12, fontSize: 16 },
   textArea: { minHeight: 60 },
   label: { fontSize: 14, fontWeight: '600', marginBottom: 6, color: '#333' },

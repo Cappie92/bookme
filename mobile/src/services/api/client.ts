@@ -7,6 +7,8 @@ import { normalizeRelativeUrlForApiBase, isMasterExclusiveApiPath } from '@src/u
 import { readToken } from '@src/auth/tokenStorage';
 import { recordApiErrorSnapshot } from '@src/debug/mobileErrorCapture';
 import { authTrace, isAuthRuntimeTraceEnabled } from '@src/debug/authRuntimeTrace';
+import { notifyInvalidSession } from '@src/auth/authSessionBridge';
+import { logAuthDiag } from '@src/debug/authDiag';
 
 // Создаем axios инстанс (в dev меньший timeout для быстрого retry)
 const apiClient: AxiosInstance = axios.create({
@@ -227,8 +229,15 @@ apiClient.interceptors.response.use(
       if (!hadToken) {
         logger.http('🔑 [API] 401 без токена (ожидаемо) - URL:', originalRequest.url);
       } else {
+        logAuthDiag('API 401 with token → invalidate session', {
+          url: originalRequest.url,
+          isAuthMeRequest,
+        });
+        if (!isAuthMeRequest) {
+          notifyInvalidSession();
+        }
         if (__DEV__ && env.DEBUG_AUTH) {
-          logger.info('auth', '[API] 401 с токеном (без авто-logout в interceptor)', {
+          logger.info('auth', '[API] 401 с токеном', {
             url: originalRequest.url,
             isAuthMeRequest,
             platform: Platform.OS,

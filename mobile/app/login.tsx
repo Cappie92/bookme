@@ -9,6 +9,7 @@ import { getPublicBookingDraft, isDraftValidForPostLoginRedirect } from '@src/st
 import { ScreenContainer } from '@src/components/ScreenContainer';
 import { PasswordInput } from '@src/components/ui/PasswordInput';
 import { cities, getTimezoneByCity } from '@src/data/cities';
+import { mapLoginRequestError } from '@src/utils/apiNetworkError';
 
 type TabType = 'login' | 'register';
 
@@ -254,25 +255,9 @@ export default function LoginScreen() {
       }
       const role = (typeof loggedInUser?.role === 'string' ? loggedInUser.role : '').toLowerCase();
       router.replace(role === 'client' ? '/client/dashboard' : '/');
-    } catch (error: any) {
-      const status = error?.response?.status as number | undefined;
-      logger.error('❌ [LOGIN] ОШИБКА ВХОДА:', status ?? 'no-status', error?.message);
-
-      let errorMessage = 'Ошибка входа';
-      if (status === 401) {
-        errorMessage = 'Неверный e-mail или пароль';
-      } else if (error.response?.data?.detail) {
-        const d = error.response.data.detail;
-        errorMessage = typeof d === 'string' ? d : Array.isArray(d) ? JSON.stringify(d) : String(d);
-      } else if (error.message) {
-        errorMessage = error.message;
-      } else if (error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND') {
-        errorMessage =
-          'Не удалось подключиться к серверу. Проверьте, что backend запущен и API_URL настроен правильно.';
-      } else if (error.code === 'NETWORK_ERROR' || !error.response) {
-        errorMessage =
-          'Ошибка сети. Проверьте подключение к интернету и что backend доступен по адресу из .env';
-      }
+    } catch (error: unknown) {
+      const errorMessage = mapLoginRequestError(error);
+      logger.error('❌ [LOGIN] ОШИБКА ВХОДА:', errorMessage);
 
       setLoginErrors((e) => ({ ...e, general: errorMessage }));
       Alert.alert('Ошибка входа', errorMessage);

@@ -9,15 +9,14 @@ import {
   Alert,
   FlatList,
   ViewStyle,
-  Modal,
   ActivityIndicator,
 } from 'react-native';
+import { KeyboardAwareBottomSheet } from '@src/components/common/KeyboardAwareBottomSheet';
 import { Ionicons } from '@expo/vector-icons';
 import { loyaltyTemplateIconName } from '@src/utils/loyaltyTemplateIcon';
 
 const SCREEN_PADDING = 16;
 const TEMPLATE_LIST_PADDING_H = 6;
-
 import { Card } from '@src/components/Card';
 import { PrimaryButton } from '@src/components/PrimaryButton';
 import type { LoyaltyDiscount, QuickDiscountTemplate, LoyaltyDiscountCreate, LoyaltyDiscountUpdate } from '@src/types/loyalty_discounts';
@@ -51,13 +50,28 @@ const WEEKDAY_OPTIONS: { v: number; l: string }[] = [
   { v: 7, l: 'Вс' },
 ];
 
-function formatRuleSummary(discount: LoyaltyDiscount): string {
+function resolveServiceLabel(
+  serviceId: unknown,
+  serviceNamesById: Map<number, string>
+): string {
+  if (serviceId == null || serviceId === '') return 'Услуга';
+  const id = typeof serviceId === 'number' ? serviceId : parseInt(String(serviceId), 10);
+  if (Number.isNaN(id)) return 'Услуга';
+  const name = serviceNamesById.get(id);
+  if (name) return name;
+  return `Услуга #${id}`;
+}
+
+function formatRuleSummary(
+  discount: LoyaltyDiscount,
+  serviceNamesById: Map<number, string>
+): string {
   const ct = (discount.conditions as any)?.condition_type;
   const p = (discount.conditions as any)?.parameters || {};
   const pct = discount.discount_percent;
   if (ct === 'first_visit') return `${pct}%`;
   if (ct === 'regular_visits') return `${p.visits_count ?? '—'} виз. / ${p.period_days ?? '—'} дн. → ${pct}%`;
-  if (ct === 'returning_client') return `≥${p.min_days_since_last_visit ?? '—'} дн. без визитов → ${pct}%`;
+  if (ct === 'returning_client') return `≥${p.min_days_since_last_visit ?? '—'} дн. без записи → ${pct}%`;
   if (ct === 'birthday') return `−${p.days_before ?? 0}/+${p.days_after ?? 0} дн. ДР → ${pct}%`;
   if (ct === 'happy_hours') {
     const d0 = (p.days || [])[0];
@@ -65,7 +79,10 @@ function formatRuleSummary(discount: LoyaltyDiscount): string {
     const wd = WEEKDAY_OPTIONS.find((x) => x.v === d0)?.l || '?';
     return `${wd} ${iv.start || '—'}-${iv.end || '—'} → ${pct}%`;
   }
-  if (ct === 'service_discount') return `Услуга #${p.service_id ?? '—'} → ${pct}%`;
+  if (ct === 'service_discount') {
+    const sid = p.service_id ?? p.master_service_id;
+    return `${resolveServiceLabel(sid, serviceNamesById)} → ${pct}%`;
+  }
   return `${pct}%`;
 }
 
@@ -134,6 +151,14 @@ export function DiscountsQuickTab({
       cancelled = true;
     };
   }, []);
+
+  const serviceNamesById = useMemo(() => {
+    const map = new Map<number, string>();
+    for (const svc of masterServices) {
+      map.set(svc.id, svc.name);
+    }
+    return map;
+  }, [masterServices]);
 
   const resetFormFromModal = useCallback((m: ModalState) => {
     if (!m?.template) return;
@@ -290,7 +315,7 @@ export function DiscountsQuickTab({
     if (!modal) return null;
     const ct = modal.template.conditions?.condition_type as string;
     return (
-      <ScrollView style={styles.modalScroll} keyboardShouldPersistTaps="handled">
+      <>
         {ct === 'first_visit' && (
           <Text style={styles.modalHint}>Скидка при первой записи клиента к вам.</Text>
         )}
@@ -304,8 +329,11 @@ export function DiscountsQuickTab({
         )}
         {ct === 'returning_client' && (
           <>
-            <Text style={styles.label}>Дней без визитов (не меньше)</Text>
+            <Text style={styles.label}>Дней без записи</Text>
             <TextInput style={styles.input} keyboardType="number-pad" value={minDaysAway} onChangeText={setMinDaysAway} />
+            <Text style={styles.modalHint}>
+              Скидка сработает, если клиент не записывался указанное число дней.
+            </Text>
           </>
         )}
         {ct === 'birthday' && (
@@ -362,9 +390,14 @@ export function DiscountsQuickTab({
         )}
         <Text style={styles.label}>Скидка, %</Text>
         <TextInput style={styles.input} keyboardType="decimal-pad" value={pct} onChangeText={setPct} />
-      </ScrollView>
+      </>
     );
   };
+
+  const modalTitle =
+    modal?.mode === 'create'
+      ? `Новое правило: ${modal ? getCompactName(modal.template.name) : ''}`
+      : `Изменить: ${modal ? getCompactName(modal.template.name) : ''}`;
 
   return (
     <View style={styles.container}>
@@ -373,23 +406,21 @@ export function DiscountsQuickTab({
         <Text style={styles.description}>Создание и управление по типам. У каждого типа своя форма.</Text>
       </View>
 
-      <Modal visible={!!modal} animationType="slide" transparent onRequestClose={() => setModal(null)}>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalBox}>
-            <Text style={styles.modalTitle}>
-              {modal?.mode === 'create' ? 'Новое правило' : 'Изменить'}
-              {modal ? `: ${getCompactName(modal.template.name)}` : ''}
-            </Text>
-            {renderModalFields()}
-            <View style={styles.modalActions}>
-              <PrimaryButton title="Сохранить" onPress={submitModal} disabled={createDisabled} />
-              <TouchableOpacity style={styles.cancelBtn} onPress={() => setModal(null)}>
-                <Text style={styles.cancelBtnText}>Отмена</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
+      <KeyboardAwareBottomSheet
+        visible={!!modal}
+        onRequestClose={() => setModal(null)}
+        title={modal ? modalTitle : undefined}
+        footer={
+          <>
+            <PrimaryButton title="Сохранить" onPress={submitModal} disabled={createDisabled} />
+            <TouchableOpacity style={styles.cancelBtn} onPress={() => setModal(null)}>
+              <Text style={styles.cancelBtnText}>Отмена</Text>
+            </TouchableOpacity>
+          </>
+        }
+      >
+        {renderModalFields()}
+      </KeyboardAwareBottomSheet>
 
       {templates.length > 0 && (
         <View
@@ -433,8 +464,12 @@ export function DiscountsQuickTab({
                       <View style={styles.rulesBlock}>
                         {displayRules.map((r) => (
                           <View key={r.id} style={styles.ruleRow}>
-                            <Text style={styles.ruleText} numberOfLines={2}>
-                              {formatRuleSummary(r)}
+                            <Text
+                              style={styles.ruleText}
+                              numberOfLines={1}
+                              ellipsizeMode="tail"
+                            >
+                              {formatRuleSummary(r, serviceNamesById)}
                               {!r.is_active ? ' · выкл' : ''}
                             </Text>
                             <View style={styles.ruleActions}>
@@ -534,20 +569,6 @@ const styles = StyleSheet.create({
   },
   bulkBtnText: { color: '#c62828', fontWeight: '600', fontSize: 12 },
   disabled: { opacity: 0.45 },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.45)',
-    justifyContent: 'flex-end',
-  },
-  modalBox: {
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    padding: 16,
-    maxHeight: '88%',
-  },
-  modalTitle: { fontSize: 16, fontWeight: '700', marginBottom: 10, color: '#111' },
-  modalScroll: { maxHeight: 420 },
   modalHint: { fontSize: 12, color: '#666', marginBottom: 8 },
   label: { fontSize: 12, fontWeight: '600', color: '#444', marginTop: 8 },
   input: {
@@ -575,7 +596,11 @@ const styles = StyleSheet.create({
   svcRowOn: { backgroundColor: '#e8f5e9' },
   svcName: { fontSize: 14, color: '#111' },
   warn: { color: '#b45309', fontSize: 13, marginVertical: 8 },
-  modalActions: { marginTop: 12, gap: 10 },
-  cancelBtn: { paddingVertical: 12, alignItems: 'center' },
+  cancelBtn: {
+    paddingVertical: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 44,
+  },
   cancelBtnText: { fontSize: 15, color: '#666' },
 });

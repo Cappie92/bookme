@@ -15,6 +15,7 @@ import {
 import { Image as ExpoImage } from 'expo-image';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { Ionicons } from '@expo/vector-icons';
+import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { PrimaryButton } from '../PrimaryButton';
 import { MasterSettings, putMasterProfileFormData } from '@src/services/api/master';
@@ -23,6 +24,15 @@ import * as ImagePicker from 'expo-image-picker';
 import * as Clipboard from 'expo-clipboard';
 import { resolveBackendUploadUrl } from '@src/utils/resolveBackendUploadUrl';
 import { logger } from '@src/utils/logger';
+import {
+  normalizeMasterDomainSlug,
+  validateMasterDomainSlug,
+} from '@src/utils/masterDomainSlug';
+import {
+  buildMasterPublicBookingUrl,
+  buildMasterPublicRoutePath,
+} from '@src/utils/masterPublicBooking';
+import { FreeSlotsShareCardModal } from './FreeSlotsShareCardModal';
 
 type PickerAsset = { uri: string; fileName?: string | null; fileSize?: number | null };
 
@@ -74,14 +84,17 @@ export function EditWebsiteModal({
   frontendBaseUrl 
 }: EditWebsiteModalProps) {
   const [form, setForm] = useState({
+    domain: '',
     site_description: '',
     use_photo_as_logo: false,
   });
+  const [domainError, setDomainError] = useState<string | null>(null);
   const [imageLoadFailed, setImageLoadFailed] = useState(false);
   const [logoFile, setLogoFile] = useState<any>(null);
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [copyHintVisible, setCopyHintVisible] = useState(false);
+  const [freeSlotsVisible, setFreeSlotsVisible] = useState(false);
   const copyHintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const postSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -94,9 +107,11 @@ export function EditWebsiteModal({
   useEffect(() => {
     if (settings && visible) {
       setForm({
+        domain: settings.master.domain ? String(settings.master.domain).trim() : '',
         site_description: settings.master.site_description || '',
         use_photo_as_logo: settings.master.use_photo_as_logo || false,
       });
+      setDomainError(null);
       setLogoFile(null);
       setSaveSuccess(false);
       setImageLoadFailed(false);
@@ -149,9 +164,18 @@ export function EditWebsiteModal({
   };
 
   const handleSave = async () => {
+    const slug = normalizeMasterDomainSlug(form.domain);
+    const slugValidation = validateMasterDomainSlug(slug);
+    if (slugValidation) {
+      setDomainError(slugValidation);
+      return;
+    }
+    setDomainError(null);
+
     setSaving(true);
     try {
       const formData = new FormData();
+      formData.append('domain', slug);
       formData.append('site_description', form.site_description);
       // Цвет фона убран из web UI; не пересылаем — чтобы не затирать значение в БД пустым/устаревшим полем
       formData.append('use_photo_as_logo', String(form.use_photo_as_logo));
@@ -211,22 +235,39 @@ export function EditWebsiteModal({
         }, 1500);
       }
     } catch (err: any) {
-      Alert.alert('Ошибка', err.message || 'Не удалось сохранить настройки');
+      const detail = err?.response?.data?.detail;
+      const message =
+        typeof detail === 'string'
+          ? detail
+          : err?.message || 'Не удалось сохранить настройки';
+      if (
+        typeof message === 'string' &&
+        (message.toLowerCase().includes('занят') || message.toLowerCase().includes('domain'))
+      ) {
+        setDomainError(message);
+      }
+      Alert.alert('Ошибка', message);
     } finally {
       setSaving(false);
     }
   };
 
-  const normalizeBaseUrl = (base: string | undefined | null): string => {
-    const b = String(base || '').trim();
-    if (!b) return '';
-    return b.endsWith('/') ? b.slice(0, -1) : b;
-  };
-
-  const webBase = normalizeBaseUrl(frontendBaseUrl || env.WEB_URL || 'https://dedato.ru');
-  const slug = settings?.master?.domain != null ? String(settings.master.domain).trim() : '';
-  const publicBookingUrl = webBase && slug ? `${webBase}/m/${slug}` : null;
+  const slug = normalizeMasterDomainSlug(form.domain || settings?.master?.domain || '');
+  const publicBookingUrl = buildMasterPublicBookingUrl(
+    form.domain || settings?.master?.domain,
+    frontendBaseUrl || env.WEB_URL
+  );
+  const publicRoutePath = buildMasterPublicRoutePath(form.domain || settings?.master?.domain);
   const isIOS = Platform.OS === 'ios';
+
+  const openPublicPage = () => {
+    if (!publicRoutePath) {
+      Alert.alert('Ошибка', 'Сначала укажите короткий адрес страницы');
+      return;
+    }
+    onClose();
+    router.push(publicRoutePath as `/m/${string}`);
+  };
 
   const renderPhotoPreview = (uri: string, style: ImageStyle, a11y: string, isServer: boolean) =>
     Platform.OS === 'android' ? (
@@ -248,6 +289,7 @@ export function EditWebsiteModal({
     );
 
   return (
+    <>
     <Modal
       visible={visible}
       animationType="slide"
@@ -270,9 +312,34 @@ export function EditWebsiteModal({
             showsVerticalScrollIndicator={true}
           >
             <View style={styles.form}>
+              <View style={styles.field}>
+                <Text style={styles.label}>Короткий адрес страницы</Text>
+                <View style={styles.domainInputRow}>
+                  <Text style={styles.domainPrefix}>/m/</Text>
+                  <TextInput
+                    style={[styles.domainInput, domainError ? styles.inputError : null]}
+                    value={form.domain}
+                    onChangeText={(text) => {
+                      setForm((s) => ({ ...s, domain: text }));
+                      if (domainError) setDomainError(null);
+                    }}
+                    placeholder="ваш-адрес"
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    autoComplete="off"
+                  />
+                </View>
+                {domainError ? <Text style={styles.errorText}>{domainError}</Text> : null}
+                {publicBookingUrl ? (
+                  <Text style={styles.hint} numberOfLines={2}>
+                    Публичная ссылка: {publicBookingUrl}
+                  </Text>
+                ) : null}
+              </View>
+
               {publicBookingUrl && (
                 <View style={styles.field}>
-                  <Text style={styles.label}>Адрес сайта для записи</Text>
+                  <Text style={styles.label}>Скопировать ссылку</Text>
                   <View style={styles.domainContainer}>
                     <Text style={styles.domainText} numberOfLines={1}>{publicBookingUrl}</Text>
                     <TouchableOpacity
@@ -302,6 +369,22 @@ export function EditWebsiteModal({
                   ) : null}
                 </View>
               )}
+
+              {publicBookingUrl ? (
+                <View style={styles.field}>
+                  <TouchableOpacity style={styles.linkActionBtn} onPress={openPublicPage}>
+                    <Ionicons name="open-outline" size={20} color="#2e7d32" />
+                    <Text style={styles.linkActionBtnText}>Открыть страницу мастера</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.linkActionBtn, styles.linkActionBtnSecondary]}
+                    onPress={() => setFreeSlotsVisible(true)}
+                  >
+                    <Ionicons name="share-social-outline" size={20} color="#2e7d32" />
+                    <Text style={styles.linkActionBtnText}>Карточка со свободными слотами</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : null}
 
               <View style={styles.field}>
                 <Text style={styles.label}>Текстовый блок для страницы записи</Text>
@@ -462,6 +545,16 @@ export function EditWebsiteModal({
         </SafeAreaView>
       </View>
     </Modal>
+    {slug && publicBookingUrl ? (
+      <FreeSlotsShareCardModal
+        visible={freeSlotsVisible}
+        onClose={() => setFreeSlotsVisible(false)}
+        slug={slug}
+        bookingUrl={publicBookingUrl}
+        masterNameFallback={settings?.user?.full_name || ''}
+      />
+    ) : null}
+    </>
   );
 }
 
@@ -534,6 +627,34 @@ const styles = StyleSheet.create({
     color: '#666',
     marginTop: 4,
   },
+  domainInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 8,
+    backgroundColor: '#fff',
+    paddingHorizontal: 12,
+  },
+  domainPrefix: {
+    fontSize: 15,
+    color: '#666',
+    marginRight: 2,
+  },
+  domainInput: {
+    flex: 1,
+    paddingVertical: 12,
+    fontSize: 16,
+    color: '#333',
+  },
+  inputError: {
+    borderColor: '#F44336',
+  },
+  errorText: {
+    fontSize: 12,
+    color: '#F44336',
+    marginTop: 4,
+  },
   domainContainer: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -556,6 +677,27 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#2e7d32',
     fontWeight: '600',
+  },
+  linkActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 8,
+    borderWidth: 1.5,
+    borderColor: '#4CAF50',
+    backgroundColor: '#f0f9f0',
+    marginBottom: 10,
+  },
+  linkActionBtnSecondary: {
+    backgroundColor: '#fff',
+  },
+  linkActionBtnText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#2e7d32',
+    flex: 1,
   },
   imageButton: {
     borderWidth: 1,

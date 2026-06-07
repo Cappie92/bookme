@@ -39,8 +39,8 @@ interface DayDrawerProps {
   onClose: () => void;
   /** После отмены/подтверждения записи */
   onCancelSuccess?: () => void;
-  /** После локального изменения слотов на день */
-  onScheduleUpdated?: () => void;
+  /** После локального изменения слотов на день (может быть async refetch) */
+  onScheduleUpdated?: () => void | Promise<void>;
   masterSettings?: { master?: { auto_confirm_bookings?: boolean; pre_visit_confirmations_enabled?: boolean } } | null;
   /** Как на дашборде: тариф с расширенной статистикой */
   hasExtendedStats?: boolean;
@@ -204,7 +204,7 @@ export function DayDrawer({
     setSaving(true);
     try {
       await updateMasterDaySchedule(date, openSlotsPayload(next));
-      onScheduleUpdated?.();
+      await onScheduleUpdated?.();
       onClose();
     } catch (err: unknown) {
       Alert.alert('Не удалось сохранить', getApiErrorMessage(err));
