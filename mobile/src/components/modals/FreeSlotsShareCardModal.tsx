@@ -31,6 +31,11 @@ import {
   shortBookingPath,
 } from '@src/utils/freeSlotsShare';
 import {
+  FreeSlotsShareCardImage,
+  FREE_SLOTS_CARD_HEIGHT,
+  FREE_SLOTS_CARD_WIDTH,
+} from '@src/components/freeSlots/FreeSlotsShareCardImage';
+import {
   captureFreeSlotsCardPng,
   saveImageToGallery,
   shareImageViaSheet,
@@ -38,6 +43,10 @@ import {
   shareToTelegramStory,
   showShareError,
 } from '@src/utils/freeSlotsShareImage';
+
+const PREVIEW_SCALE = 0.32;
+const PREVIEW_W = FREE_SLOTS_CARD_WIDTH * PREVIEW_SCALE;
+const PREVIEW_H = FREE_SLOTS_CARD_HEIGHT * PREVIEW_SCALE;
 
 type PeriodKey = 'today' | 'tomorrow' | 'week';
 
@@ -127,6 +136,19 @@ export function FreeSlotsShareCardModal({
         bookingUrl,
       }),
     [masterName, dateLabel, hourLabels, bookingUrl]
+  );
+
+  const shortLink = useMemo(() => shortBookingPath(bookingUrl), [bookingUrl]);
+
+  const cardImageProps = useMemo(
+    () => ({
+      masterName,
+      dateLabel,
+      hourLabels,
+      shortLink,
+      avatarUrl: profile?.avatar_url ?? null,
+    }),
+    [masterName, dateLabel, hourLabels, shortLink, profile?.avatar_url]
   );
 
   const applyPeriod = (key: PeriodKey) => {
@@ -280,22 +302,29 @@ export function FreeSlotsShareCardModal({
                 })}
               </ScrollView>
 
-              <View
-                ref={cardCaptureRef}
-                collapsable={false}
-                style={styles.previewCard}
-              >
-                <Text style={styles.previewBrand}>DeDato</Text>
-                <Text style={styles.previewTitle}>{masterName}</Text>
-                {dateLabel ? <Text style={styles.previewDate}>{dateLabel}</Text> : null}
-                <Text style={styles.previewHoursLabel}>Свободные часы</Text>
-                <Text style={styles.previewHours}>
-                  {hourLabels.length > 0 ? hourLabels.join(', ') : 'нет свободных часов на эту дату'}
-                </Text>
-                <Text style={styles.previewLinkLabel}>Запись</Text>
-                <Text style={styles.previewLink} selectable>
-                  {shortBookingPath(bookingUrl)}
-                </Text>
+              <Text style={styles.previewCaption}>Превью (масштаб уменьшен)</Text>
+              <View style={styles.previewFrame}>
+                <View style={[styles.previewClip, { width: PREVIEW_W, height: PREVIEW_H }]}>
+                  <View
+                    style={[
+                      styles.previewScaledInner,
+                      {
+                        width: FREE_SLOTS_CARD_WIDTH,
+                        height: FREE_SLOTS_CARD_HEIGHT,
+                        marginLeft: -(FREE_SLOTS_CARD_WIDTH - PREVIEW_W) / 2,
+                        marginTop: -(FREE_SLOTS_CARD_HEIGHT - PREVIEW_H) / 2,
+                        transform: [{ scale: PREVIEW_SCALE }],
+                      },
+                    ]}
+                  >
+                    <FreeSlotsShareCardImage {...cardImageProps} />
+                  </View>
+                </View>
+              </View>
+
+              {/* Полноразмерная 9:16 карточка для ViewShot (как web offscreen portal) */}
+              <View style={styles.offscreenCapture} pointerEvents="none">
+                <FreeSlotsShareCardImage ref={cardCaptureRef} {...cardImageProps} />
               </View>
 
               {imageBusy ? (
@@ -437,26 +466,34 @@ const styles = StyleSheet.create({
   dayChipMuted: { opacity: 0.55 },
   dayChipText: { fontSize: 14, color: '#333' },
   dayChipTextActive: { fontWeight: '700', color: '#2e7d32' },
-  previewCard: {
-    backgroundColor: '#1a1a2e',
-    borderRadius: 12,
-    padding: 20,
-    marginBottom: 16,
-    minHeight: 280,
-  },
-  previewBrand: {
+  previewCaption: {
     fontSize: 12,
-    color: '#81c784',
-    fontWeight: '700',
-    letterSpacing: 1,
+    color: '#888',
     marginBottom: 8,
   },
-  previewTitle: { fontSize: 20, fontWeight: '700', color: '#fff', marginBottom: 6 },
-  previewDate: { fontSize: 14, color: '#b0bec5', marginBottom: 12 },
-  previewHoursLabel: { fontSize: 12, color: '#90a4ae', marginBottom: 4 },
-  previewHours: { fontSize: 16, color: '#fff', fontWeight: '600', marginBottom: 12 },
-  previewLinkLabel: { fontSize: 12, color: '#90a4ae', marginBottom: 4 },
-  previewLink: { fontSize: 14, color: '#81c784' },
+  previewFrame: {
+    alignItems: 'center',
+    marginBottom: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    backgroundColor: '#f3f4f6',
+    paddingVertical: 8,
+  },
+  previewClip: {
+    overflow: 'hidden',
+  },
+  previewScaledInner: {
+    transformOrigin: 'top left',
+  },
+  offscreenCapture: {
+    position: 'absolute',
+    left: -20000,
+    top: 0,
+    width: FREE_SLOTS_CARD_WIDTH,
+    height: FREE_SLOTS_CARD_HEIGHT,
+    opacity: 1,
+  },
   imageBusyRow: {
     flexDirection: 'row',
     alignItems: 'center',

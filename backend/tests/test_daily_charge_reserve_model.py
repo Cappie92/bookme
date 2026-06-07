@@ -2,6 +2,8 @@
 from datetime import datetime, timedelta
 
 from auth import get_password_hash
+from datetime import timedelta
+
 from models import (
     Master,
     Subscription,
@@ -84,4 +86,25 @@ def test_daily_charge_decreases_balance_and_reserved_keeps_available(db):
 
     db.expire_all()
     assert get_user_reserved_total(db, user.id) == 6086.0
+    assert get_user_available_balance(db, user.id) == 43880.0
+
+
+def test_daily_charge_twice_decreases_reserved_by_68(db):
+    """Два списания по 34: balance 49932, reserved 6052, available 43880."""
+    user, sub = _master_with_reserve(db)
+    charge_date = datetime.utcnow().date()
+
+    assert process_daily_charge(db, sub.id, charge_date)["success"] is True
+
+    second_date = charge_date + timedelta(days=1)
+    result2 = process_daily_charge(db, sub.id, second_date)
+    assert result2["success"] is True, result2
+    assert result2["balance_after"] == 49932.0
+    assert result2["reserved_after"] == 6052.0
+    assert result2["available_after"] == 43880.0
+
+    db.expire_all()
+    ub = db.query(UserBalance).filter(UserBalance.user_id == user.id).first()
+    assert float(ub.balance) == 49932.0
+    assert get_user_reserved_total(db, user.id) == 6052.0
     assert get_user_available_balance(db, user.id) == 43880.0

@@ -18,6 +18,7 @@ import { ScreenContainer } from '@src/components/ScreenContainer';
 import { Card } from '@src/components/Card';
 import { StatusBadge } from '@src/components/StatusBadge';
 import { PrimaryButton } from '@src/components/PrimaryButton';
+import { SecondaryButton } from '@src/components/SecondaryButton';
 import {
   fetchCurrentSubscription,
   Subscription,
@@ -28,10 +29,11 @@ import {
   isExpiringSoon,
   getDisplayDaysRemaining,
 } from '@src/services/api/subscriptions';
+import { getBalance, type Balance } from '@src/services/api/master';
 import { SubscriptionPurchaseModal } from '@src/components/subscriptions/SubscriptionPurchaseModal';
 import { formatMoney } from '@src/utils/money';
 import { getPlanTitle } from '@src/utils/planTitle';
-import { useMasterFeatures } from '@src/hooks/useMasterFeatures';
+import { refreshMasterFeaturesGlobally } from '@src/utils/masterFeaturesRefresh';
 import {
   getMasterTariffComparisonRows,
   splitTariffComparisonColumns,
@@ -39,14 +41,48 @@ import {
 
 const SCROLL_EXTRA_BOTTOM = 24;
 
+/** Доступные средства (без резерва под подписку). */
+function getAvailableBalanceAmount(balance: Balance | null): number {
+  if (!balance) return 0;
+  if (typeof balance.available_balance === 'number' && Number.isFinite(balance.available_balance)) {
+    return balance.available_balance;
+  }
+  if (typeof balance.balance === 'number' && Number.isFinite(balance.balance)) {
+    return balance.balance;
+  }
+  return 0;
+}
+
+/** Актуальный резерв — только из GET /api/balance/ (не price/spent snapshot подписки). */
+function getReservedAmount(balance: Balance | null, subscription: Subscription | null): number {
+  if (balance) {
+    const fromBalance = balance.reserved_total ?? balance.reserved_balance;
+    if (typeof fromBalance === 'number' && Number.isFinite(fromBalance)) {
+      return fromBalance;
+    }
+  }
+  const subReserved = subscription?.reserved_amount;
+  if (typeof subReserved === 'number' && Number.isFinite(subReserved)) {
+    return subReserved;
+  }
+  return 0;
+}
+
+function getTotalBalanceAmount(balance: Balance | null): number | null {
+  if (!balance || typeof balance.balance !== 'number' || !Number.isFinite(balance.balance)) {
+    return null;
+  }
+  return balance.balance;
+}
+
 export default function SubscriptionsScreen() {
   const { user } = useAuth();
   const insets = useSafeAreaInsets();
   const { tabBarHeight } = useTabBarHeight();
   const measuredTabBarHeight = tabBarHeight > 0 ? tabBarHeight : BOTTOM_NAV_CONTENT_FALLBACK_HEIGHT;
   const scrollPaddingBottom = insets.bottom + measuredTabBarHeight + SCROLL_EXTRA_BOTTOM;
-  const { refresh: refreshMasterFeatures } = useMasterFeatures();
   const [subscription, setSubscription] = useState<Subscription | null>(null);
+  const [balance, setBalance] = useState<Balance | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -63,11 +99,17 @@ export default function SubscriptionsScreen() {
     try {
       setError(null);
 
-      const currentSub = await fetchCurrentSubscription();
+      const [currentSub, balanceData] = await Promise.all([
+        fetchCurrentSubscription(),
+        getBalance().catch(() => null),
+      ]);
       setSubscription(currentSub);
-    } catch (err: any) {
-      const errorMessage = err.response?.data?.detail || err.message || 'Ошибка загрузки подписки';
-      setError(errorMessage);
+      setBalance(balanceData);
+    } catch (err: unknown) {
+      const ax = err as { response?: { data?: { detail?: string } }; message?: string };
+      const errorMessage =
+        ax?.response?.data?.detail || ax?.message || 'Ошибка загрузки подписки';
+      setError(typeof errorMessage === 'string' ? errorMessage : 'Ошибка загрузки подписки');
       console.error('Error loading subscription:', err);
     } finally {
       setLoading(false);
@@ -80,7 +122,7 @@ export default function SubscriptionsScreen() {
     try {
       await Promise.all([
         loadSubscription(),
-        refreshMasterFeatures(),
+        refreshMasterFeaturesGlobally(user?.id),
       ]);
     } finally {
       setRefreshing(false);
@@ -125,6 +167,9 @@ export default function SubscriptionsScreen() {
 
     const planName = subscription.plan_name || 'Free';
     const isAlwaysFree = planName === 'AlwaysFree';
+    const availableBalance = getAvailableBalanceAmount(balance);
+    const reservedAmount = getReservedAmount(balance, subscription);
+    const totalBalance = getTotalBalanceAmount(balance);
     const tariffRows = getMasterTariffComparisonRows(
       {
         name: planName,
@@ -188,17 +233,23 @@ export default function SubscriptionsScreen() {
 
           {subscription.plan_id && (
             <>
+              {totalBalance != null ? (
+                <View style={styles.detailRow}>
+                  <Text style={styles.detailLabel}>Баланс на счёте:</Text>
+                  <Text style={styles.detailValue}>{formatMoney(totalBalance)}</Text>
+                </View>
+              ) : null}
               <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>Заморожено:</Text>
-                <Text style={styles.detailValue}>{formatMoney(subscription.reserved_amount || 0)}</Text>
+                <Text style={styles.detailLabel}>Свободный баланс:</Text>
+                <Text style={styles.detailValue}>{formatMoney(availableBalance)}</Text>
+              </View>
+              <View style={styles.detailRow}>
+                <Text style={styles.detailLabel}>Зарезервировано:</Text>
+                <Text style={styles.detailValue}>{formatMoney(reservedAmount)}</Text>
               </View>
               <View style={styles.detailRow}>
                 <Text style={styles.detailLabel}>Списание в день:</Text>
                 <Text style={styles.detailValue}>{formatMoney(subscription.daily_rate || 0)}</Text>
-              </View>
-              <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>Израсходовано:</Text>
-                <Text style={styles.detailValue}>{formatMoney(subscription.spent_amount || 0)}</Text>
               </View>
             </>
           )}
@@ -264,6 +315,52 @@ export default function SubscriptionsScreen() {
     );
   };
 
+  const renderInactiveSubscription = () => (
+    <>
+      <Card style={styles.inactiveCard}>
+        <Text style={styles.emptyTitle}>Подписка не активна</Text>
+        <Text style={styles.emptyText}>
+          Вы можете выбрать тариф и активировать подписку с баланса или пополнить баланс.
+        </Text>
+        {balance != null ? (
+          <View style={styles.balanceRow}>
+            <Text style={styles.balanceLabel}>Свободный баланс:</Text>
+            <Text style={styles.balanceValue}>
+              {formatMoney(getAvailableBalanceAmount(balance))}
+            </Text>
+          </View>
+        ) : null}
+      </Card>
+
+      {subscriptionType ? (
+        <Card style={styles.controlsCard}>
+          <PrimaryButton
+            title="Выбрать тариф"
+            onPress={() => setPurchaseModalVisible(true)}
+          />
+          <View style={styles.secondaryActionWrap}>
+            <SecondaryButton title="Обновить" onPress={handleRefresh} />
+          </View>
+        </Card>
+      ) : (
+        <View style={styles.secondaryActionWrap}>
+          <SecondaryButton title="Обновить" onPress={handleRefresh} />
+        </View>
+      )}
+    </>
+  );
+
+  const renderPurchaseModal = () =>
+    subscriptionType ? (
+      <SubscriptionPurchaseModal
+        visible={purchaseModalVisible}
+        onClose={() => setPurchaseModalVisible(false)}
+        subscriptionType={subscriptionType}
+        currentSubscription={subscription}
+        onRefreshAfterPayment={refreshAll}
+      />
+    ) : null;
+
   if (loading) {
     return (
       <ScreenContainer compactTop>
@@ -302,15 +399,13 @@ export default function SubscriptionsScreen() {
         scrollViewProps={{
           contentContainerStyle: { paddingBottom: scrollPaddingBottom },
           showsVerticalScrollIndicator: true,
+          refreshControl: (
+            <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} colors={['#4CAF50']} />
+          ),
         }}
       >
-        <View style={styles.centerContainer}>
-          <Text style={styles.emptyTitle}>Подписка не активна</Text>
-          <Text style={styles.emptyText}>
-            У вас нет активной подписки. Обратитесь к администратору для активации.
-          </Text>
-          <PrimaryButton title="Обновить" onPress={handleRefresh} />
-        </View>
+        {renderInactiveSubscription()}
+        {renderPurchaseModal()}
       </ScreenContainer>
     );
   }
@@ -331,15 +426,7 @@ export default function SubscriptionsScreen() {
       {renderSubscriptionInfo()}
       {renderTariffControls()}
 
-      {subscriptionType ? (
-      <SubscriptionPurchaseModal
-        visible={purchaseModalVisible}
-        onClose={() => setPurchaseModalVisible(false)}
-        subscriptionType={subscriptionType}
-        currentSubscription={subscription}
-        onRefreshAfterPayment={refreshAll}
-      />
-      ) : null}
+      {renderPurchaseModal()}
     </ScreenContainer>
   );
 }
@@ -377,8 +464,33 @@ const styles = StyleSheet.create({
   emptyText: {
     fontSize: 14,
     color: '#666',
-    textAlign: 'center',
-    marginBottom: 20,
+    textAlign: 'left',
+    marginBottom: 16,
+    lineHeight: 20,
+  },
+  inactiveCard: {
+    marginBottom: 16,
+  },
+  balanceRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#f0f0f0',
+  },
+  balanceLabel: {
+    fontSize: 14,
+    color: '#666',
+    fontWeight: '500',
+  },
+  balanceValue: {
+    fontSize: 16,
+    color: '#333',
+    fontWeight: '700',
+  },
+  secondaryActionWrap: {
+    marginTop: 12,
   },
   subscriptionCard: {
     marginBottom: 16,

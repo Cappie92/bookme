@@ -4,11 +4,14 @@ import * as MediaLibrary from 'expo-media-library';
 import * as Sharing from 'expo-sharing';
 import type { RefObject } from 'react';
 import type { View } from 'react-native';
+import {
+  FREE_SLOTS_CARD_HEIGHT,
+  FREE_SLOTS_CARD_WIDTH,
+} from '@src/components/freeSlots/FreeSlotsShareCardImage';
 
-export const FREE_SLOTS_CARD_CAPTURE_WIDTH = 360;
-export const FREE_SLOTS_CARD_CAPTURE_HEIGHT = 640;
+export { FREE_SLOTS_CARD_WIDTH, FREE_SLOTS_CARD_HEIGHT };
 
-/** PNG 9:16 из ref превью-карточки. */
+/** PNG 9:16 (1080×1920) — полноразмерная карточка, без scale preview. */
 export async function captureFreeSlotsCardPng(
   viewRef: RefObject<View | null>
 ): Promise<string> {
@@ -19,8 +22,8 @@ export async function captureFreeSlotsCardPng(
     format: 'png',
     quality: 1,
     result: 'tmpfile',
-    width: FREE_SLOTS_CARD_CAPTURE_WIDTH,
-    height: FREE_SLOTS_CARD_CAPTURE_HEIGHT,
+    width: FREE_SLOTS_CARD_WIDTH,
+    height: FREE_SLOTS_CARD_HEIGHT,
   });
   if (!uri) throw new Error('Не удалось сгенерировать изображение');
   return uri;
@@ -49,10 +52,6 @@ export async function shareImageViaSheet(
   });
 }
 
-/**
- * Instagram Stories: прямой intent только на iOS (instagram-stories://), без FB App ID может не сработать.
- * Иначе — share sheet с подсказкой выбрать Instagram → История.
- */
 export async function shareToInstagramStory(fileUri: string): Promise<'direct' | 'sheet'> {
   if (Platform.OS === 'ios') {
     const encoded = encodeURIComponent(fileUri);
@@ -71,10 +70,6 @@ export async function shareToInstagramStory(fileUri: string): Promise<'direct' |
   return 'sheet';
 }
 
-/**
- * Telegram Stories: прямого Expo/RN API для «История Telegram» нет.
- * Всегда share sheet с файлом — пользователь выбирает Telegram → История.
- */
 export async function shareToTelegramStory(fileUri: string): Promise<'sheet'> {
   await shareImageViaSheet(fileUri, 'Выберите Telegram → История');
   return 'sheet';

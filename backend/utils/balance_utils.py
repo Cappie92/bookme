@@ -539,13 +539,13 @@ def process_daily_charge(db: Session, subscription_id: int, charge_date: date = 
             "subscription_deactivated": True
         }
 
-    add_balance_transaction(
+    add_balance_transaction_no_commit(
         db=db,
         user_id=subscription.user_id,
         amount=-charge_amount,
         transaction_type=TransactionType.SUB_DAILY_FEE,
         description=f"Ежедневное списание за подписку {subscription_id}",
-        subscription_id=subscription_id
+        subscription_id=subscription_id,
     )
 
     if reservation:
@@ -553,14 +553,13 @@ def process_daily_charge(db: Session, subscription_id: int, charge_date: date = 
             0.0, float(reservation.reserved_amount or 0) - float(charge_amount)
         )
 
-    user_balance = get_or_create_user_balance(db, subscription.user_id)
+    user_balance = get_or_create_user_balance(db, subscription.user_id, do_commit=False)
     balance_after = float(user_balance.balance or 0)
     reserved_after = (
         float(reservation.reserved_amount or 0) if reservation else 0.0
     )
     available_after = get_user_available_balance(db, subscription.user_id, do_commit=False)
 
-    # Создаем запись о списании (charge_amount — целые рубли)
     charge_record = DailySubscriptionCharge(
         subscription_id=subscription_id,
         charge_date=charge_date,
@@ -568,32 +567,29 @@ def process_daily_charge(db: Session, subscription_id: int, charge_date: date = 
         daily_rate=daily_rate,
         balance_before=balance_before,
         balance_after=balance_after,
-        status=DailyChargeStatus.SUCCESS
+        status=DailyChargeStatus.SUCCESS,
     )
     db.add(charge_record)
 
-    # Переводим деньги на админ баланс
     admin_user_id = get_admin_user_id(db)
     if admin_user_id:
-        add_balance_transaction(
+        add_balance_transaction_no_commit(
             db=db,
             user_id=admin_user_id,
             amount=charge_amount,
             transaction_type=TransactionType.SUB_DAILY_FEE,
             description=f"Ежедневная плата за подписку от пользователя {subscription.user_id}",
-            subscription_id=subscription_id
+            subscription_id=subscription_id,
         )
-        
-        # Создаем запись в админ операциях
         create_admin_operation(
             db=db,
             admin_user_id=admin_user_id,
             from_user_id=subscription.user_id,
             amount_rubles=charge_amount,
             operation_type="SUB_DAILY_FEE",
-            service_description=f"Ежедневная плата за подписку {subscription_id}"
+            service_description=f"Ежедневная плата за подписку {subscription_id}",
         )
-    
+
     db.commit()
     
     return {
