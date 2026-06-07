@@ -68,6 +68,16 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         NSAppTransportSecurity: {
           NSAllowsLocalNetworking: true,
         },
+        NSPhotoLibraryUsageDescription:
+          'Разрешите доступ к фото, чтобы сохранять карточку со свободными слотами в галерею.',
+        NSPhotoLibraryAddUsageDescription:
+          'Разрешите сохранение карточки со свободными слотами в галерею.',
+        LSApplicationQueriesSchemes: [
+          'instagram',
+          'instagram-stories',
+          'tg',
+          'telegram',
+        ],
       },
     },
     android: {

@@ -384,7 +384,12 @@ export function FreeSlotsShareCardModal({
 
           {/* Capture-слой отдельно от preview: full 1080×1920 offscreen для ViewShot */}
           {!loading && !error ? (
-            <View style={styles.offscreenCapture} pointerEvents="none" accessibilityElementsHidden>
+            <View
+              style={styles.offscreenCapture}
+              collapsable={false}
+              pointerEvents="none"
+              accessibilityElementsHidden
+            >
               <FreeSlotsShareCardImage
                 ref={cardCaptureRef}
                 layoutMode="capture"

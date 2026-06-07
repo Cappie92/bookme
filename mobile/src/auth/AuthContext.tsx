@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useRef, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, ReactNode, useCallback } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 import { isAxiosError } from 'axios';
@@ -15,19 +15,29 @@ import {
   authTraceReadTokenHint,
 } from '@src/debug/authRuntimeTrace';
 import {
+  AUTH_INSTALL_MARKER,
   AUTH_LOGOUT_MARKER,
   AUTH_TOKEN_KEY,
   AUTH_USER_KEY,
   clearLogoutMarker,
   deleteSecureAuthItems,
   peekSecureToken,
+  readInstallMarker,
   readLogoutMarker,
   readToken,
+  setInstallMarker,
   setLogoutMarker,
   writeToken,
 } from '@src/auth/tokenStorage';
+import { logAuthDiag } from '@src/debug/authDiag';
+import { registerInvalidSessionHandler } from '@src/auth/authSessionBridge';
 
 const GET_USER_TIMEOUT_MS = 8000;
+
+function userDiagFields(u: User | null): { userId: number | null; phone: string | null; email: string | null } {
+  if (!u) return { userId: null, phone: null, email: null };
+  return { userId: u.id, phone: u.phone ?? null, email: u.email ?? null };
+}
 
 interface AuthContextType {
   user: User | null;
@@ -62,6 +72,7 @@ async function clearAllAuthStorage(
     AUTH_TOKEN_KEY,
     AUTH_USER_KEY,
     AUTH_LOGOUT_MARKER,
+    AUTH_INSTALL_MARKER,
     ...LEGACY_AUTH_KEYS,
   ]);
   if (opts?.preserveLogoutMarker) {
@@ -91,6 +102,21 @@ async function loadCachedUser(): Promise<User | null> {
     return JSON.parse(raw) as User;
   } catch {
     return null;
+  }
+}
+
+/** Без валидного access token cached user не должен оставаться в storage. */
+async function clearOrphanUserAndFeatureCaches(): Promise<void> {
+  try {
+    await AsyncStorage.removeItem(USER_KEY);
+  } catch {
+    /* ignore */
+  }
+  await deleteSecureAuthItems();
+  try {
+    await invalidateSubscriptionCaches(null);
+  } catch {
+    /* ignore */
   }
 }
 
@@ -148,6 +174,63 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const isLoggingOutRef = useRef(false);
   const logoutPromiseRef = useRef<Promise<void> | null>(null);
 
+  const clearAuth = useCallback(async (reason: 'logout' | 'invalid_token' = 'logout') => {
+    if (logoutPromiseRef.current) {
+      await logoutPromiseRef.current;
+      return;
+    }
+    authTraceDestructive('clearAuth:entry', reason, token != null, '(no route in context)');
+    void authTraceStorageSnapshot('clearAuth_before_marker');
+    const promise = (async () => {
+      isLoggingOutRef.current = true;
+      try {
+        if (reason === 'logout') {
+          authTrace(`[clearAuth] setLogoutMarker(${reason})`);
+          await setLogoutMarker(reason);
+        } else {
+          authTrace('[clearAuth] clearLogoutMarker (invalid_token path)');
+          await clearLogoutMarker();
+        }
+        let userId: number | null = null;
+        try {
+          const raw = await AsyncStorage.getItem(USER_KEY);
+          if (raw) {
+            const u = JSON.parse(raw) as { id?: number };
+            if (typeof u?.id === 'number') userId = u.id;
+          }
+        } catch {}
+        authTrace(
+          `[clearAuth] clearAllAuthStorage reason=${reason} preserveLogoutMarker=${reason === 'logout'}`
+        );
+        await clearAllAuthStorage(reason, { preserveLogoutMarker: reason === 'logout' });
+        try {
+          await invalidateSubscriptionCaches(userId);
+          await invalidateSubscriptionCaches(null);
+        } catch (error) {
+          logger.error('Ошибка очистки авторизации:', error);
+        }
+        setToken(null);
+        setUser(null);
+        delete apiClient.defaults.headers.common['Authorization'];
+        logAuthDiag('clearAuth done', { reason, clearedUserId: userId });
+        if (__DEV__ && env.DEBUG_AUTH) await logAuthStorageSnapshot('after logout');
+        void authTraceStorageSnapshot('clearAuth_done');
+      } finally {
+        isLoggingOutRef.current = false;
+      }
+    })();
+    logoutPromiseRef.current = promise;
+    await promise;
+    logoutPromiseRef.current = null;
+  }, [token]);
+
+  useEffect(() => {
+    registerInvalidSessionHandler(() => {
+      void clearAuth('invalid_token');
+    });
+    return () => registerInvalidSessionHandler(null);
+  }, [clearAuth]);
+
   useEffect(() => {
     authTrace(`[AuthProvider] MOUNT id=${authContextInstanceIdRef.current}`);
     logger.debug('auth', 'AUTH_CONTEXT_MOUNT', { authContextInstanceId: authContextInstanceIdRef.current });
@@ -170,6 +253,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
     authTrace('[bootstrap] loadStoredAuth ENTRY');
+    const installMarker = await readInstallMarker();
+    const peekToken = await peekSecureToken();
+    const asyncTokenPeek = await withTimeout(AsyncStorage.getItem(TOKEN_KEY), 500).catch(() => null);
+    if (!installMarker && (peekToken || asyncTokenPeek)) {
+      authTraceDestructive(
+        'loadStoredAuth_fresh_install',
+        'install_marker_missing_with_token',
+        true,
+        '(bootstrap)'
+      );
+      await clearAllAuthStorage('fresh_install_orphan_keychain');
+      await deleteSecureAuthItems();
+      setToken(null);
+      setUser(null);
+      delete apiClient.defaults.headers.common['Authorization'];
+      setIsLoading(false);
+      return;
+    }
     const logoutMarkerValue = await readLogoutMarker();
     authTrace(`[bootstrap] readLogoutMarker raw=${logoutMarkerValue ?? '(null/empty)'}`);
     if (logoutMarkerValue) {
@@ -204,13 +305,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await logAuthStorageSnapshot('before loadStoredAuth');
       void authTraceStorageSnapshot('inner_before_readToken');
       logger.debug('auth', '[Auth] loadStoredAuth start', { authContextInstanceId: instanceId });
+      let storedToken: string | null = null;
+      let meUser: User | null = null;
       try {
         if (isLoggingOutRef.current) {
           setIsLoading(false);
           return;
         }
-        const storedToken = await readToken();
+        const cachedBefore = await loadCachedUser();
+        storedToken = await readToken();
         await authTraceReadTokenHint('bootstrap_after_readToken');
+        logAuthDiag('bootstrap start', {
+          restoredToken: !!storedToken,
+          cachedUser: userDiagFields(cachedBefore),
+        });
         logger.debug('auth', '[Auth] loadStoredAuth token check', { hasToken: !!storedToken });
 
         if (storedToken && !isLoggingOutRef.current) {
@@ -221,14 +329,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               `[me] GET /api/auth/users/me START bootstrap timeout_ms=${GET_USER_TIMEOUT_MS} effective_API=${env.API_URL}`
             );
             const userData = await withTimeout(getCurrentUser(), GET_USER_TIMEOUT_MS);
+            meUser = userData;
             authTrace(`[me] GET /api/auth/users/me OK bootstrap userId=${userData.id} role=${userData.role}`);
             setUser(userData);
             await AsyncStorage.setItem(USER_KEY, JSON.stringify(userData));
             await invalidateSubscriptionCaches(userData.id);
+            logAuthDiag('/me OK (bootstrap)', {
+              restoredToken: true,
+              me: userDiagFields(userData),
+            });
             logger.debug('auth', '[Auth] Session restored (cold start)', {
               userId: userData.id,
               role: userData.role,
             });
+            await setInstallMarker();
           } catch (err: unknown) {
             if (isDefinitelyInvalidSession(err)) {
               authTrace('[me] GET /api/auth/users/me → 401 invalid_token → clearAuth');
@@ -245,7 +359,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               });
               const cached = await loadCachedUser();
               if (cached) {
+                meUser = cached;
                 setUser(cached);
+                logAuthDiag('/me transient → cached user (token kept)', {
+                  restoredToken: true,
+                  cachedUser: userDiagFields(cached),
+                });
                 logger.debug('auth', '[Auth] Restored user from AsyncStorage cache after transient error');
               } else {
                 try {
@@ -270,12 +389,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               logger.warn('auth', '[Auth] getCurrentUser failed, keep token; try cache', err);
               const cached = await loadCachedUser();
               if (cached) {
+                meUser = cached;
                 setUser(cached);
+                logAuthDiag('/me error → cached user (token kept)', {
+                  restoredToken: true,
+                  cachedUser: userDiagFields(cached),
+                });
               }
             }
           }
         } else {
           authTrace('[bootstrap] no storedToken → stay logged out');
+          const cached = await loadCachedUser();
+          logAuthDiag('bootstrap no token — clear orphan cache', {
+            restoredToken: false,
+            cachedUser: userDiagFields(cached),
+          });
+          await clearOrphanUserAndFeatureCaches();
+          setToken(null);
+          setUser(null);
+          delete apiClient.defaults.headers.common['Authorization'];
         }
       } catch (error) {
         authTrace(`[bootstrap] loadStoredAuth outer catch ${error instanceof Error ? error.message : String(error)}`);
@@ -288,6 +421,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         logger.debug('auth', '[Auth] loadStoredAuth end', { isLoading: false, authContextInstanceId: instanceId });
         await logAuthStorageSnapshot('after loadStoredAuth');
         void authTraceStorageSnapshot('after_loadStoredAuth_finally');
+        logAuthDiag('bootstrap end', {
+          restoredToken: !!storedToken,
+          me: userDiagFields(meUser),
+          finalUser: userDiagFields(meUser),
+        });
       }
     })();
     initPromiseRef.current = promise;
@@ -301,55 +439,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await loadStoredAuth();
   };
 
-  const clearAuth = async (reason: 'logout' | 'invalid_token' = 'logout') => {
-    if (logoutPromiseRef.current) {
-      await logoutPromiseRef.current;
-      return;
-    }
-    authTraceDestructive('clearAuth:entry', reason, token != null, '(no route in context)');
-    void authTraceStorageSnapshot('clearAuth_before_marker');
-    const promise = (async () => {
-      isLoggingOutRef.current = true;
-      try {
-        // Для invalid_token не оставляем marker "висеть" между запусками: иначе можно получить полу-разлогин на Android.
-        if (reason === 'logout') {
-          authTrace(`[clearAuth] setLogoutMarker(${reason})`);
-          await setLogoutMarker(reason);
-        } else {
-          authTrace('[clearAuth] clearLogoutMarker (invalid_token path)');
-          await clearLogoutMarker();
-        }
-        let userId: number | null = null;
-        try {
-          const raw = await AsyncStorage.getItem(USER_KEY);
-          if (raw) {
-            const u = JSON.parse(raw) as { id?: number };
-            if (typeof u?.id === 'number') userId = u.id;
-          }
-        } catch {}
-        authTrace(
-          `[clearAuth] clearAllAuthStorage reason=${reason} preserveLogoutMarker=${reason === 'logout'}`
-        );
-        await clearAllAuthStorage(reason, { preserveLogoutMarker: reason === 'logout' });
-        try {
-          await invalidateSubscriptionCaches(userId);
-        } catch (error) {
-          logger.error('Ошибка очистки авторизации:', error);
-        }
-        setToken(null);
-        setUser(null);
-        delete apiClient.defaults.headers.common['Authorization'];
-        if (__DEV__ && env.DEBUG_AUTH) await logAuthStorageSnapshot('after logout');
-        void authTraceStorageSnapshot('clearAuth_done');
-      } finally {
-        isLoggingOutRef.current = false;
-      }
-    })();
-    logoutPromiseRef.current = promise;
-    await promise;
-    logoutPromiseRef.current = null;
-  };
-
   const saveToken = async (newToken: string, reason: 'login' | 'register' = 'login') => {
     try {
       authTrace(`[saveToken] clearAllAuthStorage(before_write) next_reason=${reason} new_token_len=${newToken.length}`);
@@ -358,6 +447,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await clearAllAuthStorage('before_write');
       await writeToken(newToken, isLoggingOutRef, reason);
       if (isLoggingOutRef.current) return;
+      await setInstallMarker();
       setToken(newToken);
     } catch (error) {
       logger.error('Ошибка сохранения токена:', error);
@@ -379,6 +469,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         await invalidateSubscriptionCaches(userData.id);
         await clearLogoutMarker();
         void authTraceStorageSnapshot('after_login_success');
+        logAuthDiag('login success', { restoredToken: true, me: userDiagFields(userData) });
         logger.debug('auth', '🔑 [Auth] Login success', { userId: userData.id, phone: userData.phone, role: userData.role });
         return userData;
       } catch (error) {
@@ -429,6 +520,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const t = await readToken();
     if (!t) {
       authTrace('[ensureNoTokenOnLogin] no token in storage → noop');
+      const cached = await loadCachedUser();
+      if (cached) {
+        logAuthDiag('ensureNoTokenOnLogin — clear orphan user cache', {
+          cachedUser: userDiagFields(cached),
+        });
+        await clearOrphanUserAndFeatureCaches();
+      }
       return;
     }
     authTraceDestructive('ensureNoTokenOnLogin', 'invariant_login_with_token', true, '/login');

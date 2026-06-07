@@ -10,6 +10,8 @@ const LOGOUT_MARKER_TIMEOUT_MS = 1000;
 export const AUTH_TOKEN_KEY = 'access_token';
 export const AUTH_USER_KEY = 'user_data';
 export const AUTH_LOGOUT_MARKER = 'auth_logout_marker';
+/** AsyncStorage marker: Keychain/SecureStore может пережить uninstall на iOS. */
+export const AUTH_INSTALL_MARKER = 'auth_install_marker_v1';
 
 // SecureStore в Expo Go может зависать (Keychain на симуляторе). Пропускаем.
 const isExpoGo = Constants.appOwnership === 'expo';
@@ -64,6 +66,26 @@ export async function setLogoutMarker(reason?: string): Promise<void> {
 export async function clearLogoutMarker(): Promise<void> {
   await AsyncStorage.removeItem(AUTH_LOGOUT_MARKER);
   if (__DEV__ && env.DEBUG_AUTH) logger.debug('auth', '[LOGOUT_MARKER] cleared');
+}
+
+export async function readInstallMarker(): Promise<string | null> {
+  try {
+    return await withTimeout(AsyncStorage.getItem(AUTH_INSTALL_MARKER), LOGOUT_MARKER_TIMEOUT_MS);
+  } catch {
+    return null;
+  }
+}
+
+export async function setInstallMarker(): Promise<void> {
+  await AsyncStorage.setItem(AUTH_INSTALL_MARKER, `${Date.now()}`);
+}
+
+export async function clearInstallMarker(): Promise<void> {
+  try {
+    await AsyncStorage.removeItem(AUTH_INSTALL_MARKER);
+  } catch {
+    /* ignore */
+  }
 }
 
 /** Единый источник истины: Expo Go → только AsyncStorage; иначе → SecureStore (fallback AsyncStorage при чтении). */
