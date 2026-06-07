@@ -1,5 +1,16 @@
 import { buildAbsoluteApiUrl } from '@src/utils/buildAbsoluteApiUrl';
+import { fieldErrorsFromApiDetail, messageFromApiDetail } from '@src/utils/apiErrorMessage';
 import { apiClient } from './client';
+
+export class ProfileSaveApiError extends Error {
+  readonly fieldErrors: Record<string, string>;
+
+  constructor(message: string, fieldErrors: Record<string, string> = {}) {
+    super(message);
+    this.name = 'ProfileSaveApiError';
+    this.fieldErrors = fieldErrors;
+  }
+}
 
 // Интерфейсы для мастера
 export interface MasterSettings {
@@ -168,7 +179,11 @@ export interface BookingsLimit {
 export interface Balance {
   balance: number;
   available_balance: number;
-  reserved_balance: number;
+  /** @deprecated use reserved_total — alias в mobile */
+  reserved_balance?: number;
+  /** Сумма зарезервирована под подписки (GET /api/balance/) */
+  reserved_total?: number;
+  currency?: string;
 }
 
 export interface SubscriptionStatus {
@@ -291,9 +306,12 @@ export async function putMasterProfileFormData(formData: FormData): Promise<void
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({ detail: 'Ошибка сохранения профиля' }));
     const detail = errorData?.detail;
-    const message =
-      typeof detail === 'string' ? detail : Array.isArray(detail) ? JSON.stringify(detail) : 'Ошибка сохранения профиля';
-    throw new Error(message);
+    const fieldErrors = fieldErrorsFromApiDetail(detail);
+    const message = messageFromApiDetail(detail, 'Ошибка сохранения профиля');
+    if (__DEV__) {
+      console.warn('[putMasterProfileFormData]', response.status, detail);
+    }
+    throw new ProfileSaveApiError(message, fieldErrors);
   }
 }
 

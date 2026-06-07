@@ -19,6 +19,21 @@ logger = logging.getLogger(__name__)
 from models import Booking, Master, MasterSchedule, MasterScheduleSettings, User, BookingStatus, Service, ServiceCategory, MasterServiceCategory, MasterService, SalonMasterInvitation, SalonMasterInvitationStatus, ClientRestriction, Salon, SalonBranch, Income, Subscription, SubscriptionType, SubscriptionStatus, SubscriptionFreeze, ClientRestrictionRule, MasterPaymentSettings, IndieMaster, AppliedDiscount, MasterClientMetadata
 
 
+def _parse_optional_master_birth_date(raw: Any) -> Optional[date]:
+    """Парсит birth_date из multipart PUT /master/profile (YYYY-MM-DD или сброс)."""
+    if raw is None:
+        return None
+    if isinstance(raw, date):
+        return raw
+    s = str(raw).strip()
+    if not s:
+        return None
+    try:
+        return date.fromisoformat(s[:10])
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Некорректная дата рождения")
+
+
 def _reject_clear_city_timezone(master: Master, city: Optional[str], timezone: Optional[str]) -> None:
     """Запрет очистки city/timezone после того, как они были выбраны."""
     has_city = bool((getattr(master, "city", None) or "").strip())
@@ -978,7 +993,7 @@ async def update_master_profile(
             if email_s != current_user.email:
                 current_user.pending_email = email_s
     if birth_date is not None:
-        current_user.birth_date = birth_date
+        current_user.birth_date = _parse_optional_master_birth_date(birth_date)
     
     # Обновляем поля мастера
     if can_work_independently is not None:

@@ -97,7 +97,19 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     web: {
       favicon: './assets/favicon.png',
     },
-    plugins: ['expo-router', '@react-native-community/datetimepicker'],
+    plugins: [
+      'expo-router',
+      '@react-native-community/datetimepicker',
+      [
+        'expo-media-library',
+        {
+          photosPermission:
+            'Разрешите доступ к фото, чтобы сохранять карточку со свободными слотами в галерею.',
+          savePhotosPermission:
+            'Разрешите сохранение карточки со свободными слотами в галерею.',
+        },
+      ],
+    ],
     extra: {
       ...config.extra,
       ...(apiUrl ? { API_URL: apiUrl } : {}),
