@@ -147,6 +147,7 @@ export function canConfirmPostVisit(
   master: MasterLike | null,
   now: Date = new Date()
 ): boolean {
+  if (!booking) return false;
   return needsOutcome(booking, master, now);
 }
 
