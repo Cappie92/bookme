@@ -481,12 +481,6 @@ export default function LoginScreen() {
                       Клиент
                     </Text>
                   </View>
-                  <Text style={[
-                    styles.roleOptionDescription,
-                    userRole === 'client' && styles.roleOptionDescriptionActive
-                  ]}>
-                    Запись на услуги
-                  </Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   testID="role-master"
@@ -518,12 +512,6 @@ export default function LoginScreen() {
                       Мастер
                     </Text>
                   </View>
-                  <Text style={[
-                    styles.roleOptionDescription,
-                    userRole === 'master' && styles.roleOptionDescriptionActive
-                  ]}>
-                    Предоставление услуг
-                  </Text>
                 </TouchableOpacity>
               </View>
               {registerErrors.role && <Text style={styles.errorText}>{registerErrors.role}</Text>}
