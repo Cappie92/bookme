@@ -49,7 +49,9 @@ export function WelcomeFeatureCard({
             </View>
           </View>
           <Text style={styles.title}>{slide.title}</Text>
-          <Text style={styles.description}>{slide.description}</Text>
+          <Text style={styles.description} numberOfLines={2}>
+            {slide.description}
+          </Text>
           {pricingFallbackUsed ? (
             <Text style={styles.fallbackNotice}>{WELCOME_PRICING_FALLBACK_NOTICE}</Text>
           ) : null}
@@ -144,17 +146,17 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   title: {
-    fontSize: 18,
+    fontSize: 17,
     fontWeight: '700',
     color: '#333',
-    lineHeight: 24,
-    marginBottom: 4,
+    lineHeight: 22,
+    marginBottom: 2,
   },
   description: {
-    fontSize: 14,
+    fontSize: 13,
     color: '#666',
-    lineHeight: 20,
-    marginBottom: 8,
+    lineHeight: 18,
+    marginBottom: 4,
   },
   fallbackNotice: {
     fontSize: 12,
@@ -169,9 +171,10 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   periodLabel: {
-    fontSize: 12,
+    fontSize: 11,
     color: '#888',
-    marginTop: 4,
+    marginTop: 2,
+    marginBottom: 2,
   },
   cta: {
     flexDirection: 'row',

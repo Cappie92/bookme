@@ -14,14 +14,18 @@ import {
   type WelcomePeriodMonths,
 } from '@src/utils/welcomePricing';
 
-const FEATURES_TWO_COLUMN_MIN_WIDTH = 340;
+/** UI-only подпись для welcome (data flow не меняем). */
+function formatWelcomeFeatureLabel(text: string): string {
+  if (text === 'Без ограничений на запись') return 'Запись без ограничений';
+  return text;
+}
 
-function splitFeaturesIntoColumns(features: string[], columnCount: number): string[][] {
-  if (columnCount <= 1 || features.length === 0) return [features];
-  const columnSize = Math.ceil(features.length / columnCount);
-  return Array.from({ length: columnCount }, (_, index) =>
-    features.slice(index * columnSize, (index + 1) * columnSize)
-  ).filter((column) => column.length > 0);
+function pairFeaturesIntoRows(features: string[]): string[][] {
+  const rows: string[][] = [];
+  for (let i = 0; i < features.length; i += 2) {
+    rows.push(features.slice(i, i + 2));
+  }
+  return rows;
 }
 
 type WelcomePricingGridProps = {
@@ -134,25 +138,26 @@ export function WelcomePlanFeaturesBlock({
   const plan = plans.find((p) => p.id === planId);
   if (!plan) return null;
 
-  const columnCount = width < FEATURES_TWO_COLUMN_MIN_WIDTH ? 1 : 2;
-  const featureColumns = splitFeaturesIntoColumns(plan.featuresIncluded, columnCount);
+  const labels = plan.featuresIncluded.map(formatWelcomeFeatureLabel);
+  const useTwoCols = width >= 300;
+  const featureRows = useTwoCols ? pairFeaturesIntoRows(labels) : labels.map((l) => [l]);
 
   return (
     <View style={styles.featuresBlock}>
       <Text style={styles.featuresTitle}>{title}</Text>
       <Text style={styles.featuresPlanName}>{plan.displayName}</Text>
       <View style={styles.featuresGrid}>
-        {featureColumns.map((columnFeatures, columnIndex) => (
-          <View
-            key={`col-${columnIndex}`}
-            style={[styles.featuresColumn, columnCount > 1 && styles.featuresColumnHalf]}
-          >
-            {columnFeatures.map((feature, featureIndex) => (
-              <View key={`${columnIndex}-${featureIndex}-${feature}`} style={styles.featureRow}>
-                <Ionicons name="checkmark-circle" size={12} color="#4CAF50" style={styles.featureIcon} />
-                <Text style={styles.featureText}>{feature}</Text>
+        {featureRows.map((rowFeatures, rowIndex) => (
+          <View key={`row-${rowIndex}`} style={styles.featureRowPair}>
+            {rowFeatures.map((feature, featureIndex) => (
+              <View key={`${rowIndex}-${featureIndex}-${feature}`} style={styles.featureCell}>
+                <Ionicons name="checkmark-circle" size={11} color="#4CAF50" style={styles.featureIcon} />
+                <Text style={styles.featureText} numberOfLines={2}>
+                  {feature}
+                </Text>
               </View>
             ))}
+            {useTwoCols && rowFeatures.length === 1 ? <View style={styles.featureCellEmpty} /> : null}
           </View>
         ))}
       </View>
@@ -162,13 +167,14 @@ export function WelcomePlanFeaturesBlock({
 
 const styles = StyleSheet.create({
   grid: {
-    gap: 8,
-    marginTop: 4,
-    marginBottom: 12,
+    gap: 6,
+    marginTop: 2,
+    marginBottom: 6,
   },
   gridRow: {
     flexDirection: 'row',
-    gap: 8,
+    gap: 6,
+    alignItems: 'stretch',
   },
   loadingWrap: {
     alignItems: 'center',
@@ -192,10 +198,10 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     borderWidth: 1.5,
     borderColor: '#ececec',
-    paddingVertical: 10,
-    paddingHorizontal: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 6,
     alignItems: 'center',
-    minHeight: 56,
+    minHeight: 52,
     justifyContent: 'center',
     position: 'relative',
     overflow: 'hidden',
@@ -255,39 +261,41 @@ const styles = StyleSheet.create({
   featuresBlock: {
     backgroundColor: '#fafafa',
     borderRadius: 10,
-    padding: 10,
-    marginBottom: 8,
+    padding: 8,
+    marginBottom: 4,
     borderWidth: 1,
     borderColor: '#eee',
   },
   featuresTitle: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '700',
     color: '#333',
     marginBottom: 2,
   },
   featuresPlanName: {
-    fontSize: 11,
+    fontSize: 10,
     color: '#4CAF50',
     fontWeight: '600',
-    marginBottom: 6,
+    marginBottom: 4,
   },
   featuresGrid: {
+    gap: 2,
+  },
+  featureRowPair: {
     flexDirection: 'row',
-    gap: 8,
+    gap: 6,
+    alignItems: 'flex-start',
   },
-  featuresColumn: {
+  featureCell: {
     flex: 1,
-  },
-  featuresColumnHalf: {
-    flex: 1,
-    minWidth: 0,
-  },
-  featureRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    gap: 4,
-    marginBottom: 4,
+    gap: 3,
+    minWidth: 0,
+    paddingVertical: 1,
+  },
+  featureCellEmpty: {
+    flex: 1,
   },
   featureIcon: {
     marginTop: 1,
@@ -295,8 +303,8 @@ const styles = StyleSheet.create({
   featureText: {
     flex: 1,
     flexShrink: 1,
-    fontSize: 11,
+    fontSize: 10,
     color: '#555',
-    lineHeight: 14,
+    lineHeight: 13,
   },
 });
