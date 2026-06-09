@@ -226,8 +226,8 @@ function ScheduleIllustration({ frameStyle }: FrameProps) {
 }
 
 function AnalyticsIllustration({ frameStyle }: FrameProps) {
-  const bars = [44, 58, 50, 62, 56, 72];
-  const loadBars = [38, 48, 42, 52, 46, 58, 44];
+  const revenueBars = [52, 74, 62, 82, 70, 92];
+  const loadBars = [45, 58, 50, 68, 56, 82, 54];
   const days = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
 
   return (
@@ -255,19 +255,32 @@ function AnalyticsIllustration({ frameStyle }: FrameProps) {
             <Text style={styles.chipSuccessText}>+14%</Text>
           </View>
         </View>
-        <View style={styles.barsArea}>
-          {bars.map((h, i) => (
-            <View key={i} style={[styles.revenueBar, { height: h }, i === 5 && styles.barActive]} />
+        <View style={styles.revenueBarsArea}>
+          {revenueBars.map((height, index) => (
+            <View
+              key={index}
+              style={[
+                styles.revenueBar,
+                { height },
+                index === revenueBars.length - 1 ? styles.barActive : styles.barMuted,
+              ]}
+            />
           ))}
         </View>
       </View>
       <View style={[styles.sectionCard, styles.sectionCardTint, styles.analyticsLoadCard]}>
         <Text style={styles.mockTitle}>Загрузка по дням</Text>
-        <View style={styles.barsAreaLoad}>
-          {loadBars.map((h, i) => (
-            <View key={i} style={styles.loadBarCol}>
-              <View style={[styles.loadBar, { height: h }, i === 5 && styles.barActive]} />
-              <Text style={styles.dayLabelTiny}>{days[i]}</Text>
+        <View style={styles.loadBarsArea}>
+          {loadBars.map((height, index) => (
+            <View key={index} style={styles.loadBarCol}>
+              <View
+                style={[
+                  styles.loadBar,
+                  { height },
+                  index === 5 ? styles.barActive : styles.barMuted,
+                ]}
+              />
+              <Text style={styles.dayLabelTiny}>{days[index]}</Text>
             </View>
           ))}
         </View>
@@ -810,52 +823,65 @@ const styles = StyleSheet.create({
   kpiLabel: { fontSize: 9, color: '#888' },
   kpiValueLg: { fontSize: 14, fontWeight: '700', color: '#333', marginTop: 2 },
 
-  chartHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6, gap: 6 },
-  chartTitleFlex: { flex: 1, flexShrink: 1 },
-  chartTrendChip: { flexShrink: 0 },
-  analyticsBody: { flex: 1, gap: 4 },
-  analyticsChartCard: { minHeight: 86, marginBottom: 4, paddingVertical: 6 },
-  analyticsLoadCard: { minHeight: 98, marginBottom: 0, paddingVertical: 6 },
-  barsArea: {
+  chartHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+    gap: 8,
+  },
+  chartTitleFlex: { flex: 1, flexShrink: 1, marginRight: 4 },
+  chartTrendChip: { flexShrink: 0, alignSelf: 'flex-start' },
+  analyticsBody: { flex: 1, gap: 6 },
+  analyticsChartCard: {
+    flex: 1,
+    minHeight: 128,
+    marginBottom: 0,
+    paddingVertical: 8,
+    paddingHorizontal: 8,
+  },
+  analyticsLoadCard: {
+    flex: 1.08,
+    minHeight: 132,
+    marginBottom: 0,
+    paddingVertical: 8,
+    paddingHorizontal: 8,
+  },
+  revenueBarsArea: {
     flexDirection: 'row',
     alignItems: 'flex-end',
     justifyContent: 'space-between',
-    height: 48,
-    minHeight: 48,
-    marginTop: 6,
-    gap: 4,
-    paddingHorizontal: 2,
+    height: 88,
+    minHeight: 88,
+    width: '100%',
   },
   revenueBar: {
     flex: 1,
-    backgroundColor: '#C8E6C9',
-    borderRadius: 3,
-    minHeight: 8,
-    maxWidth: 22,
+    marginHorizontal: 3,
+    borderRadius: 8,
+    minHeight: 12,
   },
-  barsAreaLoad: {
+  loadBarsArea: {
     flexDirection: 'row',
     alignItems: 'flex-end',
     justifyContent: 'space-between',
-    height: 52,
-    minHeight: 52,
-    marginTop: 6,
-    paddingHorizontal: 2,
+    height: 92,
+    minHeight: 92,
+    width: '100%',
+    marginTop: 4,
   },
   loadBarCol: {
-    width: 14,
+    flex: 1,
     alignItems: 'center',
     justifyContent: 'flex-end',
+    gap: 4,
   },
   loadBar: {
-    width: 7,
-    backgroundColor: '#C8E6C9',
-    borderRadius: 3,
-    minHeight: 8,
+    width: 26,
+    borderRadius: 8,
+    minHeight: 12,
   },
-  barFlex: { flex: 1, backgroundColor: '#C8E6C9', borderRadius: 3, minHeight: 6 },
-  barsLg: { flexDirection: 'row', alignItems: 'flex-end', height: 38, gap: 4, marginTop: 4 },
-  barLg: { flex: 1, backgroundColor: '#C8E6C9', borderRadius: 3, minHeight: 5 },
+  barMuted: { backgroundColor: '#C8E6C9' },
   barActive: { backgroundColor: GREEN },
   lineBars: { flexDirection: 'row', alignItems: 'flex-end', height: 32, gap: 2, marginTop: 4 },
   lineBarCol: { flex: 1, alignItems: 'center', justifyContent: 'flex-end' },
