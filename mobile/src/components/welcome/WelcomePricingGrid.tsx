@@ -7,25 +7,19 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import type { WelcomePricingPlan } from '@src/data/welcomePricingData';
+import type { WelcomePlanFeatureRow, WelcomePricingPlan } from '@src/data/welcomePricingData';
 import {
   formatWelcomePlanDiscountSuffix,
   formatWelcomePlanPricePerMonth,
   type WelcomePeriodMonths,
 } from '@src/utils/welcomePricing';
 
-/** UI-only подпись для welcome (data flow не меняем). */
-function formatWelcomeFeatureLabel(text: string): string {
-  if (text === 'Без ограничений на запись') return 'Запись без ограничений';
-  return text;
-}
-
-function pairFeaturesIntoRows(features: string[]): string[][] {
-  const rows: string[][] = [];
-  for (let i = 0; i < features.length; i += 2) {
-    rows.push(features.slice(i, i + 2));
+function pairFeatureRowsIntoRows(rows: WelcomePlanFeatureRow[]): WelcomePlanFeatureRow[][] {
+  const paired: WelcomePlanFeatureRow[][] = [];
+  for (let i = 0; i < rows.length; i += 2) {
+    paired.push(rows.slice(i, i + 2));
   }
-  return rows;
+  return paired;
 }
 
 type WelcomePricingGridProps = {
@@ -117,6 +111,7 @@ export function WelcomePricingGrid({
               </TouchableOpacity>
             );
           })}
+          {row.length === 1 ? <View style={styles.tileSpacer} /> : null}
         </View>
       ))}
     </View>
@@ -126,34 +121,50 @@ export function WelcomePricingGrid({
 type WelcomePlanFeaturesBlockProps = {
   plans: WelcomePricingPlan[];
   planId: string;
-  title?: string;
+  fallbackMode?: boolean;
 };
 
 export function WelcomePlanFeaturesBlock({
   plans,
   planId,
-  title = 'Что входит',
+  fallbackMode = false,
 }: WelcomePlanFeaturesBlockProps) {
   const { width } = useWindowDimensions();
   const plan = plans.find((p) => p.id === planId);
   if (!plan) return null;
 
-  const labels = plan.featuresIncluded.map(formatWelcomeFeatureLabel);
+  const useComparison = !fallbackMode && (plan.featureRows?.length ?? 0) > 0;
+  const featureRows: WelcomePlanFeatureRow[] = useComparison
+    ? plan.featureRows!
+    : plan.featuresIncluded.map((text) => ({ text, available: true }));
+
   const useTwoCols = width >= 300;
-  const featureRows = useTwoCols ? pairFeaturesIntoRows(labels) : labels.map((l) => [l]);
+  const rowGroups = useTwoCols
+    ? pairFeatureRowsIntoRows(featureRows)
+    : featureRows.map((row) => [row]);
 
   return (
     <View style={styles.featuresBlock}>
-      <Text style={styles.featuresTitle}>{title}</Text>
+      <Text style={styles.featuresTitle}>
+        {useComparison ? 'Что входит / не входит' : 'Что входит'}
+      </Text>
       <Text style={styles.featuresPlanName}>{plan.displayName}</Text>
       <View style={styles.featuresGrid}>
-        {featureRows.map((rowFeatures, rowIndex) => (
+        {rowGroups.map((rowFeatures, rowIndex) => (
           <View key={`row-${rowIndex}`} style={styles.featureRowPair}>
             {rowFeatures.map((feature, featureIndex) => (
-              <View key={`${rowIndex}-${featureIndex}-${feature}`} style={styles.featureCell}>
-                <Ionicons name="checkmark-circle" size={11} color="#4CAF50" style={styles.featureIcon} />
-                <Text style={styles.featureText} numberOfLines={2}>
-                  {feature}
+              <View key={`${rowIndex}-${featureIndex}-${feature.text}`} style={styles.featureCell}>
+                <Ionicons
+                  name={feature.available ? 'checkmark-circle' : 'remove-circle-outline'}
+                  size={11}
+                  color={feature.available ? '#4CAF50' : '#BDBDBD'}
+                  style={styles.featureIcon}
+                />
+                <Text
+                  style={[styles.featureText, !feature.available && styles.featureTextExcluded]}
+                  numberOfLines={2}
+                >
+                  {feature.text}
                 </Text>
               </View>
             ))}
@@ -168,13 +179,16 @@ export function WelcomePlanFeaturesBlock({
 const styles = StyleSheet.create({
   grid: {
     gap: 6,
-    marginTop: 2,
-    marginBottom: 6,
+    marginTop: 0,
+    marginBottom: 4,
   },
   gridRow: {
     flexDirection: 'row',
     gap: 6,
     alignItems: 'stretch',
+  },
+  tileSpacer: {
+    flex: 1,
   },
   loadingWrap: {
     alignItems: 'center',
@@ -201,7 +215,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     paddingHorizontal: 6,
     alignItems: 'center',
-    minHeight: 52,
+    minHeight: 50,
     justifyContent: 'center',
     position: 'relative',
     overflow: 'hidden',
@@ -235,7 +249,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
     color: '#555',
-    marginBottom: 4,
+    marginBottom: 3,
     textAlign: 'center',
   },
   tileNameWithBadge: {
@@ -245,7 +259,7 @@ const styles = StyleSheet.create({
     color: '#2e7d32',
   },
   tilePrice: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '700',
     color: '#333',
     textAlign: 'center',
@@ -254,15 +268,16 @@ const styles = StyleSheet.create({
     color: '#2e7d32',
   },
   tileDiscount: {
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '600',
     color: '#888',
   },
   featuresBlock: {
     backgroundColor: '#fafafa',
     borderRadius: 10,
-    padding: 8,
-    marginBottom: 4,
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+    marginBottom: 2,
     borderWidth: 1,
     borderColor: '#eee',
   },
@@ -276,10 +291,10 @@ const styles = StyleSheet.create({
     fontSize: 10,
     color: '#4CAF50',
     fontWeight: '600',
-    marginBottom: 4,
+    marginBottom: 3,
   },
   featuresGrid: {
-    gap: 2,
+    gap: 1,
   },
   featureRowPair: {
     flexDirection: 'row',
@@ -306,5 +321,9 @@ const styles = StyleSheet.create({
     fontSize: 10,
     color: '#555',
     lineHeight: 13,
+  },
+  featureTextExcluded: {
+    color: '#B0B0B0',
+    opacity: 0.85,
   },
 });

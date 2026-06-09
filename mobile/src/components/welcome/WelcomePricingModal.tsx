@@ -19,7 +19,6 @@ import {
 import { WelcomePeriodSelector } from './WelcomePeriodSelector';
 import { WelcomePricingGrid, WelcomePlanFeaturesBlock } from './WelcomePricingGrid';
 import {
-  formatWelcomePeriodLabel,
   getWelcomePlanSavings,
   getWelcomePlanTotalPrice,
   formatWelcomePlanPricePerMonth,
@@ -77,7 +76,6 @@ export function WelcomePricingModal({
             {pricingFallbackUsed ? (
               <Text style={styles.fallbackNotice}>{WELCOME_PRICING_FALLBACK_NOTICE}</Text>
             ) : null}
-            <Text style={styles.periodHint}>{formatWelcomePeriodLabel(selectedPeriodMonths)}</Text>
             <WelcomePeriodSelector
               value={selectedPeriodMonths}
               onChange={onPeriodChange}
@@ -109,7 +107,11 @@ export function WelcomePricingModal({
               </View>
             ) : null}
             {!pricingLoading ? (
-              <WelcomePlanFeaturesBlock plans={pricingPlans} planId={selectedPlanId} />
+              <WelcomePlanFeaturesBlock
+                plans={pricingPlans}
+                planId={selectedPlanId}
+                fallbackMode={pricingFallbackUsed}
+              />
             ) : null}
             <Text style={styles.footnote}>{WELCOME_PRICING_FOOTNOTE}</Text>
             <PrimaryButton title="Подключить тариф" onPress={handleSelectPlan} style={styles.cta} />
@@ -154,11 +156,6 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
     marginBottom: 8,
     lineHeight: 18,
-  },
-  periodHint: {
-    fontSize: 13,
-    color: '#666',
-    marginBottom: 4,
   },
   summary: {
     marginBottom: 8,

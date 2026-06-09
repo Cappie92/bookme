@@ -2,6 +2,11 @@
  * Fallback-only тарифы для welcome (offline / ошибка API).
  * Source of truth: GET /api/subscription-plans/pricing-catalog?subscription_type=master
  */
+export type WelcomePlanFeatureRow = {
+  text: string;
+  available: boolean;
+};
+
 export type WelcomePricingPlan = {
   id: string;
   name: string;
@@ -11,6 +16,8 @@ export type WelcomePricingPlan = {
   price6Months: number;
   price12Months: number;
   featuresIncluded: string[];
+  /** Полное сравнение функций из API (online). */
+  featureRows?: WelcomePlanFeatureRow[];
   popular?: boolean;
   apiPlanId?: number;
 };

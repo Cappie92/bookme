@@ -4,22 +4,24 @@ import type {
   PricingCatalogServiceFunction,
 } from '@src/services/api/subscriptions';
 import type { WelcomePricingPlan } from '@src/data/welcomePricingData';
-import { getWelcomeFeaturesIncluded } from '@src/utils/planFeaturesFromCatalog';
+import { getPlanFeatureComparison } from '@src/utils/planFeaturesFromCatalog';
 
 function planIdFromApi(plan: PricingCatalogPlan): string {
   return plan.name.toLowerCase();
 }
 
-/**
- * «Что входит» из live API: plan.features.service_functions + plan.limits,
- * подписи — service_functions[].display_name из pricing-catalog.
- * Локальные строки только для лимита записей (как shared/subscriptionPlanFeatures.js).
- */
-function buildFeaturesIncluded(
+function buildPlanFeatures(
   plan: PricingCatalogPlan,
   serviceFunctions: PricingCatalogServiceFunction[]
-): string[] {
-  return getWelcomeFeaturesIncluded(plan, serviceFunctions);
+) {
+  const featureRows = getPlanFeatureComparison(plan, serviceFunctions).map(({ text, available }) => ({
+    text,
+    available,
+  }));
+  return {
+    featureRows,
+    featuresIncluded: featureRows.filter((row) => row.available).map((row) => row.text),
+  };
 }
 
 function resolvePopularPlanName(plans: PricingCatalogPlan[]): string | null {
@@ -35,6 +37,7 @@ export function mapPricingCatalogPlanToWelcomePlan(
   serviceFunctions: PricingCatalogServiceFunction[],
   popularPlanName: string | null
 ): WelcomePricingPlan {
+  const { featureRows, featuresIncluded } = buildPlanFeatures(plan, serviceFunctions);
   return {
     id: planIdFromApi(plan),
     name: plan.name,
@@ -43,7 +46,8 @@ export function mapPricingCatalogPlanToWelcomePlan(
     price3Months: Number(plan.price_3months) || 0,
     price6Months: Number(plan.price_6months) || 0,
     price12Months: Number(plan.price_12months) || 0,
-    featuresIncluded: buildFeaturesIncluded(plan, serviceFunctions),
+    featuresIncluded,
+    featureRows,
     popular: popularPlanName != null && plan.name === popularPlanName,
     apiPlanId: plan.id,
   };

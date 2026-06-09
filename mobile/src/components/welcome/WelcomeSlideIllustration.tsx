@@ -226,12 +226,12 @@ function ScheduleIllustration({ frameStyle }: FrameProps) {
 }
 
 function AnalyticsIllustration({ frameStyle }: FrameProps) {
-  const bars = [32, 42, 38, 46, 44, 54];
-  const loadBars = [26, 36, 30, 40, 36, 48, 34];
+  const bars = [44, 58, 50, 62, 56, 72];
+  const loadBars = [38, 48, 42, 52, 46, 58, 44];
   const days = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
 
   return (
-    <View style={frameStyle}>
+    <View style={[frameStyle, styles.analyticsBody]}>
       <View style={styles.kpiRow3}>
         <View style={styles.miniStat}>
           <Text style={styles.miniStatValue}>92 400 ₽</Text>
@@ -246,25 +246,27 @@ function AnalyticsIllustration({ frameStyle }: FrameProps) {
           <Text style={styles.miniStatLabel}>загрузка</Text>
         </View>
       </View>
-      <View style={styles.sectionCard}>
+      <View style={[styles.sectionCard, styles.analyticsChartCard]}>
         <View style={styles.chartHeader}>
-          <Text style={styles.mockTitle}>Выручка за 6 недель</Text>
-          <View style={[styles.chip, styles.chipSuccess]}>
+          <Text style={[styles.mockTitle, styles.chartTitleFlex]} numberOfLines={1}>
+            Выручка за 6 недель
+          </Text>
+          <View style={[styles.chip, styles.chipSuccess, styles.chartTrendChip]}>
             <Text style={styles.chipSuccessText}>+14%</Text>
           </View>
         </View>
-        <View style={styles.barsLg}>
+        <View style={styles.barsArea}>
           {bars.map((h, i) => (
-            <View key={i} style={[styles.barLg, { height: h }, i === 5 && styles.barActive]} />
+            <View key={i} style={[styles.barFlex, { height: h }, i === 5 && styles.barActive]} />
           ))}
         </View>
       </View>
-      <View style={[styles.sectionCard, styles.sectionCardTint]}>
+      <View style={[styles.sectionCard, styles.sectionCardTint, styles.analyticsLoadCard]}>
         <Text style={styles.mockTitle}>Загрузка по дням</Text>
-        <View style={styles.lineBars}>
+        <View style={styles.barsAreaLoad}>
           {loadBars.map((h, i) => (
             <View key={i} style={styles.lineBarCol}>
-              <View style={[styles.lineBar, { height: h * 0.5 }, i === 5 && styles.barActive]} />
+              <View style={[styles.barFlex, { height: h }, i === 5 && styles.barActive]} />
               <Text style={styles.dayLabelTiny}>{days[i]}</Text>
             </View>
           ))}
@@ -457,8 +459,8 @@ function ClientMastersIllustration({ frameStyle }: FrameProps) {
 
 function ClientLoyaltyIllustration({ frameStyle }: FrameProps) {
   const programs = [
-    { master: 'Анна', detail: '120 баллов · списать 100', tone: 'green' as const },
-    { master: 'Олег', detail: 'скидка 5% · до 30 июня', tone: 'slate' as const },
+    { master: 'Анна', detail: '120 баллов · скидка −10%', tone: 'green' as const },
+    { master: 'Олег', detail: 'скидка −10% · до 30 июня', tone: 'slate' as const },
     { master: 'Мария', detail: '+10 баллов за визит', tone: 'sand' as const },
   ];
 
@@ -482,7 +484,7 @@ function ClientLoyaltyIllustration({ frameStyle }: FrameProps) {
       ))}
       <View style={[styles.sectionCard, styles.sectionCardTint]}>
         <Text style={styles.mockMuted}>При следующей записи</Text>
-        <Text style={styles.mockTitle}>−100 ₽ или скидка 5%</Text>
+        <Text style={[styles.mockTitle, styles.textGreen]}>Скидка −10%</Text>
         <View style={[styles.chip, styles.chipSuccess, { marginTop: 6, alignSelf: 'flex-start' }]}>
           <Text style={styles.chipSuccessText}>Применить при записи</Text>
         </View>
@@ -499,16 +501,6 @@ function ClientRescheduleIllustration({ frameStyle }: FrameProps) {
         <Text style={styles.mockBody}>Ср, 14 июня · 15:00</Text>
         <View style={[styles.chip, styles.chipSuccess, styles.chipInline, { marginTop: 6 }]}>
           <Text style={styles.chipSuccessText}>Подтверждено</Text>
-        </View>
-        <View style={styles.stepRow}>
-          <View style={styles.stepCircle}>
-            <Text style={styles.stepNum}>1</Text>
-          </View>
-          <View style={styles.stepLine} />
-          <View style={styles.stepCircle}>
-            <Text style={styles.stepNum}>2</Text>
-          </View>
-          <Text style={styles.mockMuted}>2 касания</Text>
         </View>
         <View style={styles.actionRow}>
           <View style={styles.actionBtn}>
@@ -818,12 +810,33 @@ const styles = StyleSheet.create({
   kpiLabel: { fontSize: 9, color: '#888' },
   kpiValueLg: { fontSize: 14, fontWeight: '700', color: '#333', marginTop: 2 },
 
-  chartHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  chartHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6, gap: 6 },
+  chartTitleFlex: { flex: 1, flexShrink: 1 },
+  chartTrendChip: { flexShrink: 0 },
+  analyticsBody: { flex: 1, justifyContent: 'space-between', gap: 4 },
+  analyticsChartCard: { flex: 1, marginBottom: 4, paddingVertical: 6 },
+  analyticsLoadCard: { flex: 1.1, marginBottom: 0, paddingVertical: 6 },
+  barsArea: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 4,
+    minHeight: 46,
+  },
+  barsAreaLoad: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 2,
+    minHeight: 50,
+    marginTop: 4,
+  },
+  barFlex: { flex: 1, backgroundColor: '#C8E6C9', borderRadius: 3, minHeight: 6 },
   barsLg: { flexDirection: 'row', alignItems: 'flex-end', height: 38, gap: 4, marginTop: 4 },
   barLg: { flex: 1, backgroundColor: '#C8E6C9', borderRadius: 3, minHeight: 5 },
   barActive: { backgroundColor: GREEN },
   lineBars: { flexDirection: 'row', alignItems: 'flex-end', height: 32, gap: 2, marginTop: 4 },
-  lineBarCol: { flex: 1, alignItems: 'center' },
+  lineBarCol: { flex: 1, alignItems: 'center', justifyContent: 'flex-end' },
   lineBar: { width: '100%', backgroundColor: '#C8E6C9', borderRadius: 2, minHeight: 4 },
 
   benefitRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 6 },
@@ -911,18 +924,7 @@ const styles = StyleSheet.create({
     borderColor: '#EEECEA',
     marginBottom: 6,
   },
-  stepRow: { flexDirection: 'row', alignItems: 'center', marginVertical: 10, gap: 4 },
-  stepCircle: {
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    backgroundColor: GREEN,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  stepNum: { fontSize: 9, fontWeight: '700', color: '#fff' },
-  stepLine: { width: 24, height: 2, backgroundColor: '#D0CEC9' },
-  actionRow: { flexDirection: 'row', gap: 6 },
+  actionRow: { flexDirection: 'row', gap: 6, marginTop: 10 },
   actionBtn: {
     flex: 1,
     backgroundColor: GREEN,

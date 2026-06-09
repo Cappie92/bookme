@@ -7,7 +7,7 @@ import { WELCOME_PRICING_FALLBACK_NOTICE } from '@src/data/welcomePricingData';
 import { WelcomeSlideIllustration } from './WelcomeSlideIllustration';
 import { WelcomePeriodSelector } from './WelcomePeriodSelector';
 import { WelcomePricingGrid, WelcomePlanFeaturesBlock } from './WelcomePricingGrid';
-import { formatWelcomePeriodLabel, type WelcomePeriodMonths } from '@src/utils/welcomePricing';
+import type { WelcomePeriodMonths } from '@src/utils/welcomePricing';
 
 type WelcomeFeatureCardProps = {
   slide: WelcomeSlide;
@@ -55,7 +55,6 @@ export function WelcomeFeatureCard({
           {pricingFallbackUsed ? (
             <Text style={styles.fallbackNotice}>{WELCOME_PRICING_FALLBACK_NOTICE}</Text>
           ) : null}
-          <Text style={styles.periodLabel}>Период: {formatWelcomePeriodLabel(selectedPeriodMonths)}</Text>
           <WelcomePeriodSelector
             value={selectedPeriodMonths}
             onChange={onPeriodChange}
@@ -71,7 +70,11 @@ export function WelcomeFeatureCard({
             testIDPrefix="welcome-slide-plan"
           />
           {!pricingLoading ? (
-            <WelcomePlanFeaturesBlock plans={pricingPlans} planId={selectedPlanId} />
+            <WelcomePlanFeaturesBlock
+              plans={pricingPlans}
+              planId={selectedPlanId}
+              fallbackMode={pricingFallbackUsed}
+            />
           ) : null}
           {slide.ctaLabel && onPricingPress ? (
             <TouchableOpacity style={styles.cta} onPress={onPricingPress} accessibilityRole="button">
@@ -115,7 +118,7 @@ const styles = StyleSheet.create({
     minHeight: 480,
   },
   scrollContent: {
-    paddingBottom: 8,
+    paddingBottom: 4,
   },
   featureBody: {
     flex: 1,
@@ -170,20 +173,15 @@ const styles = StyleSheet.create({
     minHeight: 248,
     marginTop: 2,
   },
-  periodLabel: {
-    fontSize: 11,
-    color: '#888',
-    marginTop: 2,
-    marginBottom: 2,
-  },
   cta: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#4CAF50',
     borderRadius: 8,
-    paddingVertical: 12,
+    paddingVertical: 10,
     gap: 4,
+    marginTop: 4,
   },
   ctaText: {
     color: '#fff',
