@@ -12,12 +12,15 @@ function planIdFromApi(plan: PricingCatalogPlan): string {
 
 function buildPlanFeatures(
   plan: PricingCatalogPlan,
-  serviceFunctions: PricingCatalogServiceFunction[]
+  serviceFunctions: PricingCatalogServiceFunction[],
+  allPlans: PricingCatalogPlan[]
 ) {
-  const featureRows = getPlanFeatureComparison(plan, serviceFunctions).map(({ text, available }) => ({
-    text,
-    available,
-  }));
+  const featureRows = getPlanFeatureComparison(plan, serviceFunctions, allPlans).map(
+    ({ text, available }) => ({
+      text,
+      available,
+    })
+  );
   return {
     featureRows,
     featuresIncluded: featureRows.filter((row) => row.available).map((row) => row.text),
@@ -35,9 +38,10 @@ function resolvePopularPlanName(plans: PricingCatalogPlan[]): string | null {
 export function mapPricingCatalogPlanToWelcomePlan(
   plan: PricingCatalogPlan,
   serviceFunctions: PricingCatalogServiceFunction[],
-  popularPlanName: string | null
+  popularPlanName: string | null,
+  allPlans: PricingCatalogPlan[]
 ): WelcomePricingPlan {
-  const { featureRows, featuresIncluded } = buildPlanFeatures(plan, serviceFunctions);
+  const { featureRows, featuresIncluded } = buildPlanFeatures(plan, serviceFunctions, allPlans);
   return {
     id: planIdFromApi(plan),
     name: plan.name,
@@ -62,7 +66,7 @@ export function mapPricingCatalogToWelcomePlans(
 
   return [...apiPlans]
     .sort((a, b) => (a.display_order ?? 0) - (b.display_order ?? 0) || a.id - b.id)
-    .map((plan) => mapPricingCatalogPlanToWelcomePlan(plan, serviceFunctions, popularPlanName));
+    .map((plan) => mapPricingCatalogPlanToWelcomePlan(plan, serviceFunctions, popularPlanName, apiPlans));
 }
 
 export function resolveDefaultWelcomePlanId(plans: WelcomePricingPlan[]): string {

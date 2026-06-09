@@ -102,9 +102,19 @@ describe('welcomePricingMapper', () => {
     const premium = plans.find((p) => p.id === 'premium')!;
 
     expect(free.featuresIncluded).toEqual(['30 активных записей']);
-    expect(basic.featuresIncluded).toContain('Без ограничений на запись');
+    expect(basic.featuresIncluded).toContain('Запись без ограничений');
     expect(basic.featuresIncluded).toContain('Персональный домен');
     expect(basic.featuresIncluded).toContain('Клиенты');
+    expect(basic.featureRows?.find((r) => r.text === 'Лояльность')?.available).toBe(false);
+
+    const basicLabels = basic.featureRows?.map((r) => r.text) ?? [];
+    const proLabels = plans.find((p) => p.id === 'pro')?.featureRows?.map((r) => r.text) ?? [];
+    expect(basicLabels.indexOf('Персональный домен')).toBeLessThan(
+      basicLabels.indexOf('Статистика')
+    );
+    expect(proLabels.indexOf('Стоп-листы и предоплата')).toBeLessThan(
+      proLabels.indexOf('Лояльность')
+    );
     expect(premium.featuresIncluded).toContain('Лояльность');
     expect(premium.featuresIncluded).toContain('Финансы');
   });
