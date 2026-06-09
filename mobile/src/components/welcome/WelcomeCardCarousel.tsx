@@ -9,6 +9,7 @@ import {
   ListRenderItem,
 } from 'react-native';
 import type { WelcomeSlide } from '@src/data/welcomeSlidesData';
+import type { WelcomePricingPlan } from '@src/data/welcomePricingData';
 import type { WelcomePeriodMonths } from '@src/utils/welcomePricing';
 import { WelcomeFeatureCard } from './WelcomeFeatureCard';
 import { WelcomeRegistrationPreviewCard } from './WelcomeRegistrationPreviewCard';
@@ -17,16 +18,26 @@ const SCREEN_WIDTH = Dimensions.get('window').width;
 
 type WelcomeCardCarouselProps = {
   slides: WelcomeSlide[];
+  pricingPlans: WelcomePricingPlan[];
+  pricingLoading?: boolean;
+  pricingFallbackUsed?: boolean;
   selectedPeriodMonths: WelcomePeriodMonths;
   onPeriodChange: (months: WelcomePeriodMonths) => void;
+  selectedPlanId: string;
+  onSelectPlan: (planId: string) => void;
   onPricingPress: () => void;
   resetKey?: string;
 };
 
 export function WelcomeCardCarousel({
   slides,
+  pricingPlans,
+  pricingLoading = false,
+  pricingFallbackUsed = false,
   selectedPeriodMonths,
   onPeriodChange,
+  selectedPlanId,
+  onSelectPlan,
   onPricingPress,
   resetKey,
 }: WelcomeCardCarouselProps) {
@@ -56,14 +67,28 @@ export function WelcomeCardCarousel({
         ) : (
           <WelcomeFeatureCard
             slide={item}
+            pricingPlans={pricingPlans}
+            pricingLoading={pricingLoading}
+            pricingFallbackUsed={pricingFallbackUsed}
             selectedPeriodMonths={selectedPeriodMonths}
             onPeriodChange={onPeriodChange}
+            selectedPlanId={selectedPlanId}
+            onSelectPlan={onSelectPlan}
             onPricingPress={onPricingPress}
           />
         )}
       </View>
     ),
-    [selectedPeriodMonths, onPeriodChange, onPricingPress]
+    [
+      pricingPlans,
+      pricingLoading,
+      pricingFallbackUsed,
+      selectedPeriodMonths,
+      onPeriodChange,
+      selectedPlanId,
+      onSelectPlan,
+      onPricingPress,
+    ]
   );
 
   return (
@@ -79,7 +104,7 @@ export function WelcomeCardCarousel({
         onScroll={onScroll}
         scrollEventThrottle={16}
         decelerationRate="fast"
-        extraData={selectedPeriodMonths}
+        extraData={`${selectedPeriodMonths}-${selectedPlanId}-${pricingPlans.length}-${pricingLoading}`}
         getItemLayout={(_, index) => ({
           length: SCREEN_WIDTH,
           offset: SCREEN_WIDTH * index,

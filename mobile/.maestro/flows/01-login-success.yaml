@@ -9,9 +9,16 @@ appId: host.exp.Exponent
 - waitForAnimationToEnd
 - waitForAnimationToEnd
 
-# Стартовый экран welcome: переход к форме входа
+# Стартовый экран welcome: вход через nav → auth sheet
+- tapOn:
+    id: "welcome-nav-auth"
+    optional: true
+- waitForAnimationToEnd
 - tapOn:
     id: "welcome-login-button"
+    optional: true
+- tapOn:
+    id: "welcome-auth-login"
     optional: true
 - tapOn:
     text: "Войти"

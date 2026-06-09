@@ -5,7 +5,21 @@ export type WelcomePeriodMonths = 1 | 3 | 6 | 12;
 
 export const WELCOME_PERIOD_OPTIONS: WelcomePeriodMonths[] = [1, 3, 6, 12];
 
-/** Помесячная ставка в выбранном пакете (семантика backend: price_Nmonths = ₽/мес в пакете N мес). */
+export function findWelcomePricingPlan(
+  plans: WelcomePricingPlan[],
+  planId: string
+): WelcomePricingPlan | undefined {
+  return plans.find((p) => p.id === planId);
+}
+
+export function getWelcomePlanFeatures(
+  planId: string,
+  plans: WelcomePricingPlan[]
+): string[] {
+  return findWelcomePricingPlan(plans, planId)?.featuresIncluded ?? [];
+}
+
+/** Помесячная ставка в выбранном пакете (семантика backend / web Pricing). */
 export function getWelcomePlanMonthlyRate(
   plan: WelcomePricingPlan,
   months: WelcomePeriodMonths
@@ -43,8 +57,38 @@ export function formatWelcomePlanPrice(
   months: WelcomePeriodMonths
 ): string {
   const rate = getWelcomePlanMonthlyRate(plan, months);
+  if (rate === 0) return '0 ₽';
+  return `${formatMoney(Math.ceil(rate))}`;
+}
+
+export function formatWelcomePlanPricePerMonth(
+  plan: WelcomePricingPlan,
+  months: WelcomePeriodMonths
+): string {
+  const rate = getWelcomePlanMonthlyRate(plan, months);
   if (rate === 0) return 'Бесплатно';
   return `${formatMoney(Math.ceil(rate))}/мес`;
+}
+
+/** Скидка в скобках для 3/6/12 мес, например `(-8%)`. Для 1 мес — null. */
+export function formatWelcomePlanDiscountSuffix(
+  plan: WelcomePricingPlan,
+  months: WelcomePeriodMonths
+): string | null {
+  if (months <= 1) return null;
+  const savings = getWelcomePlanSavings(plan, months);
+  if (!savings) return null;
+  return `(-${savings.savingsPercent}%)`;
+}
+
+/** Цена за месяц + скидка в одной строке: `700 ₽/мес (-8%)`. */
+export function formatWelcomePlanPricePerMonthLabel(
+  plan: WelcomePricingPlan,
+  months: WelcomePeriodMonths
+): string {
+  const price = formatWelcomePlanPricePerMonth(plan, months);
+  const discount = formatWelcomePlanDiscountSuffix(plan, months);
+  return discount ? `${price} ${discount}` : price;
 }
 
 export function formatWelcomePeriodLabel(months: WelcomePeriodMonths): string {

@@ -1,5 +1,4 @@
-import { ScrollView, View, Text, StyleSheet } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { View, Text, StyleSheet } from 'react-native';
 import { router } from 'expo-router';
 import { Card } from '@src/components/Card';
 import { PrimaryButton } from '@src/components/PrimaryButton';
@@ -17,7 +16,7 @@ export function WelcomeRegistrationPreviewCard({ slide }: WelcomeRegistrationPre
 
   return (
     <Card style={styles.card} padding={16}>
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+      <View style={styles.body}>
         <View style={styles.header}>
           {slide.badge ? (
             <View style={styles.badge}>
@@ -25,22 +24,26 @@ export function WelcomeRegistrationPreviewCard({ slide }: WelcomeRegistrationPre
             </View>
           ) : null}
           <View style={styles.previewPill}>
-            <Text style={styles.previewPillText}>Превью</Text>
+            <Text style={styles.previewPillText}>Превью кабинета</Text>
           </View>
         </View>
         <Text style={styles.title}>{slide.title}</Text>
-        <Text style={styles.previewHint}>
-          Это превью. Нажмите кнопку ниже, чтобы перейти к регистрации.
+        <Text style={styles.description} numberOfLines={2}>
+          {slide.description}
         </Text>
-        <WelcomeSlideIllustration type={slide.illustration} />
-        <Text style={styles.description}>{slide.description}</Text>
+        <Text style={styles.previewHint}>
+          Нажмите кнопку ниже, чтобы перейти к регистрации.
+        </Text>
+        <View style={styles.illustrationWrap}>
+          <WelcomeSlideIllustration type={slide.illustration} large />
+        </View>
         <PrimaryButton
           title={ctaLabel}
           testID={isMaster ? 'welcome-register-master-button' : 'welcome-register-client-button'}
           onPress={() => router.push(route as any)}
           style={styles.cta}
         />
-      </ScrollView>
+      </View>
     </Card>
   );
 }
@@ -48,16 +51,16 @@ export function WelcomeRegistrationPreviewCard({ slide }: WelcomeRegistrationPre
 const styles = StyleSheet.create({
   card: {
     flex: 1,
-    minHeight: 420,
+    minHeight: 480,
   },
-  scrollContent: {
-    paddingBottom: 8,
+  body: {
+    flex: 1,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 10,
+    marginBottom: 8,
   },
   badge: {
     backgroundColor: '#e8f5e9',
@@ -80,28 +83,31 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '600',
     color: '#777',
-    textTransform: 'uppercase',
   },
   title: {
     fontSize: 18,
     fontWeight: '700',
     color: '#333',
     lineHeight: 24,
-    marginBottom: 6,
-  },
-  previewHint: {
-    fontSize: 12,
-    color: '#888',
-    lineHeight: 18,
     marginBottom: 4,
-    fontStyle: 'italic',
   },
   description: {
     fontSize: 14,
     color: '#666',
     lineHeight: 20,
-    marginTop: 8,
-    marginBottom: 16,
+  },
+  previewHint: {
+    fontSize: 12,
+    color: '#888',
+    lineHeight: 18,
+    marginTop: 4,
+    marginBottom: 8,
+    fontStyle: 'italic',
+  },
+  illustrationWrap: {
+    flex: 1,
+    minHeight: 248,
+    marginBottom: 10,
   },
   cta: {
     width: '100%',

@@ -2,34 +2,89 @@ import { ScrollView, View, Text, StyleSheet, TouchableOpacity } from 'react-nati
 import { Ionicons } from '@expo/vector-icons';
 import { Card } from '@src/components/Card';
 import type { WelcomeSlide } from '@src/data/welcomeSlidesData';
-import { WELCOME_PRICING_PLANS } from '@src/data/welcomePricingData';
+import type { WelcomePricingPlan } from '@src/data/welcomePricingData';
+import { WELCOME_PRICING_FALLBACK_NOTICE } from '@src/data/welcomePricingData';
 import { WelcomeSlideIllustration } from './WelcomeSlideIllustration';
 import { WelcomePeriodSelector } from './WelcomePeriodSelector';
-import {
-  formatWelcomePlanPrice,
-  formatWelcomePeriodLabel,
-  getWelcomePlanSavings,
-  type WelcomePeriodMonths,
-} from '@src/utils/welcomePricing';
+import { WelcomePricingGrid, WelcomePlanFeaturesBlock } from './WelcomePricingGrid';
+import { formatWelcomePeriodLabel, type WelcomePeriodMonths } from '@src/utils/welcomePricing';
 
 type WelcomeFeatureCardProps = {
   slide: WelcomeSlide;
+  pricingPlans: WelcomePricingPlan[];
+  pricingLoading?: boolean;
+  pricingFallbackUsed?: boolean;
   selectedPeriodMonths: WelcomePeriodMonths;
   onPeriodChange: (months: WelcomePeriodMonths) => void;
+  selectedPlanId: string;
+  onSelectPlan: (planId: string) => void;
   onPricingPress?: () => void;
 };
 
 export function WelcomeFeatureCard({
   slide,
+  pricingPlans,
+  pricingLoading = false,
+  pricingFallbackUsed = false,
   selectedPeriodMonths,
   onPeriodChange,
+  selectedPlanId,
+  onSelectPlan,
   onPricingPress,
 }: WelcomeFeatureCardProps) {
   const iconName = slide.icon ?? 'sparkles-outline';
 
+  if (slide.type === 'pricing') {
+    return (
+      <Card style={styles.card} padding={16}>
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+          <View style={styles.header}>
+            {slide.badge ? (
+              <View style={styles.badge}>
+                <Text style={styles.badgeText}>{slide.badge}</Text>
+              </View>
+            ) : null}
+            <View style={styles.iconWrap}>
+              <Ionicons name={iconName} size={22} color="#4CAF50" />
+            </View>
+          </View>
+          <Text style={styles.title}>{slide.title}</Text>
+          <Text style={styles.description}>{slide.description}</Text>
+          {pricingFallbackUsed ? (
+            <Text style={styles.fallbackNotice}>{WELCOME_PRICING_FALLBACK_NOTICE}</Text>
+          ) : null}
+          <Text style={styles.periodLabel}>Период: {formatWelcomePeriodLabel(selectedPeriodMonths)}</Text>
+          <WelcomePeriodSelector
+            value={selectedPeriodMonths}
+            onChange={onPeriodChange}
+            compact
+            testIDPrefix="welcome-slide-period"
+          />
+          <WelcomePricingGrid
+            plans={pricingPlans}
+            selectedPlanId={selectedPlanId}
+            onSelectPlan={onSelectPlan}
+            periodMonths={selectedPeriodMonths}
+            loading={pricingLoading}
+            testIDPrefix="welcome-slide-plan"
+          />
+          {!pricingLoading ? (
+            <WelcomePlanFeaturesBlock plans={pricingPlans} planId={selectedPlanId} />
+          ) : null}
+          {slide.ctaLabel && onPricingPress ? (
+            <TouchableOpacity style={styles.cta} onPress={onPricingPress} accessibilityRole="button">
+              <Text style={styles.ctaText}>{slide.ctaLabel}</Text>
+              <Ionicons name="chevron-forward" size={18} color="#fff" />
+            </TouchableOpacity>
+          ) : null}
+        </ScrollView>
+      </Card>
+    );
+  }
+
   return (
     <Card style={styles.card} padding={16}>
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+      <View style={styles.featureBody}>
         <View style={styles.header}>
           {slide.badge ? (
             <View style={styles.badge}>
@@ -41,48 +96,13 @@ export function WelcomeFeatureCard({
           </View>
         </View>
         <Text style={styles.title}>{slide.title}</Text>
-        <WelcomeSlideIllustration
-          type={slide.illustration}
-          selectedPeriodMonths={selectedPeriodMonths}
-        />
-        <Text style={styles.description}>{slide.description}</Text>
-
-        {slide.type === 'pricing' ? (
-          <>
-            <Text style={styles.periodLabel}>Период: {formatWelcomePeriodLabel(selectedPeriodMonths)}</Text>
-            <WelcomePeriodSelector
-              value={selectedPeriodMonths}
-              onChange={onPeriodChange}
-              compact
-              testIDPrefix="welcome-slide-period"
-            />
-            <View style={styles.pricingPreview}>
-              {WELCOME_PRICING_PLANS.map((plan) => {
-                const savings = getWelcomePlanSavings(plan, selectedPeriodMonths);
-                return (
-                  <View key={plan.id} style={[styles.pricingRow, plan.popular && styles.pricingRowPopular]}>
-                    <Text style={styles.pricingName}>{plan.displayName}</Text>
-                    <View style={styles.pricingRight}>
-                      <Text style={styles.pricingPrice}>
-                        {formatWelcomePlanPrice(plan, selectedPeriodMonths)}
-                      </Text>
-                      {savings ? (
-                        <Text style={styles.pricingSaving}>−{savings.savingsPercent}%</Text>
-                      ) : null}
-                    </View>
-                  </View>
-                );
-              })}
-            </View>
-            {slide.ctaLabel && onPricingPress ? (
-              <TouchableOpacity style={styles.cta} onPress={onPricingPress} accessibilityRole="button">
-                <Text style={styles.ctaText}>{slide.ctaLabel}</Text>
-                <Ionicons name="chevron-forward" size={18} color="#fff" />
-              </TouchableOpacity>
-            ) : null}
-          </>
-        ) : null}
-      </ScrollView>
+        <Text style={styles.description} numberOfLines={3}>
+          {slide.description}
+        </Text>
+        <View style={styles.illustrationWrap}>
+          <WelcomeSlideIllustration type={slide.illustration} large />
+        </View>
+      </View>
     </Card>
   );
 }
@@ -90,16 +110,19 @@ export function WelcomeFeatureCard({
 const styles = StyleSheet.create({
   card: {
     flex: 1,
-    minHeight: 420,
+    minHeight: 480,
   },
   scrollContent: {
     paddingBottom: 8,
+  },
+  featureBody: {
+    flex: 1,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 10,
+    marginBottom: 8,
   },
   badge: {
     backgroundColor: '#e8f5e9',
@@ -131,51 +154,24 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#666',
     lineHeight: 20,
-    marginTop: 8,
+    marginBottom: 8,
+  },
+  fallbackNotice: {
+    fontSize: 12,
+    color: '#888',
+    fontStyle: 'italic',
+    marginBottom: 8,
+    lineHeight: 18,
+  },
+  illustrationWrap: {
+    flex: 1,
+    minHeight: 248,
+    marginTop: 2,
   },
   periodLabel: {
     fontSize: 12,
     color: '#888',
-    marginTop: 8,
-  },
-  pricingPreview: {
     marginTop: 4,
-    marginBottom: 12,
-    gap: 6,
-  },
-  pricingRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 10,
-    backgroundColor: '#fafafa',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#f0f0f0',
-  },
-  pricingRowPopular: {
-    borderColor: '#4CAF50',
-    backgroundColor: '#f1f8f1',
-  },
-  pricingName: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#333',
-    flex: 1,
-  },
-  pricingRight: {
-    alignItems: 'flex-end',
-  },
-  pricingPrice: {
-    fontSize: 13,
-    color: '#4CAF50',
-    fontWeight: '600',
-  },
-  pricingSaving: {
-    fontSize: 10,
-    color: '#888',
-    marginTop: 2,
   },
   cta: {
     flexDirection: 'row',

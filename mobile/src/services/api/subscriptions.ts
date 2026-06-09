@@ -245,3 +245,46 @@ export function getDisplayDaysRemaining(subscription: Subscription): number {
   return getDaysRemaining(subscription.end_date);
 }
 
+// --- Публичный pricing catalog (welcome / landing) ---
+
+export interface PricingCatalogServiceFunction {
+  id: number;
+  name: string;
+  display_name: string;
+  description?: string | null;
+  display_order: number;
+}
+
+export interface PricingCatalogPlan {
+  id: number;
+  name: string;
+  display_name: string;
+  subscription_type: SubscriptionType | string;
+  price_1month: number;
+  price_3months: number;
+  price_6months: number;
+  price_12months: number;
+  features: Record<string, unknown> | null;
+  limits: Record<string, unknown> | null;
+  is_active: boolean;
+  display_order: number;
+}
+
+export interface PricingCatalogResponse {
+  plans: PricingCatalogPlan[];
+  service_functions: PricingCatalogServiceFunction[];
+}
+
+/**
+ * Публичный каталог тарифов (без авторизации).
+ * GET /api/subscription-plans/pricing-catalog?subscription_type=master|salon
+ */
+export async function fetchPricingCatalog(
+  subscriptionType: SubscriptionType
+): Promise<PricingCatalogResponse> {
+  const response = await apiClient.get<PricingCatalogResponse>(
+    `/api/subscription-plans/pricing-catalog?subscription_type=${subscriptionType}`
+  );
+  return response.data;
+}
+

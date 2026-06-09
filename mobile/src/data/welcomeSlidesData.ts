@@ -11,12 +11,11 @@ export type WelcomeIllustrationType =
   | 'analytics'
   | 'loyalty'
   | 'social-post'
-  | 'pricing'
-  | 'registration'
+  | 'master-dashboard'
   | 'client-masters'
   | 'client-loyalty'
   | 'client-reschedule'
-  | 'client-registration';
+  | 'client-dashboard';
 
 export type WelcomeSlide = {
   id: string;
@@ -89,7 +88,7 @@ const MASTER_FEATURE_SLIDES: Omit<WelcomeSlide, 'role'>[] = [
       'От бесплатного старта до профессионального плана — выберите функции под масштаб практики.',
     badge: 'Цены',
     icon: 'pricetag-outline',
-    illustration: 'pricing',
+    illustration: 'public-page',
     type: 'pricing',
     ctaLabel: 'Смотреть все тарифы',
   },
@@ -100,7 +99,7 @@ const MASTER_FEATURE_SLIDES: Omit<WelcomeSlide, 'role'>[] = [
       'Создайте страницу записи, настройте услуги и расписание — клиенты смогут записываться онлайн.',
     badge: 'Регистрация',
     icon: 'cut-outline',
-    illustration: 'registration',
+    illustration: 'master-dashboard',
     type: 'registration',
     ctaLabel: 'Создать аккаунт мастера',
     ctaRoute: '/login?tab=register&role=master',
@@ -145,7 +144,7 @@ const CLIENT_SLIDES: Omit<WelcomeSlide, 'role'>[] = [
       'Зарегистрируйтесь за минуту — выбирайте услугу, дату и время у любимого мастера.',
     badge: 'Регистрация',
     icon: 'person-outline',
-    illustration: 'client-registration',
+    illustration: 'client-dashboard',
     type: 'registration',
     ctaLabel: 'Создать аккаунт клиента',
     ctaRoute: '/login?tab=register&role=client',
