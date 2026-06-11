@@ -1,17 +1,28 @@
 import React from 'react';
-import { TouchableOpacity, View, Text, StyleSheet } from 'react-native';
+import { TouchableOpacity, View, Text, StyleSheet, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 interface QuickActionTileProps {
   label: string;
+  sublabel?: string;
+  /** Полная подпись для VoiceOver / TalkBack */
+  accessibilityLabel?: string;
   icon: keyof typeof Ionicons.glyphMap;
   onPress: () => void;
   unreadCount?: number;
 }
 
-export function QuickActionTile({ label, icon, onPress, unreadCount = 0 }: QuickActionTileProps) {
+export function QuickActionTile({
+  label,
+  sublabel,
+  accessibilityLabel,
+  icon,
+  onPress,
+  unreadCount = 0,
+}: QuickActionTileProps) {
   const showIndicator = unreadCount > 0;
   const showCountBadge = unreadCount > 1;
+  const a11y = accessibilityLabel ?? (sublabel ? `${label}, ${sublabel}` : label);
 
   return (
     <TouchableOpacity
@@ -19,7 +30,7 @@ export function QuickActionTile({ label, icon, onPress, unreadCount = 0 }: Quick
       onPress={onPress}
       activeOpacity={0.88}
       accessibilityRole="button"
-      accessibilityLabel={label}
+      accessibilityLabel={a11y}
     >
       <View style={styles.iconWrap}>
         <Ionicons name={icon} size={20} color="#4CAF50" />
@@ -30,9 +41,26 @@ export function QuickActionTile({ label, icon, onPress, unreadCount = 0 }: Quick
           </View>
         ) : null}
       </View>
-      <Text style={styles.label} numberOfLines={2}>
-        {label}
-      </Text>
+      <View style={styles.textBlock}>
+        <Text
+          style={styles.label}
+          numberOfLines={1}
+          ellipsizeMode="tail"
+          {...(Platform.OS === 'android' ? { includeFontPadding: false } : {})}
+        >
+          {label}
+        </Text>
+        {sublabel ? (
+          <Text
+            style={styles.sublabel}
+            numberOfLines={1}
+            ellipsizeMode="tail"
+            {...(Platform.OS === 'android' ? { includeFontPadding: false } : {})}
+          >
+            {sublabel}
+          </Text>
+        ) : null}
+      </View>
     </TouchableOpacity>
   );
 }
@@ -40,12 +68,13 @@ export function QuickActionTile({ label, icon, onPress, unreadCount = 0 }: Quick
 const styles = StyleSheet.create({
   tile: {
     flex: 1,
+    minWidth: 0,
     minHeight: 88,
     borderRadius: 18,
     backgroundColor: '#F7FBF7',
     borderWidth: 1,
     borderColor: '#E5EEE6',
-    padding: 12,
+    padding: 10,
     justifyContent: 'space-between',
     position: 'relative',
   },
@@ -57,13 +86,26 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     position: 'relative',
+    alignSelf: 'flex-start',
+  },
+  textBlock: {
+    minWidth: 0,
+    flexShrink: 1,
+    width: '100%',
   },
   label: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '700',
     color: '#1F2A1F',
-    lineHeight: 16,
+    lineHeight: 14,
     letterSpacing: -0.2,
+  },
+  sublabel: {
+    marginTop: 2,
+    fontSize: 10,
+    fontWeight: '500',
+    color: '#657065',
+    lineHeight: 12,
   },
   unreadDotOnIcon: {
     position: 'absolute',

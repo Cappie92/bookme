@@ -22,10 +22,24 @@ export function QuickActionsCard({
         <Text style={styles.subtitle}>Частые инструменты</Text>
       </View>
       <View style={styles.row}>
-        <QuickActionTile label="Пост для соцсетей" icon="sparkles-outline" onPress={onSocialPost} />
-        <QuickActionTile label="Скопировать ссылку" icon="link-outline" onPress={onCopyLink} />
+        <QuickActionTile
+          label="Пост"
+          sublabel="для соцсетей"
+          accessibilityLabel="Пост для соцсетей"
+          icon="sparkles-outline"
+          onPress={onSocialPost}
+        />
+        <QuickActionTile
+          label="Ссылка"
+          sublabel="скопировать"
+          accessibilityLabel="Скопировать ссылку"
+          icon="link-outline"
+          onPress={onCopyLink}
+        />
         <QuickActionTile
           label="Уведомления"
+          sublabel="изменения"
+          accessibilityLabel="Уведомления об изменениях"
           icon="notifications-outline"
           onPress={onNotifications}
           unreadCount={unreadCount}
