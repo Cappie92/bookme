@@ -1,0 +1,11 @@
+    # Universal Links (iOS) + App Links (Android). Files: /var/www/dedato-well-known/
+    location = /.well-known/apple-app-site-association {
+        default_type application/json;
+        charset utf-8;
+        alias /var/www/dedato-well-known/apple-app-site-association;
+    }
+    location = /.well-known/assetlinks.json {
+        default_type application/json;
+        charset utf-8;
+        alias /var/www/dedato-well-known/assetlinks.json;
+    }

@@ -14,17 +14,19 @@
 
 ## Подготовка
 
-1. **`apple-app-site-association.template`**  
-   - Замените `APPLE_TEAM_ID` на [Team ID](https://developer.apple.com/account) (10 символов).  
-   - Убедитесь, что `bundle id` = `com.dedato.app` (как в `mobile/app.config.ts`).  
-   - Сохраните как **`apple-app-site-association`** (без расширения) и выложите в `/.well-known/`.
+1. **`apple-app-site-association.template`** → готовый файл **`apple-app-site-association`** (без `.json`).  
+   - **Apple Team ID:** `Z2JTZ596C4` (из `mobile/ios/DeDato.xcodeproj/project.pbxproj`).  
+   - **Bundle ID:** `com.dedato.app`.  
+   - **Paths:** `/m/*`.
 
-2. **`assetlinks.json.template`**  
-   - Подставьте SHA-256 отпечатки подписи **релизного** keystore (и upload key, если отличается — оба перечислите).  
-   - Получить:  
-     `keytool -list -v -keystore <your.keystore> -alias <alias>`  
-     или из Play Console (App integrity).  
-   - `package_name`: `ru.dedato.mobile`.
+2. **`assetlinks.json.template`** → готовый **`assetlinks.json`**.  
+   - **package_name:** `ru.dedato.mobile`.  
+   - **SHA-256 (debug keystore, `mobile/android/app/debug.keystore`):**  
+     `FA:C6:17:45:DC:09:03:78:6F:B9:ED:E6:2A:96:2B:39:9F:73:48:F0:BB:6F:89:9B:83:32:66:75:91:03:3B:9C`  
+     — подходит для **локальных / preview APK**, подписанных debug keystore (см. `android/app/build.gradle`).  
+   - **EAS production / Play App Signing:** добавьте отпечаток из [Play Console → App integrity](https://play.google.com/console) или `eas credentials -p android` в массив `sha256_cert_fingerprints`.
+
+3. **Деплой на сервер:** `./scripts/deploy-well-known.sh` (копирует файлы в `/var/www/dedato-well-known/`, патчит nginx).
 
 3. **Оба хоста** (`dedato.ru` и `www.dedato.ru`), если оба открывают сайт — файлы должны быть **доступны на каждом** (или один домен канонический с 301 на другой **только для страниц**, не для `/.well-known`).
 
