@@ -1,11 +1,23 @@
 /**
  * Маппинг статусов для прошедших записей (pending / past).
  * Используется в дашборде «Прошедшие записи» и в модалке «Все записи».
- * Единая терминология: Подтверждено / Отменено / На подтверждении.
  */
 
+import { needsOutcome } from './bookingOutcome';
+
+interface BookingLike {
+  start_time: string;
+  status: string;
+}
+
+interface MasterLike {
+  auto_confirm_bookings?: boolean;
+  pre_visit_confirmations_enabled?: boolean;
+  pre_visit_confirmations_effective?: boolean;
+}
+
 const PAST_STATUS_LABELS: Record<string, string> = {
-  completed: 'Подтверждено',
+  completed: 'Завершено',
   confirmed: 'Подтверждено',
   created: 'На подтверждении',
   awaiting_confirmation: 'На подтверждении',
@@ -28,9 +40,11 @@ const PAST_STATUS_COLORS: Record<string, string> = {
   payment_expired: '#F44336',
 };
 
+const PENDING_OUTCOME_LABEL = 'На подтверждении';
+const PENDING_OUTCOME_COLOR = '#FF9800';
+
 /**
- * Лейбл для прошедших и pending записей.
- * completed/confirmed → «Подтверждено», cancelled* → «Отменено», created/awaiting_confirmation → «На подтверждении».
+ * Низкоуровневый лейбл по raw status (без учёта post-visit outcome).
  */
 export function getPastStatusLabel(status: string | null | undefined): string {
   const s = String(status ?? '').toLowerCase();
@@ -38,9 +52,44 @@ export function getPastStatusLabel(status: string | null | undefined): string {
 }
 
 /**
- * Цвет для прошедших и pending записей.
+ * Низкоуровневый цвет по raw status (без учёта post-visit outcome).
  */
 export function getPastStatusColor(status: string | null | undefined): string {
   const s = String(status ?? '').toLowerCase();
   return PAST_STATUS_COLORS[s] ?? '#757575';
+}
+
+/**
+ * Лейбл прошедшей записи с учётом post-visit outcome (needsOutcome).
+ * Для будущих записей не подменяет статус на «На подтверждении».
+ */
+export function getPastBookingStatusLabel(
+  booking: BookingLike | null | undefined,
+  master: MasterLike | null,
+  now: Date = new Date()
+): string {
+  if (!booking) return '—';
+  if (needsOutcome(booking, master, now)) {
+    return PENDING_OUTCOME_LABEL;
+  }
+  const s = String(booking.status ?? '').toLowerCase();
+  if (s === 'completed') {
+    return 'Завершено';
+  }
+  return getPastStatusLabel(booking.status);
+}
+
+/**
+ * Цвет бейджа прошедшей записи с учётом post-visit outcome.
+ */
+export function getPastBookingStatusColor(
+  booking: BookingLike | null | undefined,
+  master: MasterLike | null,
+  now: Date = new Date()
+): string {
+  if (!booking) return '#757575';
+  if (needsOutcome(booking, master, now)) {
+    return PENDING_OUTCOME_COLOR;
+  }
+  return getPastStatusColor(booking.status);
 }

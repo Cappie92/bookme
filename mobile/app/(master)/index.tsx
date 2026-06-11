@@ -14,7 +14,7 @@ import { AllBookingsModal } from '@src/components/dashboard/AllBookingsModal';
 import { WeeklyStatsCharts } from '@src/components/dashboard/WeeklyStatsCharts';
 import { getUserBookings, getPastBookings, Booking, getStatusLabel, getStatusColor } from '@src/services/api/bookings';
 import { getFutureBookingsPaged, getPastAppointmentsPaged } from '@src/services/api/master';
-import { getPastStatusLabel, getPastStatusColor } from '@src/utils/bookingStatusDisplay';
+import { getPastBookingStatusLabel, getPastBookingStatusColor } from '@src/utils/bookingStatusDisplay';
 import { fetchCurrentSubscription, Subscription, getStatusLabel as getSubscriptionStatusLabel, getStatusColor as getSubscriptionStatusColor, getDaysRemaining } from '@src/services/api/subscriptions';
 import { getBalance, getBookingsLimit, getMasterSettings, getMasterServices, getWeeklySchedule, confirmBooking, confirmPreVisitBooking, cancelBookingConfirmation, getDashboardStats, Balance, BookingsLimit, MasterSettings, ScheduleWeek, DashboardStats } from '@src/services/api/master';
 import { refreshMasterFeaturesGlobally } from '@src/utils/masterFeaturesRefresh';
@@ -487,8 +487,8 @@ export default function HomeScreen() {
                   <BookingCardCompact
                     key={booking.id}
                     booking={booking}
-                    statusLabel={getPastStatusLabel(booking.status)}
-                    statusColor={getPastStatusColor(booking.status)}
+                    statusLabel={getPastBookingStatusLabel(booking, master)}
+                    statusColor={getPastBookingStatusColor(booking, master)}
                     showConfirm={showPostVisit}
                     onPressConfirm={() => handleConfirmPostVisit(booking.id)}
                     onPressCancel={() => setCancelSheetBookingId(booking.id)}

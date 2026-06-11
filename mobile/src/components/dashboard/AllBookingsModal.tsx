@@ -24,7 +24,7 @@ import {
   confirmPreVisitBooking,
   cancelBookingConfirmation,
 } from '@src/services/api/master';
-import { getPastStatusLabel, getPastStatusColor } from '@src/utils/bookingStatusDisplay';
+import { getPastBookingStatusLabel, getPastBookingStatusColor } from '@src/utils/bookingStatusDisplay';
 import { getStatusLabel, getStatusColor } from '@src/services/api/bookings';
 import {
   getBookingTab,
@@ -381,8 +381,12 @@ export function AllBookingsModal({
       ? '#dc2626'
       : isFuture
         ? getStatusColor(item.status as any)
-        : getPastStatusColor(item.status);
-    const statusLabel = hide ? 'Отменено' : isFuture ? getStatusLabel(item.status as any) : getPastStatusLabel(item.status);
+        : getPastBookingStatusColor(item, master, now);
+    const statusLabel = hide
+      ? 'Отменено'
+      : isFuture
+        ? getStatusLabel(item.status as any)
+        : getPastBookingStatusLabel(item, master, now);
     const showConfirm = !hide && (canPreVisitConfirmBooking(item, master, now, hasExtendedStats) || canConfirmPostVisit(item, master));
     const isBusy = actionBookingId === item.id;
 

@@ -21,7 +21,8 @@ import {
   updateMasterDaySchedule,
 } from '@src/services/api/master';
 import { getStatusLabel, getStatusColor } from '@src/services/api/bookings';
-import { canCancelBooking, canPreVisitConfirmBooking, canConfirmPostVisit, debugConfirmUI } from '@src/utils/bookingOutcome';
+import { canCancelBooking, canPreVisitConfirmBooking, canConfirmPostVisit, debugConfirmUI, isPast } from '@src/utils/bookingOutcome';
+import { getPastBookingStatusLabel, getPastBookingStatusColor } from '@src/utils/bookingStatusDisplay';
 import { CancelReasonSheet } from '@src/components/bookings/CancelReasonSheet';
 import { NoteSheet } from '@src/components/bookings/NoteSheet';
 import { BookingCardCompact } from '@src/components/bookings/BookingCardCompact';
@@ -351,16 +352,26 @@ export function DayDrawer({
                   <>
                     {sortedBookings.map((booking) => {
                       const master = masterSettings?.master ?? null;
+                      const now = new Date();
+                      const bookingIsPast = isPast(booking, now);
                       const showConfirm =
-                        canPreVisitConfirmBooking(booking, master, new Date(), hasExtendedStats) ||
+                        canPreVisitConfirmBooking(booking, master, now, hasExtendedStats) ||
                         canConfirmPostVisit(booking, master);
                       debugConfirmUI(booking, master, 'DayDrawer');
                       return (
                         <BookingCardCompact
                           key={booking.id}
                           booking={booking}
-                          statusLabel={getStatusLabel(booking.status as any)}
-                          statusColor={getStatusColor(booking.status as any)}
+                          statusLabel={
+                            bookingIsPast
+                              ? getPastBookingStatusLabel(booking, master, now)
+                              : getStatusLabel(booking.status as any)
+                          }
+                          statusColor={
+                            bookingIsPast
+                              ? getPastBookingStatusColor(booking, master, now)
+                              : getStatusColor(booking.status as any)
+                          }
                           showConfirm={showConfirm}
                           onPressConfirm={() => handleConfirm(booking.id, booking)}
                           onPressCancel={() => setCancelSheetBookingId(booking.id)}
