@@ -27,6 +27,12 @@ import { stripIndiePrefix } from '@src/utils/stripIndiePrefix';
 import { getPlanTitle } from '@src/utils/planTitle';
 import { logger } from '@src/utils/logger';
 import { Ionicons } from '@expo/vector-icons';
+import { QuickActionsCard } from '@src/components/master/home/QuickActionsCard';
+import { CopyLinkToast } from '@src/components/master/home/CopyLinkToast';
+import { MasterFreeSlotsShareHost } from '@src/components/master/MasterFreeSlotsShareHost';
+import { NotificationsSheet } from '@src/components/master/notifications/NotificationsSheet';
+import { useMasterQuickActions } from '@src/hooks/useMasterQuickActions';
+import { useMasterNotifications } from '@src/hooks/useMasterNotifications';
 
 interface AttentionItem {
   id: string;
@@ -399,6 +405,22 @@ export default function HomeScreen() {
   const BOTTOM_PADDING = 16;
   const scrollViewPaddingBottom = insets.bottom + measuredTabBarHeight + BOTTOM_PADDING;
 
+  const {
+    socialPostVisible,
+    setSocialPostVisible,
+    notificationsVisible,
+    setNotificationsVisible,
+    copyToastMessage,
+    copyPublicLink,
+    openSocialPost,
+  } = useMasterQuickActions(masterSettings);
+
+  const {
+    notifications,
+    unreadCount,
+    markCurrentAsViewed,
+  } = useMasterNotifications(masterSettings?.master?.id);
+
   if (loading) {
     return (
       <SafeAreaView style={styles.safeAreaContainer} edges={['top', 'left', 'right']}>
@@ -433,6 +455,15 @@ export default function HomeScreen() {
           <RefreshControl refreshing={refreshing} onRefresh={() => loadData({ pullRefresh: true })} />
         }
       >
+        {isMaster ? (
+          <QuickActionsCard
+            onSocialPost={openSocialPost}
+            onCopyLink={() => void copyPublicLink()}
+            onNotifications={() => setNotificationsVisible(true)}
+            unreadCount={unreadCount}
+          />
+        ) : null}
+
         {/* Карточка "Будущие записи" */}
         <Card style={styles.card}>
           <Text style={styles.cardTitle}>Будущие записи</Text>
@@ -728,6 +759,23 @@ export default function HomeScreen() {
           }
         }}
       />
+
+      {isMaster ? (
+        <>
+          <MasterFreeSlotsShareHost
+            visible={socialPostVisible}
+            onClose={() => setSocialPostVisible(false)}
+            settings={masterSettings}
+          />
+          <NotificationsSheet
+            visible={notificationsVisible}
+            onClose={() => setNotificationsVisible(false)}
+            notifications={notifications}
+            onMarkViewed={() => void markCurrentAsViewed()}
+          />
+          <CopyLinkToast message={copyToastMessage} bottomOffset={scrollViewPaddingBottom + 8} />
+        </>
+      ) : null}
     </SafeAreaView>
   );
 }
