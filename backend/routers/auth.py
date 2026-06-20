@@ -23,6 +23,7 @@ from schemas import UserCreate, VerifyRequest
 from services.verification_service import VerificationService
 from services.zvonok_service import zvonok_service
 from services.demo_master_seed import ensure_demo_master_exists
+from services.promo_engine import PromoEngineError, create_pending_redemption, normalize_promo_code
 from settings import get_settings
 from sms import verify_sms_code
 from schemas import (
@@ -254,6 +255,19 @@ async def register(user_in: UserCreate, db: Session = Depends(get_db)) -> Any:
     - **password**: Пароль
     - **role**: Роль пользователя (client, master, salon, admin)
     """
+    promo_code = (user_in.promo_code or "").strip()
+    if promo_code and user_in.role != UserRole.MASTER:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Промокод доступен только при регистрации мастера",
+        )
+
+    if promo_code:
+        try:
+            promo_code = normalize_promo_code(promo_code)
+        except PromoEngineError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail={"code": exc.code, "message": exc.message})
+
     if user_in.email:
         user = db.query(User).filter(User.email == user_in.email).first()
         if user:
@@ -264,6 +278,7 @@ async def register(user_in: UserCreate, db: Session = Depends(get_db)) -> Any:
     if phone_user:
         raise HTTPException(status_code=400, detail="Phone number already registered")
 
+    master = None
     if user_in.role == UserRole.MASTER:
         city = (user_in.city or "").strip()
         tz = (user_in.timezone or "").strip()
@@ -326,6 +341,32 @@ async def register(user_in: UserCreate, db: Session = Depends(get_db)) -> Any:
         from utils.base62 import generate_unique_domain
         master.domain = generate_unique_domain(master.id, db)
         db.commit()
+
+        if promo_code:
+            try:
+                create_pending_redemption(db, master.id, promo_code)
+                db.commit()
+            except PromoEngineError as exc:
+                db.rollback()
+                try:
+                    db.delete(master)
+                    db.delete(user)
+                    db.commit()
+                except Exception:
+                    db.rollback()
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={"code": exc.code, "message": exc.message},
+                )
+            except Exception as exc:
+                db.rollback()
+                try:
+                    db.delete(master)
+                    db.delete(user)
+                    db.commit()
+                except Exception:
+                    db.rollback()
+                raise HTTPException(status_code=500, detail=f"Ошибка применения промокода: {str(exc)}")
 
     # Отправляем письмо верификации email (та же сессия db, что и при создании пользователя)
     try:

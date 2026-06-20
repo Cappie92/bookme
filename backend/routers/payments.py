@@ -43,6 +43,7 @@ from utils.balance_utils import (
     get_user_available_balance,
     add_balance_transaction_no_commit,
 )
+from services.promo_engine import apply_promo_rewards_for_first_payment
 router = APIRouter(
     prefix="/payments",
     tags=["payments"],
@@ -51,6 +52,16 @@ router = APIRouter(
 
 import logging
 logger = logging.getLogger(__name__)
+
+
+def _apply_promo_rewards_best_effort(db: Session, payment_id: int, *, context: str) -> None:
+    try:
+        result = apply_promo_rewards_for_first_payment(db, payment_id)
+        db.commit()
+        logger.info("promo_rewards_%s payment_id=%s result=%s", context, payment_id, result)
+    except Exception:
+        db.rollback()
+        logger.exception("promo_rewards_%s failed payment_id=%s", context, payment_id)
 
 
 @router.post(
@@ -364,6 +375,7 @@ async def robokassa_result(
         and (payment.subscription_apply_status or "") == "applied"
         and payment.subscription_id
     ):
+        _apply_promo_rewards_best_effort(db, payment.id, context="robokassa_already_applied")
         logger.info(
             "robokassa_result idempotent_ok already_applied invoice_id=%s payment_id=%s user_id=%s",
             invoice_id,
@@ -456,6 +468,7 @@ async def robokassa_result(
 
     # Идемпотентность: если apply уже успешно сделан — ничего не делаем
     if payment.subscription_apply_status == 'applied' and payment.subscription_id:
+        _apply_promo_rewards_best_effort(db, payment.id, context="robokassa_pre_phase2_applied")
         return f"OK{invoice_id}"
 
     # ------------------------
@@ -658,6 +671,7 @@ async def robokassa_result(
             logger.exception("robokassa_result phase2 mark failed failed invoice_id=%s", invoice_id)
         return f"OK{invoice_id}"
 
+    _apply_promo_rewards_best_effort(db, payment.id, context="robokassa_after_apply")
     return f"OK{invoice_id}"
 
 

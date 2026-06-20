@@ -831,6 +831,87 @@ class TransactionType(str, enum.Enum):
     SERV_FEE = "serv_fee"   # Плата за разовые услуги
 
 
+class PromoCategory(str, enum.Enum):
+    ACQUISITION = "acquisition"
+    RETENTION = "retention"
+    UPGRADE = "upgrade"
+    WINBACK = "winback"
+    COMPENSATION = "compensation"
+    OTHER = "other"
+
+
+class PromoCampaignType(str, enum.Enum):
+    MASTER_REFERRAL = "master_referral"
+    ADMIN_CAMPAIGN = "admin_campaign"
+    PARTNER_CAMPAIGN = "partner_campaign"
+    MANUAL = "manual"
+
+
+class PromoCampaignStatus(str, enum.Enum):
+    ACTIVE = "active"
+    PAUSED = "paused"
+    ARCHIVED = "archived"
+
+
+class PromoCodeStatus(str, enum.Enum):
+    ACTIVE = "active"
+    DISABLED = "disabled"
+
+
+class PromoRedemptionStatus(str, enum.Enum):
+    PENDING_FIRST_PAYMENT = "pending_first_payment"
+    REDEEMED = "redeemed"
+    CANCELLED = "cancelled"
+    EXPIRED = "expired"
+
+
+class PromoRewardType(str, enum.Enum):
+    SUBSCRIPTION_POINTS = "subscription_points"
+    DISCOUNT_PERCENT = "discount_percent"
+    DISCOUNT_AMOUNT = "discount_amount"
+    BONUS_TIME = "bonus_time"
+
+
+class PromoRewardGrantStatus(str, enum.Enum):
+    PENDING = "pending"
+    APPLIED = "applied"
+    CANCELLED = "cancelled"
+    FAILED = "failed"
+
+
+class PromoRewardRecipientRole(str, enum.Enum):
+    BENEFICIARY = "beneficiary"
+    REFERRER = "referrer"
+
+
+class PromoReferrerType(str, enum.Enum):
+    MASTER = "master"
+    ADMIN_CAMPAIGN = "admin_campaign"
+    PARTNER = "partner"
+    SYSTEM = "system"
+    MANUAL = "manual"
+
+
+class SubscriptionPointsDirection(str, enum.Enum):
+    CREDIT = "credit"
+    DEBIT = "debit"
+    REVERSAL = "reversal"
+
+
+class SubscriptionPointsStatus(str, enum.Enum):
+    ACTIVE = "active"
+    CONSUMED = "consumed"
+    EXPIRED = "expired"
+    CANCELLED = "cancelled"
+
+
+class SubscriptionPointsSourceType(str, enum.Enum):
+    PROMO_REWARD_GRANT = "promo_reward_grant"
+    MANUAL_ADJUSTMENT = "manual_adjustment"
+    SUBSCRIPTION_PAYMENT = "subscription_payment"
+    FUTURE_SOURCE = "future_source"
+
+
 class BalanceTransaction(Base):
     __tablename__ = "balance_transactions"
     
@@ -1735,6 +1816,187 @@ class PromoCodeActivation(Base):
         Index('idx_promo_activations_promo_code', 'promo_code_id'),
         Index('idx_promo_activations_user', 'user_id'),
         Index('idx_promo_activations_activated_at', 'activated_at'),
+    )
+
+
+class PromoCampaign(Base):
+    """Promo-engine кампании (новая система, отдельно от legacy PromoCode)."""
+    __tablename__ = "promo_campaigns"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(255), nullable=False)
+    promo_category = Column(Enum(PromoCategory), nullable=False, default=PromoCategory.ACQUISITION)
+    type = Column(Enum(PromoCampaignType), nullable=False)
+    status = Column(Enum(PromoCampaignStatus), nullable=False, default=PromoCampaignStatus.ACTIVE)
+
+    owner_master_id = Column(Integer, ForeignKey("masters.id"), nullable=True)
+    created_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+
+    starts_at = Column(DateTime, nullable=True)
+    ends_at = Column(DateTime, nullable=True)
+    max_total_redemptions = Column(Integer, nullable=True)
+    max_redemptions_per_user = Column(Integer, nullable=False, default=1)
+
+    eligible_subscription_type = Column(Enum(SubscriptionType), nullable=False, default=SubscriptionType.MASTER)
+    eligible_plan_ids = Column(JSON, nullable=True)
+    eligible_period_months = Column(JSON, nullable=True)
+    first_payment_only = Column(Boolean, nullable=False, default=True)
+
+    beneficiary_reward_type = Column(Enum(PromoRewardType), nullable=False, default=PromoRewardType.SUBSCRIPTION_POINTS)
+    beneficiary_reward_config = Column(JSON, nullable=False, default=dict)
+    referrer_reward_type = Column(Enum(PromoRewardType), nullable=True)
+    referrer_reward_config = Column(JSON, nullable=True)
+    referrer_type = Column(Enum(PromoReferrerType), nullable=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    owner_master = relationship("Master", foreign_keys=[owner_master_id])
+    created_by_user = relationship("User", foreign_keys=[created_by_user_id])
+    codes = relationship("PromoEngineCode", back_populates="campaign")
+    redemptions = relationship(
+        "PromoRedemption",
+        back_populates="campaign",
+        foreign_keys="PromoRedemption.campaign_id",
+    )
+
+    __table_args__ = (
+        Index("idx_promo_campaigns_category", "promo_category"),
+        Index("idx_promo_campaigns_type", "type"),
+        Index("idx_promo_campaigns_status", "status"),
+        Index("idx_promo_campaigns_owner_master", "owner_master_id"),
+    )
+
+
+class PromoEngineCode(Base):
+    """Коды новой promo-engine системы. Legacy таблица promo_codes не используется."""
+    __tablename__ = "promo_engine_codes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    campaign_id = Column(Integer, ForeignKey("promo_campaigns.id"), nullable=False)
+    code = Column(String(64), nullable=False, unique=True, index=True)
+    status = Column(Enum(PromoCodeStatus), nullable=False, default=PromoCodeStatus.ACTIVE)
+    max_redemptions = Column(Integer, nullable=True)
+    current_redemptions = Column(Integer, nullable=False, default=0)
+    assigned_to_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    campaign = relationship("PromoCampaign", back_populates="codes")
+    assigned_to_user = relationship("User", foreign_keys=[assigned_to_user_id])
+    redemptions = relationship("PromoRedemption", back_populates="code")
+
+    __table_args__ = (
+        Index("idx_promo_engine_codes_campaign", "campaign_id"),
+        Index("idx_promo_engine_codes_status", "status"),
+    )
+
+
+class PromoRedemption(Base):
+    """Факт применения promo-engine кода мастером."""
+    __tablename__ = "promo_redemptions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    campaign_id = Column(Integer, ForeignKey("promo_campaigns.id"), nullable=False)
+    code_id = Column(Integer, ForeignKey("promo_engine_codes.id"), nullable=False)
+
+    redeemer_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    redeemer_master_id = Column(Integer, ForeignKey("masters.id"), nullable=False)
+
+    promo_category_snapshot = Column(Enum(PromoCategory), nullable=False)
+    campaign_type_snapshot = Column(Enum(PromoCampaignType), nullable=False)
+    referrer_type_snapshot = Column(Enum(PromoReferrerType), nullable=True)
+    referrer_master_id = Column(Integer, ForeignKey("masters.id"), nullable=True)
+    referrer_campaign_id = Column(Integer, ForeignKey("promo_campaigns.id"), nullable=True)
+
+    status = Column(Enum(PromoRedemptionStatus), nullable=False, default=PromoRedemptionStatus.PENDING_FIRST_PAYMENT)
+    first_payment_id = Column(Integer, ForeignKey("payments.id"), nullable=True)
+    first_payment_amount = Column(Float, nullable=True)
+    first_payment_period_months = Column(Integer, nullable=True)
+
+    applied_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    redeemed_at = Column(DateTime, nullable=True)
+
+    beneficiary_reward_type_snapshot = Column(Enum(PromoRewardType), nullable=False)
+    beneficiary_reward_value_snapshot = Column(JSON, nullable=True)
+    referrer_reward_type_snapshot = Column(Enum(PromoRewardType), nullable=True)
+    referrer_reward_value_snapshot = Column(JSON, nullable=True)
+    extra_metadata = Column("metadata", JSON, nullable=True)
+
+    campaign = relationship("PromoCampaign", foreign_keys=[campaign_id], back_populates="redemptions")
+    code = relationship("PromoEngineCode", back_populates="redemptions")
+    redeemer_user = relationship("User", foreign_keys=[redeemer_user_id])
+    redeemer_master = relationship("Master", foreign_keys=[redeemer_master_id])
+    referrer_master = relationship("Master", foreign_keys=[referrer_master_id])
+    referrer_campaign = relationship("PromoCampaign", foreign_keys=[referrer_campaign_id])
+    first_payment = relationship("Payment", foreign_keys=[first_payment_id])
+    reward_grants = relationship("PromoRewardGrant", back_populates="redemption")
+
+    __table_args__ = (
+        Index("idx_promo_redemptions_redeemer_master", "redeemer_master_id"),
+        Index("idx_promo_redemptions_status", "status"),
+        Index("idx_promo_redemptions_code", "code_id"),
+        Index("idx_promo_redemptions_campaign", "campaign_id"),
+        Index("idx_promo_redemptions_category_status", "promo_category_snapshot", "status"),
+    )
+
+
+class PromoRewardGrant(Base):
+    """Идемпотентный ledger начислений каждой стороне redemption."""
+    __tablename__ = "promo_reward_grants"
+
+    id = Column(Integer, primary_key=True, index=True)
+    redemption_id = Column(Integer, ForeignKey("promo_redemptions.id"), nullable=False)
+    recipient_master_id = Column(Integer, ForeignKey("masters.id"), nullable=False)
+    recipient_role = Column(Enum(PromoRewardRecipientRole), nullable=False)
+    reward_type = Column(Enum(PromoRewardType), nullable=False, default=PromoRewardType.SUBSCRIPTION_POINTS)
+    reward_percent = Column(Float, nullable=True)
+    base_amount = Column(Float, nullable=True)
+    points_amount = Column(Integer, nullable=True)
+    status = Column(Enum(PromoRewardGrantStatus), nullable=False, default=PromoRewardGrantStatus.PENDING)
+    payment_id = Column(Integer, ForeignKey("payments.id"), nullable=True)
+    subscription_points_ledger_id = Column(Integer, ForeignKey("subscription_points_ledger.id"), nullable=True)
+    applied_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    source_label = Column(String(255), nullable=True)
+    extra_metadata = Column("metadata", JSON, nullable=True)
+
+    redemption = relationship("PromoRedemption", back_populates="reward_grants")
+    recipient_master = relationship("Master", foreign_keys=[recipient_master_id])
+    payment = relationship("Payment", foreign_keys=[payment_id])
+    subscription_points_entry = relationship("SubscriptionPointsLedger", foreign_keys=[subscription_points_ledger_id])
+
+    __table_args__ = (
+        UniqueConstraint("redemption_id", "recipient_role", name="uq_promo_reward_grants_redemption_role"),
+        Index("idx_promo_reward_grants_recipient_master", "recipient_master_id"),
+        Index("idx_promo_reward_grants_payment", "payment_id"),
+        Index("idx_promo_reward_grants_status", "status"),
+    )
+
+
+class SubscriptionPointsLedger(Base):
+    """Отдельный ledger бонусных баллов на оплату подписки мастера."""
+    __tablename__ = "subscription_points_ledger"
+
+    id = Column(Integer, primary_key=True, index=True)
+    master_id = Column(Integer, ForeignKey("masters.id"), nullable=False)
+    amount = Column(Integer, nullable=False)
+    remaining_amount = Column(Integer, nullable=False)
+    direction = Column(Enum(SubscriptionPointsDirection), nullable=False)
+    source_type = Column(Enum(SubscriptionPointsSourceType), nullable=False)
+    source_id = Column(Integer, nullable=True)
+    status = Column(Enum(SubscriptionPointsStatus), nullable=False, default=SubscriptionPointsStatus.ACTIVE)
+    description = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    expires_at = Column(DateTime, nullable=True)
+    extra_metadata = Column("metadata", JSON, nullable=True)
+
+    master = relationship("Master", foreign_keys=[master_id])
+
+    __table_args__ = (
+        Index("idx_subscription_points_master", "master_id"),
+        Index("idx_subscription_points_source", "source_type", "source_id"),
+        Index("idx_subscription_points_status", "status"),
     )
 
 

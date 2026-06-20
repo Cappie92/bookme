@@ -27,6 +27,7 @@ class UserCreate(BaseModel):
     birth_date: Optional[date] = None
     city: Optional[str] = None
     timezone: Optional[str] = None
+    promo_code: Optional[str] = None
 
     @field_validator("email", mode="before")
     @classmethod
@@ -1235,6 +1236,17 @@ class SubscriptionCalculationRequest(BaseModel):
     upgrade_type: Optional[str] = "immediate"  # "immediate" или "after_expiry"
 
 
+class PromoPreviewResponse(BaseModel):
+    code: Optional[str] = None
+    campaign_type: str
+    eligible: bool
+    period_months: int
+    percent: int
+    points_amount: int
+    label: str
+    ineligible_reason: Optional[str] = None
+
+
 class SubscriptionCalculationResponse(BaseModel):
     """Ответ с расчетом стоимости подписки"""
     calculation_id: int  # ID snapshot для фиксации цен
@@ -1279,6 +1291,68 @@ class SubscriptionCalculationResponse(BaseModel):
     forced_upgrade_type: Optional[str] = None
     available_balance: Optional[float] = None
     can_pay_from_balance: Optional[bool] = None
+    promo_preview: Optional[PromoPreviewResponse] = None
+
+
+class PromoApplyRequest(BaseModel):
+    code: str
+
+
+class PromoApplyResponse(BaseModel):
+    code: Optional[str] = None
+    campaign_type: str
+    promo_category: str
+    status: str
+    applied_at: datetime
+    expected_bonus_by_period: Dict[str, int]
+    message: str
+
+
+class CurrentPromoItem(BaseModel):
+    code: Optional[str] = None
+    campaign_type: str
+    promo_category: str
+    status: str
+    applied_at: datetime
+    expected_bonus_by_period: Dict[str, int]
+
+
+class CurrentPromoResponse(BaseModel):
+    promo_code: Optional[CurrentPromoItem] = None
+
+
+class ReferralCodeStats(BaseModel):
+    applied_count: int = 0
+    paid_count: int = 0
+    rewards_total_points: int = 0
+    rewards_pending_count: int = 0
+
+
+class ReferralCodeResponse(BaseModel):
+    code: str
+    share_text: str
+    share_url: str
+    beneficiary_bonus_rules: Dict[str, int]
+    referrer_bonus_rules: Dict[str, int]
+    stats: ReferralCodeStats
+
+
+class SubscriptionPointsLedgerItem(BaseModel):
+    id: int
+    amount: int
+    remaining_amount: int
+    direction: str
+    source_type: str
+    description: Optional[str] = None
+    created_at: datetime
+    expires_at: Optional[datetime] = None
+    metadata: Optional[Dict[str, Any]] = None
+    promo: Optional[Dict[str, Any]] = None
+
+
+class SubscriptionPointsResponse(BaseModel):
+    balance: int
+    items: List[SubscriptionPointsLedgerItem]
 
 
 class SubscriptionUpgradeRequest(BaseModel):

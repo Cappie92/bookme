@@ -10,7 +10,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from database import Base, engine
 from settings import get_settings
 from exceptions import SchemaOutdatedError
-from routers import admin, auth, bookings, client, master, salon, blog, moderator, domain, subscriptions, balance, loyalty, expenses, promo_codes, accounting, tax_rates, subscription_plans, subscription_plans_public, master_page_modules, service_functions, payments, public_master
+from routers import admin, auth, bookings, client, master, salon, blog, moderator, domain, subscriptions, balance, loyalty, expenses, promo_codes, promo_engine, accounting, tax_rates, subscription_plans, subscription_plans_public, master_page_modules, service_functions, payments, public_master
 from routers import master_loyalty, client_loyalty, master_clients
 from routers import dev_testdata, dev_e2e
 from routers.address_extraction import router as address_router
@@ -174,6 +174,7 @@ app.include_router(balance.router, prefix="/api")
 app.include_router(loyalty.router, prefix="/api")
 app.include_router(expenses.router, prefix="/api")
 app.include_router(promo_codes.router, prefix="/api")
+app.include_router(promo_engine.router, prefix="/api")
 app.include_router(accounting.router)
 app.include_router(tax_rates.router)
 app.include_router(master_loyalty.router)

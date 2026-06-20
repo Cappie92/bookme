@@ -20,6 +20,7 @@ from models import (
     DailyChargeStatus,
     UserBalance,
     TransactionType,
+    Payment,
 )
 from schemas import (
     SubscriptionCreate, 
@@ -46,6 +47,8 @@ from utils.balance_utils import (
     add_balance_transaction_no_commit,
     compute_subscription_days_remaining,
 )
+from services.promo_engine import build_promo_preview_for_subscription_calculation
+from services.promo_engine import apply_promo_rewards_for_first_payment
 
 router = APIRouter(
     prefix="/subscriptions",
@@ -1046,6 +1049,17 @@ async def calculate_subscription_cost(
         )
     else:
         breakdown_text = "Доплата не требуется — можно применить тариф без оплаты."
+
+    promo_preview = None
+    if subscription_type == SubscriptionType.MASTER and current_user.role.value in ["master", "indie"]:
+        master_profile = getattr(current_user, "master_profile", None)
+        if master_profile:
+            promo_preview = build_promo_preview_for_subscription_calculation(
+                db,
+                master_profile.id,
+                calculation_request.duration_months,
+                final_price,
+            )
     
     # Рассчитываем даты начала и окончания (30/90/180/360 дней)
     start_date = None
@@ -1143,6 +1157,7 @@ async def calculate_subscription_cost(
         forced_upgrade_type=forced_upgrade_type,
         available_balance=available_balance,
         can_pay_from_balance=can_pay_from_balance,
+        promo_preview=promo_preview,
     )
 
 
@@ -1454,6 +1469,45 @@ async def apply_upgrade_balance(
 
             snapshot.applied_subscription_id = new_subscription.id
             snapshot.applied_at = now
+
+            balance_payment = (
+                db.query(Payment)
+                .filter(Payment.robokassa_invoice_id == f"balance-{snapshot.id}-{current_user.id}")
+                .with_for_update()
+                .first()
+            )
+            if not balance_payment:
+                balance_payment = Payment(
+                    user_id=current_user.id,
+                    subscription_id=new_subscription.id,
+                    amount=final_price,
+                    status="paid",
+                    payment_type="subscription",
+                    robokassa_invoice_id=f"balance-{snapshot.id}-{current_user.id}",
+                    robokassa_payment_id=f"balance:{snapshot.id}",
+                    is_recurring=False,
+                    subscription_period=payload.get("payment_period") or "month",
+                    plan_id=snapshot.plan_id,
+                    subscription_apply_status="applied",
+                    subscription_applied_at=now,
+                    payment_metadata={
+                        "calculation_id": snapshot.id,
+                        "upgrade_type": snapshot.upgrade_type,
+                        "selected_duration": snapshot.duration_months,
+                        "source": "balance_apply",
+                    },
+                    paid_at=now,
+                )
+                db.add(balance_payment)
+                db.flush()
+
+            promo_reward_result = apply_promo_rewards_for_first_payment(db, balance_payment)
+            logger.info(
+                "promo_rewards_balance_apply payment_id=%s snapshot_id=%s result=%s",
+                balance_payment.id,
+                snapshot.id,
+                promo_reward_result,
+            )
 
             ub_after = get_or_create_user_balance(db, current_user.id, do_commit=False)
             result = {
