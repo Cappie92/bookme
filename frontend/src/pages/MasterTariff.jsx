@@ -24,6 +24,13 @@ import {
 } from '../utils/subscriptionFeatures'
 import { getPlanDisplayName } from '../utils/subscriptionPlanNames'
 import { formatMoney } from '../utils/formatMoney'
+import {
+  applyMasterPromoCode,
+  getCurrentMasterPromoCode,
+  getMasterReferralCode,
+  getPromoErrorMessage,
+  getSubscriptionPoints,
+} from '../utils/promoEngineApi'
 
 // Импортируем MasterSidebar из MasterDashboard
 function MasterSidebar({ activeTab, setActiveTab, refreshKey, masterSettings, scheduleConflicts, hasFinanceAccess, hasExtendedStats, hasLoyaltyAccess }) {
@@ -224,12 +231,20 @@ export default function MasterTariff({ canCustomizeDomain, onRefreshSubscription
   const [autoRenewalPeriod, setAutoRenewalPeriod] = useState('1')
   const [autoRenewalPlan, setAutoRenewalPlan] = useState(null)
   const [paymentMethod, setPaymentMethod] = useState('card') // Общий способ оплаты для всех платежей
+  const [referralCodeData, setReferralCodeData] = useState(null)
+  const [currentPromo, setCurrentPromo] = useState(null)
+  const [subscriptionPoints, setSubscriptionPoints] = useState({ balance: 0, items: [] })
+  const [promoCodeInput, setPromoCodeInput] = useState('')
+  const [promoMessage, setPromoMessage] = useState('')
+  const [promoError, setPromoError] = useState('')
+  const [promoLoading, setPromoLoading] = useState(false)
   
   const refreshSubscriptionFeatures = onRefreshSubscriptionFeatures || (() => {})
 
   useEffect(() => {
     loadSubscriptionData()
     loadFreezeInfo()
+    loadPromoEngineData()
   }, [])
 
   useEffect(() => {
@@ -314,6 +329,56 @@ export default function MasterTariff({ canCustomizeDomain, onRefreshSubscription
       }
     } catch (error) {
       console.error('Ошибка загрузки информации о заморозке:', error)
+    }
+  }
+
+  const loadPromoEngineData = async () => {
+    try {
+      const [referral, current, points] = await Promise.all([
+        getMasterReferralCode(),
+        getCurrentMasterPromoCode(),
+        getSubscriptionPoints(),
+      ])
+      setReferralCodeData(referral)
+      setCurrentPromo(current?.promo_code || null)
+      setSubscriptionPoints(points || { balance: 0, items: [] })
+    } catch (error) {
+      console.error('Ошибка загрузки промокодов:', error)
+    }
+  }
+
+  const handleCopyReferralCode = async () => {
+    const code = referralCodeData?.code
+    if (!code) return
+    try {
+      await navigator.clipboard.writeText(code)
+      setPromoMessage('Промокод скопирован')
+      setPromoError('')
+    } catch {
+      setPromoError('Не удалось скопировать промокод')
+    }
+  }
+
+  const handleApplyPromoCode = async (e) => {
+    e.preventDefault()
+    const code = promoCodeInput.trim()
+    if (!code) {
+      setPromoError('Введите промокод')
+      return
+    }
+    setPromoLoading(true)
+    setPromoError('')
+    setPromoMessage('')
+    try {
+      await applyMasterPromoCode(code)
+      setPromoCodeInput('')
+      setPromoMessage('Промокод применён. Бонус будет начислен после первой оплаты подписки.')
+      await loadPromoEngineData()
+    } catch (error) {
+      setPromoError(getPromoErrorMessage(error))
+      await loadPromoEngineData()
+    } finally {
+      setPromoLoading(false)
     }
   }
 
@@ -473,6 +538,29 @@ export default function MasterTariff({ canCustomizeDomain, onRefreshSubscription
       hour: '2-digit',
       minute: '2-digit'
     })
+  }
+
+  const formatPoints = (value) => `${Math.round(Number(value || 0)).toLocaleString('ru-RU')} баллов`
+
+  const getPointsTraceTitle = (item) => {
+    const promo = item?.promo || {}
+    if (promo.recipient_role === 'referrer') {
+      return promo.invited_master_name_masked
+        ? `За приглашённого мастера ${promo.invited_master_name_masked}`
+        : 'За приглашённого мастера'
+    }
+    if (promo.recipient_role === 'beneficiary') return 'По применённому промокоду'
+    return item?.description || 'Начисление бонусных баллов'
+  }
+
+  const getPointsTraceSubtitle = (item) => {
+    const promo = item?.promo || {}
+    const parts = []
+    if (promo.promo_code) parts.push(`Промокод ${promo.promo_code}`)
+    if (promo.campaign_type) parts.push(promo.campaign_type === 'master_referral' ? 'реферальная программа' : 'промо-кампания')
+    if (promo.period_months) parts.push(`${promo.period_months} мес.`)
+    if (promo.percent) parts.push(`${promo.percent}%`)
+    return parts.join(' · ')
   }
 
   // Загружаем список тарифных планов для выбора в автопродлении
@@ -667,6 +755,113 @@ export default function MasterTariff({ canCustomizeDomain, onRefreshSubscription
                     </div>
                   </div>
                 </div>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div className="bg-white rounded-lg shadow-sm border p-4">
+                  <div className="flex items-start justify-between gap-4 mb-4">
+                    <div>
+                      <h2 className="text-xl font-semibold text-gray-900">Ваш промокод</h2>
+                      <p className="text-sm text-gray-600 mt-1">
+                        Поделитесь кодом с другим мастером. После его первой оплаты от 3 месяцев вы оба получите бонусные баллы на оплату подписки.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleCopyReferralCode}
+                      disabled={!referralCodeData?.code}
+                      className="px-3 py-2 rounded-lg border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                    >
+                      Скопировать
+                    </button>
+                  </div>
+                  <div className="rounded-lg bg-green-50 border border-green-200 p-4">
+                    <div className="text-xs uppercase tracking-wide text-green-700 font-semibold">Личный код</div>
+                    <div className="mt-1 text-2xl font-bold tracking-wide text-gray-900" data-testid="master-referral-code">
+                      {referralCodeData?.code || 'Загрузка...'}
+                    </div>
+                  </div>
+                  <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                    <div className="rounded-lg bg-gray-50 p-3">
+                      <div className="font-medium text-gray-900 mb-1">Мастер по вашему коду</div>
+                      <div className="text-gray-600">3 мес — 15%, 6 мес — 20%, 12 мес — 25%</div>
+                    </div>
+                    <div className="rounded-lg bg-gray-50 p-3">
+                      <div className="font-medium text-gray-900 mb-1">Вы получите</div>
+                      <div className="text-gray-600">15% от первой оплаты приглашённого мастера от 3 месяцев</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-white rounded-lg shadow-sm border p-4">
+                  <h2 className="text-xl font-semibold text-gray-900 mb-2">Введите промокод</h2>
+                  <p className="text-sm text-gray-600 mb-4">
+                    Бонусные баллы начислятся после первой успешной оплаты подписки. Для текущих acquisition-промокодов применить код можно только до первой оплаты.
+                  </p>
+                  {currentPromo ? (
+                    <div className="rounded-lg border border-green-200 bg-green-50 p-3 mb-4" data-testid="current-promo-state">
+                      <div className="font-medium text-green-900">Промокод применён</div>
+                      <div className="text-sm text-green-800 mt-1">
+                        {currentPromo.code} · бонус будет начислен после первой оплаты.
+                      </div>
+                    </div>
+                  ) : null}
+                  <form className="flex flex-col sm:flex-row gap-2" onSubmit={handleApplyPromoCode}>
+                    <input
+                      type="text"
+                      value={promoCodeInput}
+                      onChange={(e) => setPromoCodeInput(e.target.value.toUpperCase())}
+                      placeholder="Промокод"
+                      className="flex-1 border rounded-lg px-3 py-2 min-h-[44px]"
+                      data-testid="master-promo-code-input"
+                    />
+                    <button
+                      type="submit"
+                      disabled={promoLoading}
+                      className="px-4 py-2 rounded-lg bg-[#4CAF50] text-white font-medium hover:bg-[#45A049] disabled:opacity-50"
+                    >
+                      {promoLoading ? 'Проверяем...' : 'Применить'}
+                    </button>
+                  </form>
+                  {promoMessage ? <div className="mt-3 text-sm text-green-700">{promoMessage}</div> : null}
+                  {promoError ? <div className="mt-3 text-sm text-red-700" data-testid="master-promo-error">{promoError}</div> : null}
+                </div>
+              </div>
+
+              <div className="bg-white rounded-lg shadow-sm border p-4" data-testid="subscription-points-card">
+                <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 mb-4">
+                  <div>
+                    <h2 className="text-xl font-semibold text-gray-900">Бонусные баллы</h2>
+                    <p className="text-sm text-gray-600 mt-1">Баллы на оплату подписки. Это не деньги и не клиентская лояльность.</p>
+                  </div>
+                  <div className="rounded-lg bg-green-50 border border-green-200 px-4 py-3">
+                    <div className="text-xs text-green-700 font-semibold">Текущий баланс</div>
+                    <div className="text-2xl font-bold text-gray-900">{formatPoints(subscriptionPoints?.balance)}</div>
+                  </div>
+                </div>
+                {subscriptionPoints?.items?.length ? (
+                  <div className="space-y-3">
+                    {subscriptionPoints.items.map((item) => (
+                      <div key={item.id} className="rounded-lg border border-gray-200 p-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <div className="font-medium text-gray-900">{getPointsTraceTitle(item)}</div>
+                            <div className="text-sm text-gray-600 mt-1">{getPointsTraceSubtitle(item) || item.description}</div>
+                            <div className="text-xs text-gray-500 mt-1">{formatDateTime(item.created_at)} · {item.status || item.direction || 'active'}</div>
+                          </div>
+                          <div className="text-right">
+                            <div className="font-semibold text-green-700">+{formatPoints(item.amount)}</div>
+                            <div className="text-xs text-gray-500">осталось {formatPoints(item.remaining_amount)}</div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="rounded-lg bg-gray-50 border border-gray-200 p-4 text-sm text-gray-600" data-testid="subscription-points-empty">
+                    Пока нет бонусных баллов. Они появятся после первой оплаты мастера, который использовал ваш промокод, или после вашей оплаты с применённым промокодом.
+                  </div>
+                )}
               </div>
 
               {/* Раздел заморозки подписки */}

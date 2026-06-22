@@ -24,6 +24,7 @@ const REGISTER_FIELDS = {
     { name: 'email', label: 'E-mail', type: 'email' },
     { name: 'dob', label: 'Дата рождения', type: 'date' },
     { name: 'city', label: 'Город', type: 'select', required: true },
+    { name: 'promo_code', label: 'Промокод', type: 'text' },
     { name: 'password', label: 'Пароль', type: 'password', required: true },
     { name: 'password2', label: 'Повторный ввод пароля', type: 'password', required: true },
   ],
@@ -150,8 +151,10 @@ export default function AuthModal() {
     setAuthModalInitialTab,
     authModalRedirectMode,
     authModalReturnToPath,
+    authModalInitialForm,
     setAuthModalRedirectMode,
     setAuthModalReturnToPath,
+    setAuthModalInitialForm,
     closeAuthModal,
   } = useAuth()
   const open = authModalOpen
@@ -168,6 +171,16 @@ export default function AuthModal() {
       setAuthModalInitialTab(null)
     }
   }, [open, authModalInitialTab, setAuthModalInitialTab])
+
+  useEffect(() => {
+    if (!open || tab !== 'register' || regType !== 'master') return
+    const query = new URLSearchParams(window.location.search)
+    const queryPromo = (query.get('promo_code') || query.get('ref') || '').trim()
+    const initialPromo = (authModalInitialForm?.promo_code || queryPromo || '').trim()
+    if (!initialPromo) return
+    setForm((f) => ({ ...f, promo_code: f.promo_code || initialPromo.toUpperCase() }))
+    if (authModalInitialForm?.promo_code) setAuthModalInitialForm(null)
+  }, [open, tab, regType, authModalInitialForm, setAuthModalInitialForm])
 
   useEffect(() => {
     if (!open) {
@@ -421,8 +434,10 @@ export default function AuthModal() {
     if (regType === 'master') {
       const city = (form.city || '').trim()
       const tz = (form.timezone || '').trim()
+      const promoCode = (form.promo_code || '').trim()
       if (city) payload.city = city
       if (tz) payload.timezone = tz
+      if (promoCode) payload.promo_code = promoCode
     }
     payload.accept_terms = Boolean(agreeTerms)
     payload.accept_personal_data = Boolean(agreePersonalData)

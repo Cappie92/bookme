@@ -19,6 +19,7 @@ export function AuthProvider({ children }) {
   const [authModalReturnToPath, setAuthModalReturnToPath] = useState(null)
   /** Контекст открытия (аналитика/будущее); автосоздание брони на /m/:slug решает по sessionStorage draft + TTL в PublicBookingWizard, не по этому полю. Сбрасывается при закрытии модалки. */
   const [authModalFlow, setAuthModalFlow] = useState('default')
+  const [authModalInitialForm, setAuthModalInitialForm] = useState(null)
   const navigate = useNavigate()
   const wasAuthModalOpen = useRef(false)
 
@@ -98,6 +99,7 @@ export function AuthProvider({ children }) {
     setAuthModalRedirectMode(options.redirectMode ?? 'default')
     setAuthModalReturnToPath(options.returnToPath ?? null)
     setAuthModalFlow(options.flow ?? 'default')
+    setAuthModalInitialForm(options.initialForm ?? null)
     setAuthModalOpen(true)
   }
 
@@ -179,6 +181,8 @@ export function AuthProvider({ children }) {
     setAuthModalRedirectMode,
     setAuthModalReturnToPath,
     authModalFlow,
+    authModalInitialForm,
+    setAuthModalInitialForm,
   }
 
   return (

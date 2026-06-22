@@ -572,6 +572,16 @@ export default function SubscriptionModal({ isOpen, onClose, isFreePlan, current
                       {calculation.breakdown_text ? (
                         <div className="text-xs text-gray-600">{calculation.breakdown_text}</div>
                       ) : null}
+                      {calculation.promo_preview ? (
+                        <div className="rounded-lg border border-green-200 bg-green-50 p-3 text-sm" data-testid="subscription-promo-preview">
+                          <div className="font-semibold text-green-900">Промокод {calculation.promo_preview.code}</div>
+                          <div className="text-green-800 mt-1">
+                            {calculation.promo_preview.eligible
+                              ? `По промокоду: +${calculation.promo_preview.points_amount} бонусных баллов после оплаты`
+                              : 'Бонус доступен при оплате от 3 месяцев'}
+                          </div>
+                        </div>
+                      ) : null}
                       {import.meta.env.DEV ? (
                         <details className="pt-2 border-t">
                           <summary className="text-xs text-gray-500 cursor-pointer select-none">Debug preview breakdown</summary>
