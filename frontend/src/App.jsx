@@ -1,7 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom"
 import { HelmetProvider } from 'react-helmet-async'
-import { lazy, Suspense, useEffect } from 'react'
-import { AuthProvider } from './contexts/AuthContext'
+import { lazy, Suspense, useEffect, useRef } from 'react'
+import { AuthProvider, useAuth } from './contexts/AuthContext'
 import MetrikaRouteListener from './analytics/MetrikaRouteListener'
 import { FavoritesProvider } from './contexts/FavoritesContext'
 import { ToastProvider } from './contexts/ToastContext'
@@ -88,6 +88,25 @@ function ScrollToTopOnRouteChange() {
   return null
 }
 
+function RegisterQueryHandler() {
+  const location = useLocation()
+  const { openAuthModal } = useAuth()
+  const handledKeyRef = useRef('')
+  useEffect(() => {
+    if (location.pathname !== '/register') return
+    const key = `${location.pathname}${location.search}`
+    if (handledKeyRef.current === key) return
+    handledKeyRef.current = key
+    const query = new URLSearchParams(location.search)
+    const promoCode = (query.get('promo_code') || query.get('ref') || '').trim()
+    openAuthModal('master', 'register', {
+      initialForm: promoCode ? { promo_code: promoCode } : null,
+      redirectMode: 'default',
+    })
+  }, [location.pathname, location.search, openAuthModal])
+  return null
+}
+
 function App() {
 
   return (
@@ -98,6 +117,7 @@ function App() {
             <AuthProvider>
               <ToastProvider>
               <FavoritesProvider>
+                <RegisterQueryHandler />
                 <AuthModal />
                 <MasterModal />
                 <ScheduleModal />
@@ -112,6 +132,7 @@ function App() {
           <Route path="/" element={<MainLayout><Home/></MainLayout>} />
           <Route path="/pricing" element={<MainLayout><Pricing/></MainLayout>} />
           <Route path="/about" element={<MainLayout><About/></MainLayout>} />
+          <Route path="/register" element={<MainLayout><Home/></MainLayout>} />
           <Route path="/verify-email" element={<MainLayout><VerifyEmail/></MainLayout>} />
           <Route path="/blog" element={<MainLayout><BlogList/></MainLayout>} />
           <Route path="/blog/:slug" element={<MainLayout><BlogPost/></MainLayout>} />
