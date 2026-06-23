@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { API_BASE_URL } from '../utils/config'
 import { apiGet } from '../utils/api'
+import { getPromoPreviewMessage } from '../utils/promoEngineApi'
 import { getPlanFeatures } from '../utils/subscriptionFeatures'
 import { getPlanDisplayName } from '../utils/subscriptionPlanNames'
 import { useModal } from '../hooks/useModal'
@@ -575,11 +576,7 @@ export default function SubscriptionModal({ isOpen, onClose, isFreePlan, current
                       {calculation.promo_preview ? (
                         <div className="rounded-lg border border-green-200 bg-green-50 p-3 text-sm" data-testid="subscription-promo-preview">
                           <div className="font-semibold text-green-900">Промокод {calculation.promo_preview.code}</div>
-                          <div className="text-green-800 mt-1">
-                            {calculation.promo_preview.eligible
-                              ? `По промокоду: +${calculation.promo_preview.points_amount} бонусных баллов после оплаты`
-                              : 'Бонус доступен при оплате от 3 месяцев'}
-                          </div>
+                          <div className="text-green-800 mt-1">{getPromoPreviewMessage(calculation.promo_preview)}</div>
                         </div>
                       ) : null}
                       {import.meta.env.DEV ? (

@@ -25,6 +25,7 @@ import {
 import { getPlanDisplayName } from '../utils/subscriptionPlanNames'
 import { formatMoney } from '../utils/formatMoney'
 import {
+  PROMO_FIRST_PAYMENT_ONLY_MESSAGE,
   applyMasterPromoCode,
   getCurrentMasterPromoCode,
   getMasterReferralCode,
@@ -597,6 +598,7 @@ export default function MasterTariff({ canCustomizeDomain, onRefreshSubscription
     features: subscriptionStatus?.features || subscriptionData?.features || {},
     limits: subscriptionStatus?.limits || subscriptionData?.limits || {}
   }
+  const hasPaidSubscriptionPlan = !isFreePlan && !isAlwaysFree
   const tariffComparisonRows = getMasterTariffComparisonRows(planData, isAlwaysFree)
   const { left: tariffLeftCol, right: tariffRightCol } = splitTariffComparisonColumns(tariffComparisonRows)
   const canFreeze = freezeInfo?.can_freeze && !isFreePlan
@@ -804,6 +806,11 @@ export default function MasterTariff({ canCustomizeDomain, onRefreshSubscription
                       <div className="text-sm text-green-800 mt-1">
                         {currentPromo.code} · бонус будет начислен после первой оплаты.
                       </div>
+                    </div>
+                  ) : null}
+                  {!currentPromo && hasPaidSubscriptionPlan ? (
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 mb-4 text-sm text-amber-900" data-testid="paid-promo-unavailable-state">
+                      {PROMO_FIRST_PAYMENT_ONLY_MESSAGE}
                     </div>
                   ) : null}
                   <form className="flex flex-col sm:flex-row gap-2" onSubmit={handleApplyPromoCode}>
