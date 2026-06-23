@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { API_BASE_URL } from '../utils/config'
 import { apiGet } from '../utils/api'
 import { getPromoPreviewMessage } from '../utils/promoEngineApi'
@@ -18,12 +18,19 @@ export default function SubscriptionModal({ isOpen, onClose, isFreePlan, current
   const [upgradeType, setUpgradeType] = useState('immediate')
   const [calculationId, setCalculationId] = useState(null)
   const [enableAutoRenewal, setEnableAutoRenewal] = useState(false)
+  const calculationRequestIdRef = useRef(0)
+  const calculationIdRef = useRef(null)
+
+  useEffect(() => {
+    calculationIdRef.current = calculationId
+  }, [calculationId])
 
   useEffect(() => {
     if (isOpen) {
       loadPlans()
       loadServiceFunctions()
     } else {
+      calculationRequestIdRef.current += 1
       // При закрытии модального окна удаляем snapshot
       if (calculationId) {
         const deleteSnapshot = async () => {
@@ -47,6 +54,9 @@ export default function SubscriptionModal({ isOpen, onClose, isFreePlan, current
       setSelectedPlan(null)
       setSelectedDuration(null)
       setCalculation(null)
+      setCalculationId(null)
+      calculationIdRef.current = null
+      setLoadingCalculation(false)
       setEnableAutoRenewal(false)
       setLoadingPayment(false)
     }
@@ -128,48 +138,48 @@ export default function SubscriptionModal({ isOpen, onClose, isFreePlan, current
   }
 
   const handlePlanSelect = (plan) => {
-    // Если выбран другой план, сбрасываем только расчет, но сохраняем период если он был выбран
-    if (selectedPlan && selectedPlan.id !== plan.id) {
-      setCalculation(null)
-      if (calculationId) {
-        deleteCalculationSnapshot(calculationId)
-        setCalculationId(null)
-      }
-    }
     setSelectedPlan(plan)
     
     // Определяем upgradeType автоматически
+    let nextUpgradeType = 'immediate'
     if (isFreePlan) {
       // Для бесплатного тарифа всегда немедленно
-      setUpgradeType('immediate')
+      nextUpgradeType = 'immediate'
     } else if (currentPlanDisplayOrder && plan.display_order < currentPlanDisplayOrder) {
       // Тариф ниже текущего - после окончания
-      setUpgradeType('after_expiry')
+      nextUpgradeType = 'after_expiry'
     } else if (currentPlanDisplayOrder && plan.display_order === currentPlanDisplayOrder) {
       // Тот же тариф - после окончания (продление)
-      setUpgradeType('after_expiry')
+      nextUpgradeType = 'after_expiry'
     } else if (currentPlanDisplayOrder && plan.display_order > currentPlanDisplayOrder) {
       // Тариф выше текущего - по умолчанию немедленно, но можно выбрать
-      setUpgradeType('immediate')
+      nextUpgradeType = 'immediate'
     } else {
       // Нет текущей подписки - немедленно
-      setUpgradeType('immediate')
+      nextUpgradeType = 'immediate'
     }
+    setUpgradeType(nextUpgradeType)
     
     // Если был выбран период, пересчитываем для нового плана
     if (selectedDuration) {
-      // Используем setTimeout чтобы дать время состоянию обновиться
-      setTimeout(() => {
-        handleDurationSelect(selectedDuration)
-      }, 0)
+      calculateSubscription(plan, selectedDuration, nextUpgradeType)
     }
   }
 
-  const handleDurationSelect = async (durationMonths, opts = {}) => {
-    if (!selectedPlan) return
+  const calculateSubscription = async (plan, durationMonths, upgradeTypeToUse) => {
+    if (!plan || !durationMonths) return
     
-    const upgradeTypeToUse = opts.upgradeTypeOverride || upgradeType
-    setSelectedDuration(durationMonths)
+    const requestId = calculationRequestIdRef.current + 1
+    calculationRequestIdRef.current = requestId
+
+    const previousCalculationId = calculationIdRef.current
+    if (previousCalculationId) {
+      deleteCalculationSnapshot(previousCalculationId)
+      calculationIdRef.current = null
+      setCalculationId(null)
+    }
+
+    setCalculation(null)
     setLoadingCalculation(true)
     
     try {
@@ -181,7 +191,7 @@ export default function SubscriptionModal({ isOpen, onClose, isFreePlan, current
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          plan_id: selectedPlan.id,
+          plan_id: plan.id,
           duration_months: durationMonths,
           upgrade_type: upgradeTypeToUse
         })
@@ -189,29 +199,46 @@ export default function SubscriptionModal({ isOpen, onClose, isFreePlan, current
       
       if (response.ok) {
         const data = await response.json()
+        if (requestId !== calculationRequestIdRef.current) {
+          if (data?.calculation_id) deleteCalculationSnapshot(data.calculation_id)
+          return
+        }
         setCalculation(data)
         if (data?.forced_upgrade_type) {
           setUpgradeType(data.forced_upgrade_type)
         }
         // Сохраняем calculation_id для последующего удаления snapshot
         if (data.calculation_id) {
+          calculationIdRef.current = data.calculation_id
           setCalculationId(data.calculation_id)
         }
       } else {
-        console.error('Ошибка расчета стоимости')
+        if (requestId === calculationRequestIdRef.current) {
+          console.error('Ошибка расчета стоимости')
+        }
       }
     } catch (error) {
-      console.error('Ошибка расчета стоимости:', error)
+      if (requestId === calculationRequestIdRef.current) {
+        console.error('Ошибка расчета стоимости:', error)
+      }
     } finally {
-      setLoadingCalculation(false)
+      if (requestId === calculationRequestIdRef.current) {
+        setLoadingCalculation(false)
+      }
     }
+  }
+
+  const handleDurationSelect = async (durationMonths) => {
+    if (!selectedPlan) return
+    setSelectedDuration(durationMonths)
+    await calculateSubscription(selectedPlan, durationMonths, upgradeType)
   }
 
   const handleUpgradeTypeChange = async (newType) => {
     setUpgradeType(newType)
-    if (selectedDuration) {
+    if (selectedPlan && selectedDuration) {
       // Пересчитываем при изменении типа апгрейда
-      await handleDurationSelect(selectedDuration, { upgradeTypeOverride: newType })
+      await calculateSubscription(selectedPlan, selectedDuration, newType)
     }
   }
 
@@ -350,22 +377,27 @@ export default function SubscriptionModal({ isOpen, onClose, isFreePlan, current
 
   const handleBack = () => {
     if (calculation) {
+      calculationRequestIdRef.current += 1
       // Если есть расчет, очищаем только расчет
       setCalculation(null)
       if (calculationId) {
         deleteCalculationSnapshot(calculationId)
+        calculationIdRef.current = null
         setCalculationId(null)
       }
     } else if (selectedDuration) {
+      calculationRequestIdRef.current += 1
       // Если выбрана продолжительность, очищаем только её
       setSelectedDuration(null)
     } else if (selectedPlan) {
+      calculationRequestIdRef.current += 1
       // Если выбран план, очищаем план и все что после него
       setSelectedPlan(null)
       setSelectedDuration(null)
       setCalculation(null)
       if (calculationId) {
         deleteCalculationSnapshot(calculationId)
+        calculationIdRef.current = null
         setCalculationId(null)
       }
     }
@@ -493,6 +525,7 @@ export default function SubscriptionModal({ isOpen, onClose, isFreePlan, current
                           type="button"
                           disabled={!selectedPlan}
                           onClick={() => handleDurationSelect(m)}
+                          data-testid={`tariff-duration-${m}`}
                           className={`flex-1 px-2 py-2 text-sm font-semibold transition-colors ${
                             !selectedPlan
                               ? 'bg-gray-50 text-gray-400 cursor-not-allowed'
@@ -553,11 +586,11 @@ export default function SubscriptionModal({ isOpen, onClose, isFreePlan, current
                     <div className="space-y-2 text-sm">
                       <div className="flex justify-between gap-4">
                         <span className="text-gray-600">К оплате</span>
-                        <span className="font-semibold text-gray-900">{formatPrice(calculation.final_price)} ₽</span>
+                        <span className="font-semibold text-gray-900" data-testid="tariff-final-price">{formatPrice(calculation.final_price)} ₽</span>
                       </div>
                       <div className="flex justify-between gap-4">
                         <span className="text-gray-600">Стоимость</span>
-                        <span className="font-semibold text-gray-900">{formatPrice(calculation.total_price)} ₽</span>
+                        <span className="font-semibold text-gray-900" data-testid="tariff-total-price">{formatPrice(calculation.total_price)} ₽</span>
                       </div>
                       {calculation.savings_percent ? (
                         <div className="flex justify-between gap-4">
