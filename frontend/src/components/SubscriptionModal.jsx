@@ -17,6 +17,7 @@ export default function SubscriptionModal({ isOpen, onClose, isFreePlan, current
   const [loadingPayment, setLoadingPayment] = useState(false)
   const [upgradeType, setUpgradeType] = useState('immediate')
   const [calculationId, setCalculationId] = useState(null)
+  const [calculationMeta, setCalculationMeta] = useState(null)
   const [enableAutoRenewal, setEnableAutoRenewal] = useState(false)
   const calculationRequestIdRef = useRef(0)
   const calculationIdRef = useRef(null)
@@ -54,6 +55,7 @@ export default function SubscriptionModal({ isOpen, onClose, isFreePlan, current
       setSelectedPlan(null)
       setSelectedDuration(null)
       setCalculation(null)
+      setCalculationMeta(null)
       setCalculationId(null)
       calculationIdRef.current = null
       setLoadingCalculation(false)
@@ -159,11 +161,6 @@ export default function SubscriptionModal({ isOpen, onClose, isFreePlan, current
       nextUpgradeType = 'immediate'
     }
     setUpgradeType(nextUpgradeType)
-    
-    // Если был выбран период, пересчитываем для нового плана
-    if (selectedDuration) {
-      calculateSubscription(plan, selectedDuration, nextUpgradeType)
-    }
   }
 
   const calculateSubscription = async (plan, durationMonths, upgradeTypeToUse) => {
@@ -180,6 +177,7 @@ export default function SubscriptionModal({ isOpen, onClose, isFreePlan, current
     }
 
     setCalculation(null)
+    setCalculationMeta(null)
     setLoadingCalculation(true)
     
     try {
@@ -204,6 +202,12 @@ export default function SubscriptionModal({ isOpen, onClose, isFreePlan, current
           return
         }
         setCalculation(data)
+        setCalculationMeta({
+          planId: plan.id,
+          durationMonths,
+          upgradeType: upgradeTypeToUse,
+          requestId,
+        })
         if (data?.forced_upgrade_type) {
           setUpgradeType(data.forced_upgrade_type)
         }
@@ -231,36 +235,40 @@ export default function SubscriptionModal({ isOpen, onClose, isFreePlan, current
   const handleDurationSelect = async (durationMonths) => {
     if (!selectedPlan) return
     setSelectedDuration(durationMonths)
-    await calculateSubscription(selectedPlan, durationMonths, upgradeType)
   }
 
   const handleUpgradeTypeChange = async (newType) => {
     setUpgradeType(newType)
-    if (selectedPlan && selectedDuration) {
-      // Пересчитываем при изменении типа апгрейда
-      await calculateSubscription(selectedPlan, selectedDuration, newType)
-    }
   }
+
+  useEffect(() => {
+    if (!isOpen || !selectedPlan || !selectedDuration) return
+    calculateSubscription(selectedPlan, selectedDuration, upgradeType)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, selectedPlan?.id, selectedDuration, upgradeType])
 
   const getPlanHighlights = (plan) => {
     const features = getPlanFeatures(plan, serviceFunctions)
     return features
       .filter((f) => f && f.available)
-      .slice(0, 5)
       .map((f) => f.text)
       .filter(Boolean)
   }
 
-  const handleSecondaryAction = () => {
-    if (selectedPlan || selectedDuration || calculation) {
-      handleBack()
-      return
-    }
-    onClose()
-  }
+  const hasCurrentCalculation = () => (
+    Boolean(
+      calculation &&
+      calculationMeta &&
+      selectedPlan &&
+      selectedDuration &&
+      calculationMeta.planId === selectedPlan.id &&
+      calculationMeta.durationMonths === selectedDuration &&
+      calculationMeta.upgradeType === upgradeType
+    )
+  )
 
   const handlePaymentInit = async () => {
-    if (!selectedPlan || !selectedDuration || !calculation) {
+    if (!selectedPlan || !selectedDuration || !hasCurrentCalculation()) {
       return
     }
     if (Number(calculation.final_price) <= 0) {
@@ -375,34 +383,6 @@ export default function SubscriptionModal({ isOpen, onClose, isFreePlan, current
     return `${day}-${month}-${year}`
   }
 
-  const handleBack = () => {
-    if (calculation) {
-      calculationRequestIdRef.current += 1
-      // Если есть расчет, очищаем только расчет
-      setCalculation(null)
-      if (calculationId) {
-        deleteCalculationSnapshot(calculationId)
-        calculationIdRef.current = null
-        setCalculationId(null)
-      }
-    } else if (selectedDuration) {
-      calculationRequestIdRef.current += 1
-      // Если выбрана продолжительность, очищаем только её
-      setSelectedDuration(null)
-    } else if (selectedPlan) {
-      calculationRequestIdRef.current += 1
-      // Если выбран план, очищаем план и все что после него
-      setSelectedPlan(null)
-      setSelectedDuration(null)
-      setCalculation(null)
-      if (calculationId) {
-        deleteCalculationSnapshot(calculationId)
-        calculationIdRef.current = null
-        setCalculationId(null)
-      }
-    }
-  }
-
   // Используем централизованную утилиту для названий планов
 
   // Функция для форматирования цены с пробелами для тысяч
@@ -416,6 +396,8 @@ export default function SubscriptionModal({ isOpen, onClose, isFreePlan, current
   const isUpgrade = currentPlanDisplayOrder && selectedPlan && selectedPlan.display_order > currentPlanDisplayOrder
   const isDowngrade = currentPlanDisplayOrder && selectedPlan && selectedPlan.display_order < currentPlanDisplayOrder
   const isSamePlan = currentPlanDisplayOrder && selectedPlan && selectedPlan.display_order === currentPlanDisplayOrder
+  const currentCalculation = hasCurrentCalculation() ? calculation : null
+  const isCalculationPending = Boolean(selectedPlan && selectedDuration && !currentCalculation)
 
   const { handleBackdropClick, handleMouseDown } = useModal(onClose)
 
@@ -498,8 +480,8 @@ export default function SubscriptionModal({ isOpen, onClose, isFreePlan, current
                       </div>
                       {highlights.length > 0 ? (
                         <ul className="mt-2 text-xs text-gray-700 space-y-1">
-                          {highlights.slice(0, 5).map((t, idx) => (
-                            <li key={idx} className="truncate">
+                          {highlights.map((t, idx) => (
+                            <li key={idx} className="break-words">
                               • {t}
                             </li>
                           ))}
@@ -569,7 +551,7 @@ export default function SubscriptionModal({ isOpen, onClose, isFreePlan, current
                   </div>
                 ) : null}
 
-                {calculation?.is_downgrade ? (
+                {currentCalculation?.is_downgrade ? (
                   <div className="text-xs text-gray-600 border rounded-lg p-3 bg-gray-50">
                     Тариф будет применён после окончания текущей подписки
                   </div>
@@ -577,62 +559,40 @@ export default function SubscriptionModal({ isOpen, onClose, isFreePlan, current
 
                 <div className="border rounded-lg p-3">
                   <div className="text-sm font-semibold text-gray-900 mb-2">Расчет</div>
-                  {loadingCalculation ? (
+                  {loadingCalculation || isCalculationPending ? (
                     <div className="flex items-center gap-2 text-sm text-gray-600">
                       <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-green-600"></div>
                       Считаем…
                     </div>
-                  ) : calculation ? (
+                  ) : currentCalculation ? (
                     <div className="space-y-2 text-sm">
                       <div className="flex justify-between gap-4">
                         <span className="text-gray-600">К оплате</span>
-                        <span className="font-semibold text-gray-900" data-testid="tariff-final-price">{formatPrice(calculation.final_price)} ₽</span>
+                        <span className="font-semibold text-gray-900" data-testid="tariff-final-price">{formatPrice(currentCalculation.final_price)} ₽</span>
                       </div>
                       <div className="flex justify-between gap-4">
                         <span className="text-gray-600">Стоимость</span>
-                        <span className="font-semibold text-gray-900" data-testid="tariff-total-price">{formatPrice(calculation.total_price)} ₽</span>
+                        <span className="font-semibold text-gray-900" data-testid="tariff-total-price">{formatPrice(currentCalculation.total_price)} ₽</span>
                       </div>
-                      {calculation.savings_percent ? (
+                      {currentCalculation.savings_percent ? (
                         <div className="flex justify-between gap-4">
                           <span className="text-gray-600">Экономия</span>
-                          <span className="font-semibold text-gray-900">{Math.round(calculation.savings_percent)}%</span>
+                          <span className="font-semibold text-gray-900">{Math.round(currentCalculation.savings_percent)}%</span>
                         </div>
                       ) : null}
-                      {(calculation.start_date || calculation.end_date) ? (
+                      {(currentCalculation.start_date || currentCalculation.end_date) ? (
                         <div className="text-xs text-gray-500 pt-2 border-t">
-                          Период: {formatDate(calculation.start_date)} — {formatDate(calculation.end_date)}
+                          Период: {formatDate(currentCalculation.start_date)} — {formatDate(currentCalculation.end_date)}
                         </div>
                       ) : null}
-                      {calculation.breakdown_text ? (
-                        <div className="text-xs text-gray-600">{calculation.breakdown_text}</div>
+                      {currentCalculation.breakdown_text ? (
+                        <div className="text-xs text-gray-600">{currentCalculation.breakdown_text}</div>
                       ) : null}
-                      {calculation.promo_preview ? (
+                      {currentCalculation.promo_preview ? (
                         <div className="rounded-lg border border-green-200 bg-green-50 p-3 text-sm" data-testid="subscription-promo-preview">
-                          <div className="font-semibold text-green-900">Промокод {calculation.promo_preview.code}</div>
-                          <div className="text-green-800 mt-1">{getPromoPreviewMessage(calculation.promo_preview)}</div>
+                          <div className="font-semibold text-green-900">Промокод {currentCalculation.promo_preview.code}</div>
+                          <div className="text-green-800 mt-1">{getPromoPreviewMessage(currentCalculation.promo_preview)}</div>
                         </div>
-                      ) : null}
-                      {import.meta.env.DEV ? (
-                        <details className="pt-2 border-t">
-                          <summary className="text-xs text-gray-500 cursor-pointer select-none">Debug preview breakdown</summary>
-                          <pre className="mt-2 text-xs bg-gray-50 border rounded p-2 overflow-auto max-h-40">
-                            {JSON.stringify(
-                              {
-                                upgrade_type: calculation.upgrade_type,
-                                total_price: calculation.total_price,
-                                final_price: calculation.final_price,
-                                current_plan_credit: calculation.current_plan_credit,
-                                current_plan_accrued: calculation.current_plan_accrued,
-                                current_plan_reserved_remaining: calculation.current_plan_reserved_remaining,
-                                credit_source: calculation.credit_source,
-                                start_date: calculation.start_date,
-                                end_date: calculation.end_date
-                              },
-                              null,
-                              2
-                            )}
-                          </pre>
-                        </details>
                       ) : null}
                     </div>
                   ) : (
@@ -640,38 +600,29 @@ export default function SubscriptionModal({ isOpen, onClose, isFreePlan, current
                   )}
                 </div>
 
-                <label className={`flex items-center justify-between gap-3 border rounded-lg p-3 ${!calculation ? 'opacity-60' : ''}`}>
+                <label className={`flex items-center justify-between gap-3 border rounded-lg p-3 ${!currentCalculation ? 'opacity-60' : ''}`}>
                   <span className="text-sm font-semibold text-gray-900">Автопродление</span>
                   <input
                     type="checkbox"
                     checked={enableAutoRenewal}
                     onChange={(e) => setEnableAutoRenewal(e.target.checked)}
                     className="w-5 h-5 text-green-600 border-gray-300 rounded focus:ring-green-500"
-                    disabled={!calculation}
+                    disabled={!currentCalculation}
                   />
                 </label>
               </div>
 
               {/* Sticky footer */}
               <div className="border-t p-4 bg-white">
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={handleSecondaryAction}
-                    className="px-4 py-2 rounded-lg border border-gray-200 text-gray-700 font-semibold hover:bg-gray-50"
-                  >
-                    {selectedPlan || selectedDuration || calculation ? 'Назад' : 'Закрыть'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handlePaymentInit}
-                    data-testid="tariff-payment-button"
-                    disabled={!calculation || loadingCalculation || loadingPayment || Number(calculation.final_price) <= 0}
-                    className="flex-1 px-4 py-2 rounded-lg bg-[#4CAF50] text-white font-semibold hover:bg-[#45A049] disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    {Number(calculation?.final_price) <= 0 ? 'Оплата не требуется' : (loadingPayment ? 'Переход…' : 'Перейти к оплате')}
-                  </button>
-                </div>
+                <button
+                  type="button"
+                  onClick={handlePaymentInit}
+                  data-testid="tariff-payment-button"
+                  disabled={!currentCalculation || loadingCalculation || loadingPayment || Number(currentCalculation.final_price) <= 0}
+                  className="w-full px-4 py-3 rounded-lg bg-[#4CAF50] text-white font-semibold hover:bg-[#45A049] disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {Number(currentCalculation?.final_price) <= 0 ? 'Оплата не требуется' : (loadingPayment ? 'Переход…' : 'Перейти к оплате')}
+                </button>
               </div>
             </div>
           </div>
