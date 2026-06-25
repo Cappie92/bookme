@@ -108,6 +108,38 @@ function RegisterQueryHandler() {
   return null
 }
 
+function getPostAdminDenyPath(role) {
+  const normalized = (role || '').toString().toLowerCase()
+  if (normalized === 'master' || normalized === 'indie') return '/master'
+  if (normalized === 'salon') return '/salon'
+  return '/'
+}
+
+function AdminRoute({ children }) {
+  const { loading, user, isAuthenticated, openAuthModal } = useAuth()
+  const role = (user?.role || '').toString().toLowerCase()
+
+  useEffect(() => {
+    if (!loading && (!isAuthenticated || !user)) {
+      openAuthModal('client', 'login', { redirectMode: 'default' })
+    }
+  }, [loading, isAuthenticated, user, openAuthModal])
+
+  if (loading) {
+    return <PageLoader />
+  }
+
+  if (!isAuthenticated || !user) {
+    return <Navigate to="/" replace />
+  }
+
+  if (role !== 'admin') {
+    return <Navigate to={getPostAdminDenyPath(role)} replace />
+  }
+
+  return <AdminLayout>{children}</AdminLayout>
+}
+
 function App() {
 
   return (
@@ -143,15 +175,15 @@ function App() {
           <Route path="/dashboard/places" element={<MainLayout><PlacesDashboard/></MainLayout>} />
           <Route path="/profile/:slug" element={<MainLayout><PublicProfile/></MainLayout>} />
           <Route path="/clients" element={<MainLayout><Clients/></MainLayout>} />
-          <Route path="/admin" element={<AdminLayout><AdminDashboard/></AdminLayout>} />
-          <Route path="/admin/users" element={<AdminLayout><AdminUsers/></AdminLayout>} />
-          <Route path="/admin/moderators" element={<AdminLayout><AdminModerators/></AdminLayout>} />
-          <Route path="/admin/blog" element={<AdminLayout><AdminBlog/></AdminLayout>} />
-          <Route path="/admin/stats" element={<AdminLayout><AdminStats/></AdminLayout>} />
-          <Route path="/admin/functions" element={<AdminLayout><AdminFunctions/></AdminLayout>} />
-          <Route path="/admin/promo-engine" element={<AdminLayout><AdminPromoEngine/></AdminLayout>} />
-          <Route path="/admin/always-free-logs" element={<AdminLayout><AdminAlwaysFreeLogs/></AdminLayout>} />
-          <Route path="/admin/settings" element={<AdminLayout><AdminSettings/></AdminLayout>} />
+          <Route path="/admin" element={<AdminRoute><AdminDashboard/></AdminRoute>} />
+          <Route path="/admin/users" element={<AdminRoute><AdminUsers/></AdminRoute>} />
+          <Route path="/admin/moderators" element={<AdminRoute><AdminModerators/></AdminRoute>} />
+          <Route path="/admin/blog" element={<AdminRoute><AdminBlog/></AdminRoute>} />
+          <Route path="/admin/stats" element={<AdminRoute><AdminStats/></AdminRoute>} />
+          <Route path="/admin/functions" element={<AdminRoute><AdminFunctions/></AdminRoute>} />
+          <Route path="/admin/promo-engine" element={<AdminRoute><AdminPromoEngine/></AdminRoute>} />
+          <Route path="/admin/always-free-logs" element={<AdminRoute><AdminAlwaysFreeLogs/></AdminRoute>} />
+          <Route path="/admin/settings" element={<AdminRoute><AdminSettings/></AdminRoute>} />
           <Route path="/user-agreement" element={<UserAgreement/>} />
           <Route path="/personal-data-consent" element={<PersonalDataConsentPage />} />
           <Route path="/marketing-consent" element={<MarketingConsent />} />

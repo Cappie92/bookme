@@ -183,6 +183,16 @@ def test_admin_only_access_for_all_endpoints(client, admin_auth_headers, master_
     assert admin.status_code == 200
 
 
+def test_core_admin_endpoints_reject_unauthenticated_requests(client):
+    for path in [
+        f"{BASE}/stats",
+        "/api/admin/users",
+        "/api/admin/service-functions",
+    ]:
+        response = client.get(path)
+        assert response.status_code in (401, 403), path
+
+
 def test_create_campaign_success(client, admin_auth_headers, db):
     response = client.post(
         f"{BASE}/campaigns",
