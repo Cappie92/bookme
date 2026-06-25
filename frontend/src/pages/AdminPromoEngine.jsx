@@ -109,6 +109,12 @@ const EMPTY_CODE_FORM = {
   assigned_to_user_id: '',
 }
 
+const EMPTY_CAMPAIGN_CODE_FORM = {
+  code: '',
+  max_redemptions: '',
+  assigned_to_user_id: '',
+}
+
 function formatDate(value) {
   if (!value) return '—'
   try {
@@ -194,6 +200,14 @@ function stringifyRewardConfig(config) {
 function isEmptyRewardConfig(value) {
   const config = parseRewardConfig(value)
   return Object.keys(config).length === 0 || REWARD_PERIODS.every(period => Number(config[String(period)] || 0) === 0)
+}
+
+function normalizeCodeCreateError(error) {
+  const message = error?.message || 'Не удалось создать промокод'
+  if (message.toLowerCase().includes('already') || message.toLowerCase().includes('exist') || message.includes('уже существует')) {
+    return 'Такой промокод уже существует.'
+  }
+  return message
 }
 
 function monthWord(months) {
@@ -326,9 +340,14 @@ function ErrorBlock({ error }) {
   )
 }
 
-function InfoBlock({ children, actions = null }) {
+function InfoBlock({ children, actions = null, tone = 'info' }) {
+  const toneClass = {
+    info: 'border-blue-200 bg-blue-50 text-blue-900',
+    success: 'border-green-200 bg-green-50 text-green-900',
+    warning: 'border-yellow-200 bg-yellow-50 text-yellow-900',
+  }[tone] || 'border-blue-200 bg-blue-50 text-blue-900'
   return (
-    <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
+    <div className={`rounded-lg border p-4 text-sm ${toneClass}`}>
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>{children}</div>
         {actions}
@@ -457,6 +476,7 @@ export default function AdminPromoEngine() {
   })
   const [campaignModal, setCampaignModal] = useState(null)
   const [campaignForm, setCampaignForm] = useState(EMPTY_CAMPAIGN_FORM)
+  const [campaignCodeForm, setCampaignCodeForm] = useState(EMPTY_CAMPAIGN_CODE_FORM)
   const [codeModal, setCodeModal] = useState(null)
   const [codeForm, setCodeForm] = useState(EMPTY_CODE_FORM)
   const [formError, setFormError] = useState('')
@@ -555,6 +575,7 @@ export default function AdminPromoEngine() {
 
   const openCreateCampaign = () => {
     setCampaignForm(EMPTY_CAMPAIGN_FORM)
+    setCampaignCodeForm(EMPTY_CAMPAIGN_CODE_FORM)
     setCampaignModal({ mode: 'create' })
     setFormError('')
     setSuccessMessage(null)
@@ -587,15 +608,47 @@ export default function AdminPromoEngine() {
       const payload = buildCampaignPayload(campaignForm, campaignModal?.mode === 'edit')
       if (campaignModal?.mode === 'edit') {
         await adminPromoEngineApi.updateCampaign(campaignModal.item.id, payload)
+        setCampaignModal(null)
+        await loadData('campaigns')
       } else {
         const createdCampaign = await adminPromoEngineApi.createCampaign(payload)
+        const codeValue = campaignCodeForm.code.trim()
+        if (codeValue) {
+          try {
+            await adminPromoEngineApi.createCode(buildCodePayload({
+              ...campaignCodeForm,
+              campaign_id: createdCampaign.id,
+              status: 'active',
+            }))
+            setSuccessMessage({
+              kind: 'success',
+              text: 'Кампания и промокод созданы.',
+              campaignId: createdCampaign.id,
+              showCreateCodeAction: false,
+            })
+            setCampaignModal(null)
+            await Promise.all([loadStats(), loadList('campaigns'), loadList('codes')])
+          } catch (codeError) {
+            setSuccessMessage({
+              kind: 'warning',
+              text: `Кампания создана, но промокод не удалось создать: ${normalizeCodeCreateError(codeError)} Создайте код вручную во вкладке «Коды».`,
+              campaignId: createdCampaign.id,
+              showCreateCodeAction: true,
+            })
+            setCampaignModal(null)
+            await Promise.all([loadStats(), loadList('campaigns')])
+          }
+          return
+        }
         setSuccessMessage({
-          text: 'Кампания создана. Теперь создайте промокод во вкладке «Коды» и привяжите его к этой кампании.',
+          kind: 'success',
+          text: 'Кампания создана. Теперь можно создать промокод во вкладке «Коды».',
           campaignId: createdCampaign?.id,
+          showCreateCodeAction: true,
         })
+        setCampaignModal(null)
+        await loadData('campaigns')
       }
-      setCampaignModal(null)
-      await loadData('campaigns')
     } catch (err) {
       setFormError(err.message || 'Не удалось сохранить кампанию')
     }
@@ -655,8 +708,7 @@ export default function AdminPromoEngine() {
     return (
       <div className="space-y-4">
         <InfoBlock>
-          Кампания задаёт правила промоакции: кому доступен промокод, срок действия и размер бонусных баллов.
-          Сам промокод создаётся отдельно во вкладке «Коды» после сохранения кампании.
+          Кампания задаёт правила промоакции. Промокод можно создать сразу при создании кампании или позже во вкладке «Коды».
         </InfoBlock>
         <div className="bg-white p-4 rounded-lg border border-gray-200 grid grid-cols-1 md:grid-cols-4 gap-3">
           <select value={filters.campaigns.status} onChange={e => updateFilter('campaigns', 'status', e.target.value)} className={textInputClass()}>
@@ -916,7 +968,8 @@ export default function AdminPromoEngine() {
       <ErrorBlock error={error} />
       {successMessage ? (
         <InfoBlock
-          actions={successMessage.campaignId ? (
+          tone={successMessage.kind}
+          actions={successMessage.campaignId && successMessage.showCreateCodeAction !== false ? (
             <button
               onClick={() => {
                 setActiveTab('codes')
@@ -972,8 +1025,7 @@ export default function AdminPromoEngine() {
           <div className="space-y-4">
             <ErrorBlock error={formError} />
             <InfoBlock>
-              Кампания задаёт правила промоакции: кому доступен промокод, срок действия и размер бонусных баллов.
-              Сам промокод создаётся отдельно во вкладке «Коды» после сохранения кампании.
+              Кампания задаёт правила промоакции. Промокод можно создать сразу ниже или позже во вкладке «Коды».
             </InfoBlock>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <Field label="Название кампании" required helper="Внутреннее понятное название для админки. Например: «Июньская проверка промокодов»">
@@ -1042,6 +1094,48 @@ export default function AdminPromoEngine() {
               onChange={nextValue => setCampaignForm(prev => ({ ...prev, referrer_reward_config: nextValue }))}
               emptyHelper="Оставьте «Нет бонуса», если пригласившему мастеру не нужно начислять бонусные баллы."
             />
+            {campaignModal.mode === 'create' ? (
+              <div className="rounded-lg border border-gray-200 p-4">
+                <div className="mb-4">
+                  <h3 className="text-sm font-semibold text-gray-900">Промокод</h3>
+                  <p className="mt-1 text-xs leading-5 text-gray-500">
+                    Можно создать промокод сразу вместе с кампанией. Если оставить поле пустым, промокод можно будет создать позже во вкладке «Коды».
+                  </p>
+                </div>
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  <Field
+                    label="Промокод"
+                    helper="Код, который мастер будет вводить при регистрации или в личном кабинете. Будет автоматически приведён к верхнему регистру."
+                  >
+                    <input
+                      value={campaignCodeForm.code}
+                      onChange={e => setCampaignCodeForm(prev => ({ ...prev, code: e.target.value.trim().toUpperCase() }))}
+                      placeholder="ADMINSMOKE202606"
+                      className={`${textInputClass()} font-mono`}
+                    />
+                  </Field>
+                  <Field label="Лимит применений промокода" helper="Оставьте пустым, если лимита для этого промокода нет.">
+                    <input
+                      type="number"
+                      min="0"
+                      value={campaignCodeForm.max_redemptions}
+                      onChange={e => setCampaignCodeForm(prev => ({ ...prev, max_redemptions: e.target.value }))}
+                      placeholder="Без лимита"
+                      className={textInputClass()}
+                    />
+                  </Field>
+                  <Field label="ID пользователя, если код персональный" helper="Оставьте пустым для общего промокода.">
+                    <input
+                      type="number"
+                      value={campaignCodeForm.assigned_to_user_id}
+                      onChange={e => setCampaignCodeForm(prev => ({ ...prev, assigned_to_user_id: e.target.value }))}
+                      placeholder="Общий промокод"
+                      className={textInputClass()}
+                    />
+                  </Field>
+                </div>
+              </div>
+            ) : null}
             <div className="flex justify-end gap-3">
               <button onClick={() => setCampaignModal(null)} className="px-4 py-2 border border-gray-300 rounded-md">Отмена</button>
               <button onClick={saveCampaign} className="px-4 py-2 bg-[#4CAF50] text-white rounded-md">Сохранить</button>
