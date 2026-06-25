@@ -17,6 +17,7 @@ const CODE_STATUSES = ['active', 'disabled']
 const REDEMPTION_STATUSES = ['pending_first_payment', 'redeemed', 'cancelled', 'expired']
 const GRANT_STATUSES = ['pending', 'applied', 'cancelled', 'failed']
 const ELIGIBLE_ROLE_OPTIONS = ['master', 'indie']
+const REWARD_PERIODS = [1, 3, 6, 12]
 
 const STATUS_LABELS = {
   active: 'Активна',
@@ -123,15 +124,26 @@ function formatDate(value) {
   }
 }
 
+function formatDateOnly(value) {
+  if (!value) return '—'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return date.toLocaleDateString('ru-RU', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  })
+}
+
 function formatNumber(value) {
   return Number(value || 0).toLocaleString('ru-RU').replace(/\u00A0/g, ' ')
 }
 
-function toDateTimeLocal(value) {
+function toDateInput(value) {
   if (!value) return ''
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return ''
-  return date.toISOString().slice(0, 16)
+  return date.toISOString().slice(0, 10)
 }
 
 function parseJsonField(value, fieldName) {
@@ -140,11 +152,11 @@ function parseJsonField(value, fieldName) {
   try {
     const parsed = JSON.parse(trimmed)
     if (!Array.isArray(parsed) && (typeof parsed !== 'object' || parsed === null)) {
-      throw new Error(`${fieldName}: нужен JSON-объект или JSON-массив`)
+      throw new Error(`${fieldName}: неверный формат данных`)
     }
     return parsed
   } catch (error) {
-    throw new Error(error.message || `${fieldName}: неверный JSON`)
+    throw new Error(error.message || `${fieldName}: неверный формат данных`)
   }
 }
 
@@ -153,9 +165,41 @@ function cleanOptionalNumber(value) {
   return Number(value)
 }
 
-function cleanOptionalDate(value) {
+function cleanOptionalCampaignDate(value, boundary) {
   if (!value) return undefined
-  return new Date(value).toISOString()
+  return `${value}T${boundary === 'end' ? '23:59:59' : '00:00:00'}`
+}
+
+function parseRewardConfig(value) {
+  const trimmed = String(value || '').trim()
+  if (!trimmed) return {}
+  try {
+    const parsed = JSON.parse(trimmed)
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
+function stringifyRewardConfig(config) {
+  const normalized = {}
+  REWARD_PERIODS.forEach(period => {
+    const raw = config?.[period] ?? config?.[String(period)]
+    const value = raw === '' || raw == null ? 0 : Number(raw)
+    normalized[String(period)] = Number.isFinite(value) ? value : 0
+  })
+  return JSON.stringify(normalized)
+}
+
+function isEmptyRewardConfig(value) {
+  const config = parseRewardConfig(value)
+  return Object.keys(config).length === 0 || REWARD_PERIODS.every(period => Number(config[String(period)] || 0) === 0)
+}
+
+function monthWord(months) {
+  if (months === 1) return 'месяц'
+  if (months >= 2 && months <= 4) return 'месяца'
+  return 'месяцев'
 }
 
 function buildCampaignPayload(form, partial = false) {
@@ -164,8 +208,8 @@ function buildCampaignPayload(form, partial = false) {
     promo_category: form.promo_category,
     type: form.type,
     status: form.status,
-    starts_at: cleanOptionalDate(form.starts_at),
-    ends_at: cleanOptionalDate(form.ends_at),
+    starts_at: cleanOptionalCampaignDate(form.starts_at, 'start'),
+    ends_at: cleanOptionalCampaignDate(form.ends_at, 'end'),
     max_total_redemptions: cleanOptionalNumber(form.max_total_redemptions),
     max_redemptions_per_user: cleanOptionalNumber(form.max_redemptions_per_user),
     first_payment_only: Boolean(form.first_payment_only),
@@ -323,6 +367,81 @@ function EmptyTableRow({ colSpan, message = 'Данных пока нет' }) {
   )
 }
 
+function RewardConfigEditor({ title, value, onChange, emptyHelper }) {
+  const mode = isEmptyRewardConfig(value) ? 'none' : 'percent'
+  const config = parseRewardConfig(value)
+
+  const setMode = (nextMode) => {
+    if (nextMode === 'none') {
+      onChange('')
+      return
+    }
+    if (nextMode === 'percent') {
+      onChange(stringifyRewardConfig(config))
+    }
+  }
+
+  const updatePeriod = (period, nextValue) => {
+    onChange(stringifyRewardConfig({
+      ...config,
+      [String(period)]: nextValue,
+    }))
+  }
+
+  return (
+    <div className="rounded-lg border border-gray-200 p-4">
+      <div className="mb-3">
+        <h3 className="text-sm font-semibold text-gray-900">{title}</h3>
+        <p className="mt-1 text-xs leading-5 text-gray-500">
+          Выберите, будет ли начисляться бонус и как считать бонусные баллы подписки.
+        </p>
+      </div>
+
+      <Field label="Тип бонуса">
+        <select value={mode} onChange={e => setMode(e.target.value)} className={textInputClass()}>
+          <option value="none">Нет бонуса</option>
+          <option value="percent">Процент от оплаты подписки</option>
+          <option value="fixed" disabled>Фиксированные бонусные баллы (потребуется backend-поддержка)</option>
+        </select>
+      </Field>
+
+      {mode === 'none' ? (
+        <HelperText>{emptyHelper}</HelperText>
+      ) : null}
+
+      {mode === 'percent' ? (
+        <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-4">
+          {REWARD_PERIODS.map(period => (
+            <Field
+              key={period}
+              label={`При оплате на ${period} ${monthWord(period)}, %`}
+              helper={period === 1 ? '0 означает, что за этот период бонус не начисляется.' : null}
+            >
+              <input
+                type="number"
+                min="0"
+                max="100"
+                value={config[String(period)] ?? 0}
+                onChange={e => updatePeriod(period, e.target.value)}
+                className={textInputClass()}
+              />
+            </Field>
+          ))}
+          <div className="md:col-span-4">
+            <HelperText>
+              Например: 3 месяца = 15 означает, что после оплаты подписки на 3 месяца мастер получит 15% от суммы оплаты бонусными баллами подписки.
+            </HelperText>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <button type="button" onClick={() => onChange(stringifyRewardConfig({ 1: 0, 3: 15, 6: 20, 12: 25 }))} className="rounded border border-gray-300 px-3 py-1 text-xs text-gray-700 hover:bg-gray-50">15/20/25 за 3/6/12</button>
+              <button type="button" onClick={() => onChange(stringifyRewardConfig({ 1: 0, 3: 0, 6: 0, 12: 0 }))} className="rounded border border-gray-300 px-3 py-1 text-xs text-gray-700 hover:bg-gray-50">Обнулить проценты</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
 export default function AdminPromoEngine() {
   const [activeTab, setActiveTab] = useState('campaigns')
   const [stats, setStats] = useState(null)
@@ -447,8 +566,8 @@ export default function AdminPromoEngine() {
       promo_category: campaign.promo_category || 'acquisition',
       type: campaign.type || 'admin_campaign',
       status: campaign.status || 'active',
-      starts_at: toDateTimeLocal(campaign.starts_at),
-      ends_at: toDateTimeLocal(campaign.ends_at),
+      starts_at: toDateInput(campaign.starts_at),
+      ends_at: toDateInput(campaign.ends_at),
       max_total_redemptions: campaign.max_total_redemptions ?? '',
       max_redemptions_per_user: campaign.max_redemptions_per_user ?? '1',
       first_payment_only: Boolean(campaign.first_payment_only),
@@ -571,7 +690,7 @@ export default function AdminPromoEngine() {
                       <td className="px-4 py-3 text-sm font-medium text-gray-900">{campaign.name}</td>
                       <td className="px-4 py-3 text-sm text-gray-600">{displayLabel(CATEGORY_LABELS, campaign.promo_category)}<br />{displayLabel(CAMPAIGN_TYPE_LABELS, campaign.type)}</td>
                       <td className="px-4 py-3"><span className={`px-2 py-1 text-xs rounded-full ${statusBadgeClass(campaign.status)}`}>{displayLabel(STATUS_LABELS, campaign.status)}</span></td>
-                      <td className="px-4 py-3 text-sm text-gray-600">{formatDate(campaign.starts_at)}<br />{formatDate(campaign.ends_at)}</td>
+                      <td className="px-4 py-3 text-sm text-gray-600">{formatDateOnly(campaign.starts_at)}<br />{formatDateOnly(campaign.ends_at)}</td>
                       <td className="px-4 py-3 text-sm text-gray-600">Всего: {campaign.max_total_redemptions ?? '∞'}<br />На мастера: {campaign.max_redemptions_per_user}</td>
                       <td className="px-4 py-3 text-sm text-gray-600">
                         Коды: {campaign.stats?.codes_count ?? 0}<br />
@@ -875,11 +994,11 @@ export default function AdminPromoEngine() {
                   {CAMPAIGN_TYPES.map(type => <option key={type} value={type}>{displayLabel(CAMPAIGN_TYPE_LABELS, type)}</option>)}
                 </select>
               </Field>
-              <Field label="Дата начала">
-                <input type="datetime-local" value={campaignForm.starts_at} onChange={e => setCampaignForm(prev => ({ ...prev, starts_at: e.target.value }))} className={textInputClass()} />
+              <Field label="Дата начала" helper="Кампания действует с 00:00 даты начала до 23:59 даты окончания.">
+                <input type="date" value={campaignForm.starts_at} onChange={e => setCampaignForm(prev => ({ ...prev, starts_at: e.target.value }))} className={textInputClass()} />
               </Field>
-              <Field label="Дата окончания">
-                <input type="datetime-local" value={campaignForm.ends_at} onChange={e => setCampaignForm(prev => ({ ...prev, ends_at: e.target.value }))} className={textInputClass()} />
+              <Field label="Дата окончания" helper="Если оставить пустым, кампания не будет ограничена датой окончания.">
+                <input type="date" value={campaignForm.ends_at} onChange={e => setCampaignForm(prev => ({ ...prev, ends_at: e.target.value }))} className={textInputClass()} />
               </Field>
               <Field label="Общий лимит применений" helper="Оставьте пустым, если общего лимита нет.">
                 <input type="number" min="0" value={campaignForm.max_total_redemptions} onChange={e => setCampaignForm(prev => ({ ...prev, max_total_redemptions: e.target.value }))} placeholder="Без лимита" className={textInputClass()} />
@@ -887,8 +1006,8 @@ export default function AdminPromoEngine() {
               <Field label="Лимит на одного мастера" helper="Обычно 1, чтобы один мастер мог применить код только один раз.">
                 <input type="number" min="1" value={campaignForm.max_redemptions_per_user} onChange={e => setCampaignForm(prev => ({ ...prev, max_redemptions_per_user: e.target.value }))} className={textInputClass()} />
               </Field>
-              <Field label="Минимальный период оплаты, мес." helper="Например, 3 означает: бонус доступен при оплате от 3 месяцев.">
-                <input type="number" min="1" value={campaignForm.min_subscription_months} onChange={e => setCampaignForm(prev => ({ ...prev, min_subscription_months: e.target.value }))} className={textInputClass()} />
+              <Field label="Минимальный период оплаты, мес." helper="0 = промокод применяется без оплаты. 3 = бонус доступен только при оплате от 3 месяцев.">
+                <input type="number" min="0" value={campaignForm.min_subscription_months} onChange={e => setCampaignForm(prev => ({ ...prev, min_subscription_months: e.target.value }))} className={textInputClass()} />
               </Field>
               <label className="flex items-center gap-2 text-sm text-gray-700 pt-7">
                 <input type="checkbox" checked={campaignForm.first_payment_only} onChange={e => setCampaignForm(prev => ({ ...prev, first_payment_only: e.target.checked }))} />
@@ -909,40 +1028,20 @@ export default function AdminPromoEngine() {
                   </label>
                 ))}
               </div>
-              <HelperText>Обычно: Мастер и Мастер / самозанятый. Технический формат: JSON-массив ролей.</HelperText>
+              <HelperText>Обычно промокод доступен мастерам и самозанятым мастерам.</HelperText>
             </div>
-            <Field
-              label="Бонус мастеру, который применил код"
-              helper="Ключ — период оплаты в месяцах, значение — процент от суммы оплаты, который начислится бонусными баллами подписки. Технический формат: JSON."
-            >
-              <textarea
-                value={campaignForm.beneficiary_reward_config}
-                onChange={e => setCampaignForm(prev => ({ ...prev, beneficiary_reward_config: e.target.value }))}
-                placeholder='{ "1": 0, "3": 15, "6": 20, "12": 25 }'
-                className={`${textInputClass()} font-mono text-sm`}
-                rows={3}
-              />
-              <div className="mt-2 flex flex-wrap gap-2">
-                <button type="button" onClick={() => setCampaignForm(prev => ({ ...prev, beneficiary_reward_config: '{}' }))} className="rounded border border-gray-300 px-3 py-1 text-xs text-gray-700 hover:bg-gray-50">Нет бонуса</button>
-                <button type="button" onClick={() => setCampaignForm(prev => ({ ...prev, beneficiary_reward_config: '{"1":0,"3":15,"6":20,"12":25}' }))} className="rounded border border-gray-300 px-3 py-1 text-xs text-gray-700 hover:bg-gray-50">15/20/25 за 3/6/12</button>
-              </div>
-            </Field>
-            <Field
-              label="Бонус пригласившему мастеру"
-              helper="Оставьте пустым, если бонус пригласившему мастеру не нужен. Технический формат: JSON."
-            >
-              <textarea
-                value={campaignForm.referrer_reward_config}
-                onChange={e => setCampaignForm(prev => ({ ...prev, referrer_reward_config: e.target.value }))}
-                placeholder='{ "1": 0, "3": 15, "6": 20, "12": 25 }'
-                className={`${textInputClass()} font-mono text-sm`}
-                rows={3}
-              />
-              <div className="mt-2 flex flex-wrap gap-2">
-                <button type="button" onClick={() => setCampaignForm(prev => ({ ...prev, referrer_reward_config: '' }))} className="rounded border border-gray-300 px-3 py-1 text-xs text-gray-700 hover:bg-gray-50">Нет бонуса</button>
-                <button type="button" onClick={() => setCampaignForm(prev => ({ ...prev, referrer_reward_config: prev.beneficiary_reward_config }))} className="rounded border border-gray-300 px-3 py-1 text-xs text-gray-700 hover:bg-gray-50">Такой же бонус пригласившему</button>
-              </div>
-            </Field>
+            <RewardConfigEditor
+              title="Бонус мастеру, который применил код"
+              value={campaignForm.beneficiary_reward_config}
+              onChange={nextValue => setCampaignForm(prev => ({ ...prev, beneficiary_reward_config: nextValue }))}
+              emptyHelper="Мастер, который применил код, не получит бонусные баллы по этой кампании."
+            />
+            <RewardConfigEditor
+              title="Бонус пригласившему мастеру"
+              value={campaignForm.referrer_reward_config}
+              onChange={nextValue => setCampaignForm(prev => ({ ...prev, referrer_reward_config: nextValue }))}
+              emptyHelper="Оставьте «Нет бонуса», если пригласившему мастеру не нужно начислять бонусные баллы."
+            />
             <div className="flex justify-end gap-3">
               <button onClick={() => setCampaignModal(null)} className="px-4 py-2 border border-gray-300 rounded-md">Отмена</button>
               <button onClick={saveCampaign} className="px-4 py-2 bg-[#4CAF50] text-white rounded-md">Сохранить</button>

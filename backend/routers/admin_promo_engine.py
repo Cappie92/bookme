@@ -72,11 +72,13 @@ def _periods_from_min_months(value: Optional[int]) -> Optional[list[int]]:
     if value is None:
         return None
     months = int(value)
-    if months < 1:
+    if months < 0:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="min_subscription_months должен быть >= 1",
+            detail="min_subscription_months должен быть >= 0",
         )
+    if months == 0:
+        return list(SUPPORTED_PERIODS)
     return [period for period in SUPPORTED_PERIODS if period >= months]
 
 

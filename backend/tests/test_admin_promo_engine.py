@@ -219,6 +219,27 @@ def test_create_campaign_success(client, admin_auth_headers, db):
     assert db.query(PromoCampaign).filter(PromoCampaign.name == "Admin Summer").count() == 1
 
 
+def test_create_campaign_accepts_zero_min_subscription_months(client, admin_auth_headers):
+    response = client.post(
+        f"{BASE}/campaigns",
+        headers=admin_auth_headers,
+        json={
+            "name": "No Min Period",
+            "promo_category": "acquisition",
+            "type": "admin_campaign",
+            "status": "active",
+            "min_subscription_months": 0,
+            "eligible_roles": ["master", "indie"],
+            "beneficiary_reward_config": {"1": 0, "3": 15, "6": 20, "12": 25},
+        },
+    )
+
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["name"] == "No Min Period"
+    assert body["eligible_period_months"] == [1, 3, 6, 12]
+
+
 def test_list_campaigns_returns_paginated_shape(client, admin_auth_headers, db):
     _campaign(db, "List Campaign")
 
@@ -244,6 +265,21 @@ def test_patch_campaign_status_and_name_success(client, admin_auth_headers, db):
     body = response.json()
     assert body["name"] == "After Patch"
     assert body["status"] == "paused"
+
+
+def test_patch_campaign_accepts_zero_min_subscription_months(client, admin_auth_headers, db):
+    campaign = _campaign(db, "Patch Zero Min")
+    campaign.eligible_period_months = [3, 6, 12]
+    db.commit()
+
+    response = client.patch(
+        f"{BASE}/campaigns/{campaign.id}",
+        headers=admin_auth_headers,
+        json={"min_subscription_months": 0},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["eligible_period_months"] == [1, 3, 6, 12]
 
 
 def test_create_code_success_uses_promo_engine_codes(client, admin_auth_headers, db):
