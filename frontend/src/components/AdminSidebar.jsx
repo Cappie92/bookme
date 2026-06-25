@@ -7,7 +7,8 @@ import {
   ChartBarIcon,
   CogIcon,
   WrenchScrewdriverIcon,
-  ClockIcon
+  ClockIcon,
+  TagIcon
 } from "@heroicons/react/24/outline"
 
 export default function AdminSidebar() {
@@ -43,6 +44,11 @@ export default function AdminSidebar() {
       name: "Функции",
       href: "/admin/functions",
       icon: WrenchScrewdriverIcon,
+    },
+    {
+      name: "Промокоды",
+      href: "/admin/promo-engine",
+      icon: TagIcon,
     },
     {
       name: "Логи всегда бесплатно",

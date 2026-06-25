@@ -60,6 +60,7 @@ const AdminSettings = lazy(() => import("./pages/AdminSettings"))
 const AdminModerators = lazy(() => import("./pages/AdminModerators"))
 const AdminFunctions = lazy(() => import("./pages/AdminFunctions"))
 const AdminAlwaysFreeLogs = lazy(() => import("./pages/AdminAlwaysFreeLogs"))
+const AdminPromoEngine = lazy(() => import("./pages/AdminPromoEngine"))
 
 // Test pages
 const AuthTest = lazy(() => import("./pages/AuthTest"))
@@ -148,6 +149,7 @@ function App() {
           <Route path="/admin/blog" element={<AdminLayout><AdminBlog/></AdminLayout>} />
           <Route path="/admin/stats" element={<AdminLayout><AdminStats/></AdminLayout>} />
           <Route path="/admin/functions" element={<AdminLayout><AdminFunctions/></AdminLayout>} />
+          <Route path="/admin/promo-engine" element={<AdminLayout><AdminPromoEngine/></AdminLayout>} />
           <Route path="/admin/always-free-logs" element={<AdminLayout><AdminAlwaysFreeLogs/></AdminLayout>} />
           <Route path="/admin/settings" element={<AdminLayout><AdminSettings/></AdminLayout>} />
           <Route path="/user-agreement" element={<UserAgreement/>} />
