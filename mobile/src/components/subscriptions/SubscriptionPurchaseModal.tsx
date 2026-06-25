@@ -20,6 +20,8 @@ import {
   SubscriptionPlan,
   SubscriptionType,
   fetchAvailableSubscriptions,
+  fetchPricingCatalog,
+  type PricingCatalogServiceFunction,
   calculateSubscription,
   deleteSubscriptionCalculationSnapshot,
   SubscriptionCalculationResponse,
@@ -37,6 +39,11 @@ import {
   sanitizePaymentRedirectUrl,
   shouldPaySubscriptionFromBalance,
 } from '@src/utils/subscriptionPayment';
+import {
+  getPeriodStepSubscriptionPurchasePromoPreviewDisplay,
+} from '@src/utils/subscriptionPurchasePromoPreview';
+import { getPromoPreviewDisplay } from '@src/utils/promoEngine';
+import { getSubscriptionPlanFeatureLabels } from '@src/utils/subscriptionPlanFeatures';
 
 type UpgradeType = 'immediate' | 'after_expiry';
 
@@ -104,13 +111,58 @@ function CalculationLoadingState() {
   );
 }
 
+function PromoPreviewBlock({
+  display,
+  testID,
+}: {
+  display: ReturnType<typeof getPromoPreviewDisplay>;
+  testID: string;
+}) {
+  if (!display) return null;
+  return (
+    <View
+      testID={testID}
+      style={[
+        styles.promoPreviewCard,
+        display.tone === 'positive'
+          ? styles.promoPreviewCardPositive
+          : styles.promoPreviewCardNeutral,
+      ]}
+    >
+      <Text
+        style={[
+          styles.promoPreviewTitle,
+          display.tone === 'positive'
+            ? styles.promoPreviewTitlePositive
+            : styles.promoPreviewTitleNeutral,
+        ]}
+      >
+        Промокод
+      </Text>
+      <Text
+        style={[
+          styles.promoPreviewMessage,
+          display.tone === 'positive'
+            ? styles.promoPreviewMessagePositive
+            : styles.promoPreviewMessageNeutral,
+        ]}
+      >
+        {display.message}
+      </Text>
+      <Text style={styles.promoPreviewHelper}>{display.helper}</Text>
+    </View>
+  );
+}
+
 function StepPlan({
   plans,
+  serviceFunctions,
   selectedPlanId,
   currentPlanId,
   onSelectPlan,
 }: {
   plans: SubscriptionPlan[];
+  serviceFunctions: PricingCatalogServiceFunction[];
   selectedPlanId: number | null;
   currentPlanId: number | null;
   onSelectPlan: (plan: SubscriptionPlan) => void;
@@ -123,6 +175,7 @@ function StepPlan({
           const isSelected = selectedPlanId === plan.id;
           const isCurrent = !!currentPlanId && plan.id === currentPlanId;
           const minPrice = getMinMonthlyPrice(plan);
+          const features = getSubscriptionPlanFeatureLabels(plan, serviceFunctions);
           return (
             <Pressable
               key={plan.id}
@@ -144,6 +197,15 @@ function StepPlan({
                   <Text style={styles.radioSub} numberOfLines={1}>
                     от {formatMoney(minPrice)} /мес
                   </Text>
+                  {features.length > 0 ? (
+                    <View style={styles.planFeaturesList}>
+                      {features.map((feature) => (
+                        <Text key={feature} style={styles.planFeatureText}>
+                          • {feature}
+                        </Text>
+                      ))}
+                    </View>
+                  ) : null}
                 </View>
                 <View style={[styles.radioMark, isSelected && styles.radioMarkSelected]}>
                   {isSelected ? <Ionicons name="checkmark" size={16} color="#fff" /> : null}
@@ -168,6 +230,8 @@ function StepPeriod({
   upgradeType,
   onChangeUpgradeType,
   isDowngrade,
+  loadingCalculation,
+  calculation,
 }: {
   selectedPlan: SubscriptionPlan | null;
   currentPlanLabel: string | null;
@@ -177,11 +241,14 @@ function StepPeriod({
   upgradeType: UpgradeType;
   onChangeUpgradeType: (nextType: UpgradeType) => void;
   isDowngrade: boolean;
+  loadingCalculation: boolean;
+  calculation: SubscriptionCalculationResponse | null;
 }) {
   const selectedSavings =
     selectedPlan && selectedDuration
       ? getPlanPeriodSavings(selectedPlan, selectedDuration)
       : null;
+  const promoPreview = getPeriodStepSubscriptionPurchasePromoPreviewDisplay(calculation);
 
   return (
     <View>
@@ -231,6 +298,40 @@ function StepPeriod({
       ) : (
         <Text style={styles.hint}>Цена зависит от периода</Text>
       )}
+
+      <View style={styles.periodCalculationCard}>
+        <Text style={styles.periodCalculationTitle}>Расчет</Text>
+        {loadingCalculation ? (
+          <CalculationLoadingState />
+        ) : calculation ? (
+          <>
+            <View style={styles.tableRow}>
+              <Text style={[styles.tableKey, styles.tableKeyStrong]}>К оплате</Text>
+              <Text style={[styles.tableVal, styles.tableValStrong]} numberOfLines={1}>
+                {formatMoney(calculation.final_price)}
+              </Text>
+            </View>
+            <View style={styles.tableRow}>
+              <Text style={styles.tableKey}>Стоимость</Text>
+              <Text style={styles.tableVal} numberOfLines={1}>
+                {formatMoney(calculation.total_price)}
+              </Text>
+            </View>
+            {calculation.savings_percent ? (
+              <View style={styles.tableRow}>
+                <Text style={styles.tableKey}>Экономия</Text>
+                <Text style={styles.tableVal}>{Math.round(calculation.savings_percent)}%</Text>
+              </View>
+            ) : null}
+            <PromoPreviewBlock
+              display={promoPreview}
+              testID="subscription-period-promo-preview"
+            />
+          </>
+        ) : (
+          <Text style={styles.muted}>Выберите тариф и период, чтобы увидеть расчет</Text>
+        )}
+      </View>
 
       {isDowngrade ? (
         <Text style={styles.breakdownHint}>
@@ -353,23 +454,6 @@ function StepCheckout({
             </Pressable>
           ) : null}
 
-          {__DEV__ ? (
-            <Text style={styles.debugJson} selectable>
-              {JSON.stringify(
-                {
-                  upgrade_type: (calculation as any).upgrade_type,
-                  total_price: (calculation as any).total_price,
-                  final_price: (calculation as any).final_price,
-                  current_plan_credit: (calculation as any).current_plan_credit,
-                  current_plan_accrued: (calculation as any).current_plan_accrued,
-                  current_plan_reserved_remaining: (calculation as any).current_plan_reserved_remaining,
-                  credit_source: (calculation as any).credit_source,
-                },
-                null,
-                2
-              )}
-            </Text>
-          ) : null}
         </View>
       ) : (
         <Text style={styles.muted}>Выберите период, чтобы увидеть расчет</Text>
@@ -384,15 +468,18 @@ export function SubscriptionPurchaseModal({
   subscriptionType,
   currentSubscription,
   onRefreshAfterPayment,
+  promoStateVersion,
 }: {
   visible: boolean;
   onClose: () => void;
   subscriptionType: SubscriptionType;
   currentSubscription: Subscription | null;
   onRefreshAfterPayment?: () => void;
+  promoStateVersion?: number;
 }) {
   const insets = useSafeAreaInsets();
   const [plans, setPlans] = React.useState<SubscriptionPlan[]>([]);
+  const [serviceFunctions, setServiceFunctions] = React.useState<PricingCatalogServiceFunction[]>([]);
   const [loadingPlans, setLoadingPlans] = React.useState(false);
   const [plansError, setPlansError] = React.useState<string | null>(null);
 
@@ -406,6 +493,8 @@ export function SubscriptionPurchaseModal({
   const [loadingCalculation, setLoadingCalculation] = React.useState(false);
   const [loadingPayment, setLoadingPayment] = React.useState(false);
   const [paymentOpened, setPaymentOpened] = React.useState(false);
+  const calculationRequestSeq = React.useRef(0);
+  const calculationIdRef = React.useRef<number | null>(null);
 
   const isFreePlan =
     !currentSubscription?.plan_id ||
@@ -421,13 +510,16 @@ export function SubscriptionPurchaseModal({
     !!currentPlanDisplayOrder && !!selectedPlan && selectedPlan.display_order > currentPlanDisplayOrder;
 
   const resetState = React.useCallback(async () => {
+    const calculationId = calculationIdRef.current;
     try {
-      if (calculation?.calculation_id) {
-        await deleteSubscriptionCalculationSnapshot(calculation.calculation_id);
+      if (calculationId) {
+        await deleteSubscriptionCalculationSnapshot(calculationId);
       }
     } catch {
       // ignore
     } finally {
+      calculationRequestSeq.current += 1;
+      calculationIdRef.current = null;
       setStep(1);
       setSelectedPlan(null);
       setSelectedDuration(null);
@@ -439,7 +531,7 @@ export function SubscriptionPurchaseModal({
       setPaymentOpened(false);
       setPlansError(null);
     }
-  }, [calculation?.calculation_id]);
+  }, []);
 
   React.useEffect(() => {
     if (!visible) return;
@@ -448,7 +540,15 @@ export function SubscriptionPurchaseModal({
       try {
         setLoadingPlans(true);
         setPlansError(null);
-        const data = await fetchAvailableSubscriptions(subscriptionType);
+        let data: SubscriptionPlan[] = [];
+        try {
+          const catalog = await fetchPricingCatalog(subscriptionType);
+          data = catalog.plans as SubscriptionPlan[];
+          setServiceFunctions(Array.isArray(catalog.service_functions) ? catalog.service_functions : []);
+        } catch {
+          data = await fetchAvailableSubscriptions(subscriptionType);
+          setServiceFunctions([]);
+        }
         const filtered = data
           .filter((p) => p.name !== 'Free' && p.name !== 'AlwaysFree')
           .sort((a, b) => a.display_order - b.display_order);
@@ -470,11 +570,14 @@ export function SubscriptionPurchaseModal({
   };
 
   const handlePlanSelect = (plan: SubscriptionPlan) => {
-    // При смене плана — сбрасываем расчет
+    // При смене плана сбрасываем период и расчет, чтобы следующий шаг был чистым.
     if (selectedPlan && selectedPlan.id !== plan.id) {
-      if (calculation?.calculation_id) {
-        deleteSubscriptionCalculationSnapshot(calculation.calculation_id).catch(() => undefined);
+      calculationRequestSeq.current += 1;
+      const previousCalculationId = calculationIdRef.current;
+      if (previousCalculationId) {
+        deleteSubscriptionCalculationSnapshot(previousCalculationId).catch(() => undefined);
       }
+      calculationIdRef.current = null;
       setCalculation(null);
       setSelectedDuration(null);
     }
@@ -496,39 +599,54 @@ export function SubscriptionPurchaseModal({
     }
   };
 
-  const handleDurationSelect = async (
-    months: 1 | 3 | 6 | 12,
-    opts?: { upgradeTypeOverride?: UpgradeType }
-  ) => {
-    if (!selectedPlan) return;
-    const upgradeTypeToUse = opts?.upgradeTypeOverride ?? upgradeType;
+  const handleDurationSelect = (months: 1 | 3 | 6 | 12) => {
     setSelectedDuration(months);
+  };
+
+  const calculateSelectedSubscription = React.useCallback(async () => {
+    if (!visible || !selectedPlan || !selectedDuration) return;
+    const plan = selectedPlan;
+    const duration = selectedDuration;
+    const upgradeTypeToUse = upgradeType;
+    const request = {
+      plan_id: plan.id,
+      duration_months: duration,
+      upgrade_type: upgradeTypeToUse,
+    };
+    const requestId = calculationRequestSeq.current + 1;
+    calculationRequestSeq.current = requestId;
+    const previousCalculationId = calculationIdRef.current;
+    setCalculation(null);
     setLoadingCalculation(true);
     try {
       // best-effort cleanup предыдущего snapshot
-      if (calculation?.calculation_id) {
-        deleteSubscriptionCalculationSnapshot(calculation.calculation_id).catch(() => undefined);
+      if (previousCalculationId) {
+        deleteSubscriptionCalculationSnapshot(previousCalculationId).catch(() => undefined);
       }
-      const data = await calculateSubscription({
-        plan_id: selectedPlan.id,
-        duration_months: months,
-        upgrade_type: upgradeTypeToUse,
-      });
-      setCalculation(data);
+      const data = await calculateSubscription(request);
+      if (calculationRequestSeq.current === requestId) {
+        calculationIdRef.current = data.calculation_id ?? null;
+        setCalculation(data);
+      }
     } catch (e: any) {
-      Alert.alert('Ошибка', e?.response?.data?.detail || 'Не удалось рассчитать стоимость');
-      setCalculation(null);
+      if (calculationRequestSeq.current === requestId) {
+        const errorText = String(e?.response?.data?.detail || e?.message || 'Не удалось рассчитать стоимость');
+        Alert.alert('Ошибка', errorText);
+        setCalculation(null);
+      }
     } finally {
-      setLoadingCalculation(false);
+      if (calculationRequestSeq.current === requestId) {
+        setLoadingCalculation(false);
+      }
     }
-  };
+  }, [visible, selectedPlan, selectedDuration, upgradeType]);
 
-  const handleUpgradeTypeChange = async (nextType: UpgradeType) => {
+  React.useEffect(() => {
+    calculateSelectedSubscription();
+  }, [calculateSelectedSubscription, promoStateVersion]);
+
+  const handleUpgradeTypeChange = (nextType: UpgradeType) => {
     setUpgradeType(nextType);
-    // Пересчитать, если уже выбран период
-    if (selectedDuration) {
-      await handleDurationSelect(selectedDuration, { upgradeTypeOverride: nextType });
-    }
   };
 
   const payFromBalance = React.useMemo(() => {
@@ -660,7 +778,7 @@ export function SubscriptionPurchaseModal({
   const currentPlanLabel = getPlanTitle(currentSubscription ?? undefined) || null;
 
   const canGoNextFromStep1 = !!selectedPlan;
-  const canGoNextFromStep2 = !!selectedPlan && !!selectedDuration;
+  const canGoNextFromStep2 = !!selectedPlan && !!selectedDuration && !!calculation && !loadingCalculation;
   const canPay =
     !!selectedPlan &&
     !!selectedDuration &&
@@ -717,6 +835,7 @@ export function SubscriptionPurchaseModal({
       return (
         <StepPlan
           plans={plans}
+          serviceFunctions={serviceFunctions}
           selectedPlanId={selectedPlan?.id ?? null}
           currentPlanId={currentPlanId}
           onSelectPlan={handlePlanSelect}
@@ -734,6 +853,8 @@ export function SubscriptionPurchaseModal({
           upgradeType={upgradeType}
           onChangeUpgradeType={handleUpgradeTypeChange}
           isDowngrade={!!currentPlanDisplayOrder && !!selectedPlan && selectedPlan.display_order < currentPlanDisplayOrder}
+          loadingCalculation={loadingCalculation}
+          calculation={calculation}
         />
       );
     }
@@ -800,7 +921,7 @@ export function SubscriptionPurchaseModal({
                 <Text style={styles.footerSecondaryText}>{step === 1 ? 'Закрыть' : 'Назад'}</Text>
               </Pressable>
 
-              {step < 3 ? (
+              {step < totalSteps ? (
                 <Pressable
                   onPress={goNext}
                   disabled={(step === 1 && !canGoNextFromStep1) || (step === 2 && !canGoNextFromStep2)}
@@ -971,6 +1092,16 @@ const styles = StyleSheet.create({
     color: '#666',
     fontWeight: '600',
   },
+  planFeaturesList: {
+    marginTop: 8,
+    gap: 3,
+  },
+  planFeatureText: {
+    fontSize: 12,
+    color: '#555',
+    fontWeight: '600',
+    lineHeight: 17,
+  },
   badge: {
     paddingHorizontal: 8,
     paddingVertical: 2,
@@ -1011,6 +1142,21 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#555',
     fontWeight: '600',
+  },
+  periodCalculationCard: {
+    marginTop: 12,
+    borderWidth: 1,
+    borderColor: '#eee',
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    backgroundColor: '#fff',
+  },
+  periodCalculationTitle: {
+    fontSize: 13,
+    fontWeight: '900',
+    color: '#111',
+    marginBottom: 10,
   },
   segmented: {
     flexDirection: 'row',
@@ -1131,12 +1277,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
   },
-  debugJson: {
-    marginTop: 8,
-    fontSize: 10,
-    color: '#888',
-    fontWeight: '600',
-  },
   table: {
     borderWidth: 1,
     borderColor: '#eee',
@@ -1168,6 +1308,50 @@ const styles = StyleSheet.create({
   tableValStrong: {
     fontSize: 15,
     color: '#111',
+  },
+  promoPreviewCard: {
+    marginTop: 10,
+    borderWidth: 1,
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+  },
+  promoPreviewCardPositive: {
+    backgroundColor: '#E8F5E9',
+    borderColor: '#C8E6C9',
+  },
+  promoPreviewCardNeutral: {
+    backgroundColor: '#FFFBEB',
+    borderColor: '#FDE68A',
+  },
+  promoPreviewTitle: {
+    fontSize: 12,
+    fontWeight: '900',
+    marginBottom: 4,
+  },
+  promoPreviewTitlePositive: {
+    color: '#1B5E20',
+  },
+  promoPreviewTitleNeutral: {
+    color: '#92400E',
+  },
+  promoPreviewMessage: {
+    fontSize: 13,
+    fontWeight: '800',
+    lineHeight: 18,
+  },
+  promoPreviewMessagePositive: {
+    color: '#1B5E20',
+  },
+  promoPreviewMessageNeutral: {
+    color: '#92400E',
+  },
+  promoPreviewHelper: {
+    marginTop: 6,
+    fontSize: 12,
+    color: '#555',
+    fontWeight: '600',
+    lineHeight: 17,
   },
   switchRowCompact: {
     marginTop: 10,

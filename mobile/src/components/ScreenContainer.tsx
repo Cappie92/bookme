@@ -1,4 +1,4 @@
-import { ReactNode } from 'react';
+import { ReactNode, Ref } from 'react';
 import { View, StyleSheet, ScrollView, ScrollViewProps } from 'react-native';
 import { SafeAreaView, SafeAreaViewProps } from 'react-native-safe-area-context';
 
@@ -6,6 +6,7 @@ interface ScreenContainerProps {
   children: ReactNode;
   scrollable?: boolean;
   scrollViewProps?: ScrollViewProps;
+  scrollViewRef?: Ref<ScrollView>;
   safeAreaProps?: SafeAreaViewProps;
   backgroundColor?: string;
   /** Уменьшить верхний отступ (когда экран уже имеет header) */
@@ -16,6 +17,7 @@ export function ScreenContainer({
   children,
   scrollable = false,
   scrollViewProps,
+  scrollViewRef,
   safeAreaProps,
   backgroundColor = '#f5f5f5',
   compactTop = false,
@@ -41,6 +43,7 @@ export function ScreenContainer({
     return (
       <SafeAreaView style={containerStyle} edges={defaultEdges} {...safeAreaProps}>
         <ScrollView
+          ref={scrollViewRef}
           {...restScrollProps}
           style={[styles.scrollView, scrollStyleProp]}
           contentContainerStyle={mergedContentStyle}

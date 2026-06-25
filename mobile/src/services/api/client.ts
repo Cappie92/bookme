@@ -59,6 +59,40 @@ function isSubscriptionsMyNoSubscription404(
   return false;
 }
 
+function isExpectedPromoApply400(
+  status: number | undefined,
+  url: string | undefined,
+  data: unknown,
+  method: string | undefined
+): boolean {
+  if (status !== 400) return false;
+  if ((method || 'get').toLowerCase() !== 'post') return false;
+  if (typeof url !== 'string' || !url.includes('master/promo-code/apply')) return false;
+  if (data == null || typeof data !== 'object') return false;
+
+  const body = data as { detail?: unknown; message?: unknown };
+  const detail = body.detail ?? body.message;
+  const code =
+    detail && typeof detail === 'object' && 'code' in detail
+      ? (detail as { code?: unknown }).code
+      : detail;
+  const message =
+    detail && typeof detail === 'object' && 'message' in detail
+      ? (detail as { message?: unknown }).message
+      : body.message;
+  return (
+    code === 'acquisition_promo_already_used' ||
+    code === 'first_payment_already_done' ||
+    code === 'self_referral' ||
+    code === 'not_eligible' ||
+    code === 'promo_not_eligible' ||
+    code === 'invalid_code' ||
+    code === 'code_not_found' ||
+    code === 'minimum_period_3_months' ||
+    (typeof message === 'string' && /промокод\s+уже\s+примен[её]н/i.test(message))
+  );
+}
+
 /** Снимок для панели DBG (SHOW_DBG_FLOATING_PANEL, строго DEBUG_MOBILE_ERRORS=1); не меняет поведение API. */
 function captureAxiosErrorForMobileDebug(error: AxiosError): void {
   if (!__DEV__ || !env.SHOW_DBG_FLOATING_PANEL) return;
@@ -68,6 +102,16 @@ function captureAxiosErrorForMobileDebug(error: AxiosError): void {
   const hadToken =
     !!originalRequest?.headers?.Authorization || !!apiClient.defaults.headers.common['Authorization'];
   const status = error.response?.status;
+  if (
+    isExpectedPromoApply400(
+      status,
+      path,
+      error.response?.data,
+      originalRequest?.method
+    )
+  ) {
+    return;
+  }
   const is401WithoutToken = status === 401 && !hadToken;
   const silent404Substrings = [
     'master/loyalty/templates',
@@ -273,8 +317,9 @@ apiClient.interceptors.response.use(
         (silent404Substrings.some((s) => url.includes(s)) ||
           (url.includes('client/favorites/') && (originalRequest?.method || '').toLowerCase() === 'delete') ||
           isSubscriptionsMyNoSubscription404(status, url, data, originalRequest?.method));
+      const isSilentExpectedPromo400 = isExpectedPromoApply400(status, url, data, originalRequest?.method);
 
-      if (!isSilent404 && !is401WithoutToken) {
+      if (!isSilent404 && !is401WithoutToken && !isSilentExpectedPromo400) {
         logger.error('API Error:', { status, message: data?.detail || data?.message || error.message, url });
       }
 

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ActivityIndicator, ScrollView, Image, KeyboardAvoidingView, Platform, Keyboard, TouchableWithoutFeedback, Modal, FlatList } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ActivityIndicator, Image, KeyboardAvoidingView, Platform, Keyboard, TouchableWithoutFeedback, Modal, FlatList } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '@src/auth/AuthContext';
 import { router, useLocalSearchParams } from 'expo-router';
 import { logger } from '@src/utils/logger';
@@ -10,12 +11,31 @@ import { ScreenContainer } from '@src/components/ScreenContainer';
 import { PasswordInput } from '@src/components/ui/PasswordInput';
 import { cities, getTimezoneByCity } from '@src/data/cities';
 import { mapLoginRequestError } from '@src/utils/apiNetworkError';
+import {
+  getCityPickerListBottomPadding,
+  getRegistrationFieldLabel,
+  getRegistrationPromoCodeFromParams,
+  isRegistrationFieldRequired,
+  normalizeRegistrationPromoCode,
+  type RegistrationFieldKey,
+  shouldShowRegistrationPromoField,
+} from '@src/utils/registrationPromo';
 
 type TabType = 'login' | 'register';
 
+function RegistrationLabel({ field }: { field: RegistrationFieldKey }) {
+  return (
+    <Text style={styles.label}>
+      {getRegistrationFieldLabel(field)}
+      {isRegistrationFieldRequired(field) ? <Text style={styles.required}> *</Text> : null}
+    </Text>
+  );
+}
+
 export default function LoginScreen() {
   const { login, register } = useAuth();
-  const params = useLocalSearchParams<{ tab?: string; role?: string }>();
+  const insets = useSafeAreaInsets();
+  const params = useLocalSearchParams<{ tab?: string; role?: string; promo_code?: string; ref?: string }>();
   const [activeTab, setActiveTab] = useState<TabType>('login');
 
   // Состояние для входа
@@ -46,6 +66,7 @@ export default function LoginScreen() {
   }>({});
   const [city, setCity] = useState('');
   const [timezone, setTimezone] = useState('');
+  const [promoCode, setPromoCode] = useState('');
   const [showCityModal, setShowCityModal] = useState(false);
 
   useEffect(() => {
@@ -56,6 +77,12 @@ export default function LoginScreen() {
       setUserRole(r);
     }
   }, [params.tab, params.role]);
+
+  useEffect(() => {
+    if (activeTab !== 'register' || !shouldShowRegistrationPromoField(userRole)) return;
+    const code = getRegistrationPromoCodeFromParams(params);
+    if (code) setPromoCode(code);
+  }, [activeTab, userRole, params.promo_code, params.ref]);
 
   // Валидация формы входа (как на web: проверяем канонический номер после normalizeRussianPhoneForApi)
   const validateLoginForm = () => {
@@ -78,10 +105,9 @@ export default function LoginScreen() {
 
   // Валидация email
   const validateEmail = (emailValue: string): string | undefined => {
-    if (!emailValue || emailValue.trim() === '') {
-      return 'Введите email';
-    }
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailValue)) {
+    const trimmed = emailValue.trim();
+    if (!trimmed) return undefined;
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
       return 'Введите корректный email (например: example@mail.com)';
     }
     return undefined;
@@ -287,6 +313,9 @@ export default function LoginScreen() {
         payload.city = city.trim();
         payload.timezone = (timezone || getTimezoneByCity(city)).trim();
       }
+      if (userRole === 'master' && promoCode.trim()) {
+        payload.promo_code = normalizeRegistrationPromoCode(promoCode);
+      }
       await register(payload);
       logger.debug('auth', '✅ [REGISTER] Успешная регистрация!');
       const draft = await getPublicBookingDraft();
@@ -378,6 +407,7 @@ export default function LoginScreen() {
               // Сбрасываем ошибки и устанавливаем роль по умолчанию
               setRegisterErrors({});
               setUserRole('client');
+              setPromoCode('');
             }}
           >
             <Text style={[styles.tabText, activeTab === 'register' && styles.tabTextActive]}>
@@ -448,7 +478,7 @@ export default function LoginScreen() {
           <View style={styles.form}>
             {/* Выбор типа аккаунта */}
             <View style={styles.inputGroup}>
-              <Text style={styles.label}>Тип аккаунта</Text>
+              <RegistrationLabel field="role" />
               <View style={styles.roleSelector}>
                 <TouchableOpacity
                   style={[
@@ -460,6 +490,7 @@ export default function LoginScreen() {
                     setUserRole('client');
                     setCity('');
                     setTimezone('');
+                    setPromoCode('');
                     if (registerErrors.role) {
                       setRegisterErrors({ ...registerErrors, role: undefined });
                     }
@@ -518,7 +549,7 @@ export default function LoginScreen() {
             </View>
 
             <View style={styles.inputGroup}>
-              <Text style={styles.label}>Имя</Text>
+              <RegistrationLabel field="fullName" />
               <TextInput
                 testID="full-name-input"
                 style={[styles.input, registerErrors.fullName && styles.inputError]}
@@ -537,7 +568,7 @@ export default function LoginScreen() {
             </View>
 
             <View style={styles.inputGroup}>
-              <Text style={styles.label}>Email</Text>
+              <RegistrationLabel field="email" />
               <TextInput
                 testID="email-input"
                 style={[styles.input, registerErrors.email && styles.inputError]}
@@ -552,7 +583,7 @@ export default function LoginScreen() {
             </View>
 
             <View style={styles.inputGroup}>
-              <Text style={styles.label}>Номер телефона</Text>
+              <RegistrationLabel field="phone" />
               <TextInput
                 testID="register-phone-input"
                 style={[styles.input, registerErrors.phone && styles.inputError]}
@@ -568,7 +599,7 @@ export default function LoginScreen() {
 
             {userRole === 'master' && (
               <View style={styles.inputGroup}>
-                <Text style={styles.label}>Город <Text style={{ color: '#dc2626' }}>*</Text></Text>
+                <RegistrationLabel field="city" />
                 <TouchableOpacity
                   style={[styles.input, styles.cityTouchable, registerErrors.city && styles.inputError]}
                   onPress={() => !registerLoading && setShowCityModal(true)}
@@ -582,8 +613,25 @@ export default function LoginScreen() {
               </View>
             )}
 
+            {shouldShowRegistrationPromoField(userRole) && (
+              <View style={styles.inputGroup}>
+                <RegistrationLabel field="promoCode" />
+                <TextInput
+                  testID="promo-code-input"
+                  style={styles.input}
+                  placeholder="Введите промокод, если он есть"
+                  value={promoCode}
+                  onChangeText={(text) => setPromoCode(normalizeRegistrationPromoCode(text))}
+                  autoCapitalize="characters"
+                  autoCorrect={false}
+                  editable={!registerLoading}
+                />
+                <Text style={styles.helperText}>Бонус доступен после первой оплаты от 3 месяцев</Text>
+              </View>
+            )}
+
             <View style={styles.inputGroup}>
-              <Text style={styles.label}>Пароль</Text>
+              <RegistrationLabel field="password" />
               <PasswordInput
                 testID="register-password-input"
                 accessibilityLabel="Пароль"
@@ -597,7 +645,7 @@ export default function LoginScreen() {
             </View>
 
             <View style={styles.inputGroup}>
-              <Text style={styles.label}>Подтвердите пароль</Text>
+              <RegistrationLabel field="confirmPassword" />
               <PasswordInput
                 testID="confirm-password-input"
                 accessibilityLabel="Подтверждение пароля"
@@ -683,6 +731,9 @@ export default function LoginScreen() {
                   data={cities}
                   keyExtractor={(item) => item.name}
                   style={styles.cityModalList}
+                  contentContainerStyle={{
+                    paddingBottom: getCityPickerListBottomPadding(insets.bottom),
+                  }}
                   renderItem={({ item }) => (
                     <TouchableOpacity
                       style={styles.cityModalItem}
@@ -740,7 +791,7 @@ const styles = StyleSheet.create({
   subtitle: {
     fontSize: 16,
     color: '#666',
-    marginBottom: 32,
+    marginBottom: 18,
     textAlign: 'center',
   },
   tabContainer: {
@@ -748,11 +799,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#f5f5f5',
     borderRadius: 8,
     padding: 4,
-    marginBottom: 24,
+    marginBottom: 16,
   },
   tab: {
     flex: 1,
-    paddingVertical: 12,
+    paddingVertical: 10,
     paddingHorizontal: 16,
     borderRadius: 6,
     alignItems: 'center',
@@ -785,19 +836,20 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   inputGroup: {
-    marginBottom: 20,
+    marginBottom: 12,
   },
   label: {
     fontSize: 14,
     fontWeight: '600',
-    marginBottom: 8,
+    marginBottom: 5,
     color: '#333',
   },
   input: {
     borderWidth: 1,
     borderColor: '#ddd',
     borderRadius: 8,
-    padding: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
     fontSize: 16,
     color: '#2D2D2D',
     backgroundColor: '#fff',
@@ -810,12 +862,18 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 4,
   },
+  helperText: {
+    color: '#666',
+    fontSize: 12,
+    marginTop: 4,
+    lineHeight: 16,
+  },
   button: {
     backgroundColor: '#4CAF50',
-    padding: 16,
+    padding: 14,
     borderRadius: 8,
     alignItems: 'center',
-    marginTop: 10,
+    marginTop: 6,
   },
   buttonDisabled: {
     backgroundColor: '#ccc',
@@ -827,17 +885,17 @@ const styles = StyleSheet.create({
   },
   roleSelector: {
     flexDirection: 'row',
-    gap: 12,
+    gap: 10,
   },
   roleOption: {
     flex: 1,
     borderWidth: 2,
     borderColor: '#ddd',
     borderRadius: 8,
-    padding: 10,
+    padding: 8,
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: 55,
+    minHeight: 48,
     backgroundColor: '#fff',
   },
   roleOptionActive: {
@@ -859,7 +917,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#666',
-    marginBottom: 4,
   },
   roleOptionTextActive: {
     color: '#4CAF50',
@@ -874,7 +931,7 @@ const styles = StyleSheet.create({
     color: '#4CAF50',
   },
   checkboxGroup: {
-    marginBottom: 16,
+    marginBottom: 12,
   },
   checkboxRow: {
     flexDirection: 'row',

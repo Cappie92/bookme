@@ -63,6 +63,18 @@ export interface SubscriptionCalculationRequest {
   upgrade_type?: 'immediate' | 'after_expiry';
 }
 
+export type PromoPreview = {
+  code?: string | null;
+  campaign_type?: string | null;
+  eligible?: boolean;
+  period_months?: number | null;
+  percent?: number | null;
+  points_amount?: number | null;
+  label?: string | null;
+  ineligible_reason?: string | null;
+  reason?: string | null;
+};
+
 export interface SubscriptionCalculationResponse {
   calculation_id: number;
   plan_id: number;
@@ -96,6 +108,39 @@ export interface SubscriptionCalculationResponse {
   forced_upgrade_type?: string | null;
   available_balance?: number | null;
   can_pay_from_balance?: boolean | null;
+  promo_preview?: PromoPreview | null;
+}
+
+function pickPromoPreview(raw: Record<string, any>, calculation: Record<string, any>): PromoPreview | null {
+  const candidates = [
+    calculation.promo_preview,
+    calculation.promoPreview,
+    raw.promo_preview,
+    raw.promoPreview,
+    raw.promo?.preview,
+    raw.promo?.promo_preview,
+  ];
+  for (const candidate of candidates) {
+    if (candidate && typeof candidate === 'object') {
+      const preview = { ...(candidate as Record<string, any>) };
+      if (preview.eligible === 'true') preview.eligible = true;
+      if (preview.eligible === 'false') preview.eligible = false;
+      return preview as PromoPreview;
+    }
+  }
+  return null;
+}
+
+function normalizeSubscriptionCalculationResponse(data: unknown): SubscriptionCalculationResponse {
+  const raw = (data ?? {}) as Record<string, any>;
+  const calculation =
+    raw.calculation && typeof raw.calculation === 'object'
+      ? { ...(raw.calculation as Record<string, any>) }
+      : { ...raw };
+
+  calculation.promo_preview = pickPromoPreview(raw, calculation);
+
+  return calculation as SubscriptionCalculationResponse;
 }
 
 function isNoSubscription404Payload(data: unknown): boolean {
@@ -145,8 +190,11 @@ export async function fetchAvailableSubscriptions(
 export async function calculateSubscription(
   payload: SubscriptionCalculationRequest
 ): Promise<SubscriptionCalculationResponse> {
-  const response = await apiClient.post<SubscriptionCalculationResponse>('/api/subscriptions/calculate', payload);
-  return response.data;
+  const response = await apiClient.post<SubscriptionCalculationResponse | Record<string, any>>(
+    '/api/subscriptions/calculate',
+    payload
+  );
+  return normalizeSubscriptionCalculationResponse(response.data);
 }
 
 /**

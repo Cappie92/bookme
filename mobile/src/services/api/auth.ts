@@ -31,6 +31,7 @@ export interface RegisterCredentials {
   role?: 'client' | 'master' | 'salon' | 'admin';
   city?: string;
   timezone?: string;
+  promo_code?: string;
 }
 
 export interface User {
@@ -78,7 +79,7 @@ export async function login(credentials: LoginCredentials): Promise<LoginRespons
     });
     return response.data;
   } catch (err: unknown) {
-    if (__DEV__ && isAxiosError(err)) {
+    if (typeof __DEV__ !== 'undefined' && __DEV__ && isAxiosError(err)) {
       const detail = pickLoginErrorDetail(err.response?.data);
       console.log('[LOGIN/API] failed', {
         method: 'POST',
@@ -97,17 +98,22 @@ export async function login(credentials: LoginCredentials): Promise<LoginRespons
  * Регистрация нового пользователя
  */
 export async function register(credentials: RegisterCredentials): Promise<LoginResponse> {
+  const role = credentials.role || 'client';
   const payload: Record<string, unknown> = {
-    ...credentials,
     email: (credentials.email ?? '').trim().toLowerCase(),
     phone: normalizeRussianPhoneForApi((credentials.phone ?? '').trim()),
-    role: credentials.role || 'client',
+    password: credentials.password,
+    full_name: credentials.full_name,
+    role,
   };
-  if (credentials.role === 'master' && credentials.city?.trim()) {
+  if (role === 'master' && credentials.city?.trim()) {
     payload.city = credentials.city.trim();
   }
-  if (credentials.role === 'master' && credentials.timezone?.trim()) {
+  if (role === 'master' && credentials.timezone?.trim()) {
     payload.timezone = credentials.timezone.trim();
+  }
+  if (role === 'master' && credentials.promo_code?.trim()) {
+    payload.promo_code = credentials.promo_code.trim();
   }
   const response = await apiClient.post<LoginResponse>('/api/auth/register', payload);
   return response.data;

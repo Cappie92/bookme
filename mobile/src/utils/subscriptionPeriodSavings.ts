@@ -13,9 +13,9 @@ export function getPeriodTotalPrice(
   months: SubscriptionDurationMonths
 ): number {
   if (months === 1) return plan.price_1month;
-  if (months === 3) return plan.price_3months;
-  if (months === 6) return plan.price_6months;
-  return plan.price_12months;
+  const monthlyPrice =
+    months === 3 ? plan.price_3months : months === 6 ? plan.price_6months : plan.price_12months;
+  return monthlyPrice * months;
 }
 
 /**

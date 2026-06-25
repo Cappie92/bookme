@@ -19,7 +19,7 @@ const REGISTER_FIELDS = {
     { name: 'password2', label: 'Повторный ввод пароля', type: 'password', required: true },
   ],
   master: [
-    { name: 'fio', label: 'ФИО', type: 'text', required: true },
+    { name: 'fio', label: 'Имя', type: 'text', required: true },
     { name: 'phone', label: 'Номер телефона', type: 'tel', required: true },
     { name: 'email', label: 'E-mail', type: 'email' },
     { name: 'dob', label: 'Дата рождения', type: 'date' },

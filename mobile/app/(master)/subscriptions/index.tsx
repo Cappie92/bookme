@@ -8,8 +8,14 @@ import {
   AppState,
   AppStateStatus,
   Platform,
+  Alert,
+  TextInput,
+  TouchableOpacity,
+  KeyboardAvoidingView,
+  Keyboard,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import * as Clipboard from 'expo-clipboard';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '@src/auth/AuthContext';
 import { useTabBarHeight } from '@src/contexts/TabBarHeightContext';
@@ -35,11 +41,33 @@ import { formatMoney } from '@src/utils/money';
 import { getPlanTitle } from '@src/utils/planTitle';
 import { refreshMasterFeaturesGlobally } from '@src/utils/masterFeaturesRefresh';
 import {
+  applyMasterPromoCode,
+  getCurrentMasterPromoCode,
+  getMasterReferralCode,
+  getSubscriptionPoints,
+  type CurrentMasterPromoCodeResponse,
+  type MasterReferralCodeResponse,
+  type SubscriptionPointsLedgerItem,
+  type SubscriptionPointsResponse,
+} from '@src/services/api/promoEngine';
+import {
+  formatSubscriptionPointsAmount,
+  getCurrentPromoStatusLabel,
+  getCurrentPromoCodeValue,
+  getCurrentPromoStatusValue,
+  getPromoAlreadyAppliedInlineMessage,
+  getPromoErrorMessage,
+  getSubscriptionPointsHistoryTitle,
+  isPromoAlreadyAppliedError,
+} from '@src/utils/promoEngine';
+import {
   getMasterTariffComparisonRows,
   splitTariffComparisonColumns,
 } from 'shared/subscriptionPlanFeatures';
 
 const SCROLL_EXTRA_BOTTOM = 24;
+const KEYBOARD_SCROLL_EXTRA_BOTTOM = 48;
+type PromoApplyMessageTone = 'success' | 'neutral';
 
 /** Доступные средства (без резерва под подписку). */
 function getAvailableBalanceAmount(balance: Balance | null): number {
@@ -79,14 +107,32 @@ export default function SubscriptionsScreen() {
   const { user } = useAuth();
   const insets = useSafeAreaInsets();
   const { tabBarHeight } = useTabBarHeight();
-  const measuredTabBarHeight = tabBarHeight > 0 ? tabBarHeight : BOTTOM_NAV_CONTENT_FALLBACK_HEIGHT;
+  const measuredTabBarHeight =
+    typeof tabBarHeight === 'number' && tabBarHeight > 0
+      ? tabBarHeight
+      : BOTTOM_NAV_CONTENT_FALLBACK_HEIGHT;
   const scrollPaddingBottom = insets.bottom + measuredTabBarHeight + SCROLL_EXTRA_BOTTOM;
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
+  const keyboardScrollPaddingBottom = keyboardVisible
+    ? scrollPaddingBottom + KEYBOARD_SCROLL_EXTRA_BOTTOM
+    : scrollPaddingBottom;
   const [subscription, setSubscription] = useState<Subscription | null>(null);
   const [balance, setBalance] = useState<Balance | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [purchaseModalVisible, setPurchaseModalVisible] = useState(false);
+  const [promoLoading, setPromoLoading] = useState(false);
+  const [promoLoadError, setPromoLoadError] = useState<string | null>(null);
+  const [referralCodeData, setReferralCodeData] = useState<MasterReferralCodeResponse | null>(null);
+  const [currentPromo, setCurrentPromo] = useState<CurrentMasterPromoCodeResponse | null>(null);
+  const [subscriptionPoints, setSubscriptionPoints] = useState<SubscriptionPointsResponse | null>(null);
+  const [promoCodeInput, setPromoCodeInput] = useState('');
+  const [promoApplyLoading, setPromoApplyLoading] = useState(false);
+  const [promoApplyMessage, setPromoApplyMessage] = useState<string | null>(null);
+  const [promoApplyMessageTone, setPromoApplyMessageTone] = useState<PromoApplyMessageTone>('success');
+  const [promoApplyError, setPromoApplyError] = useState<string | null>(null);
+  const [promoStateVersion, setPromoStateVersion] = useState(0);
 
   // Определяем тип подписки на основе роли пользователя
   const subscriptionType = user?.role === 'salon' 
@@ -117,11 +163,44 @@ export default function SubscriptionsScreen() {
     }
   };
 
+  const loadPromoData = async () => {
+    if (subscriptionType !== SubscriptionType.MASTER) return;
+    setPromoLoading(true);
+    setPromoLoadError(null);
+    try {
+      const [referralResult, currentResult, pointsResult] = await Promise.allSettled([
+        getMasterReferralCode(),
+        getCurrentMasterPromoCode(),
+        getSubscriptionPoints(),
+      ]);
+
+      if (referralResult.status === 'fulfilled') setReferralCodeData(referralResult.value);
+      if (currentResult.status === 'fulfilled') {
+        setCurrentPromo(currentResult.value);
+        setPromoStateVersion((v) => v + 1);
+      }
+      if (pointsResult.status === 'fulfilled') setSubscriptionPoints(pointsResult.value);
+
+      if (
+        referralResult.status === 'rejected' ||
+        currentResult.status === 'rejected' ||
+        pointsResult.status === 'rejected'
+      ) {
+        setPromoLoadError('Не удалось загрузить часть данных промокодов. Потяните экран вниз, чтобы обновить.');
+      }
+    } catch {
+      setPromoLoadError('Не удалось загрузить данные промокодов. Потяните экран вниз, чтобы обновить.');
+    } finally {
+      setPromoLoading(false);
+    }
+  };
+
   const refreshAll = async () => {
     setRefreshing(true);
     try {
       await Promise.all([
         loadSubscription(),
+        loadPromoData(),
         refreshMasterFeaturesGlobally(user?.id),
       ]);
     } finally {
@@ -131,6 +210,17 @@ export default function SubscriptionsScreen() {
 
   useEffect(() => {
     loadSubscription();
+    loadPromoData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    const showSub = Keyboard.addListener('keyboardDidShow', () => setKeyboardVisible(true));
+    const hideSub = Keyboard.addListener('keyboardDidHide', () => setKeyboardVisible(false));
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
   }, []);
 
   // После возврата из внешней оплаты (Linking/WebBrowser) приложение становится active — форс-обновляем подписку
@@ -155,6 +245,80 @@ export default function SubscriptionsScreen() {
     const year = date.getFullYear();
     
     return `${day}.${month}.${year}`;
+  };
+
+  const formatOptionalDate = (dateString?: string | null): string | null => {
+    if (!dateString) return null;
+    try {
+      return formatDate(dateString);
+    } catch {
+      return null;
+    }
+  };
+
+  const getCurrentPromoCode = () => {
+    return getCurrentPromoCodeValue(currentPromo);
+  };
+
+  const getPointsItems = (): SubscriptionPointsLedgerItem[] => {
+    const items = subscriptionPoints?.items || subscriptionPoints?.ledger || subscriptionPoints?.history || [];
+    return Array.isArray(items) ? items : [];
+  };
+
+  const handleCopyReferralCode = async () => {
+    const code = referralCodeData?.code;
+    if (!code) return;
+    try {
+      await Clipboard.setStringAsync(code);
+      Alert.alert('Готово', 'Промокод скопирован');
+    } catch {
+      Alert.alert('Ошибка', 'Не удалось скопировать промокод');
+    }
+  };
+
+  const handleApplyPromoCode = async () => {
+    const code = promoCodeInput.trim().toUpperCase();
+    if (!code) {
+      setPromoApplyError('Введите промокод');
+      setPromoApplyMessage(null);
+      return;
+    }
+    setPromoApplyLoading(true);
+    setPromoApplyError(null);
+    setPromoApplyMessage(null);
+    setPromoApplyMessageTone('success');
+    try {
+      await applyMasterPromoCode(code);
+      setPromoCodeInput('');
+      setPromoApplyMessage('Промокод применён. Бонус будет начислен после первой оплаты подписки.');
+      setPromoApplyMessageTone('success');
+      await loadPromoData();
+    } catch (err: unknown) {
+      if (isPromoAlreadyAppliedError(err)) {
+        try {
+          const refreshedCurrentPromo = await getCurrentMasterPromoCode();
+          setCurrentPromo(refreshedCurrentPromo);
+          setPromoStateVersion((v) => v + 1);
+          const refreshedCode = getCurrentPromoCodeValue(refreshedCurrentPromo);
+          if (refreshedCode) {
+            setPromoApplyMessage(getPromoAlreadyAppliedInlineMessage(refreshedCode));
+            setPromoApplyMessageTone('neutral');
+            setPromoApplyError(null);
+            getSubscriptionPoints().then(setSubscriptionPoints).catch(() => undefined);
+            return;
+          }
+        } catch {
+          // Expected business case: keep it as inline neutral UI, not a red error.
+        }
+        setPromoApplyMessage(getPromoAlreadyAppliedInlineMessage(null));
+        setPromoApplyMessageTone('neutral');
+        setPromoApplyError(null);
+        return;
+      }
+      setPromoApplyError(getPromoErrorMessage(err));
+    } finally {
+      setPromoApplyLoading(false);
+    }
   };
 
   const renderSubscriptionInfo = () => {
@@ -309,9 +473,150 @@ export default function SubscriptionsScreen() {
         </Text>
         <PrimaryButton
           title="Управление тарифом"
-          onPress={() => setPurchaseModalVisible(true)}
+          onPress={openPurchaseModal}
         />
       </Card>
+    );
+  };
+
+  const renderPromoCards = () => {
+    if (subscriptionType !== SubscriptionType.MASTER) return null;
+
+    const referralCode = referralCodeData?.code || null;
+    const appliedPromoCode = getCurrentPromoCode();
+    const currentPromoStatus = getCurrentPromoStatusLabel(getCurrentPromoStatusValue(currentPromo));
+    const pointsItems = getPointsItems();
+    const pointsBalance = formatSubscriptionPointsAmount(subscriptionPoints?.balance);
+
+    return (
+      <>
+        <Card style={styles.promoCard}>
+          <View style={styles.promoCardHeader}>
+            <View style={styles.promoCardHeaderText}>
+              <Text style={styles.promoCardTitle}>Ваш промокод</Text>
+              <Text style={styles.promoCardDescription}>
+                Поделитесь кодом с другим мастером. После его первой оплаты от 3 месяцев вы оба получите бонусные баллы.
+              </Text>
+            </View>
+            {promoLoading ? <ActivityIndicator size="small" color="#4CAF50" /> : null}
+          </View>
+
+          <View style={styles.referralCodeBox}>
+            <Text style={styles.referralCodeLabel}>Личный код</Text>
+            <Text style={styles.referralCodeValue} selectable>
+              {referralCode || '—'}
+            </Text>
+          </View>
+
+          <TouchableOpacity
+            testID="copy-referral-code-button"
+            style={[styles.promoSecondaryButton, !referralCode && styles.promoButtonDisabled]}
+            onPress={handleCopyReferralCode}
+            disabled={!referralCode}
+          >
+            <Text style={styles.promoSecondaryButtonText}>Скопировать</Text>
+          </TouchableOpacity>
+
+          {promoLoadError ? <Text style={styles.promoWarningText}>{promoLoadError}</Text> : null}
+        </Card>
+
+        <Card style={styles.promoCard}>
+          <Text style={styles.promoCardTitle}>Введите промокод</Text>
+          <Text style={styles.promoCardDescription}>
+            Бонусные баллы начислятся после первой успешной оплаты подписки.
+          </Text>
+
+          {appliedPromoCode ? (
+            <View testID="current-promo-state" style={styles.currentPromoBox}>
+              <Text style={styles.currentPromoTitle}>Промокод применён: {appliedPromoCode}</Text>
+              {currentPromoStatus ? <Text style={styles.currentPromoText}>{currentPromoStatus}</Text> : null}
+              <Text style={styles.currentPromoText}>Бонус будет начислен после первой оплаты.</Text>
+            </View>
+          ) : null}
+
+          <View style={[styles.promoApplyForm, appliedPromoCode && styles.promoApplyFormWithCurrent]}>
+            <TextInput
+              testID="apply-promo-code-input"
+              style={styles.promoInput}
+              value={promoCodeInput}
+              onChangeText={(text) => {
+                setPromoCodeInput(text.trim().toUpperCase());
+                if (promoApplyError) setPromoApplyError(null);
+                if (promoApplyMessage) setPromoApplyMessage(null);
+              }}
+              placeholder="Введите промокод"
+              autoCapitalize="characters"
+              autoCorrect={false}
+              editable={!promoApplyLoading}
+            />
+            <TouchableOpacity
+              testID="apply-promo-code-button"
+              style={[styles.promoPrimaryButton, promoApplyLoading && styles.promoButtonDisabled]}
+              onPress={handleApplyPromoCode}
+              disabled={promoApplyLoading}
+            >
+              {promoApplyLoading ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Text style={styles.promoPrimaryButtonText}>Применить</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+
+          {promoApplyMessage ? (
+            <Text
+              style={[
+                styles.promoApplyMessageText,
+                promoApplyMessageTone === 'neutral'
+                  ? styles.promoApplyMessageTextNeutral
+                  : styles.promoApplyMessageTextSuccess,
+              ]}
+            >
+              {promoApplyMessage}
+            </Text>
+          ) : null}
+          {promoApplyError ? <Text testID="promo-apply-error" style={styles.promoErrorText}>{promoApplyError}</Text> : null}
+        </Card>
+
+        <Card style={styles.promoCard}>
+          <View style={styles.pointsHeader}>
+            <View style={styles.pointsHeaderText}>
+              <Text style={styles.promoCardTitle}>Бонусные баллы</Text>
+              <Text style={styles.promoCardDescription}>
+                Бонусные баллы можно будет использовать для оплаты подписки. Это не клиентская лояльность и не денежный баланс.
+              </Text>
+            </View>
+            <View style={styles.pointsBalanceBox}>
+              <Text style={styles.pointsBalanceLabel}>Баланс</Text>
+              <Text style={styles.pointsBalanceValue}>{pointsBalance}</Text>
+            </View>
+          </View>
+
+          {pointsItems.length === 0 ? (
+            <Text testID="subscription-points-empty" style={styles.pointsEmptyText}>Пока нет начислений</Text>
+          ) : (
+            <View style={styles.pointsHistoryList}>
+              {pointsItems.map((item, index) => {
+                const date = formatOptionalDate(item.created_at);
+                const status = item.status || item.direction;
+                return (
+                  <View key={String(item.id ?? index)} style={styles.pointsHistoryItem}>
+                    <View style={styles.pointsHistoryMain}>
+                      <Text style={styles.pointsHistoryTitle}>{getSubscriptionPointsHistoryTitle(item)}</Text>
+                      <Text style={styles.pointsHistoryMeta}>
+                        {[date, status].filter(Boolean).join(' · ')}
+                      </Text>
+                    </View>
+                    <Text style={styles.pointsHistoryAmount}>
+                      +{formatSubscriptionPointsAmount(item.amount)}
+                    </Text>
+                  </View>
+                );
+              })}
+            </View>
+          )}
+        </Card>
+      </>
     );
   };
 
@@ -336,7 +641,7 @@ export default function SubscriptionsScreen() {
         <Card style={styles.controlsCard}>
           <PrimaryButton
             title="Выбрать тариф"
-            onPress={() => setPurchaseModalVisible(true)}
+            onPress={openPurchaseModal}
           />
           <View style={styles.secondaryActionWrap}>
             <SecondaryButton title="Обновить" onPress={handleRefresh} />
@@ -350,6 +655,19 @@ export default function SubscriptionsScreen() {
     </>
   );
 
+  const openPurchaseModal = async () => {
+    if (subscriptionType === SubscriptionType.MASTER) {
+      try {
+        const refreshedCurrentPromo = await getCurrentMasterPromoCode();
+        setCurrentPromo(refreshedCurrentPromo);
+        setPromoStateVersion((v) => v + 1);
+      } catch {
+        // Открытие тарифов не блокируем: calculate сам вернёт promo_preview, если backend видит pending promo.
+      }
+    }
+    setPurchaseModalVisible(true);
+  };
+
   const renderPurchaseModal = () =>
     subscriptionType ? (
       <SubscriptionPurchaseModal
@@ -358,6 +676,7 @@ export default function SubscriptionsScreen() {
         subscriptionType={subscriptionType}
         currentSubscription={subscription}
         onRefreshAfterPayment={refreshAll}
+        promoStateVersion={promoStateVersion}
       />
     ) : null;
 
@@ -393,45 +712,63 @@ export default function SubscriptionsScreen() {
 
   if (!subscription) {
     return (
-      <ScreenContainer
-        compactTop
-        scrollable
-        scrollViewProps={{
-          contentContainerStyle: { paddingBottom: scrollPaddingBottom },
-          showsVerticalScrollIndicator: true,
-          refreshControl: (
-            <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} colors={['#4CAF50']} />
-          ),
-        }}
+      <KeyboardAvoidingView
+        style={styles.keyboardAvoiding}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
-        {renderInactiveSubscription()}
-        {renderPurchaseModal()}
-      </ScreenContainer>
+        <ScreenContainer
+          compactTop
+          scrollable
+          scrollViewProps={{
+            contentContainerStyle: { paddingBottom: keyboardScrollPaddingBottom },
+            showsVerticalScrollIndicator: true,
+            keyboardShouldPersistTaps: 'always',
+            keyboardDismissMode: 'none',
+            refreshControl: (
+              <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} colors={['#4CAF50']} />
+            ),
+          }}
+        >
+          {renderInactiveSubscription()}
+          {renderPromoCards()}
+          {renderPurchaseModal()}
+        </ScreenContainer>
+      </KeyboardAvoidingView>
     );
   }
 
   return (
-    <ScreenContainer
-      compactTop
-      scrollable
-      scrollViewProps={{
-        contentContainerStyle: { paddingBottom: scrollPaddingBottom },
-        showsVerticalScrollIndicator: true,
-        refreshControl: (
-          <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} colors={['#4CAF50']} />
-        ),
-        keyboardShouldPersistTaps: 'handled',
-      }}
+    <KeyboardAvoidingView
+      style={styles.keyboardAvoiding}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
-      {renderSubscriptionInfo()}
-      {renderTariffControls()}
+      <ScreenContainer
+        compactTop
+        scrollable
+        scrollViewProps={{
+          contentContainerStyle: { paddingBottom: keyboardScrollPaddingBottom },
+          showsVerticalScrollIndicator: true,
+          refreshControl: (
+            <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} colors={['#4CAF50']} />
+          ),
+          keyboardShouldPersistTaps: 'always',
+          keyboardDismissMode: 'none',
+        }}
+      >
+        {renderSubscriptionInfo()}
+        {renderTariffControls()}
+        {renderPromoCards()}
 
-      {renderPurchaseModal()}
-    </ScreenContainer>
+        {renderPurchaseModal()}
+      </ScreenContainer>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
+  keyboardAvoiding: {
+    flex: 1,
+  },
   centerContainer: {
     flex: 1,
     justifyContent: 'center',
@@ -647,5 +984,214 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#666',
     marginBottom: 12,
+  },
+  promoCard: {
+    marginTop: 8,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  promoCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  promoCardHeaderText: {
+    flex: 1,
+  },
+  promoCardTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 6,
+  },
+  promoCardDescription: {
+    fontSize: 13,
+    color: '#666',
+    lineHeight: 18,
+    marginBottom: 12,
+  },
+  referralCodeBox: {
+    borderWidth: 1,
+    borderColor: '#C8E6C9',
+    borderRadius: 12,
+    backgroundColor: '#E8F5E9',
+    padding: 12,
+    marginBottom: 12,
+  },
+  referralCodeLabel: {
+    fontSize: 11,
+    color: '#2E7D32',
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  referralCodeValue: {
+    fontSize: 20,
+    color: '#1B5E20',
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  promoPrimaryButton: {
+    backgroundColor: '#4CAF50',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 112,
+  },
+  promoPrimaryButtonText: {
+    color: '#fff',
+    fontWeight: '800',
+    fontSize: 14,
+  },
+  promoSecondaryButton: {
+    borderWidth: 1,
+    borderColor: '#4CAF50',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+    alignSelf: 'flex-start',
+  },
+  promoSecondaryButtonText: {
+    color: '#4CAF50',
+    fontWeight: '800',
+    fontSize: 14,
+  },
+  promoButtonDisabled: {
+    opacity: 0.55,
+  },
+  promoWarningText: {
+    marginTop: 10,
+    color: '#92400E',
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  promoApplyForm: {
+    flexDirection: 'row',
+    gap: 10,
+    alignItems: 'center',
+  },
+  promoApplyFormWithCurrent: {
+    marginTop: 12,
+  },
+  promoInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+    fontSize: 15,
+    color: '#2D2D2D',
+    backgroundColor: '#fff',
+  },
+  currentPromoBox: {
+    borderWidth: 1,
+    borderColor: '#C8E6C9',
+    backgroundColor: '#E8F5E9',
+    borderRadius: 12,
+    padding: 12,
+  },
+  currentPromoTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#1B5E20',
+    marginBottom: 4,
+  },
+  currentPromoText: {
+    fontSize: 13,
+    color: '#2E7D32',
+    lineHeight: 18,
+  },
+  promoApplyMessageText: {
+    marginTop: 10,
+    fontSize: 12,
+    fontWeight: '700',
+    lineHeight: 17,
+  },
+  promoApplyMessageTextSuccess: {
+    color: '#2E7D32',
+  },
+  promoApplyMessageTextNeutral: {
+    color: '#92400E',
+  },
+  promoErrorText: {
+    marginTop: 10,
+    color: '#B91C1C',
+    fontSize: 12,
+    fontWeight: '700',
+    lineHeight: 17,
+  },
+  pointsHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  pointsHeaderText: {
+    flex: 1,
+  },
+  pointsBalanceBox: {
+    borderWidth: 1,
+    borderColor: '#C8E6C9',
+    backgroundColor: '#E8F5E9',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    minWidth: 92,
+    alignItems: 'center',
+  },
+  pointsBalanceLabel: {
+    fontSize: 11,
+    color: '#2E7D32',
+    fontWeight: '700',
+    marginBottom: 2,
+  },
+  pointsBalanceValue: {
+    fontSize: 18,
+    color: '#1B5E20',
+    fontWeight: '900',
+  },
+  pointsEmptyText: {
+    marginTop: 4,
+    color: '#777',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  pointsHistoryList: {
+    gap: 8,
+  },
+  pointsHistoryItem: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 10,
+    borderWidth: 1,
+    borderColor: '#f0f0f0',
+    borderRadius: 12,
+    padding: 10,
+  },
+  pointsHistoryMain: {
+    flex: 1,
+  },
+  pointsHistoryTitle: {
+    color: '#333',
+    fontSize: 13,
+    fontWeight: '800',
+    marginBottom: 3,
+  },
+  pointsHistoryMeta: {
+    color: '#777',
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  pointsHistoryAmount: {
+    color: '#2E7D32',
+    fontSize: 13,
+    fontWeight: '900',
   },
 });

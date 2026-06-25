@@ -29,7 +29,11 @@ describe('Auth API', () => {
 
       const result = await login(credentials);
 
-      expect(apiClient.post).toHaveBeenCalledWith('/api/auth/login', credentials);
+      expect(apiClient.post).toHaveBeenCalledWith(
+        '/api/auth/login',
+        credentials,
+        expect.objectContaining({ timeout: expect.any(Number) })
+      );
       expect(result).toEqual(mockResponse);
       expect(result.access_token).toBe('test-token');
     });
@@ -121,6 +125,61 @@ describe('Auth API', () => {
       expect(apiClient.post).toHaveBeenCalledWith('/api/auth/register', {
         ...credentials,
         role: 'master',
+      });
+    });
+
+    it('should send promo_code for master registration', async () => {
+      const credentials: RegisterCredentials = {
+        email: 'master@test.com',
+        phone: '+77777777777',
+        password: 'password123',
+        full_name: 'Master User',
+        role: 'master',
+        promo_code: ' REF123 ',
+      };
+      const mockResponse = {
+        access_token: 'test-token',
+        refresh_token: 'refresh-token',
+        token_type: 'bearer',
+      };
+      (apiClient.post as jest.Mock).mockResolvedValue({ data: mockResponse });
+
+      await register(credentials);
+
+      expect(apiClient.post).toHaveBeenCalledWith('/api/auth/register', {
+        email: 'master@test.com',
+        phone: '+77777777777',
+        password: 'password123',
+        full_name: 'Master User',
+        role: 'master',
+        promo_code: 'REF123',
+      });
+    });
+
+    it('should not send promo_code for client registration', async () => {
+      const credentials: RegisterCredentials = {
+        email: 'client@test.com',
+        phone: '+78888888888',
+        password: 'password123',
+        full_name: 'Client User',
+        role: 'client',
+        promo_code: 'REF123',
+      };
+      const mockResponse = {
+        access_token: 'test-token',
+        refresh_token: 'refresh-token',
+        token_type: 'bearer',
+      };
+      (apiClient.post as jest.Mock).mockResolvedValue({ data: mockResponse });
+
+      await register(credentials);
+
+      expect(apiClient.post).toHaveBeenCalledWith('/api/auth/register', {
+        email: 'client@test.com',
+        phone: '+78888888888',
+        password: 'password123',
+        full_name: 'Client User',
+        role: 'client',
       });
     });
   });
