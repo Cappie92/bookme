@@ -8,6 +8,7 @@ import { useModal } from '../hooks/useModal'
 import { cities, getTimezoneByCity } from '../utils/cities'
 import { normalizeRussianPhoneForApi } from '../utils/normalizeRussianPhoneForApi'
 import { reportAuthLoginSuccess, reportAuthRegisterSuccess } from '../analytics/authReachGoals'
+import { API_BASE_URL } from '../utils/config'
 
 const REGISTER_FIELDS = {
   client: [
@@ -595,6 +596,10 @@ export default function AuthModal() {
     } finally {
       setLoginLoading(false)
     }
+  }
+
+  const handleYandexLogin = () => {
+    window.location.href = `${API_BASE_URL}/api/auth/yandex/login`
   }
 
   const handleForgotPassword = async (e) => {
@@ -1231,6 +1236,19 @@ export default function AuthModal() {
                     Забыли пароль?
                   </button>
                 </div>
+                <div className="flex items-center gap-3">
+                  <div className="h-px flex-1 bg-gray-200" />
+                  <span className="text-xs text-gray-500">или</span>
+                  <div className="h-px flex-1 bg-gray-200" />
+                </div>
+                <button
+                  type="button"
+                  onClick={handleYandexLogin}
+                  data-testid="auth-yandex-login"
+                  className="w-full rounded border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-800 hover:bg-gray-50"
+                >
+                  Войти через Яндекс
+                </button>
               </form>
             )
           ) : (

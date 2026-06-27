@@ -35,6 +35,7 @@ const BranchBookingPage = lazy(() => import("./pages/BranchBookingPage"))
 const DesignSystemDemo = lazy(() => import("./pages/DesignSystemDemo"))
 const Clients = lazy(() => import("./pages/Clients"))
 const VerifyEmail = lazy(() => import("./pages/VerifyEmail"))
+const OAuthCallback = lazy(() => import("./pages/OAuthCallback"))
 
 // Client pages
 const ClientDashboard = lazy(() => import("./pages/ClientDashboard"))
@@ -167,6 +168,7 @@ function App() {
           <Route path="/about" element={<MainLayout><About/></MainLayout>} />
           <Route path="/register" element={<MainLayout><Home/></MainLayout>} />
           <Route path="/verify-email" element={<MainLayout><VerifyEmail/></MainLayout>} />
+          <Route path="/auth/oauth/callback" element={<OAuthCallback/>} />
           <Route path="/blog" element={<MainLayout><BlogList/></MainLayout>} />
           <Route path="/blog/:slug" element={<MainLayout><BlogPost/></MainLayout>} />
           <Route path="/dashboard" element={<MainLayout><ClientDashboard/></MainLayout>} />

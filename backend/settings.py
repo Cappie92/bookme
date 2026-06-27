@@ -55,6 +55,12 @@ class Settings(BaseSettings):
     FRONTEND_URL: str = "http://localhost:5175"
     API_BASE_URL: str = "http://localhost:8000"
 
+    # --- OAuth: Yandex web login ---
+    YANDEX_AUTH_ENABLED: str = "false"
+    YANDEX_CLIENT_ID: str = ""
+    YANDEX_CLIENT_SECRET: str = ""
+    YANDEX_REDIRECT_URI: str = ""
+
     # --- Transactional email (классический Unisender API sendEmail; см. services/email/unisender_provider) ---
     # EMAIL_ENABLED=false — без сети (stub), текущее поведение dev по умолчанию.
     EMAIL_ENABLED: str = ""
@@ -231,6 +237,10 @@ class Settings(BaseSettings):
     @property
     def email_enabled(self) -> bool:
         return _parse_bool(self.EMAIL_ENABLED)
+
+    @property
+    def yandex_auth_enabled(self) -> bool:
+        return _parse_bool(self.YANDEX_AUTH_ENABLED)
 
     @property
     def email_provider(self) -> str:

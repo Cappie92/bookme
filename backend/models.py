@@ -88,6 +88,27 @@ class User(Base):
     favorites = relationship("ClientFavorite", back_populates="client")
     subscription_price_snapshots = relationship("SubscriptionPriceSnapshot", back_populates="user")
     payments = relationship("Payment", back_populates="user")
+    oauth_accounts = relationship("UserOAuthAccount", back_populates="user")
+
+
+class UserOAuthAccount(Base):
+    __tablename__ = "user_oauth_accounts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    provider = Column(String(32), nullable=False)
+    provider_user_id = Column(String(128), nullable=False)
+    email = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    user = relationship("User", back_populates="oauth_accounts")
+
+    __table_args__ = (
+        UniqueConstraint("provider", "provider_user_id", name="uq_user_oauth_provider_user"),
+        Index("idx_user_oauth_user", "user_id"),
+        Index("idx_user_oauth_provider", "provider"),
+    )
 
 
 class Salon(Base):

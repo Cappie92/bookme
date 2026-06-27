@@ -1,8 +1,17 @@
+import base64
+import hashlib
+import hmac
+import json
+import secrets
 from datetime import datetime, timedelta
-from typing import Any, List
+from typing import Any, List, Optional
+from urllib.parse import urlencode
 
-from fastapi import APIRouter, Depends, HTTPException, status
+import httpx
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import RedirectResponse
 from jose import JWTError, jwt
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from auth import (
@@ -16,7 +25,7 @@ from auth import (
     verify_password,
 )
 from database import get_db
-from models import User, Master, Booking, UserRole, EmailVerification
+from models import User, Master, Booking, UserRole, EmailVerification, UserOAuthAccount
 from schemas import LoginRequest, Token, ChangePasswordRequest, SetPasswordRequest, MessageOut
 from schemas import User as UserSchema
 from schemas import UserCreate, VerifyRequest
@@ -46,6 +55,256 @@ router = APIRouter(
     tags=["auth"],
     responses={401: {"description": "Unauthorized"}},
 )
+
+YANDEX_PROVIDER = "yandex"
+YANDEX_AUTHORIZE_URL = "https://oauth.yandex.ru/authorize"
+YANDEX_TOKEN_URL = "https://oauth.yandex.ru/token"
+YANDEX_PROFILE_URL = "https://login.yandex.ru/info"
+OAUTH_STATE_TTL_SECONDS = 10 * 60
+OAUTH_TICKET_TTL_SECONDS = 120
+_oauth_ticket_memory_store: dict[str, dict] = {}
+
+
+class OAuthExchangeRequest(BaseModel):
+    ticket: str
+
+
+def _oauth_enabled_or_404():
+    settings = get_settings()
+    if not settings.yandex_auth_enabled:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Yandex auth disabled")
+    if not settings.YANDEX_CLIENT_ID or not settings.YANDEX_CLIENT_SECRET:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Yandex auth is not configured")
+    return settings
+
+
+def _yandex_redirect_uri(settings) -> str:
+    explicit = (settings.YANDEX_REDIRECT_URI or "").strip()
+    if explicit:
+        return explicit
+    return f"{settings.API_BASE_URL.rstrip('/')}/api/auth/yandex/callback"
+
+
+def _state_signature(payload: str) -> str:
+    digest = hmac.new(SECRET_KEY.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).digest()
+    return base64.urlsafe_b64encode(digest).decode("ascii").rstrip("=")
+
+
+def _b64_json(data: dict) -> str:
+    raw = json.dumps(data, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def _decode_b64_json(value: str) -> dict:
+    padded = value + "=" * (-len(value) % 4)
+    return json.loads(base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8"))
+
+
+def _create_oauth_state() -> str:
+    payload = _b64_json({
+        "provider": YANDEX_PROVIDER,
+        "nonce": secrets.token_urlsafe(16),
+        "exp": int((datetime.utcnow() + timedelta(seconds=OAUTH_STATE_TTL_SECONDS)).timestamp()),
+    })
+    return f"{payload}.{_state_signature(payload)}"
+
+
+def _verify_oauth_state(state: str) -> None:
+    try:
+        payload, signature = (state or "").split(".", 1)
+        if not hmac.compare_digest(_state_signature(payload), signature):
+            raise ValueError("bad signature")
+        data = _decode_b64_json(payload)
+        if data.get("provider") != YANDEX_PROVIDER:
+            raise ValueError("bad provider")
+        if int(data.get("exp") or 0) < int(datetime.utcnow().timestamp()):
+            raise ValueError("expired")
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Недействительная OAuth-сессия")
+
+
+def _issue_tokens_for_user(user: User) -> dict:
+    token_sub = (user.phone or "").strip() or (user.email or "").strip()
+    if not token_sub:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="У пользователя нет идентификатора для токена")
+    access_token = create_access_token(
+        data={"sub": token_sub, "role": user.role.value.upper()},
+        expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
+    )
+    refresh_token = create_refresh_token(data={"sub": token_sub, "role": user.role.value.upper()})
+    return {"access_token": access_token, "refresh_token": refresh_token, "token_type": "bearer"}
+
+
+def _token_response_for_user(user: User) -> dict:
+    tokens = _issue_tokens_for_user(user)
+    tokens["user"] = {
+        "id": user.id,
+        "email": user.email,
+        "phone": user.phone,
+        "role": user.role,
+        "full_name": user.full_name,
+        "is_verified": user.is_verified,
+        "is_phone_verified": user.is_phone_verified,
+    }
+    return tokens
+
+
+def _oauth_error_redirect(message: str) -> RedirectResponse:
+    frontend = get_settings().FRONTEND_URL.rstrip("/")
+    query = urlencode({"error": message})
+    return RedirectResponse(f"{frontend}/auth/oauth/callback?{query}")
+
+
+def _oauth_ticket_key(ticket: str) -> str:
+    return f"oauth_ticket:{ticket}"
+
+
+def _cleanup_memory_oauth_tickets() -> None:
+    now = int(datetime.utcnow().timestamp())
+    for key, value in list(_oauth_ticket_memory_store.items()):
+        if int(value.get("exp") or 0) < now:
+            _oauth_ticket_memory_store.pop(key, None)
+
+
+def _store_oauth_ticket(user_id: int) -> str:
+    ticket = secrets.token_urlsafe(32)
+    payload = json.dumps({"user_id": int(user_id)}, separators=(",", ":"))
+    settings = get_settings()
+    try:
+        from sms import redis_client
+        redis_client.setex(_oauth_ticket_key(ticket), OAUTH_TICKET_TTL_SECONDS, payload)
+        return ticket
+    except Exception:
+        if settings.is_production:
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="OAuth ticket storage unavailable")
+        _cleanup_memory_oauth_tickets()
+        _oauth_ticket_memory_store[ticket] = {
+            "user_id": int(user_id),
+            "exp": int((datetime.utcnow() + timedelta(seconds=OAUTH_TICKET_TTL_SECONDS)).timestamp()),
+        }
+        return ticket
+
+
+def _consume_oauth_ticket(ticket: str) -> int:
+    normalized = str(ticket or "").strip()
+    if not normalized:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Недействительный OAuth ticket")
+
+    settings = get_settings()
+    try:
+        from sms import redis_client
+        key = _oauth_ticket_key(normalized)
+        raw = redis_client.get(key)
+        if not raw:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Недействительный или истекший OAuth ticket")
+        redis_client.delete(key)
+        data = json.loads(raw)
+        return int(data["user_id"])
+    except HTTPException:
+        raise
+    except Exception:
+        if settings.is_production:
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="OAuth ticket storage unavailable")
+        _cleanup_memory_oauth_tickets()
+        data = _oauth_ticket_memory_store.pop(normalized, None)
+        if not data:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Недействительный или истекший OAuth ticket")
+        if int(data.get("exp") or 0) < int(datetime.utcnow().timestamp()):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Недействительный или истекший OAuth ticket")
+        return int(data["user_id"])
+
+
+def _exchange_yandex_code_for_token(code: str, redirect_uri: str, settings) -> str:
+    try:
+        response = httpx.post(
+            YANDEX_TOKEN_URL,
+            data={
+                "grant_type": "authorization_code",
+                "code": code,
+                "client_id": settings.YANDEX_CLIENT_ID,
+                "client_secret": settings.YANDEX_CLIENT_SECRET,
+                "redirect_uri": redirect_uri,
+            },
+            timeout=15,
+        )
+        response.raise_for_status()
+        token = response.json().get("access_token")
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Не удалось получить токен Яндекса")
+    if not token:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Яндекс не вернул access token")
+    return token
+
+
+def _fetch_yandex_profile(access_token: str) -> dict:
+    try:
+        response = httpx.get(
+            YANDEX_PROFILE_URL,
+            headers={"Authorization": f"OAuth {access_token}"},
+            params={"format": "json"},
+            timeout=15,
+        )
+        response.raise_for_status()
+        return response.json()
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Не удалось получить профиль Яндекса")
+
+
+def _user_from_yandex_profile(db: Session, profile: dict) -> User:
+    provider_user_id = str(profile.get("id") or "").strip()
+    email = str(profile.get("default_email") or profile.get("email") or "").strip().lower()
+    name = str(profile.get("real_name") or profile.get("display_name") or profile.get("login") or "").strip()
+    if not provider_user_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Яндекс не вернул идентификатор пользователя")
+    if not email:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Яндекс не вернул email")
+
+    account = (
+        db.query(UserOAuthAccount)
+        .filter(
+            UserOAuthAccount.provider == YANDEX_PROVIDER,
+            UserOAuthAccount.provider_user_id == provider_user_id,
+        )
+        .first()
+    )
+    if account:
+        account.email = email
+        account.updated_at = datetime.utcnow()
+        db.commit()
+        db.refresh(account.user)
+        return account.user
+
+    user = db.query(User).filter(User.email == email).first()
+    if not user:
+        user = User(
+            email=email,
+            phone=None,
+            full_name=name or None,
+            hashed_password=None,
+            role=UserRole.CLIENT,
+            is_active=True,
+            is_verified=True,
+            is_phone_verified=False,
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow(),
+        )
+        db.add(user)
+        db.flush()
+    elif name and not user.full_name:
+        user.full_name = name
+        user.updated_at = datetime.utcnow()
+
+    db.add(UserOAuthAccount(
+        user_id=user.id,
+        provider=YANDEX_PROVIDER,
+        provider_user_id=provider_user_id,
+        email=email,
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow(),
+    ))
+    db.commit()
+    db.refresh(user)
+    return user
 
 # --- Контракты смены контактов (pending) ---
 
@@ -235,6 +494,54 @@ def demo_master_access(db: Session = Depends(get_db)) -> Any:
         "refresh_token": refresh_token,
         "token_type": "bearer",
     }
+
+
+@router.get("/yandex/login", include_in_schema=False)
+def yandex_login() -> RedirectResponse:
+    settings = _oauth_enabled_or_404()
+    redirect_uri = _yandex_redirect_uri(settings)
+    state = _create_oauth_state()
+    query = urlencode({
+        "response_type": "code",
+        "client_id": settings.YANDEX_CLIENT_ID,
+        "redirect_uri": redirect_uri,
+        "state": state,
+        "scope": "login:email login:info",
+    })
+    return RedirectResponse(f"{YANDEX_AUTHORIZE_URL}?{query}")
+
+
+@router.get("/yandex/callback", include_in_schema=False)
+def yandex_callback(
+    code: Optional[str] = Query(None),
+    state: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
+    settings = _oauth_enabled_or_404()
+    if not code or not state:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Отсутствует code/state")
+    _verify_oauth_state(state)
+    redirect_uri = _yandex_redirect_uri(settings)
+
+    try:
+        access_token = _exchange_yandex_code_for_token(code, redirect_uri, settings)
+        profile = _fetch_yandex_profile(access_token)
+        user = _user_from_yandex_profile(db, profile)
+        ticket = _store_oauth_ticket(user.id)
+    except HTTPException as exc:
+        return _oauth_error_redirect(str(exc.detail))
+
+    query = urlencode({"ticket": ticket})
+    return RedirectResponse(f"{settings.FRONTEND_URL.rstrip('/')}/auth/oauth/callback?{query}")
+
+
+@router.post("/oauth/exchange")
+def oauth_exchange(payload: OAuthExchangeRequest, db: Session = Depends(get_db)) -> Any:
+    user_id = _consume_oauth_ticket(payload.ticket)
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user or not user.is_active:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Недействительный OAuth ticket")
+    return _token_response_for_user(user)
 
 
 @router.post(
