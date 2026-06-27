@@ -32,7 +32,13 @@ from models import (
     User,
     UserRole,
 )
-from services.promo_engine import ensure_master_referral_code, normalize_promo_code, PromoEngineError
+from services.promo_engine import (
+    MASTER_REFERRAL_SHARED_CAMPAIGN_NAME,
+    ensure_master_referral_code,
+    get_or_create_master_referral_shared_campaign,
+    normalize_promo_code,
+    PromoEngineError,
+)
 
 
 router = APIRouter(
@@ -208,15 +214,18 @@ def _normalize_code_or_400(code: str) -> str:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=exc.message)
 
 
-def _master_referral_code_query(db: Session, master_id: int):
+def _master_referral_code_query(db: Session, master: Master):
     return (
         db.query(PromoEngineCode)
         .join(PromoCampaign, PromoEngineCode.campaign_id == PromoCampaign.id)
         .filter(
             PromoCampaign.type == PromoCampaignType.MASTER_REFERRAL,
-            PromoCampaign.owner_master_id == master_id,
             PromoCampaign.promo_category == PromoCategory.ACQUISITION,
             PromoEngineCode.status == PromoCodeStatus.ACTIVE,
+        )
+        .filter(
+            (PromoEngineCode.assigned_to_user_id == master.user_id)
+            | (PromoCampaign.owner_master_id == master.id)
         )
         .order_by(PromoEngineCode.created_at.asc(), PromoEngineCode.id.asc())
     )
@@ -268,9 +277,16 @@ def _campaign_stats(db: Session, campaign_id: int) -> dict:
 
 
 def _campaign_item(campaign: PromoCampaign, db: Optional[Session] = None) -> dict:
+    is_master_referral_system = (
+        campaign.type == PromoCampaignType.MASTER_REFERRAL
+        and campaign.promo_category == PromoCategory.ACQUISITION
+        and campaign.owner_master_id is None
+        and campaign.name == MASTER_REFERRAL_SHARED_CAMPAIGN_NAME
+    )
     item = {
         "id": campaign.id,
         "name": campaign.name,
+        "is_master_referral_system": is_master_referral_system,
         "promo_category": _enum_value(campaign.promo_category),
         "type": _enum_value(campaign.type),
         "status": _enum_value(campaign.status),
@@ -461,6 +477,20 @@ def get_promo_engine_stats(db: Session = Depends(get_db)) -> dict:
 
 @router.post("/master-referral-codes/backfill")
 def backfill_master_referral_codes(db: Session = Depends(get_db)) -> dict:
+    shared_before = (
+        db.query(PromoCampaign.id)
+        .filter(
+            PromoCampaign.type == PromoCampaignType.MASTER_REFERRAL,
+            PromoCampaign.promo_category == PromoCategory.ACQUISITION,
+            PromoCampaign.owner_master_id.is_(None),
+            PromoCampaign.name == MASTER_REFERRAL_SHARED_CAMPAIGN_NAME,
+        )
+        .first()
+    )
+    shared_campaign = get_or_create_master_referral_shared_campaign(db)
+    if shared_before is None:
+        db.commit()
+        db.refresh(shared_campaign)
     masters = (
         db.query(Master)
         .join(User, Master.user_id == User.id)
@@ -472,22 +502,67 @@ def backfill_master_referral_codes(db: Session = Depends(get_db)) -> dict:
         .all()
     )
     summary = {
-        "created": 0,
+        "created_campaign": shared_before is None,
+        "shared_campaign_id": shared_campaign.id,
+        "created_codes": 0,
+        "migrated_codes": 0,
         "skipped_existing": 0,
         "failed": 0,
         "items": [],
     }
 
     for master in masters:
-        existing = _master_referral_code_query(db, master.id).first()
+        existing = _master_referral_code_query(db, master).first()
         if existing:
-            summary["skipped_existing"] += 1
+            if existing.assigned_to_user_id not in (None, master.user_id):
+                summary["failed"] += 1
+                summary["items"].append({
+                    "master_id": master.id,
+                    "user_id": master.user_id,
+                    "status": "failed",
+                    "code": existing.code,
+                    "code_id": existing.id,
+                    "error": "У промокода уже указан другой владелец",
+                })
+                continue
+
+            changed = False
+            if existing.assigned_to_user_id is None:
+                existing.assigned_to_user_id = master.user_id
+                changed = True
+            if existing.campaign_id != shared_campaign.id:
+                existing.campaign_id = shared_campaign.id
+                changed = True
+
+            if changed:
+                try:
+                    db.commit()
+                    db.refresh(existing)
+                except IntegrityError:
+                    db.rollback()
+                    summary["failed"] += 1
+                    summary["items"].append({
+                        "master_id": master.id,
+                        "user_id": master.user_id,
+                        "status": "failed",
+                        "code": existing.code,
+                        "code_id": existing.id,
+                        "error": "Не удалось перенести промокод в общую кампанию",
+                    })
+                    continue
+                summary["migrated_codes"] += 1
+                item_status = "migrated"
+            else:
+                summary["skipped_existing"] += 1
+                item_status = "skipped_existing"
+
             summary["items"].append({
                 "master_id": master.id,
                 "user_id": master.user_id,
-                "status": "skipped_existing",
+                "status": item_status,
                 "code": existing.code,
                 "code_id": existing.id,
+                "campaign_id": existing.campaign_id,
             })
             continue
 
@@ -495,13 +570,14 @@ def backfill_master_referral_codes(db: Session = Depends(get_db)) -> dict:
             code = ensure_master_referral_code(db, master.id)
             db.commit()
             db.refresh(code)
-            summary["created"] += 1
+            summary["created_codes"] += 1
             summary["items"].append({
                 "master_id": master.id,
                 "user_id": master.user_id,
                 "status": "created",
                 "code": code.code,
                 "code_id": code.id,
+                "campaign_id": code.campaign_id,
             })
         except PromoEngineError as exc:
             db.rollback()

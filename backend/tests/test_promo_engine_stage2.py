@@ -68,6 +68,7 @@ def _campaign(
     owner_master_id=None,
     status_: PromoCampaignStatus = PromoCampaignStatus.ACTIVE,
     ends_at=None,
+    eligible_period_months=None,
 ) -> PromoCampaign:
     campaign = PromoCampaign(
         name=f"Stage2 {type_.value}",
@@ -77,6 +78,7 @@ def _campaign(
         owner_master_id=owner_master_id,
         ends_at=ends_at,
         eligible_subscription_type=SubscriptionType.MASTER,
+        eligible_period_months=eligible_period_months,
         first_payment_only=True,
         beneficiary_reward_config={"1": 0, "3": 15, "6": 20, "12": 25},
     )
@@ -122,6 +124,7 @@ def _plan(db: Session) -> SubscriptionPlan:
 
 def test_referral_code_endpoint_creates_and_reuses_code(client, db: Session):
     master = _master(db, 1)
+    master_user_id = master.user_id
     headers = _login(client, master.user.phone)
 
     first = client.get("/api/master/referral-code", headers=headers)
@@ -135,7 +138,9 @@ def test_referral_code_endpoint_creates_and_reuses_code(client, db: Session):
     assert data["referrer_bonus_rules"] == {"1": 0, "3": 15, "6": 15, "12": 15}
     code = db.query(PromoEngineCode).filter(PromoEngineCode.code == data["code"]).first()
     assert code.campaign.type == PromoCampaignType.MASTER_REFERRAL
-    assert code.campaign.owner_master_id == master.id
+    assert code.campaign.owner_master_id is None
+    assert code.campaign.name == "Реферальные коды мастеров"
+    assert code.assigned_to_user_id == master_user_id
 
 
 def test_apply_admin_campaign_and_current_promo(client, db: Session):
@@ -159,6 +164,29 @@ def test_apply_admin_campaign_and_current_promo(client, db: Session):
     current = client.get("/api/master/promo-code/current", headers=headers)
     assert current.status_code == 200
     assert current.json()["promo_code"]["code"] == "ADMIN2026"
+
+
+def test_zero_min_period_campaign_applies_before_payment_and_calculates(client, db: Session):
+    master = _master(db, 21)
+    campaign = _campaign(db, eligible_period_months=[1, 3, 6, 12])
+    _code(db, campaign, "ZEROMIN")
+    plan = _plan(db)
+    headers = _login(client, master.user.phone)
+
+    apply_response = client.post("/api/master/promo-code/apply", json={"code": "ZEROMIN"}, headers=headers)
+    assert apply_response.status_code == 200, apply_response.json()
+    assert apply_response.json()["status"] == "pending_first_payment"
+
+    calculation = client.post(
+        "/api/subscriptions/calculate",
+        json={"plan_id": plan.id, "duration_months": 1, "upgrade_type": "immediate"},
+        headers=headers,
+    )
+
+    assert calculation.status_code == 200, calculation.json()
+    assert calculation.json()["promo_preview"]["code"] == "ZEROMIN"
+    assert db.query(PromoRewardGrant).count() == 0
+    assert db.query(SubscriptionPointsLedger).count() == 0
 
 
 def test_current_promo_empty(client, db: Session):

@@ -78,13 +78,14 @@ def _campaign(
     return campaign
 
 
-def _code(db, campaign: PromoCampaign, code: str = "ADMIN2026") -> PromoEngineCode:
+def _code(db, campaign: PromoCampaign, code: str = "ADMIN2026", assigned_to_user_id=None) -> PromoEngineCode:
     promo_code = PromoEngineCode(
         campaign_id=campaign.id,
         code=code,
         status=PromoCodeStatus.ACTIVE,
         max_redemptions=10,
         current_redemptions=0,
+        assigned_to_user_id=assigned_to_user_id,
     )
     db.add(promo_code)
     db.commit()
@@ -294,6 +295,8 @@ def test_patch_campaign_accepts_zero_min_subscription_months(client, admin_auth_
 def test_backfill_master_referral_codes_creates_missing_and_is_idempotent(client, admin_auth_headers, db):
     master_with_code = _master(db, 601)
     master_without_code = _master(db, 602)
+    master_with_code_user_id = master_with_code.user_id
+    master_without_code_user_id = master_without_code.user_id
     existing_campaign = _campaign(
         db,
         "Existing Referral",
@@ -302,22 +305,35 @@ def test_backfill_master_referral_codes_creates_missing_and_is_idempotent(client
     )
     existing_code = _code(db, existing_campaign, "EXIST601")
     existing_code_id = existing_code.id
+    existing_campaign_id = existing_campaign.id
 
     first = client.post(f"{BASE}/master-referral-codes/backfill", headers=admin_auth_headers)
 
     assert first.status_code == 200, first.text
     first_body = first.json()
-    assert first_body["created"] >= 1
-    assert first_body["skipped_existing"] >= 1
+    assert first_body["created_campaign"] is True
+    assert first_body["created_codes"] >= 1
+    assert first_body["migrated_codes"] >= 1
     assert first_body["failed"] == 0
-    assert db.query(PromoEngineCode).filter(PromoEngineCode.id == existing_code_id).one().code == "EXIST601"
+    shared_campaign_id = first_body["shared_campaign_id"]
+    shared_campaign = db.query(PromoCampaign).filter(PromoCampaign.id == shared_campaign_id).one()
+    assert shared_campaign.name == "Реферальные коды мастеров"
+    assert shared_campaign.type == PromoCampaignType.MASTER_REFERRAL
+    assert shared_campaign.owner_master_id is None
+
+    preserved_code = db.query(PromoEngineCode).filter(PromoEngineCode.id == existing_code_id).one()
+    assert preserved_code.code == "EXIST601"
+    assert preserved_code.campaign_id == shared_campaign_id
+    assert preserved_code.assigned_to_user_id == master_with_code_user_id
+    assert db.query(PromoCampaign).filter(PromoCampaign.id == existing_campaign_id).count() == 1
 
     created_for_missing = (
         db.query(PromoEngineCode)
         .join(PromoCampaign, PromoEngineCode.campaign_id == PromoCampaign.id)
         .filter(
             PromoCampaign.type == PromoCampaignType.MASTER_REFERRAL,
-            PromoCampaign.owner_master_id == master_without_code.id,
+            PromoCampaign.id == shared_campaign_id,
+            PromoEngineCode.assigned_to_user_id == master_without_code_user_id,
         )
         .one()
     )
@@ -327,10 +343,16 @@ def test_backfill_master_referral_codes_creates_missing_and_is_idempotent(client
 
     assert second.status_code == 200, second.text
     second_body = second.json()
-    assert second_body["created"] == 0
+    assert second_body["created_campaign"] is False
+    assert second_body["created_codes"] == 0
+    assert second_body["migrated_codes"] == 0
     assert second_body["skipped_existing"] >= 2
     assert second_body["failed"] == 0
     assert db.query(PromoEngineCode).filter(PromoEngineCode.code == created_for_missing.code).count() == 1
+    assert db.query(PromoCampaign).filter(
+        PromoCampaign.type == PromoCampaignType.MASTER_REFERRAL,
+        PromoCampaign.name == "Реферальные коды мастеров",
+    ).count() == 1
 
 
 def test_create_code_success_uses_promo_engine_codes(client, admin_auth_headers, db):

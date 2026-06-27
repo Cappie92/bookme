@@ -41,6 +41,7 @@ ACTIVE_REDEMPTION_STATUSES = (
 
 DEFAULT_BENEFICIARY_POINTS_CONFIG = {"1": 0, "3": 15, "6": 20, "12": 25}
 DEFAULT_REFERRER_POINTS_CONFIG = {"1": 0, "3": 15, "6": 15, "12": 15}
+MASTER_REFERRAL_SHARED_CAMPAIGN_NAME = "Реферальные коды мастеров"
 
 
 class PromoEngineError(ValueError):
@@ -644,6 +645,9 @@ def validate_promo_code_for_master(
     referrer_type = campaign.referrer_type
     if campaign.type == PromoCampaignType.MASTER_REFERRAL:
         referrer_master_id = campaign.owner_master_id
+        if not referrer_master_id and promo_code.assigned_to_user_id:
+            referrer = db.query(Master).filter(Master.user_id == promo_code.assigned_to_user_id).first()
+            referrer_master_id = referrer.id if referrer else None
         referrer_type = PromoReferrerType.MASTER
         if not referrer_master_id:
             raise PromoEngineError("referrer_missing", "Владелец реферального кода не найден")
@@ -755,30 +759,29 @@ def generate_master_referral_code(master: Master) -> str:
     return f"M{int(master.id)}{suffix}"
 
 
-def ensure_master_referral_code(db: Session, master_id: int) -> PromoEngineCode:
-    master = _assert_master_can_use_promo(_get_master_for_update(db, master_id))
-    existing = (
-        db.query(PromoEngineCode)
-        .join(PromoCampaign, PromoEngineCode.campaign_id == PromoCampaign.id)
+def get_or_create_master_referral_shared_campaign(db: Session) -> PromoCampaign:
+    campaign = (
+        db.query(PromoCampaign)
         .filter(
             PromoCampaign.type == PromoCampaignType.MASTER_REFERRAL,
-            PromoCampaign.owner_master_id == master.id,
             PromoCampaign.promo_category == PromoCategory.ACQUISITION,
-            PromoEngineCode.status == PromoCodeStatus.ACTIVE,
+            PromoCampaign.owner_master_id.is_(None),
+            PromoCampaign.name == MASTER_REFERRAL_SHARED_CAMPAIGN_NAME,
         )
-        .order_by(PromoEngineCode.created_at.asc())
+        .order_by(PromoCampaign.created_at.asc(), PromoCampaign.id.asc())
         .first()
     )
-    if existing:
-        return existing
+    if campaign:
+        return campaign
 
     campaign = PromoCampaign(
-        name=f"Referral master #{master.id}",
+        name=MASTER_REFERRAL_SHARED_CAMPAIGN_NAME,
         promo_category=PromoCategory.ACQUISITION,
         type=PromoCampaignType.MASTER_REFERRAL,
         status=PromoCampaignStatus.ACTIVE,
-        owner_master_id=master.id,
+        owner_master_id=None,
         eligible_subscription_type=SubscriptionType.MASTER,
+        eligible_period_months=[3, 6, 12],
         first_payment_only=True,
         beneficiary_reward_type=PromoRewardType.SUBSCRIPTION_POINTS,
         beneficiary_reward_config=DEFAULT_BENEFICIARY_POINTS_CONFIG,
@@ -788,11 +791,40 @@ def ensure_master_referral_code(db: Session, master_id: int) -> PromoEngineCode:
     )
     db.add(campaign)
     db.flush()
+    return campaign
+
+
+def ensure_master_referral_code(db: Session, master_id: int) -> PromoEngineCode:
+    master = _assert_master_can_use_promo(_get_master_for_update(db, master_id))
+    existing = (
+        db.query(PromoEngineCode)
+        .join(PromoCampaign, PromoEngineCode.campaign_id == PromoCampaign.id)
+        .filter(
+            PromoCampaign.type == PromoCampaignType.MASTER_REFERRAL,
+            PromoCampaign.promo_category == PromoCategory.ACQUISITION,
+            PromoEngineCode.status == PromoCodeStatus.ACTIVE,
+        )
+        .filter(
+            (PromoEngineCode.assigned_to_user_id == master.user_id)
+            | (PromoCampaign.owner_master_id == master.id)
+        )
+        .order_by(PromoEngineCode.created_at.asc())
+        .first()
+    )
+    if existing:
+        return existing
+
+    campaign = get_or_create_master_referral_shared_campaign(db)
 
     for _ in range(10):
         candidate = generate_master_referral_code(master)
         if not db.query(PromoEngineCode.id).filter(PromoEngineCode.code == candidate).first():
-            code = PromoEngineCode(campaign_id=campaign.id, code=candidate, status=PromoCodeStatus.ACTIVE)
+            code = PromoEngineCode(
+                campaign_id=campaign.id,
+                code=candidate,
+                status=PromoCodeStatus.ACTIVE,
+                assigned_to_user_id=master.user_id,
+            )
             db.add(code)
             db.flush()
             return code

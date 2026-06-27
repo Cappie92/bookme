@@ -373,11 +373,19 @@ def test_first_payment_detector(db):
 
 def test_ensure_master_referral_code_creates_unique_active_code(db):
     master = _master(db, 16)
+    another_master = _master(db, 17)
 
     first = ensure_master_referral_code(db, master.id)
     second = ensure_master_referral_code(db, master.id)
+    another = ensure_master_referral_code(db, another_master.id)
 
     assert first.id == second.id
     assert first.code.startswith(f"M{master.id}")
+    assert another.code.startswith(f"M{another_master.id}")
+    assert first.id != another.id
+    assert first.campaign_id == another.campaign_id
     assert first.campaign.type == PromoCampaignType.MASTER_REFERRAL
-    assert first.campaign.owner_master_id == master.id
+    assert first.campaign.owner_master_id is None
+    assert first.campaign.name == "Реферальные коды мастеров"
+    assert first.assigned_to_user_id == master.user_id
+    assert another.assigned_to_user_id == another_master.user_id

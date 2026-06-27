@@ -788,6 +788,16 @@ export default function AdminPromoEngine() {
     }
   }
 
+  const exportCampaignCodes = async (campaign) => {
+    try {
+      setError('')
+      const blob = await adminPromoEngineApi.exportCodes({ campaign_id: campaign.id })
+      downloadBlob(blob, `promo-codes-${campaign.id}.csv`)
+    } catch (err) {
+      setError(err.message || 'Не удалось скачать коды кампании')
+    }
+  }
+
   const renderTableShell = (title, children, actions = null) => (
     <div className="bg-white rounded-lg shadow-sm border border-gray-200">
       <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
@@ -838,7 +848,14 @@ export default function AdminPromoEngine() {
                   {(data?.items || []).map(campaign => (
                     <tr key={campaign.id} className="hover:bg-gray-50">
                       <td className="px-4 py-3 text-sm text-gray-900">#{campaign.id}</td>
-                      <td className="px-4 py-3 text-sm font-medium text-gray-900">{campaign.name}</td>
+                      <td className="px-4 py-3 text-sm font-medium text-gray-900">
+                        {campaign.name}
+                        {campaign.is_master_referral_system ? (
+                          <span className="ml-2 inline-flex rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-700">
+                            Личные коды мастеров
+                          </span>
+                        ) : null}
+                      </td>
                       <td className="px-4 py-3 text-sm text-gray-600">{displayLabel(CATEGORY_LABELS, campaign.promo_category)}<br />{displayLabel(CAMPAIGN_TYPE_LABELS, campaign.type)}</td>
                       <td className="px-4 py-3"><span className={`px-2 py-1 text-xs rounded-full ${statusBadgeClass(campaign.status)}`}>{displayLabel(STATUS_LABELS, campaign.status)}</span></td>
                       <td className="px-4 py-3 text-sm text-gray-600">{formatDateOnly(campaign.starts_at)}<br />{formatDateOnly(campaign.ends_at)}</td>
@@ -849,9 +866,14 @@ export default function AdminPromoEngine() {
                         Баллы: {campaign.stats?.points_granted ?? 0}
                       </td>
                       <td className="px-4 py-3 text-right">
-                        <button onClick={() => openEditCampaign(campaign)} className="text-blue-600 hover:text-blue-800">
-                          <PencilIcon className="w-5 h-5" />
-                        </button>
+                        <div className="flex justify-end gap-3">
+                          <button onClick={() => exportCampaignCodes(campaign)} className="text-sm font-medium text-green-700 hover:text-green-800">
+                            Скачать коды
+                          </button>
+                          <button onClick={() => openEditCampaign(campaign)} className="text-blue-600 hover:text-blue-800">
+                            <PencilIcon className="w-5 h-5" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -885,11 +907,13 @@ export default function AdminPromoEngine() {
           )}
         >
           <div>
-            <p>Личные промокоды мастеров создаются автоматически и используются для реферальной программы мастеров.</p>
-            <p className="mt-1">Эта операция создаст коды только тем мастерам, у кого их ещё нет.</p>
+            <p>Все личные промокоды мастеров хранятся в общей кампании «Реферальные коды мастеров».</p>
+            <p className="mt-1">Операция создаёт недостающие коды и при необходимости переносит старые личные коды в общую кампанию.</p>
             {backfillResult ? (
               <p className="mt-2 font-semibold">
-                Создано: {backfillResult.created}. Уже было: {backfillResult.skipped_existing}. Ошибки: {backfillResult.failed}.
+                Кампания создана: {backfillResult.created_campaign ? 'да' : 'нет'}.
+                Создано кодов: {backfillResult.created_codes}. Перенесено: {backfillResult.migrated_codes}.
+                Уже было: {backfillResult.skipped_existing}. Ошибки: {backfillResult.failed}.
               </p>
             ) : null}
           </div>
