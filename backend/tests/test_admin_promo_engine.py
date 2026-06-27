@@ -54,12 +54,18 @@ def _master(db, idx: int) -> Master:
     return master
 
 
-def _campaign(db, name: str = "Admin Promo") -> PromoCampaign:
+def _campaign(
+    db,
+    name: str = "Admin Promo",
+    type_: PromoCampaignType = PromoCampaignType.ADMIN_CAMPAIGN,
+    owner_master_id=None,
+) -> PromoCampaign:
     campaign = PromoCampaign(
         name=name,
         promo_category=PromoCategory.ACQUISITION,
-        type=PromoCampaignType.ADMIN_CAMPAIGN,
+        type=type_,
         status=PromoCampaignStatus.ACTIVE,
+        owner_master_id=owner_master_id,
         eligible_subscription_type=SubscriptionType.MASTER,
         max_redemptions_per_user=1,
         first_payment_only=True,
@@ -164,8 +170,11 @@ def test_admin_only_access_for_all_endpoints(client, admin_auth_headers, master_
         ("get", f"{BASE}/redemptions", None),
         ("get", f"{BASE}/grants", None),
         ("get", f"{BASE}/ledger", None),
+        ("get", f"{BASE}/codes/export", None),
+        ("post", f"{BASE}/master-referral-codes/backfill", None),
         ("post", f"{BASE}/campaigns", {"name": "Forbidden"}),
         ("post", f"{BASE}/codes", {"campaign_id": 1, "code": "FORBIDDEN"}),
+        ("post", f"{BASE}/codes/bulk-create", {"campaign_id": 1, "count": 1}),
         ("patch", f"{BASE}/campaigns/1", {"name": "Forbidden"}),
         ("patch", f"{BASE}/codes/1", {"status": "disabled"}),
     ]:
@@ -282,6 +291,48 @@ def test_patch_campaign_accepts_zero_min_subscription_months(client, admin_auth_
     assert response.json()["eligible_period_months"] == [1, 3, 6, 12]
 
 
+def test_backfill_master_referral_codes_creates_missing_and_is_idempotent(client, admin_auth_headers, db):
+    master_with_code = _master(db, 601)
+    master_without_code = _master(db, 602)
+    existing_campaign = _campaign(
+        db,
+        "Existing Referral",
+        type_=PromoCampaignType.MASTER_REFERRAL,
+        owner_master_id=master_with_code.id,
+    )
+    existing_code = _code(db, existing_campaign, "EXIST601")
+    existing_code_id = existing_code.id
+
+    first = client.post(f"{BASE}/master-referral-codes/backfill", headers=admin_auth_headers)
+
+    assert first.status_code == 200, first.text
+    first_body = first.json()
+    assert first_body["created"] >= 1
+    assert first_body["skipped_existing"] >= 1
+    assert first_body["failed"] == 0
+    assert db.query(PromoEngineCode).filter(PromoEngineCode.id == existing_code_id).one().code == "EXIST601"
+
+    created_for_missing = (
+        db.query(PromoEngineCode)
+        .join(PromoCampaign, PromoEngineCode.campaign_id == PromoCampaign.id)
+        .filter(
+            PromoCampaign.type == PromoCampaignType.MASTER_REFERRAL,
+            PromoCampaign.owner_master_id == master_without_code.id,
+        )
+        .one()
+    )
+    assert created_for_missing.code
+
+    second = client.post(f"{BASE}/master-referral-codes/backfill", headers=admin_auth_headers)
+
+    assert second.status_code == 200, second.text
+    second_body = second.json()
+    assert second_body["created"] == 0
+    assert second_body["skipped_existing"] >= 2
+    assert second_body["failed"] == 0
+    assert db.query(PromoEngineCode).filter(PromoEngineCode.code == created_for_missing.code).count() == 1
+
+
 def test_create_code_success_uses_promo_engine_codes(client, admin_auth_headers, db):
     campaign = _campaign(db)
 
@@ -325,6 +376,66 @@ def test_patch_code_status_and_max_redemptions_success(client, admin_auth_header
     body = response.json()
     assert body["status"] == "disabled"
     assert body["max_redemptions"] == 20
+
+
+def test_bulk_create_codes_success_unique_and_campaign_required(client, admin_auth_headers, db):
+    campaign = _campaign(db, "Bulk Campaign")
+
+    response = client.post(
+        f"{BASE}/codes/bulk-create",
+        headers=admin_auth_headers,
+        json={"campaign_id": campaign.id, "count": 5, "prefix": "bulk", "code_length": 6, "max_redemptions": 1},
+    )
+
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["created"] == 5
+    codes = [item["code"] for item in body["items"]]
+    assert len(codes) == len(set(codes))
+    assert all(code.startswith("BULK") for code in codes)
+    assert all(item["campaign_id"] == campaign.id for item in body["items"])
+    assert all(item["max_redemptions"] == 1 for item in body["items"])
+
+    missing_campaign = client.post(
+        f"{BASE}/codes/bulk-create",
+        headers=admin_auth_headers,
+        json={"count": 1},
+    )
+    assert missing_campaign.status_code == 422
+
+
+def test_bulk_create_codes_rejects_invalid_count(client, admin_auth_headers, db):
+    campaign = _campaign(db, "Bulk Invalid")
+
+    response = client.post(
+        f"{BASE}/codes/bulk-create",
+        headers=admin_auth_headers,
+        json={"campaign_id": campaign.id, "count": 0},
+    )
+
+    assert response.status_code == 422
+
+
+def test_export_codes_csv_respects_filters(client, admin_auth_headers, db):
+    campaign = _campaign(db, "Export Campaign")
+    _code(db, campaign, "EXPORT1")
+    _code(db, campaign, "EXPORT2")
+    other_campaign = _campaign(db, "Other Export Campaign")
+    _code(db, other_campaign, "OTHEREXPORT")
+
+    response = client.get(
+        f"{BASE}/codes/export?campaign_id={campaign.id}&search=EXPORT",
+        headers=admin_auth_headers,
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.headers["content-type"].startswith("text/csv")
+    assert "promo-engine-codes.csv" in response.headers["content-disposition"]
+    text = response.text
+    assert "Промокод" in text
+    assert "EXPORT1" in text
+    assert "EXPORT2" in text
+    assert "OTHEREXPORT" not in text
 
 
 def test_readonly_lists_return_paginated_shape(client, admin_auth_headers, db):

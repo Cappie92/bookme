@@ -1,7 +1,11 @@
+import csv
+import io
+import secrets
+import string
 from datetime import datetime
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
@@ -24,9 +28,11 @@ from models import (
     SubscriptionPointsLedger,
     SubscriptionPointsSourceType,
     SubscriptionType,
+    Master,
     User,
+    UserRole,
 )
-from services.promo_engine import normalize_promo_code, PromoEngineError
+from services.promo_engine import ensure_master_referral_code, normalize_promo_code, PromoEngineError
 
 
 router = APIRouter(
@@ -156,6 +162,15 @@ class CodePatchRequest(BaseModel):
     assigned_to_user_id: Optional[int] = None
 
 
+class BulkCodeCreateRequest(BaseModel):
+    campaign_id: int
+    count: int = Field(..., ge=1, le=1000)
+    prefix: Optional[str] = None
+    code_length: Optional[int] = 8
+    max_redemptions: Optional[int] = None
+    status: Optional[str] = PromoCodeStatus.ACTIVE.value
+
+
 def _validate_dates(starts_at: Optional[datetime], ends_at: Optional[datetime]) -> None:
     if starts_at and ends_at and ends_at < starts_at:
         raise HTTPException(
@@ -191,6 +206,34 @@ def _normalize_code_or_400(code: str) -> str:
         return normalize_promo_code(code)
     except PromoEngineError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=exc.message)
+
+
+def _master_referral_code_query(db: Session, master_id: int):
+    return (
+        db.query(PromoEngineCode)
+        .join(PromoCampaign, PromoEngineCode.campaign_id == PromoCampaign.id)
+        .filter(
+            PromoCampaign.type == PromoCampaignType.MASTER_REFERRAL,
+            PromoCampaign.owner_master_id == master_id,
+            PromoCampaign.promo_category == PromoCategory.ACQUISITION,
+            PromoEngineCode.status == PromoCodeStatus.ACTIVE,
+        )
+        .order_by(PromoEngineCode.created_at.asc(), PromoEngineCode.id.asc())
+    )
+
+
+def _generate_bulk_code(prefix: str, code_length: int) -> str:
+    alphabet = string.ascii_uppercase + string.digits
+    suffix = "".join(secrets.choice(alphabet) for _ in range(code_length))
+    return f"{prefix}{suffix}"
+
+
+def _csv_escape(value: Any) -> Any:
+    if value is None:
+        return ""
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    return value
 
 
 def _campaign_stats(db: Session, campaign_id: int) -> dict:
@@ -416,6 +459,72 @@ def get_promo_engine_stats(db: Session = Depends(get_db)) -> dict:
     }
 
 
+@router.post("/master-referral-codes/backfill")
+def backfill_master_referral_codes(db: Session = Depends(get_db)) -> dict:
+    masters = (
+        db.query(Master)
+        .join(User, Master.user_id == User.id)
+        .filter(
+            User.role.in_([UserRole.MASTER, UserRole.INDIE]),
+            User.is_active.is_(True),
+        )
+        .order_by(Master.id.asc())
+        .all()
+    )
+    summary = {
+        "created": 0,
+        "skipped_existing": 0,
+        "failed": 0,
+        "items": [],
+    }
+
+    for master in masters:
+        existing = _master_referral_code_query(db, master.id).first()
+        if existing:
+            summary["skipped_existing"] += 1
+            summary["items"].append({
+                "master_id": master.id,
+                "user_id": master.user_id,
+                "status": "skipped_existing",
+                "code": existing.code,
+                "code_id": existing.id,
+            })
+            continue
+
+        try:
+            code = ensure_master_referral_code(db, master.id)
+            db.commit()
+            db.refresh(code)
+            summary["created"] += 1
+            summary["items"].append({
+                "master_id": master.id,
+                "user_id": master.user_id,
+                "status": "created",
+                "code": code.code,
+                "code_id": code.id,
+            })
+        except PromoEngineError as exc:
+            db.rollback()
+            summary["failed"] += 1
+            summary["items"].append({
+                "master_id": master.id,
+                "user_id": master.user_id,
+                "status": "failed",
+                "error": exc.message,
+            })
+        except IntegrityError:
+            db.rollback()
+            summary["failed"] += 1
+            summary["items"].append({
+                "master_id": master.id,
+                "user_id": master.user_id,
+                "status": "failed",
+                "error": "Не удалось создать уникальный промокод",
+            })
+
+    return summary
+
+
 @router.get("/campaigns")
 def list_campaigns(
     skip: int = Query(0, ge=0),
@@ -496,6 +605,54 @@ def list_codes(
     return _paginated(query, skip, limit, _code_item)
 
 
+@router.get("/codes/export")
+def export_codes_csv(
+    campaign_id: Optional[int] = None,
+    status: Optional[str] = None,
+    search: Optional[str] = None,
+    q: Optional[str] = None,
+    db: Session = Depends(get_db),
+) -> Response:
+    query = db.query(PromoEngineCode).join(PromoCampaign)
+    if campaign_id:
+        query = query.filter(PromoEngineCode.campaign_id == campaign_id)
+    if status:
+        query = query.filter(PromoEngineCode.status == _parse_enum(PromoCodeStatus, status, "status"))
+    search_value = search or q
+    if search_value:
+        query = query.filter(PromoEngineCode.code.ilike(f"%{search_value}%"))
+    codes = query.order_by(PromoEngineCode.created_at.desc(), PromoEngineCode.id.desc()).all()
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        "Промокод",
+        "Кампания",
+        "Статус",
+        "Применено",
+        "Лимит",
+        "Персональный пользователь",
+        "Дата создания",
+    ])
+    for code in codes:
+        writer.writerow([
+            _csv_escape(code.code),
+            _csv_escape(code.campaign.name if code.campaign else code.campaign_id),
+            _csv_escape(_enum_value(code.status)),
+            _csv_escape(code.current_redemptions),
+            _csv_escape(code.max_redemptions),
+            _csv_escape(code.assigned_to_user_id),
+            _csv_escape(code.created_at),
+        ])
+
+    content = "\ufeff" + output.getvalue()
+    return Response(
+        content=content,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="promo-engine-codes.csv"'},
+    )
+
+
 @router.post("/codes", status_code=status.HTTP_201_CREATED)
 def create_code(payload: CodeCreateRequest, db: Session = Depends(get_db)) -> dict:
     campaign = _get_campaign_or_404(db, payload.campaign_id)
@@ -520,6 +677,63 @@ def create_code(payload: CodeCreateRequest, db: Session = Depends(get_db)) -> di
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Промокод уже существует")
     db.refresh(code)
     return _code_item(code)
+
+
+@router.post("/codes/bulk-create", status_code=status.HTTP_201_CREATED)
+def bulk_create_codes(payload: BulkCodeCreateRequest, db: Session = Depends(get_db)) -> dict:
+    campaign = _get_campaign_or_404(db, payload.campaign_id)
+    count = int(payload.count)
+    if count < 1 or count > 1000:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="count должен быть от 1 до 1000")
+    code_length = int(payload.code_length or 8)
+    if code_length < 4 or code_length > 32:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="code_length должен быть от 4 до 32")
+    if payload.max_redemptions is not None and payload.max_redemptions < 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="max_redemptions должен быть >= 0")
+    code_status = _parse_enum(PromoCodeStatus, payload.status or PromoCodeStatus.ACTIVE.value, "status")
+    prefix = "".join(str(payload.prefix or "").strip().upper().split())
+
+    created = []
+    generated = set()
+    attempts = 0
+    max_attempts = max(100, count * 20)
+    while len(created) < count and attempts < max_attempts:
+        attempts += 1
+        candidate = _generate_bulk_code(prefix, code_length)
+        if candidate in generated:
+            continue
+        if db.query(PromoEngineCode.id).filter(PromoEngineCode.code == candidate).first():
+            continue
+        generated.add(candidate)
+        created.append(PromoEngineCode(
+            campaign_id=campaign.id,
+            code=candidate,
+            status=code_status,
+            max_redemptions=payload.max_redemptions,
+        ))
+
+    if len(created) < count:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Не удалось сгенерировать нужное количество уникальных промокодов. Измените префикс или длину кода.",
+        )
+
+    db.add_all(created)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Не удалось сохранить промокоды из-за совпадения кодов. Повторите попытку.",
+        )
+
+    for code in created:
+        db.refresh(code)
+    return {
+        "created": len(created),
+        "items": [_code_item(code) for code in created],
+    }
 
 
 @router.patch("/codes/{code_id}")

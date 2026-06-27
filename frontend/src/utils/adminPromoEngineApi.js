@@ -44,8 +44,21 @@ async function request(path, options = {}) {
   return body
 }
 
+async function download(path) {
+  const response = await fetch(`${API_BASE_URL}${BASE_PATH}${path}`, {
+    headers: getAuthHeaders(),
+  })
+  if (!response.ok) {
+    const body = await response.json().catch(() => null)
+    throw new Error(getErrorMessage(body, response.statusText || 'Ошибка запроса'))
+  }
+  return response.blob()
+}
+
 export const adminPromoEngineApi = {
   getStats: () => request('/stats'),
+  backfillMasterReferralCodes: () =>
+    request('/master-referral-codes/backfill', { method: 'POST' }),
   listCampaigns: (params) => request(`/campaigns${buildQuery(params)}`),
   createCampaign: (payload) =>
     request('/campaigns', { method: 'POST', body: JSON.stringify(payload) }),
@@ -54,6 +67,9 @@ export const adminPromoEngineApi = {
   listCodes: (params) => request(`/codes${buildQuery(params)}`),
   createCode: (payload) =>
     request('/codes', { method: 'POST', body: JSON.stringify(payload) }),
+  bulkCreateCodes: (payload) =>
+    request('/codes/bulk-create', { method: 'POST', body: JSON.stringify(payload) }),
+  exportCodes: (params) => download(`/codes/export${buildQuery(params)}`),
   updateCode: (id, payload) =>
     request(`/codes/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
   listRedemptions: (params) => request(`/redemptions${buildQuery(params)}`),

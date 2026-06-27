@@ -60,7 +60,7 @@ const CAMPAIGN_TYPE_LABELS = {
 
 const ROLE_LABELS = {
   master: 'Мастер',
-  indie: 'Мастер / самозанятый',
+  indie: 'Самозанятый мастер',
   salon: 'Салон',
   client: 'Клиент',
   admin: 'Администратор',
@@ -113,6 +113,14 @@ const EMPTY_CAMPAIGN_CODE_FORM = {
   code: '',
   max_redemptions: '',
   assigned_to_user_id: '',
+}
+
+const EMPTY_BULK_CODE_FORM = {
+  campaign_id: '',
+  count: '10',
+  prefix: '',
+  code_length: '8',
+  max_redemptions: '',
 }
 
 function formatDate(value) {
@@ -208,6 +216,33 @@ function normalizeCodeCreateError(error) {
     return 'Такой промокод уже существует.'
   }
   return message
+}
+
+function downloadBlob(blob, filename) {
+  const url = window.URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  window.URL.revokeObjectURL(url)
+}
+
+function downloadCreatedCodesCsv(items) {
+  const headers = ['Промокод', 'Кампания', 'Статус', 'Применено', 'Лимит', 'Персональный пользователь', 'Дата создания']
+  const rows = (items || []).map(item => [
+    item.code,
+    item.campaign_name || item.campaign_id,
+    displayLabel(CODE_STATUS_LABELS, item.status),
+    item.current_redemptions ?? 0,
+    item.max_redemptions ?? '',
+    item.assigned_to_user_id ?? '',
+    item.created_at ?? '',
+  ])
+  const escapeCell = (value) => `"${String(value ?? '').replaceAll('"', '""')}"`
+  const csv = [headers, ...rows].map(row => row.map(escapeCell).join(',')).join('\n')
+  downloadBlob(new Blob([`\ufeff${csv}`], { type: 'text/csv;charset=utf-8;' }), 'created-promo-codes.csv')
 }
 
 function monthWord(months) {
@@ -434,7 +469,6 @@ function RewardConfigEditor({ title, value, onChange, emptyHelper }) {
             <Field
               key={period}
               label={`При оплате на ${period} ${monthWord(period)}, %`}
-              helper={period === 1 ? '0 означает, что за этот период бонус не начисляется.' : null}
             >
               <input
                 type="number"
@@ -447,6 +481,9 @@ function RewardConfigEditor({ title, value, onChange, emptyHelper }) {
             </Field>
           ))}
           <div className="md:col-span-4">
+            <HelperText>
+              0 означает, что за этот период бонус не начисляется.
+            </HelperText>
             <HelperText>
               Например: 3 месяца = 15 означает, что после оплаты подписки на 3 месяца мастер получит 15% от суммы оплаты бонусными баллами подписки.
             </HelperText>
@@ -479,6 +516,10 @@ export default function AdminPromoEngine() {
   const [campaignCodeForm, setCampaignCodeForm] = useState(EMPTY_CAMPAIGN_CODE_FORM)
   const [codeModal, setCodeModal] = useState(null)
   const [codeForm, setCodeForm] = useState(EMPTY_CODE_FORM)
+  const [bulkCodeModal, setBulkCodeModal] = useState(false)
+  const [bulkCodeForm, setBulkCodeForm] = useState(EMPTY_BULK_CODE_FORM)
+  const [bulkCreatedCodes, setBulkCreatedCodes] = useState([])
+  const [backfillResult, setBackfillResult] = useState(null)
   const [formError, setFormError] = useState('')
   const [successMessage, setSuccessMessage] = useState(null)
 
@@ -689,6 +730,64 @@ export default function AdminPromoEngine() {
     }
   }
 
+  const openBulkCodeModal = () => {
+    setBulkCodeForm({
+      ...EMPTY_BULK_CODE_FORM,
+      campaign_id: filters.codes.campaign_id || '',
+    })
+    setBulkCreatedCodes([])
+    setFormError('')
+    setBulkCodeModal(true)
+  }
+
+  const runBackfillMasterCodes = async () => {
+    try {
+      setError('')
+      setBackfillResult(null)
+      const result = await adminPromoEngineApi.backfillMasterReferralCodes()
+      setBackfillResult(result)
+      await Promise.all([loadStats(), loadList('codes'), loadList('campaigns')])
+    } catch (err) {
+      setError(err.message || 'Не удалось создать недостающие коды мастеров')
+    }
+  }
+
+  const saveBulkCodes = async () => {
+    try {
+      setFormError('')
+      const result = await adminPromoEngineApi.bulkCreateCodes({
+        campaign_id: cleanOptionalNumber(bulkCodeForm.campaign_id),
+        count: cleanOptionalNumber(bulkCodeForm.count),
+        prefix: bulkCodeForm.prefix.trim().toUpperCase(),
+        code_length: cleanOptionalNumber(bulkCodeForm.code_length),
+        max_redemptions: cleanOptionalNumber(bulkCodeForm.max_redemptions),
+      })
+      setBulkCreatedCodes(result.items || [])
+      setSuccessMessage({
+        kind: 'success',
+        text: `Создано промокодов: ${result.created}.`,
+        showCreateCodeAction: false,
+      })
+      await Promise.all([loadStats(), loadList('codes')])
+    } catch (err) {
+      setFormError(err.message || 'Не удалось создать промокоды')
+    }
+  }
+
+  const exportCodes = async () => {
+    try {
+      setError('')
+      const blob = await adminPromoEngineApi.exportCodes({
+        campaign_id: filters.codes.campaign_id,
+        status: filters.codes.status,
+        search: filters.codes.search,
+      })
+      downloadBlob(blob, 'promo-engine-codes.csv')
+    } catch (err) {
+      setError(err.message || 'Не удалось скачать коды')
+    }
+  }
+
   const renderTableShell = (title, children, actions = null) => (
     <div className="bg-white rounded-lg shadow-sm border border-gray-200">
       <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
@@ -775,7 +874,27 @@ export default function AdminPromoEngine() {
           Здесь создаются конкретные промокоды, которые мастер вводит в регистрации или в личном кабинете.
           Каждый код должен быть привязан к кампании.
         </InfoBlock>
-        <div className="bg-white p-4 rounded-lg border border-gray-200 grid grid-cols-1 md:grid-cols-4 gap-3">
+        <InfoBlock
+          actions={(
+            <button
+              onClick={runBackfillMasterCodes}
+              className="inline-flex shrink-0 items-center justify-center rounded-md bg-[#4CAF50] px-4 py-2 text-sm font-semibold text-white hover:bg-[#43A047]"
+            >
+              Создать недостающие коды мастеров
+            </button>
+          )}
+        >
+          <div>
+            <p>Личные промокоды мастеров создаются автоматически и используются для реферальной программы мастеров.</p>
+            <p className="mt-1">Эта операция создаст коды только тем мастерам, у кого их ещё нет.</p>
+            {backfillResult ? (
+              <p className="mt-2 font-semibold">
+                Создано: {backfillResult.created}. Уже было: {backfillResult.skipped_existing}. Ошибки: {backfillResult.failed}.
+              </p>
+            ) : null}
+          </div>
+        </InfoBlock>
+        <div className="bg-white p-4 rounded-lg border border-gray-200 grid grid-cols-1 md:grid-cols-6 gap-3">
           <select value={filters.codes.campaign_id} onChange={e => updateFilter('codes', 'campaign_id', e.target.value)} className={textInputClass()}>
             <option value="">Все кампании</option>
             {campaignOptions.map(campaign => <option key={campaign.id} value={campaign.id}>{campaign.name} (#{campaign.id})</option>)}
@@ -787,6 +906,12 @@ export default function AdminPromoEngine() {
           <input value={filters.codes.search} onChange={e => updateFilter('codes', 'search', e.target.value.toUpperCase())} placeholder="Поиск по промокоду" className={textInputClass()} />
           <button onClick={() => openCreateCode()} className="inline-flex items-center justify-center px-4 py-2 bg-[#4CAF50] text-white rounded-md hover:bg-[#43A047]">
             <PlusIcon className="w-5 h-5 mr-2" /> Создать промокод
+          </button>
+          <button onClick={openBulkCodeModal} className="inline-flex items-center justify-center px-4 py-2 border border-[#4CAF50] text-[#2E7D32] rounded-md hover:bg-green-50">
+            Создать много кодов
+          </button>
+          <button onClick={exportCodes} className="inline-flex items-center justify-center px-4 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50">
+            Скачать коды
           </button>
         </div>
         {renderTableShell('Промокоды', (
@@ -1189,6 +1314,53 @@ export default function AdminPromoEngine() {
             <div className="flex justify-end gap-3">
               <button onClick={() => setCodeModal(null)} className="px-4 py-2 border border-gray-300 rounded-md">Отмена</button>
               <button onClick={saveCode} className="px-4 py-2 bg-[#4CAF50] text-white rounded-md">Сохранить</button>
+            </div>
+          </div>
+        </Modal>
+      ) : null}
+
+      {bulkCodeModal ? (
+        <Modal title="Создать много кодов" onClose={() => setBulkCodeModal(false)}>
+          <div className="space-y-4">
+            <ErrorBlock error={formError} />
+            <InfoBlock>
+              Коды будут созданы автоматически и привязаны к выбранной кампании.
+            </InfoBlock>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <Field label="Кампания" required>
+                <select value={bulkCodeForm.campaign_id} onChange={e => setBulkCodeForm(prev => ({ ...prev, campaign_id: e.target.value }))} className={textInputClass()}>
+                  <option value="">Выберите кампанию</option>
+                  {campaignOptions.map(campaign => <option key={campaign.id} value={campaign.id}>{campaign.name} (#{campaign.id})</option>)}
+                </select>
+              </Field>
+              <Field label="Количество" required helper="От 1 до 1000 кодов за один запуск.">
+                <input type="number" min="1" max="1000" value={bulkCodeForm.count} onChange={e => setBulkCodeForm(prev => ({ ...prev, count: e.target.value }))} className={textInputClass()} />
+              </Field>
+              <Field label="Префикс" helper="Например ADMIN. Будет приведён к верхнему регистру.">
+                <input value={bulkCodeForm.prefix} onChange={e => setBulkCodeForm(prev => ({ ...prev, prefix: e.target.value.toUpperCase() }))} placeholder="ADMIN" className={`${textInputClass()} font-mono`} />
+              </Field>
+              <Field label="Длина случайной части" helper="От 4 до 32 символов. По умолчанию 8.">
+                <input type="number" min="4" max="32" value={bulkCodeForm.code_length} onChange={e => setBulkCodeForm(prev => ({ ...prev, code_length: e.target.value }))} className={textInputClass()} />
+              </Field>
+              <Field label="Лимит применений каждого кода" helper="Оставьте пустым, если лимита нет.">
+                <input type="number" min="0" value={bulkCodeForm.max_redemptions} onChange={e => setBulkCodeForm(prev => ({ ...prev, max_redemptions: e.target.value }))} placeholder="Без лимита" className={textInputClass()} />
+              </Field>
+            </div>
+            {bulkCreatedCodes.length > 0 ? (
+              <InfoBlock
+                tone="success"
+                actions={(
+                  <button onClick={() => downloadCreatedCodesCsv(bulkCreatedCodes)} className="inline-flex shrink-0 items-center justify-center rounded-md bg-[#4CAF50] px-4 py-2 text-sm font-semibold text-white hover:bg-[#43A047]">
+                    Скачать CSV созданных кодов
+                  </button>
+                )}
+              >
+                Создано промокодов: {bulkCreatedCodes.length}.
+              </InfoBlock>
+            ) : null}
+            <div className="flex justify-end gap-3">
+              <button onClick={() => setBulkCodeModal(false)} className="px-4 py-2 border border-gray-300 rounded-md">Отмена</button>
+              <button onClick={saveBulkCodes} className="px-4 py-2 bg-[#4CAF50] text-white rounded-md">Создать коды</button>
             </div>
           </div>
         </Modal>
