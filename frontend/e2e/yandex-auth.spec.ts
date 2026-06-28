@@ -91,9 +91,12 @@ test.describe('Yandex auth web MVP', () => {
   })
 
   test('oauth callback with missing phone redirects and opens phone completion modal', async ({ page }) => {
+    let exchangeCalls = 0
+    let phoneChangeAuthorization = ''
     await page.route('**/api/**', route => {
       const url = new URL(route.request().url())
       if (url.pathname === '/api/auth/oauth/exchange') {
+        exchangeCalls += 1
         return route.fulfill({
           json: {
             access_token: 'test-access-token-no-phone',
@@ -108,6 +111,16 @@ test.describe('Yandex auth web MVP', () => {
               role: 'client',
               full_name: 'OAuth No Phone',
             },
+          },
+        })
+      }
+      if (url.pathname === '/api/auth/request-phone-change') {
+        phoneChangeAuthorization = route.request().headers().authorization || ''
+        return route.fulfill({
+          json: {
+            success: true,
+            call_id: 'test-call-id',
+            verification_number: '1234',
           },
         })
       }
@@ -130,9 +143,15 @@ test.describe('Yandex auth web MVP', () => {
     await navigateSpa(page, '/auth/oauth/callback?ticket=test-oauth-ticket-no-phone')
 
     await expect(page).toHaveURL(/\/client/)
+    expect(exchangeCalls).toBe(1)
+    await expect.poll(async () => page.evaluate(() => localStorage.getItem('access_token'))).toBe('test-access-token-no-phone')
+    await expect.poll(async () => page.evaluate(() => localStorage.getItem('refresh_token'))).toBe('test-refresh-token-no-phone')
     await expect(page.getByText('Ошибка входа')).toHaveCount(0)
     await expect(page.getByTestId('phone-completion-modal')).toBeVisible()
     await expect(page.getByText('Чтобы завершить вход через Яндекс, укажите номер телефона. Мы подтвердим его звонком.')).toBeVisible()
+    await page.getByTestId('phone-completion-modal').getByPlaceholder('+7 (999) 999 99 99').fill('+79005550004')
+    await page.getByRole('button', { name: 'Подтвердить звонком' }).click()
+    await expect.poll(() => phoneChangeAuthorization).toBe('Bearer test-access-token-no-phone')
   })
 
   test('normal phone login does not open phone completion modal', async ({ page }) => {
