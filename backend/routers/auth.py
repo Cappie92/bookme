@@ -114,7 +114,7 @@ def _yandex_authorize_redirect(settings, state: str) -> RedirectResponse:
         "client_id": settings.YANDEX_CLIENT_ID,
         "redirect_uri": redirect_uri,
         "state": state,
-        "scope": "login:email login:info login:phone",
+        "scope": "login:email login:info",
     })
     return RedirectResponse(f"{YANDEX_AUTHORIZE_URL}?{query}")
 

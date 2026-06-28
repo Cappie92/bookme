@@ -48,6 +48,15 @@ def _auth_headers(token_data: dict) -> dict:
     return {"Authorization": f"Bearer {token_data['access_token']}"}
 
 
+def _assert_yandex_authorize_scope(location: str) -> dict:
+    parsed = urlparse(location)
+    params = parse_qs(parsed.query)
+    assert parsed.netloc == "oauth.yandex.ru"
+    assert params["scope"][0] == "login:email login:info"
+    assert "login:phone" not in params["scope"][0]
+    return params
+
+
 def _mock_yandex(monkeypatch, profile):
     monkeypatch.setattr(auth_router, "get_settings", _enabled_settings)
     monkeypatch.setattr(auth_router, "_exchange_yandex_code_for_token", lambda code, redirect_uri, settings: "ya-token")
@@ -60,6 +69,17 @@ def test_yandex_login_disabled_returns_404(client, monkeypatch):
     response = client.get("/api/auth/yandex/login", follow_redirects=False)
 
     assert response.status_code == status.HTTP_404_NOT_FOUND
+
+
+def test_yandex_login_redirect_scope_does_not_request_phone(client, monkeypatch):
+    monkeypatch.setattr(auth_router, "get_settings", _enabled_settings)
+
+    response = client.get("/api/auth/yandex/login", follow_redirects=False)
+
+    assert response.status_code in (302, 307)
+    params = _assert_yandex_authorize_scope(response.headers["location"])
+    assert params["client_id"][0] == "client-id"
+    assert auth_router._verify_oauth_state(params["state"][0])["mode"] == "login"
 
 
 def test_yandex_callback_rejects_invalid_state(client, monkeypatch):
@@ -100,7 +120,7 @@ def test_yandex_link_start_uses_signed_link_state_and_relative_return_to(client,
 
     assert response.status_code in (302, 307)
     location = response.headers["location"]
-    params = parse_qs(urlparse(location).query)
+    params = _assert_yandex_authorize_scope(location)
     assert params["client_id"][0] == "client-id"
     state_data = auth_router._verify_oauth_state(params["state"][0])
     assert state_data["mode"] == "link"
@@ -118,7 +138,7 @@ def test_yandex_link_start_can_return_json_redirect_url(client, test_user_token,
 
     assert response.status_code == 200
     location = response.json()["redirect_url"]
-    params = parse_qs(urlparse(location).query)
+    params = _assert_yandex_authorize_scope(location)
     assert params["client_id"][0] == "client-id"
     state_data = auth_router._verify_oauth_state(params["state"][0])
     assert state_data["mode"] == "link"
@@ -303,6 +323,9 @@ def test_yandex_oauth_user_without_phone_users_me_returns_nullable_phone(client,
 
     assert response.status_code in (302, 307)
     ticket = _callback_ticket(response.headers["location"])
+    user = db.query(User).filter(User.email == "no-phone@example.com").one()
+    assert user.phone is None
+    assert user.phone_required is True
     exchange = _exchange_ticket(client, ticket)
     assert exchange.status_code == 200, exchange.text
     assert exchange.json()["user"]["phone"] is None
