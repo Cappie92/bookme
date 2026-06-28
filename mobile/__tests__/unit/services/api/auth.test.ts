@@ -1,4 +1,12 @@
-import { login, register, getCurrentUser, RegisterCredentials, LoginCredentials } from '@src/services/api/auth';
+import {
+  exchangeOAuthTicket,
+  getCurrentUser,
+  getYandexLoginUrl,
+  login,
+  register,
+  RegisterCredentials,
+  LoginCredentials,
+} from '@src/services/api/auth';
 import { apiClient } from '@src/services/api/client';
 
 describe('Auth API', () => {
@@ -204,6 +212,38 @@ describe('Auth API', () => {
 
       expect(apiClient.get).toHaveBeenCalledWith('/api/auth/users/me');
       expect(result).toEqual(mockUser);
+    });
+  });
+
+  describe('Yandex OAuth scaffold', () => {
+    it('builds backend Yandex login URL without launching browser flow', () => {
+      (apiClient as any).defaults = { baseURL: 'https://dedato.ru' };
+
+      expect(getYandexLoginUrl()).toBe('https://dedato.ru/api/auth/yandex/login');
+    });
+
+    it('exchanges OAuth ticket for auth tokens', async () => {
+      const mockResponse = {
+        access_token: 'oauth-token',
+        refresh_token: 'oauth-refresh',
+        token_type: 'bearer',
+        user: {
+          id: 3,
+          email: 'oauth@test.com',
+          phone: '',
+          role: 'client',
+          is_verified: true,
+          is_phone_verified: false,
+        },
+      };
+      (apiClient.post as jest.Mock).mockResolvedValue({ data: mockResponse });
+
+      const result = await exchangeOAuthTicket('one-time-ticket');
+
+      expect(apiClient.post).toHaveBeenCalledWith('/api/auth/oauth/exchange', {
+        ticket: 'one-time-ticket',
+      });
+      expect(result).toEqual(mockResponse);
     });
   });
 });

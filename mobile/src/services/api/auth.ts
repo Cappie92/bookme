@@ -23,6 +23,8 @@ export interface LoginResponse {
   };
 }
 
+export type OAuthExchangeResponse = LoginResponse;
+
 export interface RegisterCredentials {
   email: string;
   phone: string;
@@ -116,6 +118,19 @@ export async function register(credentials: RegisterCredentials): Promise<LoginR
     payload.promo_code = credentials.promo_code.trim();
   }
   const response = await apiClient.post<LoginResponse>('/api/auth/register', payload);
+  return response.data;
+}
+
+export function getYandexLoginUrl(): string {
+  const baseURL = String(apiClient.defaults?.baseURL || '').replace(/\/$/, '');
+  return `${baseURL}/api/auth/yandex/login`;
+}
+
+// TODO(mobile-yandex-auth): after App Store / Google Play publication, configure
+// Yandex mobile platforms, add redirect/deep link scheme, implement AuthSession/browser flow,
+// handle /auth/oauth/callback?ticket=..., call exchangeOAuthTicket(), then save tokens via AuthContext.
+export async function exchangeOAuthTicket(ticket: string): Promise<OAuthExchangeResponse> {
+  const response = await apiClient.post<OAuthExchangeResponse>('/api/auth/oauth/exchange', { ticket });
   return response.data;
 }
 

@@ -15,5 +15,7 @@ declare module '@env' {
   export const DEBUG_MOBILE_ERRORS: string | undefined;
   /** Dev: ring-buffer auth lifecycle trace (storage, bootstrap, /me, destructive ops, AuthGate) — копируется из DBG. */
   export const DEBUG_AUTH_TRACE: string | undefined;
+  /** Hidden scaffold flag for future mobile Yandex login. Default false. */
+  export const YANDEX_MOBILE_AUTH_VISIBLE: string | undefined;
 }
 

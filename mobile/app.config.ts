@@ -38,6 +38,11 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     process.env.EXPO_PUBLIC_WEB_URL ||
     ''
   ).trim();
+  const yandexMobileAuthVisible = (
+    process.env.YANDEX_MOBILE_AUTH_VISIBLE ||
+    process.env.EXPO_PUBLIC_YANDEX_MOBILE_AUTH_VISIBLE ||
+    ''
+  ).trim();
 
   const httpsIntentData = linkHosts.map((host) => ({
     scheme: 'https' as const,
@@ -124,6 +129,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       ...config.extra,
       ...(apiUrl ? { API_URL: apiUrl } : {}),
       ...(webUrl ? { WEB_URL: webUrl } : {}),
+      ...(yandexMobileAuthVisible ? { YANDEX_MOBILE_AUTH_VISIBLE: yandexMobileAuthVisible } : {}),
     },
   };
 };

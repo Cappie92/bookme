@@ -131,6 +131,37 @@ const AUTH_PASSWORD_INPUT_CLASS =
 
 const LOGIN_REQUEST_TIMEOUT_MS = 25000
 const LOGIN_ME_TIMEOUT_MS = 15000
+const YANDEX_LOGO_SRC = '/YaLogo.webp'
+
+function AuthDivider() {
+  return (
+    <div className="flex items-center gap-3">
+      <div className="h-px flex-1 bg-gray-200" />
+      <span className="text-xs text-gray-500">или</span>
+      <div className="h-px flex-1 bg-gray-200" />
+    </div>
+  )
+}
+
+function YandexAuthButton({ onClick, testId = 'auth-yandex-login' }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      data-testid={testId}
+      className="flex min-h-[44px] w-full items-center justify-center gap-2 rounded-lg border border-[#E0D8CF] bg-white px-4 py-2.5 text-sm font-semibold text-gray-900 shadow-sm transition-colors hover:border-[#CFC5BA] hover:bg-[#FFFDFB] focus:outline-none focus:ring-2 focus:ring-[#4CAF50]/35"
+    >
+      <img
+        src={YANDEX_LOGO_SRC}
+        alt=""
+        aria-hidden="true"
+        data-testid={`${testId}-logo`}
+        className="h-5 w-5 flex-shrink-0 object-contain"
+      />
+      <span className="min-w-0 whitespace-nowrap">Войти через Яндекс</span>
+    </button>
+  )
+}
 
 /** fetch с таймаутом: иначе зависший login или /users/me оставляет кнопку в «Вход...» без выхода из async-функции и без finally. */
 async function fetchWithTimeout(resource, options = {}, timeoutMs = 20000) {
@@ -1236,19 +1267,8 @@ export default function AuthModal() {
                     Забыли пароль?
                   </button>
                 </div>
-                <div className="flex items-center gap-3">
-                  <div className="h-px flex-1 bg-gray-200" />
-                  <span className="text-xs text-gray-500">или</span>
-                  <div className="h-px flex-1 bg-gray-200" />
-                </div>
-                <button
-                  type="button"
-                  onClick={handleYandexLogin}
-                  data-testid="auth-yandex-login"
-                  className="w-full rounded border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-800 hover:bg-gray-50"
-                >
-                  Войти через Яндекс
-                </button>
+                <AuthDivider />
+                <YandexAuthButton onClick={handleYandexLogin} />
               </form>
             )
           ) : (
@@ -1259,6 +1279,13 @@ export default function AuthModal() {
                 {isSalonFeaturesEnabled() && (
                   <button type="button" className={`px-3 py-1 rounded ${regType==='salon' ? 'bg-[#4CAF50] text-white' : 'bg-gray-100'}`} onClick={()=>setRegType('salon')}>Салон</button>
                 )}
+              </div>
+              <div className="mb-4 rounded-lg border border-[#E8E2DD] bg-white px-3 py-3 text-sm text-gray-700">
+                Можно не заполнять форму — войдите через Яндекс, и мы создадим аккаунт автоматически.
+              </div>
+              <div className="mb-4 flex flex-col gap-3">
+                <YandexAuthButton onClick={handleYandexLogin} testId="auth-yandex-register" />
+                <AuthDivider />
               </div>
               <form className="flex flex-col gap-4" onSubmit={handleRegister}>
                 {errors.general && (

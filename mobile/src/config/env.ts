@@ -13,6 +13,7 @@ import {
   DEBUG_LOGS,
   DEBUG_MOBILE_ERRORS,
   DEBUG_AUTH_TRACE,
+  YANDEX_MOBILE_AUTH_VISIBLE,
 } from '@env';
 import { buildMobileEnvUrls } from './resolveMobileEnv';
 
@@ -29,6 +30,10 @@ function isDbgFloatingPanelEnabled(): boolean {
 const extra = (Constants.expoConfig?.extra ?? {}) as Record<string, unknown>;
 const extraApiUrl = typeof extra.API_URL === 'string' ? extra.API_URL : undefined;
 const extraWebUrl = typeof extra.WEB_URL === 'string' ? extra.WEB_URL : undefined;
+const extraYandexMobileAuthVisible =
+  typeof extra.YANDEX_MOBILE_AUTH_VISIBLE === 'string'
+    ? extra.YANDEX_MOBILE_AUTH_VISIBLE
+    : undefined;
 
 const pe =
   typeof process !== 'undefined' && process.env
@@ -37,6 +42,8 @@ const pe =
         EXPO_PUBLIC_API_URL: process.env.EXPO_PUBLIC_API_URL,
         WEB_URL: process.env.WEB_URL,
         EXPO_PUBLIC_WEB_URL: process.env.EXPO_PUBLIC_WEB_URL,
+        YANDEX_MOBILE_AUTH_VISIBLE: process.env.YANDEX_MOBILE_AUTH_VISIBLE,
+        EXPO_PUBLIC_YANDEX_MOBILE_AUTH_VISIBLE: process.env.EXPO_PUBLIC_YANDEX_MOBILE_AUTH_VISIBLE,
       }
     : undefined;
 
@@ -81,6 +88,12 @@ export const env = {
   DEBUG_LOGS: parseBool(DEBUG_LOGS),
   DEBUG_MOBILE_ERRORS: parseBool(DEBUG_MOBILE_ERRORS),
   DEBUG_AUTH_TRACE: parseBool(DEBUG_AUTH_TRACE),
+  YANDEX_MOBILE_AUTH_VISIBLE: parseBool(
+    extraYandexMobileAuthVisible ||
+      YANDEX_MOBILE_AUTH_VISIBLE ||
+      pe?.YANDEX_MOBILE_AUTH_VISIBLE ||
+      pe?.EXPO_PUBLIC_YANDEX_MOBILE_AUTH_VISIBLE
+  ),
   SHOW_DBG_FLOATING_PANEL: isDbgFloatingPanelEnabled(),
 } as const;
 

@@ -9,3 +9,4 @@ export const DEBUG_DASHBOARD = '0';
 export const DEBUG_LOGS = '0';
 export const DEBUG_MOBILE_ERRORS = '0';
 export const DEBUG_AUTH_TRACE = '0';
+export const YANDEX_MOBILE_AUTH_VISIBLE = '0';

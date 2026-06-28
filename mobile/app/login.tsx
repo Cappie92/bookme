@@ -12,6 +12,11 @@ import { PasswordInput } from '@src/components/ui/PasswordInput';
 import { cities, getTimezoneByCity } from '@src/data/cities';
 import { mapLoginRequestError } from '@src/utils/apiNetworkError';
 import {
+  getYandexMobileAuthPresentation,
+  YANDEX_MOBILE_AUTH_BUTTON_LABEL,
+  YANDEX_MOBILE_AUTH_REGISTER_HINT,
+} from '@src/config/yandexMobileAuth';
+import {
   getCityPickerListBottomPadding,
   getRegistrationFieldLabel,
   getRegistrationPromoCodeFromParams,
@@ -22,6 +27,41 @@ import {
 } from '@src/utils/registrationPromo';
 
 type TabType = 'login' | 'register';
+const yandexLogo = require('../assets/YaLogo.webp');
+
+function YandexMobileAuthBlock({ showHint = false }: { showHint?: boolean }) {
+  // TODO(mobile-yandex-auth): keep disabled until Yandex mobile platforms,
+  // deep links and AuthSession/browser ticket exchange are implemented.
+  return (
+    <View style={styles.yandexAuthBlock}>
+      {showHint ? (
+        <View style={styles.yandexRegisterHint}>
+          <Text style={styles.yandexRegisterHintText}>{YANDEX_MOBILE_AUTH_REGISTER_HINT}</Text>
+        </View>
+      ) : null}
+      <View style={styles.authDivider}>
+        <View style={styles.authDividerLine} />
+        <Text style={styles.authDividerText}>или</Text>
+        <View style={styles.authDividerLine} />
+      </View>
+      <TouchableOpacity
+        testID="yandex-mobile-login-button"
+        accessibilityLabel={YANDEX_MOBILE_AUTH_BUTTON_LABEL}
+        accessibilityRole="button"
+        style={[styles.yandexButton, styles.yandexButtonDisabled]}
+        disabled
+      >
+        <Image
+          testID="yandex-mobile-login-logo"
+          source={yandexLogo}
+          style={styles.yandexLogo}
+          resizeMode="contain"
+        />
+        <Text style={styles.yandexButtonText}>{YANDEX_MOBILE_AUTH_BUTTON_LABEL}</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
 
 function RegistrationLabel({ field }: { field: RegistrationFieldKey }) {
   return (
@@ -68,6 +108,8 @@ export default function LoginScreen() {
   const [timezone, setTimezone] = useState('');
   const [promoCode, setPromoCode] = useState('');
   const [showCityModal, setShowCityModal] = useState(false);
+  const yandexLoginPresentation = getYandexMobileAuthPresentation(undefined, 'login');
+  const yandexRegisterPresentation = getYandexMobileAuthPresentation(undefined, 'register');
 
   useEffect(() => {
     const t = (params.tab || '').toString().toLowerCase();
@@ -470,12 +512,17 @@ export default function LoginScreen() {
                 <Text style={styles.buttonText}>Войти</Text>
               )}
             </TouchableOpacity>
+
+            {yandexLoginPresentation.visible ? <YandexMobileAuthBlock /> : null}
           </View>
         )}
 
         {/* Форма регистрации */}
         {activeTab === 'register' && (
           <View style={styles.form}>
+            {yandexRegisterPresentation.visible ? (
+              <YandexMobileAuthBlock showHint={yandexRegisterPresentation.showRegisterHint} />
+            ) : null}
             {/* Выбор типа аккаунта */}
             <View style={styles.inputGroup}>
               <RegistrationLabel field="role" />
@@ -880,6 +927,61 @@ const styles = StyleSheet.create({
   },
   buttonText: {
     color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  yandexAuthBlock: {
+    marginTop: 10,
+    marginBottom: 4,
+  },
+  authDivider: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  authDividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: '#e5e7eb',
+  },
+  authDividerText: {
+    marginHorizontal: 10,
+    color: '#777',
+    fontSize: 12,
+  },
+  yandexRegisterHint: {
+    borderWidth: 1,
+    borderColor: '#E8E2DD',
+    borderRadius: 8,
+    backgroundColor: '#fff',
+    padding: 12,
+    marginBottom: 10,
+  },
+  yandexRegisterHintText: {
+    color: '#444',
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  yandexButton: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 8,
+    borderWidth: 1,
+    borderColor: '#E0D8CF',
+    borderRadius: 8,
+    padding: 14,
+    alignItems: 'center',
+    backgroundColor: '#fff',
+  },
+  yandexButtonDisabled: {
+    opacity: 0.45,
+  },
+  yandexLogo: {
+    width: 20,
+    height: 20,
+  },
+  yandexButtonText: {
+    color: '#333',
     fontSize: 16,
     fontWeight: '600',
   },
