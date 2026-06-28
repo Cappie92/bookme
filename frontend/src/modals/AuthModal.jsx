@@ -143,7 +143,7 @@ function AuthDivider() {
   )
 }
 
-function YandexAuthButton({ onClick, testId = 'auth-yandex-login' }) {
+function YandexAuthButton({ onClick, testId = 'auth-yandex-login', label = 'Войти через Яндекс' }) {
   return (
     <button
       type="button"
@@ -158,7 +158,7 @@ function YandexAuthButton({ onClick, testId = 'auth-yandex-login' }) {
         data-testid={`${testId}-logo`}
         className="h-5 w-5 flex-shrink-0 object-contain"
       />
-      <span className="min-w-0 whitespace-nowrap">Войти через Яндекс</span>
+      <span className="min-w-0 whitespace-nowrap">{label}</span>
     </button>
   )
 }
@@ -1281,10 +1281,10 @@ export default function AuthModal() {
                 )}
               </div>
               <div className="mb-4 rounded-lg border border-[#E8E2DD] bg-white px-3 py-3 text-sm text-gray-700">
-                Можно не заполнять форму — войдите через Яндекс, и мы создадим аккаунт автоматически.
+                Можно продолжить через Яндекс — после входа выберите роль и завершите регистрацию.
               </div>
               <div className="mb-4 flex flex-col gap-3">
-                <YandexAuthButton onClick={handleYandexLogin} testId="auth-yandex-register" />
+                <YandexAuthButton onClick={handleYandexLogin} testId="auth-yandex-register" label="Продолжить через Яндекс" />
                 <AuthDivider />
               </div>
               <form className="flex flex-col gap-4" onSubmit={handleRegister}>

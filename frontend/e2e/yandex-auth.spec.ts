@@ -34,9 +34,9 @@ test.describe('Yandex auth web MVP', () => {
     await page.getByTestId('header-login').first().click()
     await page.getByRole('button', { name: 'Регистрация' }).click()
 
-    await expect(page.getByText('Можно не заполнять форму — войдите через Яндекс, и мы создадим аккаунт автоматически.')).toBeVisible()
+    await expect(page.getByText('Можно продолжить через Яндекс — после входа выберите роль и завершите регистрацию.')).toBeVisible()
     await expect(page.getByTestId('auth-yandex-register')).toBeVisible()
-    await expect(page.getByTestId('auth-yandex-register')).toHaveText('Войти через Яндекс')
+    await expect(page.getByTestId('auth-yandex-register')).toHaveText('Продолжить через Яндекс')
     await expect(page.getByTestId('auth-yandex-register-logo')).toBeVisible()
     await expect(page.getByTestId('auth-yandex-register-logo')).toHaveAttribute('src', '/YaLogo.webp')
 
@@ -194,6 +194,102 @@ test.describe('Yandex auth web MVP', () => {
 
     await expect(page).toHaveURL(/\/client/)
     await expect(page.getByTestId('phone-completion-modal')).toHaveCount(0)
+  })
+
+  test('oauth onboarding ticket opens role selection', async ({ page }) => {
+    await page.route('**/api/**', route => route.fulfill({ json: {} }))
+
+    await navigateSpa(page, '/auth/oauth/callback?onboarding_ticket=test-onboarding-ticket')
+
+    await expect(page.getByText('Завершите регистрацию через Яндекс')).toBeVisible()
+    await expect(page.getByTestId('oauth-onboarding-client-role')).toBeVisible()
+    await expect(page.getByTestId('oauth-onboarding-master-role')).toBeVisible()
+    await expect(page.getByText('Ошибка входа')).toHaveCount(0)
+  })
+
+  test('oauth client onboarding requests phone and completes registration', async ({ page }) => {
+    let phoneRequestBody: any = null
+    let phoneRequestAuthorization = 'not-set'
+    let completeBody: any = null
+    await page.route('**/api/**', route => {
+      const url = new URL(route.request().url())
+      if (url.pathname === '/api/auth/oauth/onboarding-phone-request') {
+        phoneRequestBody = route.request().postDataJSON()
+        phoneRequestAuthorization = route.request().headers().authorization || ''
+        return route.fulfill({ json: { success: true, call_id: 'onboarding-call-id' } })
+      }
+      if (url.pathname === '/api/auth/oauth/onboarding-complete') {
+        completeBody = route.request().postDataJSON()
+        return route.fulfill({
+          json: {
+            access_token: 'onboarding-client-access',
+            refresh_token: 'onboarding-client-refresh',
+            token_type: 'bearer',
+            user: {
+              id: 201,
+              email: 'onboarding-client@example.com',
+              phone: '+79005550005',
+              phone_required: false,
+              phone_verified: true,
+              role: 'client',
+              full_name: 'Onboarding Client',
+            },
+          },
+        })
+      }
+      if (url.pathname === '/api/auth/users/me') {
+        return route.fulfill({ status: 401, json: { detail: 'Not authenticated' } })
+      }
+      return route.fulfill({ json: {} })
+    })
+
+    await navigateSpa(page, '/auth/oauth/callback?onboarding_ticket=client-onboarding-ticket')
+    await page.getByTestId('oauth-onboarding-client-role').click()
+    await page.getByPlaceholder('+7 (999) 999 99 99').fill('+79005550005')
+    await page.getByLabel(/пользовательское соглашение/i).check()
+    await page.getByLabel(/согласие на обработку персональных данных/i).check()
+    await page.getByTestId('oauth-onboarding-request-phone').click()
+
+    await expect.poll(() => phoneRequestBody?.ticket).toBe('client-onboarding-ticket')
+    expect(phoneRequestBody.phone).toBe('+79005550005')
+    expect(phoneRequestAuthorization).toBe('')
+
+    await page.getByTestId('oauth-onboarding-digits').fill('1234')
+    await page.getByTestId('oauth-onboarding-complete').click()
+
+    await expect(page).toHaveURL(/\/client/)
+    await expect.poll(async () => page.evaluate(() => localStorage.getItem('access_token'))).toBe('onboarding-client-access')
+    await expect.poll(async () => page.evaluate(() => localStorage.getItem('refresh_token'))).toBe('onboarding-client-refresh')
+    expect(completeBody).toMatchObject({
+      ticket: 'client-onboarding-ticket',
+      role: 'client',
+      phone: '+79005550005',
+      phone_verification_code: '1234',
+      accepted_terms: true,
+      accepted_personal_data: true,
+    })
+  })
+
+  test('oauth master onboarding requires city before phone request', async ({ page }) => {
+    let phoneRequestCalls = 0
+    await page.route('**/api/**', route => {
+      const url = new URL(route.request().url())
+      if (url.pathname === '/api/auth/oauth/onboarding-phone-request') {
+        phoneRequestCalls += 1
+        return route.fulfill({ json: { success: true, call_id: 'onboarding-call-id' } })
+      }
+      return route.fulfill({ json: {} })
+    })
+
+    await navigateSpa(page, '/auth/oauth/callback?onboarding_ticket=master-onboarding-ticket')
+    await page.getByTestId('oauth-onboarding-master-role').click()
+    await page.getByPlaceholder('+7 (999) 999 99 99').fill('+79005550006')
+    await page.getByLabel(/пользовательское соглашение/i).check()
+    await page.getByLabel(/согласие на обработку персональных данных/i).check()
+    await page.getByTestId('oauth-onboarding-request-phone').click()
+
+    await expect(page.getByText('Для мастера укажите город')).toBeVisible()
+    expect(phoneRequestCalls).toBe(0)
   })
 
   test('oauth callback failed exchange shows error', async ({ page }) => {

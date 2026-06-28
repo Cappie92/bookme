@@ -63,11 +63,30 @@ YANDEX_TOKEN_URL = "https://oauth.yandex.ru/token"
 YANDEX_PROFILE_URL = "https://login.yandex.ru/info"
 OAUTH_STATE_TTL_SECONDS = 10 * 60
 OAUTH_TICKET_TTL_SECONDS = 120
+OAUTH_ONBOARDING_TICKET_TTL_SECONDS = 10 * 60
 _oauth_ticket_memory_store: dict[str, dict] = {}
 
 
 class OAuthExchangeRequest(BaseModel):
     ticket: str
+
+
+class OAuthOnboardingPhoneRequest(BaseModel):
+    ticket: str
+    phone: str
+
+
+class OAuthOnboardingCompleteRequest(BaseModel):
+    ticket: str
+    role: str
+    phone: str
+    city: Optional[str] = None
+    timezone: Optional[str] = None
+    phone_verification_code: str
+    call_id: Optional[str] = None
+    accepted_terms: bool = False
+    accepted_personal_data: bool = False
+    accepted_marketing: bool = False
 
 
 def _oauth_enabled_or_404():
@@ -214,6 +233,10 @@ def _oauth_ticket_key(ticket: str) -> str:
     return f"oauth_ticket:{ticket}"
 
 
+def _oauth_onboarding_ticket_key(ticket: str) -> str:
+    return f"oauth_onboarding_ticket:{ticket}"
+
+
 def _cleanup_memory_oauth_tickets() -> None:
     now = int(datetime.utcnow().timestamp())
     for key, value in list(_oauth_ticket_memory_store.items()):
@@ -294,6 +317,84 @@ def _consume_oauth_ticket(ticket: str) -> dict:
         return data
 
 
+def _store_oauth_onboarding_ticket(profile_data: dict) -> str:
+    ticket = secrets.token_urlsafe(32)
+    now = datetime.utcnow()
+    payload_dict = {
+        "provider": YANDEX_PROVIDER,
+        "provider_user_id": str(profile_data.get("provider_user_id") or "").strip(),
+        "email": str(profile_data.get("email") or "").strip().lower(),
+        "display_name": str(profile_data.get("display_name") or "").strip() or None,
+        "avatar": profile_data.get("avatar"),
+        "exp": int((now + timedelta(seconds=OAUTH_ONBOARDING_TICKET_TTL_SECONDS)).timestamp()),
+    }
+    if not payload_dict["provider_user_id"] or not payload_dict["email"]:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Яндекс не вернул данные для регистрации")
+    payload = json.dumps(payload_dict, separators=(",", ":"))
+    settings = get_settings()
+    try:
+        from sms import redis_client
+        redis_client.setex(_oauth_onboarding_ticket_key(ticket), OAUTH_ONBOARDING_TICKET_TTL_SECONDS, payload)
+        return ticket
+    except Exception:
+        if settings.is_production:
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="OAuth onboarding storage unavailable")
+        _cleanup_memory_oauth_tickets()
+        _oauth_ticket_memory_store[_oauth_onboarding_ticket_key(ticket)] = payload_dict
+        return ticket
+
+
+def _get_oauth_onboarding_ticket(ticket: str) -> dict:
+    normalized = str(ticket or "").strip()
+    if not normalized:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Недействительный OAuth onboarding ticket")
+    settings = get_settings()
+    try:
+        from sms import redis_client
+        raw = redis_client.get(_oauth_onboarding_ticket_key(normalized))
+        if not raw:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Недействительный или истекший OAuth onboarding ticket")
+        data = json.loads(raw)
+    except HTTPException:
+        raise
+    except Exception:
+        if settings.is_production:
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="OAuth onboarding storage unavailable")
+        _cleanup_memory_oauth_tickets()
+        data = _oauth_ticket_memory_store.get(_oauth_onboarding_ticket_key(normalized))
+        if not data:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Недействительный или истекший OAuth onboarding ticket")
+    if int(data.get("exp") or 0) < int(datetime.utcnow().timestamp()):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Недействительный или истекший OAuth onboarding ticket")
+    return dict(data)
+
+
+def _save_oauth_onboarding_ticket(ticket: str, data: dict) -> None:
+    normalized = str(ticket or "").strip()
+    ttl = max(1, int(data.get("exp") or 0) - int(datetime.utcnow().timestamp()))
+    payload = json.dumps(data, separators=(",", ":"))
+    settings = get_settings()
+    try:
+        from sms import redis_client
+        redis_client.setex(_oauth_onboarding_ticket_key(normalized), ttl, payload)
+    except Exception:
+        if settings.is_production:
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="OAuth onboarding storage unavailable")
+        _oauth_ticket_memory_store[_oauth_onboarding_ticket_key(normalized)] = dict(data)
+
+
+def _delete_oauth_onboarding_ticket(ticket: str) -> None:
+    normalized = str(ticket or "").strip()
+    settings = get_settings()
+    try:
+        from sms import redis_client
+        redis_client.delete(_oauth_onboarding_ticket_key(normalized))
+    except Exception:
+        if settings.is_production:
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="OAuth onboarding storage unavailable")
+        _oauth_ticket_memory_store.pop(_oauth_onboarding_ticket_key(normalized), None)
+
+
 def _exchange_yandex_code_for_token(code: str, redirect_uri: str, settings) -> str:
     try:
         response = httpx.post(
@@ -350,7 +451,25 @@ def _assign_yandex_phone_if_empty(db: Session, user: User, phone: Optional[str])
     return True
 
 
-def _user_from_yandex_profile(db: Session, profile: dict) -> User:
+def _yandex_onboarding_profile_data(profile: dict) -> dict:
+    provider_user_id = str(profile.get("id") or "").strip()
+    email = str(profile.get("default_email") or profile.get("email") or "").strip().lower()
+    name = str(profile.get("real_name") or profile.get("display_name") or profile.get("login") or "").strip()
+    avatar = profile.get("default_avatar_id") or profile.get("avatar_id")
+    if not provider_user_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Яндекс не вернул идентификатор пользователя")
+    if not email:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Яндекс не вернул email")
+    return {
+        "provider": YANDEX_PROVIDER,
+        "provider_user_id": provider_user_id,
+        "email": email,
+        "display_name": name or None,
+        "avatar": avatar,
+    }
+
+
+def _user_from_yandex_profile(db: Session, profile: dict) -> Optional[User]:
     provider_user_id = str(profile.get("id") or "").strip()
     email = str(profile.get("default_email") or profile.get("email") or "").strip().lower()
     name = str(profile.get("real_name") or profile.get("display_name") or profile.get("login") or "").strip()
@@ -378,21 +497,8 @@ def _user_from_yandex_profile(db: Session, profile: dict) -> User:
 
     user = db.query(User).filter(User.email == email).first()
     if not user:
-        user = User(
-            email=email,
-            phone=None,
-            full_name=name or None,
-            hashed_password=None,
-            role=UserRole.CLIENT,
-            is_active=True,
-            is_verified=True,
-            is_phone_verified=False,
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow(),
-        )
-        db.add(user)
-        db.flush()
-    elif name and not user.full_name:
+        return None
+    if name and not user.full_name:
         user.full_name = name
         user.updated_at = datetime.utcnow()
     _assign_yandex_phone_if_empty(db, user, yandex_phone)
@@ -453,6 +559,109 @@ def _link_yandex_profile_to_user(db: Session, profile: dict, user_id: int) -> tu
     db.commit()
     db.refresh(user)
     return user, "linked", "Яндекс аккаунт привязан"
+
+
+def _create_master_profile_for_user(db: Session, user: User, city: str, timezone: str) -> Master:
+    master = Master(
+        user_id=user.id,
+        bio="",
+        experience_years=0,
+        can_work_independently=True,
+        can_work_in_salon=True,
+        website=None,
+        created_at=datetime.utcnow(),
+        city=city,
+        timezone=timezone,
+        timezone_confirmed=bool(city and timezone),
+    )
+    db.add(master)
+    db.commit()
+    db.refresh(master)
+
+    from utils.base62 import generate_unique_domain
+    master.domain = generate_unique_domain(master.id, db)
+    db.commit()
+    db.refresh(master)
+    return master
+
+
+def _create_user_from_oauth_onboarding(db: Session, ticket_data: dict, payload: OAuthOnboardingCompleteRequest) -> User:
+    role_value = (payload.role or "").strip().lower()
+    if role_value not in {UserRole.CLIENT.value, UserRole.MASTER.value}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Выберите роль: client или master")
+    if not payload.accepted_terms or not payload.accepted_personal_data:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Примите пользовательское соглашение и согласие на обработку персональных данных")
+
+    phone = normalize_to_canonical(payload.phone)
+    if not phone:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Укажите корректный номер телефона")
+
+    if db.query(User).filter(User.phone == phone).first():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Phone number already registered")
+
+    email = str(ticket_data.get("email") or "").strip().lower()
+    if not email:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="OAuth ticket не содержит email")
+    if db.query(User).filter(User.email == email).first():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already registered")
+
+    provider_user_id = str(ticket_data.get("provider_user_id") or "").strip()
+    if not provider_user_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="OAuth ticket не содержит идентификатор Яндекса")
+    if (
+        db.query(UserOAuthAccount)
+        .filter(UserOAuthAccount.provider == YANDEX_PROVIDER, UserOAuthAccount.provider_user_id == provider_user_id)
+        .first()
+    ):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Этот Яндекс уже привязан")
+
+    if ticket_data.get("phone") != phone:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Телефон не совпадает с подтвержденным")
+    if not ticket_data.get("phone_verification_code") or not ticket_data.get("phone_verification_expires"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Подтвердите телефон звонком")
+    if int(ticket_data.get("phone_verification_expires") or 0) < int(datetime.utcnow().timestamp()):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Код истёк. Запросите звонок ещё раз.")
+    if ticket_data.get("call_id") and str(ticket_data.get("call_id")) != str(payload.call_id or ""):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Неверная сессия верификации")
+    if str(ticket_data.get("phone_verification_code") or "") != str(payload.phone_verification_code or ""):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Неверные цифры номера телефона")
+
+    city = (payload.city or "").strip()
+    timezone = (payload.timezone or "").strip() or "Europe/Moscow"
+    role = UserRole(role_value)
+    if role == UserRole.MASTER and not city:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Для регистрации мастера укажите город")
+
+    user = User(
+        email=email,
+        phone=phone,
+        hashed_password=None,
+        role=role,
+        is_active=True,
+        is_verified=True,
+        is_phone_verified=True,
+        full_name=ticket_data.get("display_name"),
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow(),
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+
+    if role == UserRole.MASTER:
+        _create_master_profile_for_user(db, user, city, timezone)
+
+    db.add(UserOAuthAccount(
+        user_id=user.id,
+        provider=YANDEX_PROVIDER,
+        provider_user_id=provider_user_id,
+        email=email,
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow(),
+    ))
+    db.commit()
+    db.refresh(user)
+    return user
 
 # --- Контракты смены контактов (pending) ---
 
@@ -708,8 +917,12 @@ def yandex_callback(
             query = urlencode({"ticket": ticket, "mode": "link"})
         else:
             user = _user_from_yandex_profile(db, profile)
-            ticket = _store_oauth_ticket(user.id, purpose="oauth_login")
-            query = urlencode({"ticket": ticket})
+            if user:
+                ticket = _store_oauth_ticket(user.id, purpose="oauth_login")
+                query = urlencode({"ticket": ticket})
+            else:
+                onboarding_ticket = _store_oauth_onboarding_ticket(_yandex_onboarding_profile_data(profile))
+                query = urlencode({"onboarding_ticket": onboarding_ticket})
     except HTTPException as exc:
         mode = state_data.get("mode", "login") if isinstance(state_data, dict) else "login"
         return _oauth_error_redirect(str(exc.detail), mode=mode, return_to=state_data.get("return_to") if isinstance(state_data, dict) else None)
@@ -748,6 +961,46 @@ def oauth_accounts(current_user: User = Depends(get_current_active_user), db: Se
             for account in accounts
         ]
     }
+
+
+@router.post("/oauth/onboarding-phone-request", response_model=PhoneVerificationResponse)
+def oauth_onboarding_phone_request(payload: OAuthOnboardingPhoneRequest, db: Session = Depends(get_db)) -> Any:
+    ticket_data = _get_oauth_onboarding_ticket(payload.ticket)
+    phone = normalize_to_canonical(payload.phone)
+    if not phone:
+        return PhoneVerificationResponse(message="Укажите корректный номер телефона", success=False)
+    if db.query(User).filter(User.phone == phone).first():
+        return PhoneVerificationResponse(message="Телефон уже используется", success=False)
+
+    call_result = zvonok_service.send_verification_call(phone)
+    if not call_result.get("success"):
+        return PhoneVerificationResponse(
+            message=call_result.get("error") or "Ошибка инициации звонка",
+            success=False,
+        )
+
+    pin_raw = str(call_result.get("pincode") or call_result.get("verification_number") or "").strip() or None
+    ticket_data["phone"] = phone
+    ticket_data["phone_verification_code"] = pin_raw
+    ticket_data["call_id"] = str(call_result.get("call_id") or "").strip() or None
+    ticket_data["phone_verification_expires"] = int((datetime.utcnow() + timedelta(minutes=5)).timestamp())
+    _save_oauth_onboarding_ticket(payload.ticket, ticket_data)
+
+    stub = bool(getattr(get_settings(), "zvonok_stub", False))
+    return PhoneVerificationResponse(
+        message="Звонок для подтверждения телефона инициирован. Введите последние 4 цифры номера, с которого вам звонят.",
+        success=True,
+        call_id=call_result.get("call_id"),
+        verification_number=pin_raw if stub else None,
+    )
+
+
+@router.post("/oauth/onboarding-complete")
+def oauth_onboarding_complete(payload: OAuthOnboardingCompleteRequest, db: Session = Depends(get_db)) -> Any:
+    ticket_data = _get_oauth_onboarding_ticket(payload.ticket)
+    user = _create_user_from_oauth_onboarding(db, ticket_data, payload)
+    _delete_oauth_onboarding_ticket(payload.ticket)
+    return _token_response_for_user(user)
 
 
 @router.post(

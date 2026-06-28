@@ -5,7 +5,7 @@ from fastapi import status
 
 import routers.auth as auth_router
 from auth import get_password_hash
-from models import User, UserOAuthAccount, UserRole
+from models import User, Master, UserOAuthAccount, UserRole
 
 
 def _enabled_settings():
@@ -38,6 +38,15 @@ def _callback_ticket(location: str) -> str:
     assert "token" not in params
     assert "refresh_token" not in params
     return params["ticket"][0]
+
+
+def _callback_onboarding_ticket(location: str) -> str:
+    parsed = urlparse(location)
+    params = parse_qs(parsed.query)
+    assert "token" not in params
+    assert "refresh_token" not in params
+    assert "onboarding_ticket" in params
+    return params["onboarding_ticket"][0]
 
 
 def _exchange_ticket(client, ticket: str):
@@ -97,7 +106,7 @@ def test_yandex_callback_redirects_with_ticket_not_tokens(client, db, monkeypatc
     response = client.get(f"/api/auth/yandex/callback?code=abc&state={state}", follow_redirects=False)
 
     assert response.status_code in (302, 307)
-    ticket = _callback_ticket(response.headers["location"])
+    ticket = _callback_onboarding_ticket(response.headers["location"])
     assert ticket
 
 
@@ -299,46 +308,32 @@ def test_yandex_callback_links_existing_user_by_email(client, db, monkeypatch):
     assert me.json()["role"] == "admin"
 
 
-def test_yandex_callback_creates_new_client_if_email_not_found(client, db, monkeypatch):
+def test_yandex_callback_new_profile_returns_onboarding_ticket_without_user(client, db, monkeypatch):
     _mock_yandex(monkeypatch, {"id": "ya-2", "default_email": "new@example.com", "real_name": "New User"})
     state = auth_router._create_oauth_state()
 
     response = client.get(f"/api/auth/yandex/callback?code=abc&state={state}", follow_redirects=False)
 
     assert response.status_code in (302, 307)
-    _callback_ticket(response.headers["location"])
-    user = db.query(User).filter(User.email == "new@example.com").one()
-    assert user.role == UserRole.CLIENT
-    assert user.full_name == "New User"
-    assert user.hashed_password is None
-    account = db.query(UserOAuthAccount).filter(UserOAuthAccount.provider_user_id == "ya-2").one()
-    assert account.user_id == user.id
+    onboarding_ticket = _callback_onboarding_ticket(response.headers["location"])
+    assert onboarding_ticket
+    assert db.query(User).filter(User.email == "new@example.com").first() is None
+    assert db.query(UserOAuthAccount).filter(UserOAuthAccount.provider_user_id == "ya-2").first() is None
 
 
-def test_yandex_oauth_user_without_phone_users_me_returns_nullable_phone(client, db, monkeypatch):
+def test_yandex_oauth_new_profile_without_default_phone_starts_onboarding(client, db, monkeypatch):
     _mock_yandex(monkeypatch, {"id": "ya-no-phone", "default_email": "no-phone@example.com", "real_name": "No Phone"})
     state = auth_router._create_oauth_state()
 
     response = client.get(f"/api/auth/yandex/callback?code=abc&state={state}", follow_redirects=False)
 
     assert response.status_code in (302, 307)
-    ticket = _callback_ticket(response.headers["location"])
-    user = db.query(User).filter(User.email == "no-phone@example.com").one()
-    assert user.phone is None
-    assert user.phone_required is True
-    exchange = _exchange_ticket(client, ticket)
-    assert exchange.status_code == 200, exchange.text
-    assert exchange.json()["user"]["phone"] is None
-    assert exchange.json()["user"]["phone_required"] is True
-    token = exchange.json()["access_token"]
-    me = client.get("/api/auth/users/me", headers={"Authorization": f"Bearer {token}"})
-    assert me.status_code == 200, me.text
-    assert me.json()["phone"] is None
-    assert me.json()["phone_required"] is True
-    assert me.json()["phone_verified"] is False
+    onboarding_ticket = _callback_onboarding_ticket(response.headers["location"])
+    assert onboarding_ticket
+    assert db.query(User).filter(User.email == "no-phone@example.com").first() is None
 
 
-def test_yandex_default_phone_saved_for_new_user(client, db, monkeypatch):
+def test_yandex_default_phone_does_not_auto_create_new_user(client, db, monkeypatch):
     _mock_yandex(
         monkeypatch,
         {
@@ -353,9 +348,8 @@ def test_yandex_default_phone_saved_for_new_user(client, db, monkeypatch):
     response = client.get(f"/api/auth/yandex/callback?code=abc&state={state}", follow_redirects=False)
 
     assert response.status_code in (302, 307)
-    user = db.query(User).filter(User.email == "default-phone@example.com").one()
-    assert user.phone == "+79005550011"
-    assert user.is_phone_verified is False
+    _callback_onboarding_ticket(response.headers["location"])
+    assert db.query(User).filter(User.email == "default-phone@example.com").first() is None
 
 
 def test_yandex_default_phone_does_not_overwrite_existing_phone(client, db, monkeypatch):
@@ -423,13 +417,163 @@ def test_yandex_existing_oauth_account_logs_in_same_user(client, db, monkeypatch
     assert account.email == "updated@example.com"
 
 
-def test_yandex_new_user_never_gets_admin_role(client, db, monkeypatch):
+def test_yandex_new_user_never_gets_admin_role_without_onboarding(client, db, monkeypatch):
     _mock_yandex(monkeypatch, {"id": "ya-4", "default_email": "fresh-admin-name@example.com", "real_name": "Admin"})
     state = auth_router._create_oauth_state()
 
     response = client.get(f"/api/auth/yandex/callback?code=abc&state={state}", follow_redirects=False)
 
     assert response.status_code in (302, 307)
-    _callback_ticket(response.headers["location"])
-    user = db.query(User).filter(User.email == "fresh-admin-name@example.com").one()
-    assert user.role == UserRole.CLIENT
+    _callback_onboarding_ticket(response.headers["location"])
+    assert db.query(User).filter(User.email == "fresh-admin-name@example.com").first() is None
+
+
+def _start_yandex_onboarding(client, db, monkeypatch, email="oauth-new@example.com", provider_user_id="ya-onboarding"):
+    _mock_yandex(monkeypatch, {"id": provider_user_id, "default_email": email, "real_name": "OAuth New"})
+    state = auth_router._create_oauth_state()
+    response = client.get(f"/api/auth/yandex/callback?code=abc&state={state}", follow_redirects=False)
+    assert response.status_code in (302, 307), response.text
+    ticket = _callback_onboarding_ticket(response.headers["location"])
+    assert db.query(User).filter(User.email == email).first() is None
+    return ticket
+
+
+def _verify_onboarding_phone(client, ticket: str, phone: str = "+79005550123"):
+    from services.zvonok_service import ZVONOK_STUB_CALL_ID, ZVONOK_STUB_DIGITS
+
+    request = client.post("/api/auth/oauth/onboarding-phone-request", json={"ticket": ticket, "phone": phone})
+    assert request.status_code == 200, request.text
+    assert request.json()["success"] is True
+    return {
+        "phone": phone,
+        "call_id": request.json().get("call_id") or ZVONOK_STUB_CALL_ID,
+        "phone_verification_code": ZVONOK_STUB_DIGITS,
+    }
+
+
+def test_oauth_onboarding_complete_client_creates_user_and_tokens(client, db, monkeypatch):
+    ticket = _start_yandex_onboarding(client, db, monkeypatch, email="oauth-client-new@example.com", provider_user_id="ya-client-onboarding")
+    verification = _verify_onboarding_phone(client, ticket, "+79005550123")
+
+    response = client.post(
+        "/api/auth/oauth/onboarding-complete",
+        json={
+            "ticket": ticket,
+            "role": "client",
+            "accepted_terms": True,
+            "accepted_personal_data": True,
+            "accepted_marketing": False,
+            **verification,
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["access_token"]
+    assert data["refresh_token"]
+    assert data["user"]["role"] == "client"
+    assert data["user"]["phone"] == "+79005550123"
+    assert data["user"]["phone_verified"] is True
+    user = db.query(User).filter(User.email == "oauth-client-new@example.com").one()
+    assert user.is_phone_verified is True
+    account = db.query(UserOAuthAccount).filter(UserOAuthAccount.provider_user_id == "ya-client-onboarding").one()
+    assert account.user_id == user.id
+
+
+def test_oauth_onboarding_complete_requires_phone_verification_and_consents(client, db, monkeypatch):
+    ticket = _start_yandex_onboarding(client, db, monkeypatch, email="oauth-consents@example.com", provider_user_id="ya-consents")
+
+    no_verification = client.post(
+        "/api/auth/oauth/onboarding-complete",
+        json={
+            "ticket": ticket,
+            "role": "client",
+            "phone": "+79005550124",
+            "phone_verification_code": "0000",
+            "accepted_terms": True,
+            "accepted_personal_data": True,
+        },
+    )
+    assert no_verification.status_code == status.HTTP_400_BAD_REQUEST
+
+    verification = _verify_onboarding_phone(client, ticket, "+79005550124")
+    no_consents = client.post(
+        "/api/auth/oauth/onboarding-complete",
+        json={
+            "ticket": ticket,
+            "role": "client",
+            "accepted_terms": False,
+            "accepted_personal_data": True,
+            **verification,
+        },
+    )
+    assert no_consents.status_code == status.HTTP_400_BAD_REQUEST
+    assert db.query(User).filter(User.email == "oauth-consents@example.com").first() is None
+
+
+def test_oauth_onboarding_complete_master_requires_city_and_creates_profile(client, db, monkeypatch):
+    ticket = _start_yandex_onboarding(client, db, monkeypatch, email="oauth-master-new@example.com", provider_user_id="ya-master-onboarding")
+    verification = _verify_onboarding_phone(client, ticket, "+79005550125")
+
+    missing_city = client.post(
+        "/api/auth/oauth/onboarding-complete",
+        json={
+            "ticket": ticket,
+            "role": "master",
+            "accepted_terms": True,
+            "accepted_personal_data": True,
+            **verification,
+        },
+    )
+    assert missing_city.status_code == status.HTTP_400_BAD_REQUEST
+
+    response = client.post(
+        "/api/auth/oauth/onboarding-complete",
+        json={
+            "ticket": ticket,
+            "role": "master",
+            "city": "Москва",
+            "timezone": "Europe/Moscow",
+            "accepted_terms": True,
+            "accepted_personal_data": True,
+            **verification,
+        },
+    )
+    assert response.status_code == 200, response.text
+    user = db.query(User).filter(User.email == "oauth-master-new@example.com").one()
+    assert user.role == UserRole.MASTER
+    master = db.query(Master).filter(Master.user_id == user.id).one()
+    assert master.city == "Москва"
+    assert master.timezone == "Europe/Moscow"
+    assert master.domain
+
+
+def test_oauth_onboarding_occupied_phone_and_reused_ticket_fail(client, db, test_user, monkeypatch):
+    ticket = _start_yandex_onboarding(client, db, monkeypatch, email="oauth-occupied@example.com", provider_user_id="ya-occupied")
+    occupied = client.post("/api/auth/oauth/onboarding-phone-request", json={"ticket": ticket, "phone": test_user.phone})
+    assert occupied.status_code == 200
+    assert occupied.json()["success"] is False
+
+    verification = _verify_onboarding_phone(client, ticket, "+79005550126")
+    first = client.post(
+        "/api/auth/oauth/onboarding-complete",
+        json={
+            "ticket": ticket,
+            "role": "client",
+            "accepted_terms": True,
+            "accepted_personal_data": True,
+            **verification,
+        },
+    )
+    assert first.status_code == 200, first.text
+    reused = client.post(
+        "/api/auth/oauth/onboarding-complete",
+        json={
+            "ticket": ticket,
+            "role": "client",
+            "accepted_terms": True,
+            "accepted_personal_data": True,
+            **verification,
+        },
+    )
+    assert reused.status_code == status.HTTP_400_BAD_REQUEST
