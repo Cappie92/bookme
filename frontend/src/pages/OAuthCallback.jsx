@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
+import { useToast } from '../contexts/ToastContext'
 
 function getRolePath(role) {
   const normalized = (role || '').toString().toLowerCase()
@@ -14,14 +15,22 @@ export default function OAuthCallback() {
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
   const { login } = useAuth()
+  const { showToast } = useToast()
   const [error, setError] = useState('')
 
   useEffect(() => {
     const completeLogin = async () => {
       const ticket = searchParams.get('ticket')
       const oauthError = searchParams.get('error')
+      const mode = searchParams.get('mode') || 'login'
+      const returnTo = searchParams.get('return_to') || '/client/profile'
 
       if (oauthError || !ticket) {
+        if (mode === 'link') {
+          showToast(oauthError || 'Не удалось привязать Яндекс', 'error')
+          navigate(returnTo, { replace: true })
+          return
+        }
         setError('Не удалось войти через Яндекс. Попробуйте ещё раз или войдите по телефону.')
         return
       }
@@ -35,22 +44,35 @@ export default function OAuthCallback() {
         if (!exchangeResponse.ok) throw new Error('exchange failed')
         const authData = await exchangeResponse.json()
         if (!authData.access_token) throw new Error('token missing')
+        const oauth = authData.oauth || {}
 
         localStorage.setItem('access_token', authData.access_token)
         if (authData.refresh_token) localStorage.setItem('refresh_token', authData.refresh_token)
         window.history.replaceState({}, '', '/auth/oauth/callback')
 
-        const response = await fetch('/api/auth/users/me', {
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${authData.access_token}`,
-          },
-        })
-        if (!response.ok) throw new Error('profile failed')
-        const user = await response.json()
+        let user = authData.user || null
+        try {
+          const response = await fetch('/api/auth/users/me', {
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${authData.access_token}`,
+            },
+          })
+          if (response.ok) {
+            user = await response.json()
+          }
+        } catch {
+          // OAuth уже успешен и токены сохранены; профиль подтянется в AuthProvider/кабинете.
+        }
+        if (!user) throw new Error('profile missing')
         if (user.role) localStorage.setItem('user_role', user.role)
         login(user)
-        navigate(getRolePath(user.role), { replace: true })
+        if (oauth.purpose === 'oauth_link') {
+          showToast(oauth.message || 'Яндекс аккаунт привязан', 'success')
+          navigate(oauth.return_to || returnTo, { replace: true })
+        } else {
+          navigate(getRolePath(user.role), { replace: true })
+        }
       } catch {
         localStorage.removeItem('access_token')
         localStorage.removeItem('refresh_token')
@@ -60,7 +82,7 @@ export default function OAuthCallback() {
     }
 
     completeLogin()
-  }, [login, navigate, searchParams])
+  }, [login, navigate, searchParams, showToast])
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4">

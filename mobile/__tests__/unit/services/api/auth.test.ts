@@ -245,6 +245,31 @@ describe('Auth API', () => {
       });
       expect(result).toEqual(mockResponse);
     });
+
+    it('accepts nullable phone in OAuth auth response', async () => {
+      const mockResponse = {
+        access_token: 'oauth-token-null-phone',
+        refresh_token: 'oauth-refresh-null-phone',
+        token_type: 'bearer',
+        user: {
+          id: 4,
+          email: 'oauth-null-phone@test.com',
+          phone: null,
+          role: 'client',
+          is_verified: true,
+          is_phone_verified: false,
+          phone_required: true,
+          phone_verified: false,
+        },
+      };
+      (apiClient.post as jest.Mock).mockResolvedValue({ data: mockResponse });
+
+      const result = await exchangeOAuthTicket('one-time-ticket-null-phone');
+
+      expect(result.user?.phone).toBeNull();
+      expect(result.user?.phone_required).toBe(true);
+      expect(result).toEqual(mockResponse);
+    });
   });
 });
 

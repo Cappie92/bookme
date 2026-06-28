@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { apiGet, apiPut, apiRequest, getAuthHeaders } from '../utils/api'
 import { PencilIcon, TrashIcon, EyeIcon, EyeSlashIcon, ChevronRightIcon } from "@heroicons/react/24/outline"
+import YandexAccountLinkPanel from '../components/auth/YandexAccountLinkPanel'
 import {
   getClientNotificationPreferences,
   saveClientNotificationPreferences,
@@ -569,6 +570,8 @@ export default function ClientProfile() {
               </div>
             )}
           </div>
+
+          <YandexAccountLinkPanel className="mb-4 lg:mb-6" />
 
           {/* Уведомления: отдельная карточка */}
           <div className="relative bg-white rounded-lg lg:rounded-xl shadow-sm border border-gray-100 p-4 lg:p-6 mb-4 lg:mb-6">

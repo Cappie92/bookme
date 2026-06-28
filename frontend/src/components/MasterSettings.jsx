@@ -6,6 +6,7 @@ import { apiGet, apiPut, apiFetch } from '../utils/api'
 import PaymentMethodSelector from './PaymentMethodSelector'
 import Tooltip from './Tooltip'
 import FreeSlotsShareCardModal from './FreeSlotsShareCardModal'
+import YandexAccountLinkPanel from './auth/YandexAccountLinkPanel'
 import { isSalonFeaturesEnabled } from '../config/features'
 import { Link, useNavigate } from 'react-router-dom'
 
@@ -1051,6 +1052,8 @@ export default function MasterSettings({
               </form>
             )}
           </section>
+
+          <YandexAccountLinkPanel />
 
           {!featuresLoading && (
             <div className="relative overflow-hidden rounded-[16px] bg-gradient-to-br from-[#1F2B23] via-[#2D4732] to-[#4CAF50] p-3.5 text-white shadow-[0_14px_36px_-16px_rgba(61,139,66,0.42)] sm:p-4">

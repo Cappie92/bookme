@@ -13,6 +13,7 @@ import ClientLayout from "./layouts/ClientLayout"
 import Home from "./pages/Home"
 import NotFound from "./pages/NotFound"
 import AuthModal from "./modals/AuthModal"
+import PhoneCompletionModal from "./components/auth/PhoneCompletionModal"
 import MasterModal from "./modals/MasterModal"
 import ScheduleModal from "./modals/ScheduleModal"
 import BookingModal from "./modals/BookingModal"
@@ -153,6 +154,7 @@ function App() {
               <FavoritesProvider>
                 <RegisterQueryHandler />
                 <AuthModal />
+                <PhoneCompletionModal />
                 <MasterModal />
                 <ScheduleModal />
                 <BookingModal />

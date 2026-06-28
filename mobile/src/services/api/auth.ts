@@ -16,10 +16,12 @@ export interface LoginResponse {
   user?: {
     id: number;
     email: string;
-    phone: string;
+    phone: string | null;
     role: string;
     is_verified: boolean;
     is_phone_verified: boolean;
+    phone_required?: boolean;
+    phone_verified?: boolean;
   };
 }
 
@@ -39,12 +41,14 @@ export interface RegisterCredentials {
 export interface User {
   id: number;
   email: string;
-  phone: string;
+  phone: string | null;
   full_name: string;
   role: string;
   is_active: boolean;
   is_verified: boolean;
   is_phone_verified?: boolean;
+  phone_required?: boolean;
+  phone_verified?: boolean;
   birth_date?: string;
   created_at: string;
   updated_at: string;

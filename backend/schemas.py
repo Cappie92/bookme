@@ -12,7 +12,7 @@ from models import BookingStatus, EditRequestStatus, OwnerType, UserRole, SalonM
 # Базовые схемы
 class UserBase(BaseModel):
     email: Optional[EmailStr] = None
-    phone: str = Field(..., pattern=r"^\+?1?\d{9,15}$")
+    phone: Optional[str] = Field(None, pattern=r"^\+?1?\d{9,15}$")
     full_name: Optional[str] = None
     role: UserRole
     birth_date: Optional[date] = None
@@ -52,6 +52,9 @@ class User(UserBase):
     role: UserRole
     is_active: bool
     is_verified: Optional[bool] = False
+    is_phone_verified: Optional[bool] = False
+    phone_required: bool = False
+    phone_verified: bool = False
     is_always_free: bool = False
     created_at: datetime
     updated_at: datetime

@@ -90,6 +90,14 @@ class User(Base):
     payments = relationship("Payment", back_populates="user")
     oauth_accounts = relationship("UserOAuthAccount", back_populates="user")
 
+    @property
+    def phone_required(self) -> bool:
+        return not bool((self.phone or "").strip())
+
+    @property
+    def phone_verified(self) -> bool:
+        return bool(self.phone) and bool(self.is_phone_verified)
+
 
 class UserOAuthAccount(Base):
     __tablename__ = "user_oauth_accounts"

@@ -131,6 +131,17 @@ def test_protected_route_with_token(client, test_user_token):
     assert response.status_code == status.HTTP_200_OK
 
 
+def test_users_me_phone_password_user_returns_phone_string(client, test_user_token, test_user):
+    headers = {"Authorization": f"Bearer {test_user_token['access_token']}"}
+    response = client.get("/api/auth/users/me", headers=headers)
+    assert response.status_code == status.HTTP_200_OK
+    data = response.json()
+    assert data["phone"] == test_user.phone
+    assert isinstance(data["phone"], str)
+    assert data["phone_required"] is False
+    assert data["phone_verified"] is bool(test_user.is_phone_verified)
+
+
 def test_protected_route_without_token(client):
     response = client.get("/api/auth/users/me")
     assert response.status_code == status.HTTP_401_UNAUTHORIZED

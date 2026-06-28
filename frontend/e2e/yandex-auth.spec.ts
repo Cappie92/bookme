@@ -66,6 +66,9 @@ test.describe('Yandex auth web MVP', () => {
           json: {
             id: 100,
             email: 'oauth-client@example.com',
+            phone: '+79005550001',
+            phone_required: false,
+            phone_verified: true,
             role: 'client',
             full_name: 'OAuth Client',
           },
@@ -84,6 +87,94 @@ test.describe('Yandex auth web MVP', () => {
     expect(accessToken).toBe('test-access-token')
     expect(refreshToken).toBe('test-refresh-token')
     expect(role).toBe('client')
+    await expect(page.getByTestId('phone-completion-modal')).toHaveCount(0)
+  })
+
+  test('oauth callback with missing phone redirects and opens phone completion modal', async ({ page }) => {
+    await page.route('**/api/**', route => {
+      const url = new URL(route.request().url())
+      if (url.pathname === '/api/auth/oauth/exchange') {
+        return route.fulfill({
+          json: {
+            access_token: 'test-access-token-no-phone',
+            refresh_token: 'test-refresh-token-no-phone',
+            token_type: 'bearer',
+            user: {
+              id: 101,
+              email: 'oauth-no-phone@example.com',
+              phone: null,
+              phone_required: true,
+              phone_verified: false,
+              role: 'client',
+              full_name: 'OAuth No Phone',
+            },
+          },
+        })
+      }
+      if (url.pathname === '/api/auth/users/me') {
+        return route.fulfill({
+          json: {
+            id: 101,
+            email: 'oauth-no-phone@example.com',
+            phone: null,
+            phone_required: true,
+            phone_verified: false,
+            role: 'client',
+            full_name: 'OAuth No Phone',
+          },
+        })
+      }
+      return route.fulfill({ json: {} })
+    })
+
+    await navigateSpa(page, '/auth/oauth/callback?ticket=test-oauth-ticket-no-phone')
+
+    await expect(page).toHaveURL(/\/client/)
+    await expect(page.getByText('Ошибка входа')).toHaveCount(0)
+    await expect(page.getByTestId('phone-completion-modal')).toBeVisible()
+    await expect(page.getByText('Чтобы завершить вход через Яндекс, укажите номер телефона. Мы подтвердим его звонком.')).toBeVisible()
+  })
+
+  test('normal phone login does not open phone completion modal', async ({ page }) => {
+    await page.route('**/api/**', route => {
+      const url = new URL(route.request().url())
+      if (url.pathname === '/api/auth/login') {
+        return route.fulfill({
+          json: {
+            access_token: 'phone-login-token',
+            refresh_token: 'phone-login-refresh',
+            token_type: 'bearer',
+          },
+        })
+      }
+      if (url.pathname === '/api/auth/users/me') {
+        const hasAuth = !!route.request().headers().authorization
+        if (!hasAuth) {
+          return route.fulfill({ status: 401, json: { detail: 'Not authenticated' } })
+        }
+        return route.fulfill({
+          json: {
+            id: 102,
+            email: 'phone-client@example.com',
+            phone: '+79005550002',
+            phone_required: false,
+            phone_verified: true,
+            role: 'client',
+            full_name: 'Phone Client',
+          },
+        })
+      }
+      return route.fulfill({ json: {} })
+    })
+
+    await page.goto('/')
+    await page.getByTestId('header-login').first().click()
+    await page.getByPlaceholder('+7 (999) 999 99 99').fill('+79005550002')
+    await page.getByPlaceholder('Пароль').fill('password123')
+    await page.getByTestId('auth-login-submit').click()
+
+    await expect(page).toHaveURL(/\/client/)
+    await expect(page.getByTestId('phone-completion-modal')).toHaveCount(0)
   })
 
   test('oauth callback failed exchange shows error', async ({ page }) => {
@@ -94,5 +185,72 @@ test.describe('Yandex auth web MVP', () => {
     await expect(page.getByText('Не удалось войти через Яндекс')).toBeVisible()
     const accessToken = await page.evaluate(() => localStorage.getItem('access_token'))
     expect(accessToken).toBeNull()
+  })
+
+  test('oauth link callback redirects to return_to and shows success', async ({ page }) => {
+    await page.route('**/api/**', route => {
+      const url = new URL(route.request().url())
+      if (url.pathname === '/api/auth/oauth/exchange') {
+        return route.fulfill({
+          json: {
+            access_token: 'linked-access-token',
+            refresh_token: 'linked-refresh-token',
+            token_type: 'bearer',
+            user: {
+              id: 103,
+              email: 'linked-client@example.com',
+              phone: '+79005550003',
+              phone_required: false,
+              phone_verified: true,
+              role: 'client',
+              full_name: 'Linked Client',
+            },
+            oauth: {
+              purpose: 'oauth_link',
+              provider: 'yandex',
+              status: 'linked',
+              message: 'Яндекс аккаунт привязан',
+              return_to: '/client/profile',
+            },
+          },
+        })
+      }
+      if (url.pathname === '/api/auth/users/me') {
+        return route.fulfill({
+          json: {
+            id: 103,
+            email: 'linked-client@example.com',
+            phone: '+79005550003',
+            phone_required: false,
+            phone_verified: true,
+            role: 'client',
+            full_name: 'Linked Client',
+          },
+        })
+      }
+      if (url.pathname === '/api/client/profile') {
+        return route.fulfill({
+          json: {
+            email: 'linked-client@example.com',
+            phone: '+79005550003',
+            name: 'Linked Client',
+            birth_date: null,
+          },
+        })
+      }
+      if (url.pathname === '/api/auth/oauth/accounts') {
+        return route.fulfill({
+          json: {
+            items: [{ provider: 'yandex', email: 'linked-client@example.com', created_at: '2026-01-01T00:00:00', is_linked: true }],
+          },
+        })
+      }
+      return route.fulfill({ json: {} })
+    })
+
+    await navigateSpa(page, '/auth/oauth/callback?ticket=link-ticket&mode=link')
+
+    await expect(page).toHaveURL(/\/client\/profile/)
+    await expect(page.getByText('Яндекс аккаунт привязан')).toBeVisible()
   })
 })
