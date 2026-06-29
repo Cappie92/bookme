@@ -1284,7 +1284,7 @@ export default function AuthModal() {
                 Можно продолжить через Яндекс — после входа выберите роль и завершите регистрацию.
               </div>
               <div className="mb-4 flex flex-col gap-3">
-                <YandexAuthButton onClick={handleYandexLogin} testId="auth-yandex-register" label="Продолжить через Яндекс" />
+                <YandexAuthButton onClick={handleYandexLogin} testId="auth-yandex-register" label="Зарегистрироваться через Яндекс" />
                 <AuthDivider />
               </div>
               <form className="flex flex-col gap-4" onSubmit={handleRegister}>

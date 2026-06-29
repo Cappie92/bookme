@@ -25,6 +25,7 @@ test.describe('Yandex auth web MVP', () => {
     await page.getByTestId('auth-yandex-login').click()
     const request = await requestPromise
     expect(new URL(request.url()).pathname).toBe('/api/auth/yandex/login')
+    await expect(page.getByText('Завершите регистрацию через Яндекс')).toHaveCount(0)
   })
 
   test('register tab renders Yandex login option with hint and logo', async ({ page }) => {
@@ -36,7 +37,7 @@ test.describe('Yandex auth web MVP', () => {
 
     await expect(page.getByText('Можно продолжить через Яндекс — после входа выберите роль и завершите регистрацию.')).toBeVisible()
     await expect(page.getByTestId('auth-yandex-register')).toBeVisible()
-    await expect(page.getByTestId('auth-yandex-register')).toHaveText('Продолжить через Яндекс')
+    await expect(page.getByTestId('auth-yandex-register')).toHaveText('Зарегистрироваться через Яндекс')
     await expect(page.getByTestId('auth-yandex-register-logo')).toBeVisible()
     await expect(page.getByTestId('auth-yandex-register-logo')).toHaveAttribute('src', '/YaLogo.webp')
 
@@ -45,6 +46,7 @@ test.describe('Yandex auth web MVP', () => {
     await page.getByTestId('auth-yandex-register').click()
     const request = await requestPromise
     expect(new URL(request.url()).pathname).toBe('/api/auth/yandex/login')
+    await expect(page.getByText('Завершите регистрацию через Яндекс')).toHaveCount(0)
   })
 
   test('oauth callback exchanges ticket, stores token and redirects by role', async ({ page }) => {
@@ -197,14 +199,37 @@ test.describe('Yandex auth web MVP', () => {
   })
 
   test('oauth onboarding ticket opens role selection', async ({ page }) => {
-    await page.route('**/api/**', route => route.fulfill({ json: {} }))
+    await page.route('**/api/**', route => {
+      const url = new URL(route.request().url())
+      if (url.pathname === '/api/auth/oauth/onboarding-validate') {
+        return route.fulfill({ json: { valid: true, provider: 'yandex', email: 'new@example.com' } })
+      }
+      return route.fulfill({ json: {} })
+    })
 
     await navigateSpa(page, '/auth/oauth/callback?onboarding_ticket=test-onboarding-ticket')
 
     await expect(page.getByText('Завершите регистрацию через Яндекс')).toBeVisible()
     await expect(page.getByTestId('oauth-onboarding-client-role')).toBeVisible()
     await expect(page.getByTestId('oauth-onboarding-master-role')).toBeVisible()
+    await expect(page.getByPlaceholder('+7 (999) 999 99 99')).toHaveCount(0)
     await expect(page.getByText('Ошибка входа')).toHaveCount(0)
+  })
+
+  test('oauth onboarding invalid ticket shows retry instead of form', async ({ page }) => {
+    await page.route('**/api/**', route => {
+      const url = new URL(route.request().url())
+      if (url.pathname === '/api/auth/oauth/onboarding-validate') {
+        return route.fulfill({ status: 400, json: { detail: 'expired' } })
+      }
+      return route.fulfill({ json: {} })
+    })
+
+    await navigateSpa(page, '/auth/oauth/callback?onboarding_ticket=expired-onboarding-ticket')
+
+    await expect(page.getByText('Не удалось продолжить регистрацию')).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Попробовать снова через Яндекс' })).toBeVisible()
+    await expect(page.getByTestId('oauth-onboarding-client-role')).toHaveCount(0)
   })
 
   test('oauth client onboarding requests phone and completes registration', async ({ page }) => {
@@ -213,6 +238,9 @@ test.describe('Yandex auth web MVP', () => {
     let completeBody: any = null
     await page.route('**/api/**', route => {
       const url = new URL(route.request().url())
+      if (url.pathname === '/api/auth/oauth/onboarding-validate') {
+        return route.fulfill({ json: { valid: true, provider: 'yandex', email: 'onboarding-client@example.com' } })
+      }
       if (url.pathname === '/api/auth/oauth/onboarding-phone-request') {
         phoneRequestBody = route.request().postDataJSON()
         phoneRequestAuthorization = route.request().headers().authorization || ''
@@ -244,10 +272,15 @@ test.describe('Yandex auth web MVP', () => {
     })
 
     await navigateSpa(page, '/auth/oauth/callback?onboarding_ticket=client-onboarding-ticket')
+    await expect(page.getByTestId('oauth-onboarding-client-role')).toBeVisible()
+    await expect(page.getByPlaceholder('+7 (999) 999 99 99')).toHaveCount(0)
     await page.getByTestId('oauth-onboarding-client-role').click()
+    await expect(page.getByTestId('oauth-onboarding-request-phone')).toBeDisabled()
     await page.getByPlaceholder('+7 (999) 999 99 99').fill('+79005550005')
+    await expect(page.getByTestId('oauth-onboarding-request-phone')).toBeDisabled()
     await page.getByLabel(/пользовательское соглашение/i).check()
     await page.getByLabel(/согласие на обработку персональных данных/i).check()
+    await expect(page.getByTestId('oauth-onboarding-request-phone')).toBeEnabled()
     await page.getByTestId('oauth-onboarding-request-phone').click()
 
     await expect.poll(() => phoneRequestBody?.ticket).toBe('client-onboarding-ticket')
@@ -274,6 +307,9 @@ test.describe('Yandex auth web MVP', () => {
     let phoneRequestCalls = 0
     await page.route('**/api/**', route => {
       const url = new URL(route.request().url())
+      if (url.pathname === '/api/auth/oauth/onboarding-validate') {
+        return route.fulfill({ json: { valid: true, provider: 'yandex', email: 'onboarding-master@example.com' } })
+      }
       if (url.pathname === '/api/auth/oauth/onboarding-phone-request') {
         phoneRequestCalls += 1
         return route.fulfill({ json: { success: true, call_id: 'onboarding-call-id' } })
@@ -286,9 +322,8 @@ test.describe('Yandex auth web MVP', () => {
     await page.getByPlaceholder('+7 (999) 999 99 99').fill('+79005550006')
     await page.getByLabel(/пользовательское соглашение/i).check()
     await page.getByLabel(/согласие на обработку персональных данных/i).check()
-    await page.getByTestId('oauth-onboarding-request-phone').click()
 
-    await expect(page.getByText('Для мастера укажите город')).toBeVisible()
+    await expect(page.getByTestId('oauth-onboarding-request-phone')).toBeDisabled()
     expect(phoneRequestCalls).toBe(0)
   })
 

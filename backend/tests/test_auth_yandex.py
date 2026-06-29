@@ -526,6 +526,21 @@ def test_oauth_onboarding_complete_requires_phone_verification_and_consents(clie
     assert db.query(User).filter(User.email == "oauth-consents@example.com").first() is None
 
 
+def test_oauth_onboarding_complete_without_ticket_fails(client):
+    response = client.post(
+        "/api/auth/oauth/onboarding-complete",
+        json={
+            "role": "client",
+            "phone": "+79005550129",
+            "phone_verification_code": "1234",
+            "accepted_terms": True,
+            "accepted_personal_data": True,
+        },
+    )
+
+    assert response.status_code in (status.HTTP_400_BAD_REQUEST, status.HTTP_422_UNPROCESSABLE_ENTITY)
+
+
 def test_oauth_onboarding_complete_master_requires_city_and_creates_profile(client, db, monkeypatch):
     ticket = _start_yandex_onboarding(client, db, monkeypatch, email="oauth-master-new@example.com", provider_user_id="ya-master-onboarding")
     verification = _verify_onboarding_phone(client, ticket, "+79005550125")

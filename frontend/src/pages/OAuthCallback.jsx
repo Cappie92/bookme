@@ -73,10 +73,13 @@ function OAuthOnboardingForm({ ticket, onComplete }) {
   const [acceptedMarketing, setAcceptedMarketing] = useState(false)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const normalizedPhone = normalizeRussianPhoneForApi(phone)
+  const isPhoneValid = /^\+7\d{10}$/.test(normalizedPhone)
+  const hasRequiredCity = role !== 'master' || Boolean(city.trim())
+  const canRequestPhone = Boolean(role) && isPhoneValid && hasRequiredCity && acceptedTerms && acceptedPersonalData
 
   const requestPhone = async (event) => {
     event.preventDefault()
-    const normalized = normalizeRussianPhoneForApi(phone)
     if (!role) {
       setError('Выберите роль')
       return
@@ -85,7 +88,7 @@ function OAuthOnboardingForm({ ticket, onComplete }) {
       setError('Для мастера укажите город')
       return
     }
-    if (!/^\+7\d{10}$/.test(normalized)) {
+    if (!isPhoneValid) {
       setError('Введите номер телефона в формате +7XXXXXXXXXX')
       return
     }
@@ -99,14 +102,14 @@ function OAuthOnboardingForm({ ticket, onComplete }) {
       const response = await fetch('/api/auth/oauth/onboarding-phone-request', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ticket, phone: normalized }),
+        body: JSON.stringify({ ticket, phone: normalizedPhone }),
       })
       const data = await response.json().catch(() => ({}))
       if (!response.ok || data.success === false) {
         setError(data.message || data.detail || 'Не удалось отправить звонок для подтверждения')
         return
       }
-      setPhone(normalized)
+      setPhone(normalizedPhone)
       setCallId(data.call_id || '')
       setStep('digits')
     } catch {
@@ -179,6 +182,7 @@ function OAuthOnboardingForm({ ticket, onComplete }) {
         </button>
       </div>
 
+      {role ? (
       <form onSubmit={step === 'phone' ? requestPhone : completeOnboarding} className="mt-5 space-y-4">
         <div>
           <label className="mb-1 block text-sm font-medium text-gray-700">Телефон</label>
@@ -246,12 +250,13 @@ function OAuthOnboardingForm({ ticket, onComplete }) {
         <button
           type="submit"
           data-testid={step === 'phone' ? 'oauth-onboarding-request-phone' : 'oauth-onboarding-complete'}
-          disabled={loading || !role || !acceptedTerms || !acceptedPersonalData}
+          disabled={loading || (step === 'phone' ? !canRequestPhone : false)}
           className="w-full rounded bg-[#4CAF50] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#45A049] disabled:opacity-60"
         >
           {loading ? 'Подождите...' : step === 'phone' ? 'Подтвердить телефон звонком' : 'Завершить регистрацию'}
         </button>
       </form>
+      ) : null}
     </div>
   )
 }
@@ -262,6 +267,7 @@ export default function OAuthCallback() {
   const { login } = useAuth()
   const { showToast } = useToast()
   const [error, setError] = useState('')
+  const [onboardingStatus, setOnboardingStatus] = useState('idle')
   const processedTicketRef = useRef(null)
   const exchangeInFlightRef = useRef(false)
   const onboardingTicket = searchParams.get('onboarding_ticket')
@@ -347,9 +353,67 @@ export default function OAuthCallback() {
     }
 
     completeLogin()
-  }, [login, navigate, searchParams, showToast])
+  }, [login, navigate, onboardingTicket, searchParams, showToast])
+
+  useEffect(() => {
+    if (!onboardingTicket) return
+    let cancelled = false
+    setOnboardingStatus('validating')
+    setError('')
+    fetch('/api/auth/oauth/onboarding-validate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ticket: onboardingTicket }),
+    })
+      .then(async (response) => {
+        if (!response.ok) throw new Error('invalid onboarding ticket')
+        return response.json()
+      })
+      .then(() => {
+        if (!cancelled) setOnboardingStatus('valid')
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setOnboardingStatus('invalid')
+          setError('Сессия регистрации через Яндекс истекла или недействительна.')
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [onboardingTicket])
 
   if (onboardingTicket) {
+    if (onboardingStatus === 'validating' || onboardingStatus === 'idle') {
+      return (
+        <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4">
+          <div className="w-full max-w-md rounded-lg bg-white p-6 text-center shadow">
+            <div className="mx-auto h-10 w-10 animate-spin rounded-full border-b-2 border-[#4CAF50]" />
+            <p className="mt-4 text-sm text-gray-600">Проверяем сессию регистрации через Яндекс...</p>
+          </div>
+        </div>
+      )
+    }
+    if (onboardingStatus === 'invalid') {
+      return (
+        <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4">
+          <div className="w-full max-w-md rounded-lg bg-white p-6 text-center shadow">
+            <h1 className="text-lg font-semibold text-gray-900">Не удалось продолжить регистрацию</h1>
+            <p className="mt-3 text-sm text-gray-600">{error}</p>
+            <button
+              type="button"
+              onClick={() => {
+                cleanOAuthCallbackUrl()
+                window.location.href = '/api/auth/yandex/login'
+              }}
+              className="mt-5 rounded bg-[#4CAF50] px-4 py-2 text-sm font-medium text-white hover:bg-[#45A049]"
+            >
+              Попробовать снова через Яндекс
+            </button>
+          </div>
+        </div>
+      )
+    }
     return (
       <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4 py-8">
         <OAuthOnboardingForm ticket={onboardingTicket} onComplete={completeAuth} />

@@ -76,6 +76,10 @@ class OAuthOnboardingPhoneRequest(BaseModel):
     phone: str
 
 
+class OAuthOnboardingValidateRequest(BaseModel):
+    ticket: str
+
+
 class OAuthOnboardingCompleteRequest(BaseModel):
     ticket: str
     role: str
@@ -972,6 +976,17 @@ def oauth_accounts(current_user: User = Depends(get_current_active_user), db: Se
             }
             for account in accounts
         ]
+    }
+
+
+@router.post("/oauth/onboarding-validate")
+def oauth_onboarding_validate(payload: OAuthOnboardingValidateRequest) -> Any:
+    ticket_data = _get_oauth_onboarding_ticket(payload.ticket)
+    return {
+        "valid": True,
+        "provider": ticket_data.get("provider", YANDEX_PROVIDER),
+        "email": ticket_data.get("email"),
+        "display_name": ticket_data.get("display_name"),
     }
 
 
