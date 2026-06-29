@@ -557,6 +557,21 @@ def test_oauth_onboarding_complete_master_requires_city_and_creates_profile(clie
     )
     assert missing_city.status_code == status.HTTP_400_BAD_REQUEST
 
+    invalid_city = client.post(
+        "/api/auth/oauth/onboarding-complete",
+        json={
+            "ticket": ticket,
+            "role": "master",
+            "city": "Абвырагл",
+            "timezone": "Europe/Moscow",
+            "accepted_terms": True,
+            "accepted_personal_data": True,
+            **verification,
+        },
+    )
+    assert invalid_city.status_code == status.HTTP_400_BAD_REQUEST
+    assert "город" in invalid_city.json()["detail"].lower()
+
     response = client.post(
         "/api/auth/oauth/onboarding-complete",
         json={

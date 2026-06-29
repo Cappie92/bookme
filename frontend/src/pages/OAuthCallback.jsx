@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { useToast } from '../contexts/ToastContext'
-import { getTimezoneByCity } from '../utils/cities'
+import { cities, getTimezoneByCity } from '../utils/cities'
 import { normalizeRussianPhoneForApi } from '../utils/normalizeRussianPhoneForApi'
 
 const oauthExchangeRequests = new Map()
@@ -198,14 +198,17 @@ function OAuthOnboardingForm({ ticket, onComplete }) {
         {role === 'master' ? (
           <div>
             <label className="mb-1 block text-sm font-medium text-gray-700">Город</label>
-            <input
+            <select
               data-testid="oauth-onboarding-city"
-              type="text"
               value={city}
               onChange={(event) => setCity(event.target.value)}
-              placeholder="Москва"
               className="min-h-[44px] w-full rounded border border-gray-300 px-3 py-2 text-[15px] focus:border-[#4CAF50] focus:outline-none focus:ring-2 focus:ring-[#4CAF50]/25"
-            />
+            >
+              <option value="">Выберите город</option>
+              {cities.map((item) => (
+                <option key={item.name} value={item.name}>{item.name}</option>
+              ))}
+            </select>
           </div>
         ) : null}
 
@@ -232,6 +235,9 @@ function OAuthOnboardingForm({ ticket, onComplete }) {
 
         {step === 'digits' ? (
           <div>
+            <p className="mb-3 text-sm text-gray-600">
+              На ваш номер {phone} поступит звонок. Введите последние 4 цифры номера, с которого вам звонят.
+            </p>
             <label className="mb-1 block text-sm font-medium text-gray-700">4 цифры</label>
             <input
               data-testid="oauth-onboarding-digits"

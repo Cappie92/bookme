@@ -49,6 +49,7 @@ from schemas import (
     ConfirmEmailChangeRequest, ConfirmEmailChangeResponse
 )
 from utils.phone import normalize_to_canonical
+from utils.cities import get_timezone_by_city
 
 
 router = APIRouter(
@@ -645,8 +646,13 @@ def _create_user_from_oauth_onboarding(db: Session, ticket_data: dict, payload: 
     city = (payload.city or "").strip()
     timezone = (payload.timezone or "").strip() or "Europe/Moscow"
     role = UserRole(role_value)
-    if role == UserRole.MASTER and not city:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Для регистрации мастера укажите город")
+    if role == UserRole.MASTER:
+        expected_timezone = get_timezone_by_city(city)
+        if not expected_timezone:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Выберите город из списка")
+        if timezone and timezone != expected_timezone:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Часовой пояс не соответствует выбранному городу")
+        timezone = expected_timezone
 
     user = User(
         email=email,

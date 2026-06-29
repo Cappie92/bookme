@@ -286,6 +286,7 @@ test.describe('Yandex auth web MVP', () => {
     await expect.poll(() => phoneRequestBody?.ticket).toBe('client-onboarding-ticket')
     expect(phoneRequestBody.phone).toBe('+79005550005')
     expect(phoneRequestAuthorization).toBe('')
+    await expect(page.getByText('На ваш номер +79005550005 поступит звонок. Введите последние 4 цифры номера, с которого вам звонят.')).toBeVisible()
 
     await page.getByTestId('oauth-onboarding-digits').fill('1234')
     await page.getByTestId('oauth-onboarding-complete').click()
@@ -303,8 +304,9 @@ test.describe('Yandex auth web MVP', () => {
     })
   })
 
-  test('oauth master onboarding requires city before phone request', async ({ page }) => {
+  test('oauth master onboarding requires city dropdown before phone request', async ({ page }) => {
     let phoneRequestCalls = 0
+    let phoneRequestBody: any = null
     await page.route('**/api/**', route => {
       const url = new URL(route.request().url())
       if (url.pathname === '/api/auth/oauth/onboarding-validate') {
@@ -312,6 +314,7 @@ test.describe('Yandex auth web MVP', () => {
       }
       if (url.pathname === '/api/auth/oauth/onboarding-phone-request') {
         phoneRequestCalls += 1
+        phoneRequestBody = route.request().postDataJSON()
         return route.fulfill({ json: { success: true, call_id: 'onboarding-call-id' } })
       }
       return route.fulfill({ json: {} })
@@ -323,8 +326,18 @@ test.describe('Yandex auth web MVP', () => {
     await page.getByLabel(/пользовательское соглашение/i).check()
     await page.getByLabel(/согласие на обработку персональных данных/i).check()
 
+    await expect(page.getByTestId('oauth-onboarding-city')).toBeVisible()
+    await expect(page.getByTestId('oauth-onboarding-city')).toHaveValue('')
     await expect(page.getByTestId('oauth-onboarding-request-phone')).toBeDisabled()
     expect(phoneRequestCalls).toBe(0)
+
+    await page.getByTestId('oauth-onboarding-city').selectOption('Москва')
+    await expect(page.getByTestId('oauth-onboarding-request-phone')).toBeEnabled()
+    await page.getByTestId('oauth-onboarding-request-phone').click()
+
+    await expect.poll(() => phoneRequestCalls).toBe(1)
+    expect(phoneRequestBody.phone).toBe('+79005550006')
+    await expect(page.getByText('На ваш номер +79005550006 поступит звонок. Введите последние 4 цифры номера, с которого вам звонят.')).toBeVisible()
   })
 
   test('oauth callback failed exchange shows error', async ({ page }) => {
