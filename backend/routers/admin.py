@@ -41,6 +41,7 @@ from models import (
     AlwaysFreeLog,
     PromoCodeActivation,
     BalanceTransaction,
+    UserOAuthAccount,
 )
 from constants import duration_months_to_days
 from utils.balance_utils import move_available_to_reserve
@@ -696,6 +697,7 @@ def delete_user(
 
             db.query(EmailVerification).filter(EmailVerification.user_id == uid).delete(synchronize_session=False)
             db.query(PasswordReset).filter(PasswordReset.user_id == uid).delete(synchronize_session=False)
+            db.query(UserOAuthAccount).filter(UserOAuthAccount.user_id == uid).delete(synchronize_session=False)
 
             db.query(Payment).filter(Payment.user_id == uid).delete(synchronize_session=False)
             db.query(SubscriptionReservation).filter(SubscriptionReservation.user_id == uid).delete(synchronize_session=False)

@@ -4,7 +4,7 @@ import pytest
 from sqlalchemy import event
 
 from auth import get_password_hash
-from models import User, UserRole
+from models import User, UserOAuthAccount, UserRole
 from routers.admin import _admin_json_bool
 
 
@@ -119,6 +119,32 @@ def test_admin_delete_client_user_no_salon_orm(client, db, test_admin):
     assert r.json().get("message")
 
     assert db.query(User).filter(User.id == uid).first() is None
+
+
+def test_admin_delete_user_removes_oauth_accounts(client, db, test_admin):
+    u = User(
+        email="to_delete_oauth@test.com",
+        hashed_password=get_password_hash("x"),
+        phone="+79005550998",
+        full_name="Delete OAuth Client",
+        role=UserRole.CLIENT,
+        is_active=True,
+        is_verified=False,
+        is_phone_verified=True,
+    )
+    db.add(u)
+    db.flush()
+    db.add(UserOAuthAccount(provider="yandex", provider_user_id="ya-delete-cleanup", email=u.email, user_id=u.id))
+    db.commit()
+    uid = u.id
+    db.expunge(u)
+
+    headers = _auth_admin(client, test_admin.phone, "testpassword")
+    r = client.delete(f"/api/admin/users/{uid}", headers=headers)
+
+    assert r.status_code == 200, r.text
+    assert db.query(User).filter(User.id == uid).first() is None
+    assert db.query(UserOAuthAccount).filter(UserOAuthAccount.provider_user_id == "ya-delete-cleanup").first() is None
 
 
 def test_admin_delete_client_emits_no_from_salons_sql(client, db, test_admin):

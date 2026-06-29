@@ -321,6 +321,21 @@ def test_yandex_callback_new_profile_returns_onboarding_ticket_without_user(clie
     assert db.query(UserOAuthAccount).filter(UserOAuthAccount.provider_user_id == "ya-2").first() is None
 
 
+def test_yandex_callback_orphan_oauth_account_is_cleaned_and_starts_onboarding(client, db, monkeypatch):
+    db.add(UserOAuthAccount(provider="yandex", provider_user_id="ya-orphan", email="orphan-old@example.com", user_id=999999))
+    db.commit()
+    _mock_yandex(monkeypatch, {"id": "ya-orphan", "default_email": "orphan-new@example.com", "real_name": "Orphan User"})
+    state = auth_router._create_oauth_state()
+
+    response = client.get(f"/api/auth/yandex/callback?code=abc&state={state}", follow_redirects=False)
+
+    assert response.status_code in (302, 307), response.text
+    onboarding_ticket = _callback_onboarding_ticket(response.headers["location"])
+    assert onboarding_ticket
+    assert db.query(User).filter(User.email == "orphan-new@example.com").first() is None
+    assert db.query(UserOAuthAccount).filter(UserOAuthAccount.provider_user_id == "ya-orphan").first() is None
+
+
 def test_yandex_oauth_new_profile_without_default_phone_starts_onboarding(client, db, monkeypatch):
     _mock_yandex(monkeypatch, {"id": "ya-no-phone", "default_email": "no-phone@example.com", "real_name": "No Phone"})
     state = auth_router._create_oauth_state()

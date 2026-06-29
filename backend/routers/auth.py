@@ -451,6 +451,11 @@ def _assign_yandex_phone_if_empty(db: Session, user: User, phone: Optional[str])
     return True
 
 
+def cleanup_orphan_oauth_account(db: Session, account: UserOAuthAccount) -> None:
+    db.delete(account)
+    db.commit()
+
+
 def _yandex_onboarding_profile_data(profile: dict) -> dict:
     provider_user_id = str(profile.get("id") or "").strip()
     email = str(profile.get("default_email") or profile.get("email") or "").strip().lower()
@@ -488,12 +493,16 @@ def _user_from_yandex_profile(db: Session, profile: dict) -> Optional[User]:
         .first()
     )
     if account:
-        account.email = email
-        account.updated_at = datetime.utcnow()
-        _assign_yandex_phone_if_empty(db, account.user, yandex_phone)
-        db.commit()
-        db.refresh(account.user)
-        return account.user
+        linked_user = account.user
+        if linked_user is None:
+            cleanup_orphan_oauth_account(db, account)
+        else:
+            account.email = email
+            account.updated_at = datetime.utcnow()
+            _assign_yandex_phone_if_empty(db, linked_user, yandex_phone)
+            db.commit()
+            db.refresh(linked_user)
+            return linked_user
 
     user = db.query(User).filter(User.email == email).first()
     if not user:
@@ -534,6 +543,9 @@ def _link_yandex_profile_to_user(db: Session, profile: dict, user_id: int) -> tu
         )
         .first()
     )
+    if account and account.user is None:
+        cleanup_orphan_oauth_account(db, account)
+        account = None
     if account and account.user_id != user.id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
