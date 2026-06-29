@@ -2,6 +2,7 @@ import { isAxiosError } from 'axios';
 import { apiClient } from './client';
 import { normalizeRussianPhoneForApi } from '@src/utils/normalizeRussianPhoneForApi';
 import { AUTH_REQUEST_TIMEOUT_MS } from '@src/utils/apiNetworkError';
+import { env } from '@src/config/env';
 
 // Типы для авторизации
 export interface LoginCredentials {
@@ -126,7 +127,7 @@ export async function register(credentials: RegisterCredentials): Promise<LoginR
 }
 
 export function getYandexLoginUrl(): string {
-  const baseURL = String(apiClient.defaults?.baseURL || '').replace(/\/$/, '');
+  const baseURL = String(env.WEB_URL || env.API_URL || apiClient.defaults?.baseURL || '').replace(/\/$/, '');
   return `${baseURL}/api/auth/yandex/login`;
 }
 

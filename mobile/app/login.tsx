@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ActivityIndicator, Image, KeyboardAvoidingView, Platform, Keyboard, TouchableWithoutFeedback, Modal, FlatList } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import * as Linking from 'expo-linking';
 import { useAuth } from '@src/auth/AuthContext';
 import { router, useLocalSearchParams } from 'expo-router';
 import { logger } from '@src/utils/logger';
@@ -11,9 +12,9 @@ import { ScreenContainer } from '@src/components/ScreenContainer';
 import { PasswordInput } from '@src/components/ui/PasswordInput';
 import { cities, getTimezoneByCity } from '@src/data/cities';
 import { mapLoginRequestError } from '@src/utils/apiNetworkError';
+import { openYandexMobileAuthUrl } from '@src/utils/yandexMobileAuthLink';
 import {
   getYandexMobileAuthPresentation,
-  YANDEX_MOBILE_AUTH_BUTTON_LABEL,
   YANDEX_MOBILE_AUTH_REGISTER_HINT,
 } from '@src/config/yandexMobileAuth';
 import {
@@ -29,9 +30,16 @@ import {
 type TabType = 'login' | 'register';
 const yandexLogo = require('../assets/YaLogo.webp');
 
-function YandexMobileAuthBlock({ showHint = false }: { showHint?: boolean }) {
-  // TODO(mobile-yandex-auth): keep disabled until Yandex mobile platforms,
-  // deep links and AuthSession/browser ticket exchange are implemented.
+async function openYandexOAuthInBrowser() {
+  try {
+    await openYandexMobileAuthUrl(Linking.openURL);
+  } catch (error) {
+    logger.error('❌ [YANDEX_AUTH] Не удалось открыть OAuth URL:', error);
+    Alert.alert('Не удалось открыть Яндекс', 'Попробуйте ещё раз или войдите по номеру телефона.');
+  }
+}
+
+function YandexMobileAuthBlock({ label, showHint = false }: { label: string; showHint?: boolean }) {
   return (
     <View style={styles.yandexAuthBlock}>
       {showHint ? (
@@ -46,10 +54,10 @@ function YandexMobileAuthBlock({ showHint = false }: { showHint?: boolean }) {
       </View>
       <TouchableOpacity
         testID="yandex-mobile-login-button"
-        accessibilityLabel={YANDEX_MOBILE_AUTH_BUTTON_LABEL}
+        accessibilityLabel={label}
         accessibilityRole="button"
-        style={[styles.yandexButton, styles.yandexButtonDisabled]}
-        disabled
+        style={styles.yandexButton}
+        onPress={openYandexOAuthInBrowser}
       >
         <Image
           testID="yandex-mobile-login-logo"
@@ -57,7 +65,7 @@ function YandexMobileAuthBlock({ showHint = false }: { showHint?: boolean }) {
           style={styles.yandexLogo}
           resizeMode="contain"
         />
-        <Text style={styles.yandexButtonText}>{YANDEX_MOBILE_AUTH_BUTTON_LABEL}</Text>
+        <Text style={styles.yandexButtonText}>{label}</Text>
       </TouchableOpacity>
     </View>
   );
@@ -513,7 +521,9 @@ export default function LoginScreen() {
               )}
             </TouchableOpacity>
 
-            {yandexLoginPresentation.visible ? <YandexMobileAuthBlock /> : null}
+            {yandexLoginPresentation.visible ? (
+              <YandexMobileAuthBlock label={yandexLoginPresentation.buttonLabel} />
+            ) : null}
           </View>
         )}
 
@@ -521,7 +531,10 @@ export default function LoginScreen() {
         {activeTab === 'register' && (
           <View style={styles.form}>
             {yandexRegisterPresentation.visible ? (
-              <YandexMobileAuthBlock showHint={yandexRegisterPresentation.showRegisterHint} />
+              <YandexMobileAuthBlock
+                label={yandexRegisterPresentation.buttonLabel}
+                showHint={yandexRegisterPresentation.showRegisterHint}
+              />
             ) : null}
             {/* Выбор типа аккаунта */}
             <View style={styles.inputGroup}>
@@ -972,9 +985,6 @@ const styles = StyleSheet.create({
     padding: 14,
     alignItems: 'center',
     backgroundColor: '#fff',
-  },
-  yandexButtonDisabled: {
-    opacity: 0.45,
   },
   yandexLogo: {
     width: 20,

@@ -19,6 +19,7 @@ jest.mock('expo/src/winter/installGlobal', () => ({
 jest.mock('@src/config/env', () => ({
   env: {
     API_URL: 'http://localhost:8001',
+    WEB_URL: 'http://localhost:5173',
     YANDEX_MOBILE_AUTH_VISIBLE: false,
   },
 }));

@@ -216,10 +216,10 @@ describe('Auth API', () => {
   });
 
   describe('Yandex OAuth scaffold', () => {
-    it('builds backend Yandex login URL without launching browser flow', () => {
+    it('builds web Yandex login URL without launching browser flow', () => {
       (apiClient as any).defaults = { baseURL: 'https://dedato.ru' };
 
-      expect(getYandexLoginUrl()).toBe('https://dedato.ru/api/auth/yandex/login');
+      expect(getYandexLoginUrl()).toBe('http://localhost:5173/api/auth/yandex/login');
     });
 
     it('exchanges OAuth ticket for auth tokens', async () => {

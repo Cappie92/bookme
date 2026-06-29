@@ -3,32 +3,33 @@ import {
   isYandexMobileAuthVisible,
   shouldRenderYandexMobileLoginButton,
   YANDEX_MOBILE_AUTH_BUTTON_LABEL,
+  YANDEX_MOBILE_AUTH_REGISTER_BUTTON_LABEL,
   YANDEX_MOBILE_AUTH_REGISTER_HINT,
 } from '@src/config/yandexMobileAuth';
 import { env } from '@src/config/env';
 
 describe('Yandex mobile auth visibility', () => {
-  it('is disabled by default when env flag is absent/false', () => {
+  it('is visible in mobile UI even when legacy flag is false', () => {
     expect(env.YANDEX_MOBILE_AUTH_VISIBLE).toBe(false);
-    expect(isYandexMobileAuthVisible()).toBe(false);
-    expect(shouldRenderYandexMobileLoginButton()).toBe(false);
+    expect(isYandexMobileAuthVisible()).toBe(true);
+    expect(shouldRenderYandexMobileLoginButton()).toBe(true);
   });
 
-  it('can render the login button only when flag is true', () => {
-    expect(shouldRenderYandexMobileLoginButton(false)).toBe(false);
+  it('keeps rendering the login button regardless of the old flag value', () => {
+    expect(shouldRenderYandexMobileLoginButton(false)).toBe(true);
     expect(shouldRenderYandexMobileLoginButton(true)).toBe(true);
   });
 
-  it('keeps login/register UI hidden when flag is false', () => {
+  it('shows login/register UI when flag is false', () => {
     expect(getYandexMobileAuthPresentation(false, 'login')).toMatchObject({
-      visible: false,
+      visible: true,
       showRegisterHint: false,
-      usesLogo: false,
+      usesLogo: true,
     });
     expect(getYandexMobileAuthPresentation(false, 'register')).toMatchObject({
-      visible: false,
-      showRegisterHint: false,
-      usesLogo: false,
+      visible: true,
+      showRegisterHint: true,
+      usesLogo: true,
     });
   });
 
@@ -44,7 +45,7 @@ describe('Yandex mobile auth visibility', () => {
   it('shows Yandex button, hint and logo on register when flag is true', () => {
     expect(getYandexMobileAuthPresentation(true, 'register')).toMatchObject({
       visible: true,
-      buttonLabel: 'Войти через Яндекс',
+      buttonLabel: YANDEX_MOBILE_AUTH_REGISTER_BUTTON_LABEL,
       showRegisterHint: true,
       registerHint: YANDEX_MOBILE_AUTH_REGISTER_HINT,
       usesLogo: true,
