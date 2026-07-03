@@ -6,7 +6,7 @@ export const YANDEX_MOBILE_AUTH_REGISTER_HINT =
   'Можно продолжить через Яндекс — регистрация и выбор роли завершатся в браузере.';
 
 export function isYandexMobileAuthVisible(flag = env.YANDEX_MOBILE_AUTH_VISIBLE): boolean {
-  return true;
+  return flag === true;
 }
 
 export const shouldRenderYandexMobileLoginButton = isYandexMobileAuthVisible;

@@ -9,27 +9,27 @@ import {
 import { env } from '@src/config/env';
 
 describe('Yandex mobile auth visibility', () => {
-  it('is visible in mobile UI even when legacy flag is false', () => {
+  it('is disabled by default when env flag is absent/false', () => {
     expect(env.YANDEX_MOBILE_AUTH_VISIBLE).toBe(false);
-    expect(isYandexMobileAuthVisible()).toBe(true);
-    expect(shouldRenderYandexMobileLoginButton()).toBe(true);
+    expect(isYandexMobileAuthVisible()).toBe(false);
+    expect(shouldRenderYandexMobileLoginButton()).toBe(false);
   });
 
-  it('keeps rendering the login button regardless of the old flag value', () => {
-    expect(shouldRenderYandexMobileLoginButton(false)).toBe(true);
+  it('can render the login button only when flag is true', () => {
+    expect(shouldRenderYandexMobileLoginButton(false)).toBe(false);
     expect(shouldRenderYandexMobileLoginButton(true)).toBe(true);
   });
 
-  it('shows login/register UI when flag is false', () => {
+  it('keeps login/register UI hidden when flag is false', () => {
     expect(getYandexMobileAuthPresentation(false, 'login')).toMatchObject({
-      visible: true,
+      visible: false,
       showRegisterHint: false,
-      usesLogo: true,
+      usesLogo: false,
     });
     expect(getYandexMobileAuthPresentation(false, 'register')).toMatchObject({
-      visible: true,
-      showRegisterHint: true,
-      usesLogo: true,
+      visible: false,
+      showRegisterHint: false,
+      usesLogo: false,
     });
   });
 
