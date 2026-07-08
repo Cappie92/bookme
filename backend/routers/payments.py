@@ -296,20 +296,37 @@ async def robokassa_stub_complete(
     # POST к себе с теми же данными, что Robokassa
     import httpx
     api_base = get_settings().API_BASE_URL.rstrip("/")
-    async with httpx.AsyncClient() as client:
-        r = await client.post(
-            f"{api_base}/api/payments/robokassa/result",
-            data={
-                "OutSum": f"{payment.amount:.2f}",
-                "InvId": invoice_id,
-                "SignatureValue": signature,
-            },
-            timeout=30,
-        )
+    result_ok = False
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.post(
+                f"{api_base}/api/payments/robokassa/result",
+                data={
+                    "OutSum": f"{payment.amount:.2f}",
+                    "InvId": invoice_id,
+                    "SignatureValue": signature,
+                },
+                timeout=30,
+            )
+        body = (r.text or "").strip()
+        if body.startswith('"') and body.endswith('"'):
+            body = body[1:-1]
+        result_ok = body == f"OK{invoice_id}"
+        if not result_ok:
+            logger.warning(
+                "robokassa_stub_complete result_not_ok invoice_id=%s body=%r",
+                invoice_id,
+                r.text,
+            )
+    except Exception:
+        logger.exception("robokassa_stub_complete result callback failed invoice_id=%s", invoice_id)
+
     from utils.robokassa import resolve_robokassa_redirect_urls
 
-    success_url, _ = resolve_robokassa_redirect_urls()
-    return RedirectResponse(url=f"{success_url}?payment_id={payment.id}", status_code=302)
+    success_url, fail_url = resolve_robokassa_redirect_urls()
+    if result_ok:
+        return RedirectResponse(url=f"{success_url}?payment_id={payment.id}", status_code=302)
+    return RedirectResponse(url=f"{fail_url}?payment_id={payment.id}", status_code=302)
 
 
 @router.post("/robokassa/result")
@@ -390,39 +407,41 @@ async def robokassa_result(
     # Фаза 1: фиксируем факт оплаты (НЕ откатывается из-за apply)
     # ------------------------
     try:
-        with db.begin():
-            payment_locked = db.query(Payment).filter(Payment.robokassa_invoice_id == invoice_id).with_for_update().first()
-            if not payment_locked:
-                return f"ERROR: Payment not found for invoice {invoice_id}"
+        payment_locked = db.query(Payment).filter(Payment.robokassa_invoice_id == invoice_id).with_for_update().first()
+        if not payment_locked:
+            db.rollback()
+            return f"ERROR: Payment not found for invoice {invoice_id}"
 
-            if payment_locked.status != 'paid':
-                payment_locked.status = 'paid'
-                payment_locked.paid_at = now
-                payment_locked.robokassa_payment_id = form_data.get("PaymentId", "") or payment_locked.robokassa_payment_id
+        if payment_locked.status != 'paid':
+            payment_locked.status = 'paid'
+            payment_locked.paid_at = now
+            payment_locked.robokassa_payment_id = form_data.get("PaymentId", "") or payment_locked.robokassa_payment_id
 
-            # Идемпотентно применяем "внутренний депозит" (зачисление средств на баланс) для subscription платежей.
-            # ВАЖНО: это часть "paid"-факта: деньги должны быть учтены даже если apply подписки упадет.
-            if payment_locked.payment_type == 'subscription':
-                if not payment_locked.subscription_apply_status:
-                    payment_locked.subscription_apply_status = 'pending'
-                meta = payment_locked.payment_metadata or {}
-                if meta.get("subscription_deposit_applied") is not True:
-                    user_balance = db.query(UserBalance).filter(UserBalance.user_id == payment_locked.user_id).with_for_update().first()
-                    if not user_balance:
-                        user_balance = UserBalance(user_id=payment_locked.user_id, balance=0, currency="RUB")
-                        db.add(user_balance)
-                        db.flush()
-                    add_balance_transaction_no_commit(
-                        db=db,
-                        user_id=payment_locked.user_id,
-                        amount=payment_locked.amount,
-                        transaction_type=TransactionType.DEPOSIT,
-                        description=f"Оплата подписки через Robokassa (платеж {payment_locked.id})",
-                    )
-                    meta["subscription_deposit_applied"] = True
-                    payment_locked.payment_metadata = meta
+        # Идемпотентно применяем "внутренний депозит" (зачисление средств на баланс) для subscription платежей.
+        # ВАЖНО: это часть "paid"-факта: деньги должны быть учтены даже если apply подписки упадет.
+        if payment_locked.payment_type == 'subscription':
+            if not payment_locked.subscription_apply_status:
+                payment_locked.subscription_apply_status = 'pending'
+            meta = payment_locked.payment_metadata or {}
+            if meta.get("subscription_deposit_applied") is not True:
+                user_balance = db.query(UserBalance).filter(UserBalance.user_id == payment_locked.user_id).with_for_update().first()
+                if not user_balance:
+                    user_balance = UserBalance(user_id=payment_locked.user_id, balance=0, currency="RUB")
+                    db.add(user_balance)
+                    db.flush()
+                add_balance_transaction_no_commit(
+                    db=db,
+                    user_id=payment_locked.user_id,
+                    amount=payment_locked.amount,
+                    transaction_type=TransactionType.DEPOSIT,
+                    description=f"Оплата подписки через Robokassa (платеж {payment_locked.id})",
+                )
+                meta["subscription_deposit_applied"] = True
+                payment_locked.payment_metadata = meta
 
+        db.commit()
     except Exception as e:
+        db.rollback()
         logger.exception("robokassa_result phase1 mark-paid failed invoice_id=%s", invoice_id)
         return f"ERROR: Failed to mark payment as paid: {e}"
 
@@ -434,30 +453,33 @@ async def robokassa_result(
     # Для deposit — фиксируем paid и применяем депозит идемпотентно
     if payment.payment_type == 'deposit':
         try:
-            with db.begin():
-                p = db.query(Payment).filter(Payment.robokassa_invoice_id == invoice_id).with_for_update().first()
-                if not p:
-                    return f"ERROR: Payment not found for invoice {invoice_id}"
-                meta = p.payment_metadata or {}
-                if meta.get("deposit_applied") is True:
-                    return f"OK{invoice_id}"
-                # Лочим баланс пользователя
-                user_balance = db.query(UserBalance).filter(UserBalance.user_id == p.user_id).with_for_update().first()
-                if not user_balance:
-                    user_balance = UserBalance(user_id=p.user_id, balance=0, currency="RUB")
-                    db.add(user_balance)
-                    db.flush()
-                add_balance_transaction_no_commit(
-                    db=db,
-                    user_id=p.user_id,
-                    amount=p.amount,
-                    transaction_type=TransactionType.DEPOSIT,
-                    description=f"Пополнение баланса через Robokassa (платеж {p.id})",
-                )
-                meta["deposit_applied"] = True
-                p.payment_metadata = meta
-                p.error_message = None
+            p = db.query(Payment).filter(Payment.robokassa_invoice_id == invoice_id).with_for_update().first()
+            if not p:
+                db.rollback()
+                return f"ERROR: Payment not found for invoice {invoice_id}"
+            meta = p.payment_metadata or {}
+            if meta.get("deposit_applied") is True:
+                db.commit()
+                return f"OK{invoice_id}"
+            # Лочим баланс пользователя
+            user_balance = db.query(UserBalance).filter(UserBalance.user_id == p.user_id).with_for_update().first()
+            if not user_balance:
+                user_balance = UserBalance(user_id=p.user_id, balance=0, currency="RUB")
+                db.add(user_balance)
+                db.flush()
+            add_balance_transaction_no_commit(
+                db=db,
+                user_id=p.user_id,
+                amount=p.amount,
+                transaction_type=TransactionType.DEPOSIT,
+                description=f"Пополнение баланса через Robokassa (платеж {p.id})",
+            )
+            meta["deposit_applied"] = True
+            p.payment_metadata = meta
+            p.error_message = None
+            db.commit()
         except Exception as e:
+            db.rollback()
             logger.exception("robokassa_result deposit apply failed invoice_id=%s", invoice_id)
             # депозит можно безопасно ретраить (Robokassa повторит callback)
             return f"ERROR: Deposit apply failed: {e}"
@@ -475,175 +497,176 @@ async def robokassa_result(
     # Фаза 2: apply подписки (атомарно, можно ретраить)
     # ------------------------
     try:
-        with db.begin():
-            payment = db.query(Payment).filter(Payment.robokassa_invoice_id == invoice_id).with_for_update().first()
-            if not payment:
-                raise RuntimeError("Payment not found")
+        payment = db.query(Payment).filter(Payment.robokassa_invoice_id == invoice_id).with_for_update().first()
+        if not payment:
+            raise RuntimeError("Payment not found")
 
-            if payment.subscription_apply_status == 'applied' and payment.subscription_id:
-                return f"OK{invoice_id}"
+        if payment.subscription_apply_status == 'applied' and payment.subscription_id:
+            db.commit()
+            return f"OK{invoice_id}"
 
-            payment.subscription_apply_status = 'pending'
-            payment.error_message = None
+        payment.subscription_apply_status = 'pending'
+        payment.error_message = None
 
-            meta = payment.payment_metadata or {}
-            calculation_id = meta.get("calculation_id")
-            if not calculation_id:
-                raise RuntimeError("Missing calculation_id in payment metadata")
+        meta = payment.payment_metadata or {}
+        calculation_id = meta.get("calculation_id")
+        if not calculation_id:
+            raise RuntimeError("Missing calculation_id in payment metadata")
 
-            snapshot = db.query(SubscriptionPriceSnapshot).filter(
-                SubscriptionPriceSnapshot.id == calculation_id,
-                SubscriptionPriceSnapshot.user_id == payment.user_id
-            ).first()
-            if not snapshot:
-                raise RuntimeError("Snapshot not found")
-            if snapshot.expires_at <= now:
-                raise RuntimeError("Snapshot expired")
-            if abs(float(snapshot.final_price) - float(payment.amount)) > 0.01:
-                raise RuntimeError("Amount mismatch vs snapshot.final_price")
+        snapshot = db.query(SubscriptionPriceSnapshot).filter(
+            SubscriptionPriceSnapshot.id == calculation_id,
+            SubscriptionPriceSnapshot.user_id == payment.user_id
+        ).first()
+        if not snapshot:
+            raise RuntimeError("Snapshot not found")
+        if snapshot.expires_at <= now:
+            raise RuntimeError("Snapshot expired")
+        if abs(float(snapshot.final_price) - float(payment.amount)) > 0.01:
+            raise RuntimeError("Amount mismatch vs snapshot.final_price")
 
-            user = db.query(User).filter(User.id == payment.user_id).first()
-            if not user:
-                raise RuntimeError("User not found")
+        user = db.query(User).filter(User.id == payment.user_id).first()
+        if not user:
+            raise RuntimeError("User not found")
 
-            # Лочим баланс пользователя (минимизация гонок available/reserve)
-            user_balance = db.query(UserBalance).filter(UserBalance.user_id == payment.user_id).with_for_update().first()
-            if not user_balance:
-                user_balance = UserBalance(user_id=payment.user_id, balance=0, currency="RUB")
-                db.add(user_balance)
-                db.flush()
-
-            # Определяем тип подписки
-            subscription_type = None
-            if user.role.value in ['salon']:
-                subscription_type = SubscriptionType.SALON
-            elif user.role.value in ['master', 'indie']:
-                subscription_type = SubscriptionType.MASTER
-            else:
-                raise RuntimeError("Invalid role for subscription")
-
-            # Единый строгий селектор (и автопочинка "ACTIVE но уже expired")
-            from utils.subscription_features import get_effective_subscription
-            current_subscription = get_effective_subscription(db, payment.user_id, subscription_type, now_utc=now)
-
-            # Enforce downgrade rule (не доверяем клиенту). Сравнение по цене выбранного периода.
-            requested_upgrade_type = snapshot.upgrade_type or meta.get("upgrade_type") or "immediate"
-            effective_upgrade_type = requested_upgrade_type
-            current_price_period = None
-            new_price_period = None
-            computed_is_downgrade = False
-            if current_subscription and current_subscription.plan_id:
-                current_plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.id == current_subscription.plan_id).first()
-                new_plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.id == snapshot.plan_id).first()
-                try:
-                    if current_plan and new_plan:
-                        months = int(getattr(snapshot, "duration_months", 1) or 1)
-                        def _p(p, m):
-                            if m == 1:
-                                return float(getattr(p, "price_1month", 0.0) or 0.0)
-                            if m == 3:
-                                return float(getattr(p, "price_3months", 0.0) or 0.0)
-                            if m == 6:
-                                return float(getattr(p, "price_6months", 0.0) or 0.0)
-                            return float(getattr(p, "price_12months", 0.0) or 0.0)
-                        current_price_period = _p(current_plan, months)
-                        new_price_period = _p(new_plan, months)
-                        if new_price_period > 0 and current_price_period > 0 and new_price_period < current_price_period:
-                            computed_is_downgrade = True
-                            effective_upgrade_type = "after_expiry"
-                except Exception:
-                    # best-effort: если не смогли сравнить, не форсим
-                    pass
-
-            # Start date
-            if effective_upgrade_type == "after_expiry" and current_subscription:
-                start_date = current_subscription.end_date
-            else:
-                start_date = now
-
-            _dm = int(getattr(snapshot, "duration_months", 1) or 1)
-            _duration_days = max(1, duration_months_to_days(_dm))
-            end_date = start_date + timedelta(days=_duration_days)
-            will_start_now = start_date <= now
-            new_status = SubscriptionStatus.ACTIVE if will_start_now else SubscriptionStatus.PENDING
-            new_is_active = True if will_start_now else False
-
-            import math
-            total_price_full = float(snapshot.total_price)
-            daily_rate = int(math.ceil(total_price_full / _duration_days)) if _duration_days else 0
-
-            new_subscription = Subscription(
-                user_id=payment.user_id,
-                subscription_type=subscription_type,
-                status=new_status,
-                start_date=start_date,
-                end_date=end_date,
-                price=total_price_full,
-                daily_rate=daily_rate,
-                payment_period=payment.subscription_period,
-                is_active=new_is_active,
-                auto_renewal=payment.is_recurring,
-                plan_id=snapshot.plan_id,
-            )
-            db.add(new_subscription)
+        # Лочим баланс пользователя (минимизация гонок available/reserve)
+        user_balance = db.query(UserBalance).filter(UserBalance.user_id == payment.user_id).with_for_update().first()
+        if not user_balance:
+            user_balance = UserBalance(user_id=payment.user_id, balance=0, currency="RUB")
+            db.add(user_balance)
             db.flush()
 
-            # MVP: резерв не используем. Остаток = UserBalance.balance. Таблицу оставляем, запись с 0.
-            new_res = SubscriptionReservation(
-                user_id=payment.user_id,
-                subscription_id=new_subscription.id,
-                reserved_amount=0.0
+        # Определяем тип подписки
+        subscription_type = None
+        if user.role.value in ['salon']:
+            subscription_type = SubscriptionType.SALON
+        elif user.role.value in ['master', 'indie']:
+            subscription_type = SubscriptionType.MASTER
+        else:
+            raise RuntimeError("Invalid role for subscription")
+
+        # Единый строгий селектор (и автопочинка "ACTIVE но уже expired")
+        from utils.subscription_features import get_effective_subscription
+        current_subscription = get_effective_subscription(db, payment.user_id, subscription_type, now_utc=now)
+
+        # Enforce downgrade rule (не доверяем клиенту). Сравнение по цене выбранного периода.
+        requested_upgrade_type = snapshot.upgrade_type or meta.get("upgrade_type") or "immediate"
+        effective_upgrade_type = requested_upgrade_type
+        current_price_period = None
+        new_price_period = None
+        computed_is_downgrade = False
+        if current_subscription and current_subscription.plan_id:
+            current_plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.id == current_subscription.plan_id).first()
+            new_plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.id == snapshot.plan_id).first()
+            try:
+                if current_plan and new_plan:
+                    months = int(getattr(snapshot, "duration_months", 1) or 1)
+                    def _p(p, m):
+                        if m == 1:
+                            return float(getattr(p, "price_1month", 0.0) or 0.0)
+                        if m == 3:
+                            return float(getattr(p, "price_3months", 0.0) or 0.0)
+                        if m == 6:
+                            return float(getattr(p, "price_6months", 0.0) or 0.0)
+                        return float(getattr(p, "price_12months", 0.0) or 0.0)
+                    current_price_period = _p(current_plan, months)
+                    new_price_period = _p(new_plan, months)
+                    if new_price_period > 0 and current_price_period > 0 and new_price_period < current_price_period:
+                        computed_is_downgrade = True
+                        effective_upgrade_type = "after_expiry"
+            except Exception:
+                # best-effort: если не смогли сравнить, не форсим
+                pass
+
+        # Start date
+        if effective_upgrade_type == "after_expiry" and current_subscription:
+            start_date = current_subscription.end_date
+        else:
+            start_date = now
+
+        _dm = int(getattr(snapshot, "duration_months", 1) or 1)
+        _duration_days = max(1, duration_months_to_days(_dm))
+        end_date = start_date + timedelta(days=_duration_days)
+        will_start_now = start_date <= now
+        new_status = SubscriptionStatus.ACTIVE if will_start_now else SubscriptionStatus.PENDING
+        new_is_active = True if will_start_now else False
+
+        import math
+        total_price_full = float(snapshot.total_price)
+        daily_rate = int(math.ceil(total_price_full / _duration_days)) if _duration_days else 0
+
+        new_subscription = Subscription(
+            user_id=payment.user_id,
+            subscription_type=subscription_type,
+            status=new_status,
+            start_date=start_date,
+            end_date=end_date,
+            price=total_price_full,
+            daily_rate=daily_rate,
+            payment_period=payment.subscription_period,
+            is_active=new_is_active,
+            auto_renewal=payment.is_recurring,
+            plan_id=snapshot.plan_id,
+        )
+        db.add(new_subscription)
+        db.flush()
+
+        # MVP: резерв не используем. Остаток = UserBalance.balance. Таблицу оставляем, запись с 0.
+        new_res = SubscriptionReservation(
+            user_id=payment.user_id,
+            subscription_id=new_subscription.id,
+            reserved_amount=0.0
+        )
+        db.add(new_res)
+        db.flush()
+
+        # Деактивируем старую подписку при immediate upgrade
+        if effective_upgrade_type == "immediate" and current_subscription:
+            current_subscription.status = SubscriptionStatus.EXPIRED
+            current_subscription.is_active = False
+
+        payment.subscription_id = new_subscription.id
+        payment.subscription_apply_status = 'applied'
+        payment.subscription_applied_at = now
+        payment.error_message = None
+
+        from settings import get_settings
+        if get_settings().SUBSCRIPTION_PAYMENT_DEBUG.strip() == "1":
+            logger.info(
+                "subscription/apply_downgrade invoice_id=%s payment_id=%s user_id=%s calculation_id=%s current_plan_id=%s current_price_1m=%s "
+                "new_plan_id=%s new_price_1m=%s requested_upgrade_type=%s effective_upgrade_type=%s is_downgrade=%s snapshot_final=%s snapshot_total=%s",
+                invoice_id,
+                payment.id,
+                payment.user_id,
+                meta.get("calculation_id"),
+                getattr(current_subscription, "plan_id", None),
+                current_price_period,
+                snapshot.plan_id,
+                new_price_period,
+                requested_upgrade_type,
+                effective_upgrade_type,
+                computed_is_downgrade,
+                float(getattr(snapshot, "final_price", 0.0) or 0.0),
+                float(getattr(snapshot, "total_price", 0.0) or 0.0),
             )
-            db.add(new_res)
-            db.flush()
+            logger.info(
+                "subscription/apply_success payment_id=%s user_id=%s snapshot_id=%s paid_amount=%s "
+                "plan_id=%s requested_upgrade_type=%s effective_upgrade_type=%s start_date=%s end_date=%s reserved=%s",
+                payment.id,
+                payment.user_id,
+                snapshot.id,
+                payment.amount,
+                snapshot.plan_id,
+                requested_upgrade_type,
+                effective_upgrade_type,
+                start_date,
+                end_date,
+                float(new_res.reserved_amount or 0.0),
+            )
 
-            # Деактивируем старую подписку при immediate upgrade
-            if effective_upgrade_type == "immediate" and current_subscription:
-                current_subscription.status = SubscriptionStatus.EXPIRED
-                current_subscription.is_active = False
-
-            payment.subscription_id = new_subscription.id
-            payment.subscription_apply_status = 'applied'
-            payment.subscription_applied_at = now
-            payment.error_message = None
-
-            from settings import get_settings
-            if get_settings().SUBSCRIPTION_PAYMENT_DEBUG.strip() == "1":
-                logger.info(
-                    "subscription/apply_downgrade invoice_id=%s payment_id=%s user_id=%s calculation_id=%s current_plan_id=%s current_price_1m=%s "
-                    "new_plan_id=%s new_price_1m=%s requested_upgrade_type=%s effective_upgrade_type=%s is_downgrade=%s snapshot_final=%s snapshot_total=%s",
-                    invoice_id,
-                    payment.id,
-                    payment.user_id,
-                    meta.get("calculation_id"),
-                    getattr(current_subscription, "plan_id", None),
-                    current_price_period,
-                    snapshot.plan_id,
-                    new_price_period,
-                    requested_upgrade_type,
-                    effective_upgrade_type,
-                    computed_is_downgrade,
-                    float(getattr(snapshot, "final_price", 0.0) or 0.0),
-                    float(getattr(snapshot, "total_price", 0.0) or 0.0),
-                )
-                logger.info(
-                    "subscription/apply_success payment_id=%s user_id=%s snapshot_id=%s paid_amount=%s "
-                    "plan_id=%s requested_upgrade_type=%s effective_upgrade_type=%s start_date=%s end_date=%s old_reserved=%s reserved=%s needed=%s",
-                    payment.id,
-                    payment.user_id,
-                    snapshot.id,
-                    payment.amount,
-                    snapshot.plan_id,
-                    requested_upgrade_type,
-                    effective_upgrade_type,
-                    start_date,
-                    end_date,
-                    old_reserved,
-                    float(new_res.reserved_amount or 0.0),
-                    needed,
-                )
+        db.commit()
 
     except Exception as e:
+        db.rollback()
         # apply упал: paid остаётся, но помечаем apply_status=failed (и возвращаем OK, чтобы Robokassa не ретраила бесконечно)
         logger.exception("robokassa_result phase2 apply failed invoice_id=%s", invoice_id)
         try:
@@ -662,12 +685,13 @@ async def robokassa_result(
         except Exception:
             pass
         try:
-            with db.begin():
-                p2 = db.query(Payment).filter(Payment.robokassa_invoice_id == invoice_id).with_for_update().first()
-                if p2:
-                    p2.subscription_apply_status = 'failed'
-                    p2.error_message = str(e)
+            p2 = db.query(Payment).filter(Payment.robokassa_invoice_id == invoice_id).with_for_update().first()
+            if p2:
+                p2.subscription_apply_status = 'failed'
+                p2.error_message = str(e)
+            db.commit()
         except Exception:
+            db.rollback()
             logger.exception("robokassa_result phase2 mark failed failed invoice_id=%s", invoice_id)
         return f"OK{invoice_id}"
 

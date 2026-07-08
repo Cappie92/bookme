@@ -1,20 +1,86 @@
-import React, { useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
+import { CheckCircleIcon } from '@heroicons/react/24/solid'
 import Header from '../components/Header'
 import Logo from '../components/ui/Logo'
+import { useAuth } from '../contexts/AuthContext'
 import { metrikaInitOnce, metrikaGoal } from '../analytics/metrika'
 import { M } from '../analytics/metrikaEvents'
+
+function isPaymentConfirmed(payment) {
+  if (!payment || payment.status !== 'paid') {
+    return false
+  }
+  if (
+    payment.subscription_apply_status != null &&
+    payment.subscription_apply_status !== 'applied'
+  ) {
+    return false
+  }
+  return true
+}
 
 function PaymentSuccess() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const paymentId = searchParams.get('payment_id')
+  const { getAuthHeaders } = useAuth()
+  const [verifyState, setVerifyState] = useState('loading')
   const [countdown, setCountdown] = useState(10)
-  useEffect(() => {
-    if (typeof window === 'undefined') {
+
+  const verifyPayment = useCallback(async () => {
+    if (!paymentId) {
+      setVerifyState('error')
       return
     }
-    // Один reachGoal на успешный return URL (и при React StrictMode remount)
+
+    setVerifyState('loading')
+    try {
+      const response = await fetch(
+        `/api/payments/status?payment_id=${encodeURIComponent(paymentId)}`,
+        { headers: getAuthHeaders() }
+      )
+
+      if (!response.ok) {
+        setVerifyState('error')
+        return
+      }
+
+      const payments = await response.json()
+      const payment = Array.isArray(payments)
+        ? payments.find((item) => String(item.id) === String(paymentId)) || payments[0]
+        : null
+
+      if (!payment) {
+        setVerifyState('pending')
+        return
+      }
+
+      if (isPaymentConfirmed(payment)) {
+        setVerifyState('success')
+        return
+      }
+
+      if (payment.status === 'pending') {
+        setVerifyState('pending')
+        return
+      }
+
+      setVerifyState('error')
+    } catch {
+      setVerifyState('error')
+    }
+  }, [paymentId, getAuthHeaders])
+
+  useEffect(() => {
+    void verifyPayment()
+  }, [verifyPayment])
+
+  useEffect(() => {
+    if (verifyState !== 'success' || typeof window === 'undefined') {
+      return
+    }
+
     const k = `dedato_ym_subscription_ok_${paymentId || 'none'}`
     if (window.sessionStorage.getItem(k) === '1') {
       return
@@ -23,10 +89,13 @@ function PaymentSuccess() {
     void metrikaInitOnce().then(() => {
       metrikaGoal(M.PAYMENT_SUBSCRIPTION_SUCCESS, { payment_id: paymentId || undefined })
     })
-  }, [paymentId])
+  }, [verifyState, paymentId])
 
   useEffect(() => {
-    // Таймер обратного отсчета
+    if (verifyState !== 'success') {
+      return
+    }
+
     const timer = setInterval(() => {
       setCountdown((prev) => {
         if (prev <= 1) {
@@ -39,10 +108,82 @@ function PaymentSuccess() {
     }, 1000)
 
     return () => clearInterval(timer)
-  }, [navigate])
+  }, [navigate, verifyState])
 
   const handleGoToDashboard = () => {
     navigate('/master/tariff?refresh=1')
+  }
+
+  const handleGoToFailPage = () => {
+    const query = paymentId ? `?payment_id=${encodeURIComponent(paymentId)}` : ''
+    navigate(`/payment/failed${query}`)
+  }
+
+  const renderContent = () => {
+    if (verifyState === 'loading') {
+      return (
+        <>
+          <h1 className="text-3xl lg:text-4xl font-bold text-gray-900 mb-4">
+            Проверяем оплату...
+          </h1>
+          <p className="text-base text-gray-600 mb-6">
+            Подождите, подтверждаем статус платежа
+          </p>
+        </>
+      )
+    }
+
+    if (verifyState === 'success') {
+      return (
+        <>
+          <CheckCircleIcon className="h-14 w-14 text-[#4CAF50] mb-4" aria-hidden="true" />
+          <h1 className="text-3xl lg:text-4xl font-bold text-gray-900 mb-4">
+            Оплата прошла успешно
+          </h1>
+          <p className="text-base text-gray-600 mb-6">
+            Сейчас вы будете перенаправлены в личный кабинет
+          </p>
+          <button
+            onClick={handleGoToDashboard}
+            className="bg-[#4CAF50] hover:bg-[#43A047] text-white font-semibold py-3 px-8 rounded-lg transition-colors mb-4"
+          >
+            Личный кабинет
+          </button>
+          <p className="text-sm text-gray-500">
+            Перенаправление через {countdown} сек...
+          </p>
+        </>
+      )
+    }
+
+    const isPending = verifyState === 'pending'
+    const title = isPending ? 'Платёж ещё не подтверждён' : 'Не удалось подтвердить оплату'
+    const description = isPending
+      ? 'Оплата обрабатывается. Попробуйте проверить статус ещё раз через несколько секунд.'
+      : 'Не удалось получить подтверждение оплаты. Повторите проверку или вернитесь к оплате.'
+
+    return (
+      <>
+        <h1 className="text-3xl lg:text-4xl font-bold text-gray-900 mb-4">
+          {title}
+        </h1>
+        <p className="text-base text-gray-600 mb-6">
+          {description}
+        </p>
+        <button
+          onClick={() => void verifyPayment()}
+          className="bg-[#4CAF50] hover:bg-[#43A047] text-white font-semibold py-3 px-8 rounded-lg transition-colors mb-4"
+        >
+          Проверить ещё раз
+        </button>
+        <button
+          onClick={handleGoToFailPage}
+          className="text-[#4CAF50] hover:text-[#43A047] font-medium mb-4"
+        >
+          Перейти на страницу ошибки
+        </button>
+      </>
+    )
   }
 
   return (
@@ -51,33 +192,14 @@ function PaymentSuccess() {
       <div className="flex-grow flex items-center justify-center px-4 py-4">
         <div className="max-w-6xl w-full">
           <div className="flex flex-col lg:flex-row items-center justify-center gap-4 lg:gap-6">
-            {/* Логотип слева */}
             <div className="flex-shrink-0 w-full lg:w-1/2 max-w-md flex justify-center" style={{ maxWidth: '50%' }}>
               <div style={{ transform: 'scale(5)' }}>
                 <Logo size="3xl" />
               </div>
             </div>
-            
-            {/* Текст справа */}
+
             <div className="flex-shrink-0 w-full lg:w-1/2 flex flex-col items-center lg:items-start text-center lg:text-left">
-              <h1 className="text-3xl lg:text-4xl font-bold text-gray-900 mb-4">
-                Оплата прошла успешно
-              </h1>
-              
-              <p className="text-base text-gray-600 mb-6">
-                Сейчас вы будете перенаправлены в личный кабинет
-              </p>
-              
-              <button
-                onClick={handleGoToDashboard}
-                className="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-8 rounded-lg transition-colors mb-4"
-              >
-                Личный кабинет
-              </button>
-              
-              <p className="text-sm text-gray-500">
-                Перенаправление через {countdown} сек...
-              </p>
+              {renderContent()}
             </div>
           </div>
         </div>
@@ -87,4 +209,3 @@ function PaymentSuccess() {
 }
 
 export default PaymentSuccess
-
