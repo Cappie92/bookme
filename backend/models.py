@@ -2235,6 +2235,7 @@ class Payment(Base):
     __tablename__ = "payments"
     
     id = Column(Integer, primary_key=True, index=True)
+    public_id = Column(String, unique=True, nullable=False, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     subscription_id = Column(Integer, ForeignKey("subscriptions.id"), nullable=True, index=True)
     
@@ -2315,3 +2316,21 @@ from utils.booking_public_reference import ensure_booking_public_reference_alloc
 @event.listens_for(Booking, "before_insert", propagate=True)
 def _booking_assign_public_reference(mapper, connection, target):
     ensure_booking_public_reference_allocated(connection, target)
+
+
+from utils.payment_public_id import ensure_payment_public_id_allocated, persist_new_payment  # noqa: E402
+
+
+@event.listens_for(Payment, "before_insert", propagate=True)
+def _payment_assign_public_id(mapper, connection, target):
+    ensure_payment_public_id_allocated(connection, target)
+
+
+@event.listens_for(Payment, "before_update", propagate=True)
+def _payment_public_id_immutable(mapper, connection, target):
+    from sqlalchemy import inspect as sa_inspect
+
+    state = sa_inspect(target)
+    hist = state.attrs.public_id.history
+    if hist.has_changes() and hist.deleted:
+        target.public_id = hist.deleted[0]

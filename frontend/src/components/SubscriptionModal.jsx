@@ -351,13 +351,13 @@ export default function SubscriptionModal({ isOpen, onClose, isFreePlan, current
           onClose()
           return
         }
-        if (!data?.payment_id || !data?.payment_url) {
+        if (!data?.payment || !data?.payment_url) {
           alert('Ошибка инициализации платежа: не получены данные оплаты')
           return
         }
         
         // Сохраняем состояние для восстановления при ошибке
-        localStorage.setItem(`payment_state_${data.payment_id}`, JSON.stringify(paymentState))
+        localStorage.setItem(`payment_state_${data.payment}`, JSON.stringify(paymentState))
         
         // Открываем URL оплаты в новом окне
         window.location.href = data.payment_url

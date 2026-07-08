@@ -54,6 +54,10 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def _payment_return_url_param(payment: Payment) -> str:
+    return f"payment={payment.public_id}"
+
+
 def _apply_promo_rewards_best_effort(db: Session, payment_id: int, *, context: str) -> None:
     try:
         result = apply_promo_rewards_for_first_payment(db, payment_id)
@@ -188,9 +192,8 @@ async def init_subscription_payment(
         }
     )
     
-    db.add(payment)
-    db.commit()
-    db.refresh(payment)
+    from utils.payment_public_id import persist_new_payment
+    payment = persist_new_payment(db, payment)
     
     # Получаем конфигурацию Robokassa
     from settings import get_settings
@@ -202,8 +205,8 @@ async def init_subscription_payment(
     description = f"Подписка {plan.display_name or plan.name} на {payment_request.duration_months} мес."
     
     # Генерируем URL для оплаты
-    success_url_full = f"{config['success_url']}?payment_id={payment.id}"
-    fail_url_full = f"{config['fail_url']}?payment_id={payment.id}"
+    success_url_full = f"{config['success_url']}?{_payment_return_url_param(payment)}"
+    fail_url_full = f"{config['fail_url']}?{_payment_return_url_param(payment)}"
     if robokassa_stub:
         api_base = s.API_BASE_URL.rstrip("/")
         payment_url = f"{api_base}/api/payments/robokassa/stub-complete?invoice_id={invoice_id}"
@@ -257,7 +260,7 @@ async def init_subscription_payment(
         )
 
     return PaymentInitResponse(
-        payment_id=payment.id,
+        payment=payment.public_id,
         payment_url=payment_url,
         invoice_id=invoice_id
     )
@@ -325,8 +328,8 @@ async def robokassa_stub_complete(
 
     success_url, fail_url = resolve_robokassa_redirect_urls()
     if result_ok:
-        return RedirectResponse(url=f"{success_url}?payment_id={payment.id}", status_code=302)
-    return RedirectResponse(url=f"{fail_url}?payment_id={payment.id}", status_code=302)
+        return RedirectResponse(url=f"{success_url}?{_payment_return_url_param(payment)}", status_code=302)
+    return RedirectResponse(url=f"{fail_url}?{_payment_return_url_param(payment)}", status_code=302)
 
 
 @router.post("/robokassa/result")
@@ -703,7 +706,7 @@ async def robokassa_result(
 async def get_payments_status(
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
-    payment_id: Optional[int] = None,
+    payment: Optional[str] = Query(None, description="Публичный идентификатор платежа"),
     status_filter: Optional[str] = None
 ):
     """
@@ -720,8 +723,8 @@ async def get_payments_status(
         query = db.query(Payment)
     
     # Фильтры
-    if payment_id:
-        query = query.filter(Payment.id == payment_id)
+    if payment:
+        query = query.filter(Payment.public_id == payment)
     
     if status_filter:
         query = query.filter(Payment.status == status_filter)
@@ -731,9 +734,9 @@ async def get_payments_status(
     return [PaymentOut.from_orm(p) for p in payments]
 
 
-@router.post("/{payment_id}/activate-subscription")
+@router.post("/{payment}/activate-subscription")
 async def activate_subscription_after_payment(
-    payment_id: int,
+    payment: str,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -743,30 +746,30 @@ async def activate_subscription_after_payment(
     Пользователь должен нажать кнопку активации после успешной оплаты
     """
     # Находим платеж
-    payment = db.query(Payment).filter(
-        Payment.id == payment_id,
+    payment_row = db.query(Payment).filter(
+        Payment.public_id == payment,
         Payment.user_id == current_user.id
     ).first()
     
-    if not payment:
+    if not payment_row:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Платеж не найден"
         )
     
-    if payment.status != 'paid':
+    if payment_row.status != 'paid':
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Платеж еще не оплачен"
         )
     
-    if payment.payment_type != 'subscription':
+    if payment_row.payment_type != 'subscription':
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Этот платеж не для подписки"
         )
     
-    if not payment.subscription_id:
+    if not payment_row.subscription_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Подписка не найдена для этого платежа"
@@ -774,7 +777,7 @@ async def activate_subscription_after_payment(
     
     # Находим подписку
     subscription = db.query(Subscription).filter(
-        Subscription.id == payment.subscription_id,
+        Subscription.id == payment_row.subscription_id,
         Subscription.user_id == current_user.id
     ).first()
     

@@ -100,7 +100,7 @@ def test_init_returns_stub_url_when_stub_mode(client, db, monkeypatch):
     assert "payment_url" in data
     url = data["payment_url"]
     assert "stub-complete" in url
-    assert data.get("payment_id")
+    assert data.get("payment")
     assert data.get("invoice_id")
 
 
@@ -185,10 +185,10 @@ def test_robokassa_result_marks_paid_and_applies_subscription(client, db, monkey
         },
     )
     assert init.status_code == 200, init.text
+    payment_public_id = init.json()["payment"]
     invoice_id = init.json()["invoice_id"]
-    payment_id = init.json()["payment_id"]
 
-    payment = db.query(Payment).filter(Payment.id == payment_id).first()
+    payment = db.query(Payment).filter(Payment.public_id == payment_public_id).first()
     assert payment.status == "pending"
 
     cfg = get_robokassa_config()
@@ -201,7 +201,7 @@ def test_robokassa_result_marks_paid_and_applies_subscription(client, db, monkey
     assert f"OK{invoice_id}" in result.text
 
     db.expire_all()
-    payment = db.query(Payment).filter(Payment.id == payment_id).first()
+    payment = db.query(Payment).filter(Payment.public_id == payment_public_id).first()
     assert payment.status == "paid"
     assert payment.subscription_apply_status == "applied"
     assert payment.subscription_id is not None
@@ -283,7 +283,7 @@ def test_stub_complete_redirects_success_when_result_ok(client, db, monkeypatch)
 
     init = _setup_stub_payment_user(client, db)
     invoice_id = init["invoice_id"]
-    payment_id = init["payment_id"]
+    payment_public_id = init["payment"]
 
     class FakeResponse:
         def __init__(self, body):
@@ -307,7 +307,7 @@ def test_stub_complete_redirects_success_when_result_ok(client, db, monkeypatch)
     )
 
     assert response.status_code == 302
-    assert response.headers["location"] == f"http://localhost:5173/payment/success?payment_id={payment_id}"
+    assert response.headers["location"] == f"http://localhost:5173/payment/success?payment={payment_public_id}"
 
 
 def test_stub_complete_redirects_fail_when_result_not_ok(client, db, monkeypatch):
@@ -323,7 +323,7 @@ def test_stub_complete_redirects_fail_when_result_not_ok(client, db, monkeypatch
 
     init = _setup_stub_payment_user(client, db)
     invoice_id = init["invoice_id"]
-    payment_id = init["payment_id"]
+    payment_public_id = init["payment"]
 
     class FakeResponse:
         text = "ERROR: Failed to mark payment as paid"
@@ -346,7 +346,7 @@ def test_stub_complete_redirects_fail_when_result_not_ok(client, db, monkeypatch
     )
 
     assert response.status_code == 302
-    assert response.headers["location"] == f"http://localhost:5173/payment/fail?payment_id={payment_id}"
+    assert response.headers["location"] == f"http://localhost:5173/payment/fail?payment={payment_public_id}"
 
 
 def test_stub_complete_accepts_json_quoted_ok_body(client, db, monkeypatch):
@@ -359,7 +359,7 @@ def test_stub_complete_accepts_json_quoted_ok_body(client, db, monkeypatch):
 
     init = _setup_stub_payment_user(client, db)
     invoice_id = init["invoice_id"]
-    payment_id = init["payment_id"]
+    payment_public_id = init["payment"]
 
     class FakeResponse:
         def __init__(self, body):
@@ -383,4 +383,4 @@ def test_stub_complete_accepts_json_quoted_ok_body(client, db, monkeypatch):
     )
 
     assert response.status_code == 302
-    assert response.headers["location"] == f"http://localhost:5173/payment/success?payment_id={payment_id}"
+    assert response.headers["location"] == f"http://localhost:5173/payment/success?payment={payment_public_id}"

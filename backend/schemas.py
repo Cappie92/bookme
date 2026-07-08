@@ -2929,18 +2929,17 @@ class DepositPaymentInitRequest(BaseModel):
 class PaymentInitResponse(BaseModel):
     requires_payment: bool = True
     message: Optional[str] = None
-    payment_id: Optional[int] = None
+    payment: Optional[str] = None
     payment_url: Optional[str] = None
     invoice_id: Optional[str] = None
 
 
 class PaymentOut(BaseModel):
-    id: int
-    user_id: int
-    subscription_id: Optional[int] = None
+    public_id: str
     amount: float
     status: str
     payment_type: str
+    subscription_apply_status: Optional[str] = None
     robokassa_invoice_id: str
     robokassa_payment_id: Optional[str] = None
     is_recurring: bool

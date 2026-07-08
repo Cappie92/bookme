@@ -5,7 +5,7 @@ import Header from '../components/Header'
 function PaymentFailed() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
-  const paymentId = searchParams.get('payment_id')
+  const paymentPublicId = searchParams.get('payment')
   const [countdown, setCountdown] = useState(10)
 
   useEffect(() => {
@@ -15,8 +15,8 @@ function PaymentFailed() {
         if (prev <= 1) {
           clearInterval(timer)
           // Восстанавливаем состояние модального окна из localStorage
-          if (paymentId) {
-            const savedState = localStorage.getItem(`payment_state_${paymentId}`)
+          if (paymentPublicId) {
+            const savedState = localStorage.getItem(`payment_state_${paymentPublicId}`)
             if (savedState) {
               try {
                 const state = JSON.parse(savedState)
@@ -38,12 +38,12 @@ function PaymentFailed() {
     }, 1000)
 
     return () => clearInterval(timer)
-  }, [navigate, paymentId])
+  }, [navigate, paymentPublicId])
 
   const handleGoToDashboard = () => {
     // Восстанавливаем состояние модального окна из localStorage
-    if (paymentId) {
-      const savedState = localStorage.getItem(`payment_state_${paymentId}`)
+    if (paymentPublicId) {
+      const savedState = localStorage.getItem(`payment_state_${paymentPublicId}`)
       if (savedState) {
         try {
           const state = JSON.parse(savedState)

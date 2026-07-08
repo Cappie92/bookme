@@ -23,13 +23,13 @@ function isPaymentConfirmed(payment) {
 function PaymentSuccess() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
-  const paymentId = searchParams.get('payment_id')
+  const paymentPublicId = searchParams.get('payment')
   const { getAuthHeaders } = useAuth()
   const [verifyState, setVerifyState] = useState('loading')
   const [countdown, setCountdown] = useState(10)
 
   const verifyPayment = useCallback(async () => {
-    if (!paymentId) {
+    if (!paymentPublicId) {
       setVerifyState('error')
       return
     }
@@ -37,7 +37,7 @@ function PaymentSuccess() {
     setVerifyState('loading')
     try {
       const response = await fetch(
-        `/api/payments/status?payment_id=${encodeURIComponent(paymentId)}`,
+        `/api/payments/status?payment=${encodeURIComponent(paymentPublicId)}`,
         { headers: getAuthHeaders() }
       )
 
@@ -48,7 +48,7 @@ function PaymentSuccess() {
 
       const payments = await response.json()
       const payment = Array.isArray(payments)
-        ? payments.find((item) => String(item.id) === String(paymentId)) || payments[0]
+        ? payments.find((item) => item.public_id === paymentPublicId) || payments[0]
         : null
 
       if (!payment) {
@@ -70,7 +70,7 @@ function PaymentSuccess() {
     } catch {
       setVerifyState('error')
     }
-  }, [paymentId, getAuthHeaders])
+  }, [paymentPublicId, getAuthHeaders])
 
   useEffect(() => {
     void verifyPayment()
@@ -81,15 +81,15 @@ function PaymentSuccess() {
       return
     }
 
-    const k = `dedato_ym_subscription_ok_${paymentId || 'none'}`
+    const k = `dedato_ym_subscription_ok_${paymentPublicId || 'none'}`
     if (window.sessionStorage.getItem(k) === '1') {
       return
     }
     window.sessionStorage.setItem(k, '1')
     void metrikaInitOnce().then(() => {
-      metrikaGoal(M.PAYMENT_SUBSCRIPTION_SUCCESS, { payment_id: paymentId || undefined })
+      metrikaGoal(M.PAYMENT_SUBSCRIPTION_SUCCESS, { payment: paymentPublicId || undefined })
     })
-  }, [verifyState, paymentId])
+  }, [verifyState, paymentPublicId])
 
   useEffect(() => {
     if (verifyState !== 'success') {
@@ -115,7 +115,7 @@ function PaymentSuccess() {
   }
 
   const handleGoToFailPage = () => {
-    const query = paymentId ? `?payment_id=${encodeURIComponent(paymentId)}` : ''
+    const query = paymentPublicId ? `?payment=${encodeURIComponent(paymentPublicId)}` : ''
     navigate(`/payment/failed${query}`)
   }
 

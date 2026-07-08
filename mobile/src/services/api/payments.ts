@@ -13,9 +13,17 @@ export interface PaymentInitRequest {
 export interface PaymentInitResponse {
   requires_payment?: boolean;
   message?: string | null;
-  payment_id?: number;
+  payment?: string;
   payment_url?: string | null;
   invoice_id?: string | null;
+}
+
+export interface PaymentStatusResponse {
+  public_id: string;
+  status: string;
+  amount: number;
+  subscription_apply_status?: string | null;
+  paid_at: string | null;
 }
 
 /**
@@ -44,15 +52,16 @@ export async function initDepositPayment(
 }
 
 /**
- * Получить статус платежа
+ * Получить статус платежа по публичному идентификатору
  */
-export async function getPaymentStatus(paymentId: number): Promise<{
-  id: number;
-  status: string;
-  amount: number;
-  paid_at: string | null;
-}> {
-  const response = await apiClient.get(`/api/payments/${paymentId}/status`);
-  return response.data;
+export async function getPaymentStatus(paymentPublicId: string): Promise<PaymentStatusResponse> {
+  const response = await apiClient.get<PaymentStatusResponse[]>(
+    '/api/payments/status',
+    { params: { payment: paymentPublicId } }
+  );
+  const row = response.data[0];
+  if (!row) {
+    throw new Error('Payment not found');
+  }
+  return row;
 }
-

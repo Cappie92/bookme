@@ -41,15 +41,15 @@ describe('shouldPaySubscriptionFromBalance', () => {
 describe('sanitizePaymentRedirectUrl', () => {
   it('rewrites localhost success URL in production', () => {
     const out = sanitizePaymentRedirectUrl(
-      'http://localhost:5173/payment/success?payment_id=1',
+      'http://localhost:5173/payment/success?payment=abc123token',
       'https://dedato.ru',
       false
     );
-    expect(out).toBe('https://dedato.ru/payment/success?payment_id=1');
+    expect(out).toBe('https://dedato.ru/payment/success?payment=abc123token');
   });
 
   it('keeps localhost in dev', () => {
-    const url = 'http://localhost:5173/payment/success?payment_id=1';
+    const url = 'http://localhost:5173/payment/success?payment=abc123token';
     expect(sanitizePaymentRedirectUrl(url, 'https://dedato.ru', true)).toBe(url);
   });
 
