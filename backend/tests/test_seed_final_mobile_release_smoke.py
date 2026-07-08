@@ -9,7 +9,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from auth import get_password_hash
-from models import User, UserRole
+from models import User, UserBalance, UserRole
 from scripts import seed_final_mobile_release_smoke as smoke
 
 
@@ -186,3 +186,40 @@ def test_main_dry_run_exits_zero(capsys):
     assert code == 0
     out = capsys.readouterr().out
     assert "Dry-run" in out or "dry-run" in out.lower() or "FINAL_MOBILE_SMOKE_2026" in out
+
+
+def test_post_seed_clean_state_allows_empty_user_balance(db):
+    user = User(
+        email="empty-balance-smoke@example.com",
+        phone="+79991701901",
+        full_name=f"Empty balance {smoke.MARKER}",
+        hashed_password=get_password_hash(smoke.PASSWORD),
+        role=UserRole.MASTER,
+        is_active=True,
+        is_verified=True,
+    )
+    db.add(user)
+    db.flush()
+    db.add(UserBalance(user_id=user.id, balance=0.0, currency="RUB"))
+    db.commit()
+
+    smoke._assert_post_seed_clean_state(db, [user.id])
+
+
+def test_post_seed_clean_state_rejects_non_empty_user_balance(db):
+    user = User(
+        email="nonempty-balance-smoke@example.com",
+        phone="+79991701902",
+        full_name=f"Non-empty balance {smoke.MARKER}",
+        hashed_password=get_password_hash(smoke.PASSWORD),
+        role=UserRole.MASTER,
+        is_active=True,
+        is_verified=True,
+    )
+    db.add(user)
+    db.flush()
+    db.add(UserBalance(user_id=user.id, balance=100.0, currency="RUB"))
+    db.commit()
+
+    with pytest.raises(smoke.SmokeSafetyError, match="non_empty_balances=1"):
+        smoke._assert_post_seed_clean_state(db, [user.id])

@@ -40,6 +40,7 @@ from sqlalchemy.orm import Session
 
 from database import SessionLocal
 from models import (
+    BalanceTransaction,
     Booking,
     BookingConfirmation,
     Income,
@@ -849,22 +850,70 @@ def run_cleanup(db: Session, report: SeedReport) -> None:
     report.cleanup_summary = summary
 
 
-def _assert_no_payments_or_subs(db: Session, user_ids: List[int]) -> None:
+def _master_ids_for_users(db: Session, user_ids: List[int]) -> List[int]:
+    if not user_ids:
+        return []
+    return [
+        m.id
+        for m in db.query(Master).filter(Master.user_id.in_(user_ids)).all()
+    ]
+
+
+def _assert_post_seed_clean_state(db: Session, user_ids: List[int]) -> None:
+    """Strict post-seed checks: no money flow, no subs/payments/grants/ledger.
+
+  Empty UserBalance rows (balance=0, no BalanceTransaction) are allowed — they are
+  created lazily by billing helpers when subscription/balance endpoints are first touched.
+    """
     if not user_ids:
         return
+
+    master_ids = _master_ids_for_users(db, user_ids)
     payments = db.query(Payment).filter(Payment.user_id.in_(user_ids)).count()
     subs = db.query(Subscription).filter(Subscription.user_id.in_(user_ids)).count()
-    balances = db.query(UserBalance).filter(UserBalance.user_id.in_(user_ids)).count()
     grants = (
         db.query(PromoRewardGrant)
         .join(PromoRedemption, PromoRewardGrant.redemption_id == PromoRedemption.id)
         .filter(PromoRedemption.redeemer_user_id.in_(user_ids))
         .count()
     )
-    if payments or subs or balances or grants:
+    ledger_count = 0
+    if master_ids:
+        ledger_count = (
+            db.query(SubscriptionPointsLedger)
+            .filter(SubscriptionPointsLedger.master_id.in_(master_ids))
+            .count()
+        )
+    balance_tx = (
+        db.query(BalanceTransaction)
+        .filter(BalanceTransaction.user_id.in_(user_ids))
+        .count()
+    )
+    reservations = (
+        db.query(SubscriptionReservation)
+        .filter(SubscriptionReservation.user_id.in_(user_ids))
+        .count()
+    )
+    balances = db.query(UserBalance).filter(UserBalance.user_id.in_(user_ids)).all()
+    non_empty_balances = [
+        ub for ub in balances if abs(float(ub.balance or 0)) > 0.001
+    ]
+
+    if (
+        payments
+        or subs
+        or grants
+        or ledger_count
+        or balance_tx
+        or reservations
+        or non_empty_balances
+    ):
         raise SmokeSafetyError(
-            f"Post-seed dirty state: payments={payments} subscriptions={subs} "
-            f"user_balances={balances} grants={grants}"
+            "Post-seed dirty state: "
+            f"payments={payments} subscriptions={subs} grants={grants} "
+            f"ledger={ledger_count} balance_transactions={balance_tx} "
+            f"reservations={reservations} non_empty_balances={len(non_empty_balances)} "
+            f"(empty_user_balances={len(balances)} allowed)"
         )
 
 
@@ -960,7 +1009,7 @@ def seed_via_api(client: httpx.Client, base_url: str, db: Session, report: SeedR
     db.expire_all()
     smoke_users = _smoke_users(db)
     user_ids = [u.id for u in smoke_users]
-    _assert_no_payments_or_subs(db, user_ids)
+    _assert_post_seed_clean_state(db, user_ids)
 
     master_b_row = (
         db.query(Master).filter(Master.user_id == result_b.user_id).first()
