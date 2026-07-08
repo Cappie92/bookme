@@ -684,9 +684,16 @@ def collect_cleanup_plan(db: Session) -> Dict[str, List[int]]:
         ]
 
     balance_ids: List[int] = []
+    balance_transaction_ids: List[int] = []
     if user_ids:
         balance_ids = [
             b.id for b in db.query(UserBalance).filter(UserBalance.user_id.in_(user_ids)).all()
+        ]
+        balance_transaction_ids = [
+            t.id
+            for t in db.query(BalanceTransaction)
+            .filter(BalanceTransaction.user_id.in_(user_ids))
+            .all()
         ]
 
     schedule_ids: List[int] = []
@@ -764,6 +771,7 @@ def collect_cleanup_plan(db: Session) -> Dict[str, List[int]]:
         "subscription_reservations": reservation_ids,
         "subscription_price_snapshots": snapshot_ids,
         "subscriptions": subscription_ids,
+        "balance_transactions": balance_transaction_ids,
         "user_balances": balance_ids,
         "master_schedules": schedule_ids,
         "master_schedule_settings": schedule_settings_ids,
@@ -796,6 +804,7 @@ def run_cleanup(db: Session, report: SeedReport) -> None:
         ("subscription_reservations", SubscriptionReservation, plan["subscription_reservations"]),
         ("subscription_price_snapshots", SubscriptionPriceSnapshot, plan["subscription_price_snapshots"]),
         ("subscriptions", Subscription, plan["subscriptions"]),
+        ("balance_transactions", BalanceTransaction, plan["balance_transactions"]),
         ("user_balances", UserBalance, plan["user_balances"]),
         ("master_schedules", MasterSchedule, plan["master_schedules"]),
         ("master_schedule_settings", MasterScheduleSettings, plan["master_schedule_settings"]),

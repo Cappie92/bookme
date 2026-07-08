@@ -9,7 +9,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from auth import get_password_hash
-from models import User, UserBalance, UserRole
+from models import BalanceTransaction, TransactionType, User, UserBalance, UserRole
 from scripts import seed_final_mobile_release_smoke as smoke
 
 
@@ -223,3 +223,48 @@ def test_post_seed_clean_state_rejects_non_empty_user_balance(db):
 
     with pytest.raises(smoke.SmokeSafetyError, match="non_empty_balances=1"):
         smoke._assert_post_seed_clean_state(db, [user.id])
+
+
+def test_cleanup_deletes_balance_transactions_for_smoke_user(db):
+    user = User(
+        email=smoke.EMAIL_MASTER_A,
+        phone=smoke.PHONE_MASTER_A,
+        full_name=f"Balance tx cleanup {smoke.MARKER}",
+        hashed_password=get_password_hash(smoke.PASSWORD),
+        role=UserRole.MASTER,
+        is_active=True,
+        is_verified=True,
+    )
+    db.add(user)
+    db.flush()
+    db.add(UserBalance(user_id=user.id, balance=3210.0, currency="RUB"))
+    db.add(
+        BalanceTransaction(
+            user_id=user.id,
+            amount=3210.0,
+            transaction_type=TransactionType.DEPOSIT,
+            description="orphan deposit from prior payment test",
+            balance_before=0.0,
+            balance_after=3210.0,
+        )
+    )
+    db.add(
+        BalanceTransaction(
+            user_id=user.id,
+            amount=-36.0,
+            transaction_type=TransactionType.SUB_DAILY_FEE,
+            description="orphan daily fee",
+            balance_before=3210.0,
+            balance_after=3174.0,
+        )
+    )
+    db.commit()
+    user_id = user.id
+
+    assert db.query(BalanceTransaction).filter(BalanceTransaction.user_id == user_id).count() == 2
+
+    report = smoke.SeedReport(mode="test", base_url="http://127.0.0.1:8000")
+    smoke.run_cleanup(db, report)
+
+    assert db.query(BalanceTransaction).filter(BalanceTransaction.user_id == user_id).count() == 0
+    assert db.query(User).filter(User.id == user_id).count() == 0
