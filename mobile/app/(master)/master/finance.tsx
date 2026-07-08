@@ -27,6 +27,7 @@ import { fetchAvailableSubscriptions, SubscriptionType } from '@src/services/api
 import { parseLocalDate } from '@src/utils/date';
 import {
   chartDateToYmd,
+  chartPointNetProfit,
   finalizeChartPoint,
   findFirstNonZeroIncomeExpenseIndex,
   getChartConfirmedIncome,

@@ -30,6 +30,11 @@ import {
   getBookingNativeTheme,
   createBookingNativeStyles,
 } from './bookingNativeTheme';
+import {
+  publicBookingBottomInset,
+  publicBookingScrollBottomPadding,
+  publicBookingSheetBottomPadding,
+} from './publicBookingSafeArea';
 
 /** Строка label/value для summary в sheet входа (guest). */
 export type PublicBookingConfirmSummaryRow = { label: string; value: string };
@@ -136,7 +141,10 @@ export function MasterPublicBookingPresentational(props: MasterPublicBookingPres
     <View style={s.screen}>
       <ScrollView
         refreshControl={props.refreshControl}
-        contentContainerStyle={[s.scrollContent, { paddingBottom: 120 + props.insets.bottom }]}
+        contentContainerStyle={[
+          s.scrollContent,
+          { paddingBottom: publicBookingScrollBottomPadding(props.insets) },
+        ]}
         keyboardShouldPersistTaps="handled"
       >
         <View style={[s.navRow, { paddingTop: Math.max(4, props.insets.top - 4) }]}>
@@ -452,7 +460,7 @@ export function MasterPublicBookingPresentational(props: MasterPublicBookingPres
       </ScrollView>
 
       {props.canSubmit ? (
-        <View style={[s.ctaBar, { paddingBottom: props.insets.bottom + 12 }]}>
+        <View style={[s.ctaBar, { paddingBottom: publicBookingBottomInset(props.insets) + 12 }]}>
           <TouchableOpacity
             style={[s.ctaBtn, (props.submitting || props.ctaBlocked) && s.ctaBtnDisabled]}
             onPress={props.onPrimaryCtaPress}
@@ -468,11 +476,12 @@ export function MasterPublicBookingPresentational(props: MasterPublicBookingPres
         </View>
       ) : null}
 
-      <Modal visible={props.guestAuthSheet.visible} transparent animationType="slide">
+      <Modal visible={props.guestAuthSheet.visible} transparent animationType="slide" statusBarTranslucent>
         <Pressable style={modalStyles.overlay} onPress={props.guestAuthSheet.onClose}>
           <Pressable
             style={[
               modalStyles.sheet,
+              { paddingBottom: publicBookingSheetBottomPadding(props.insets, 16) },
               v === 'ios'
                 ? { borderTopLeftRadius: 24, borderTopRightRadius: 24 }
                 : { borderTopLeftRadius: 28, borderTopRightRadius: 28 },
@@ -537,7 +546,6 @@ const modalStyles = StyleSheet.create({
     backgroundColor: '#fff',
     paddingHorizontal: 22,
     paddingTop: 10,
-    paddingBottom: 32,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderColor: '#dfe7df',
     maxHeight: '88%',

@@ -9,7 +9,7 @@ import { SettingsBlock } from '@src/components/SettingsBlock';
 import { EditProfileModal } from '@src/components/modals/EditProfileModal';
 import { EditWorkSettingsModal } from '@src/components/modals/EditWorkSettingsModal';
 import { EditWebsiteModal } from '@src/components/modals/EditWebsiteModal';
-import { FreeSlotsShareCardModal } from '@src/components/modals/FreeSlotsShareCardModal';
+import { MasterFreeSlotsShareHost } from '@src/components/master/MasterFreeSlotsShareHost';
 import { isoToBirthDateDisplay } from '@src/utils/birthDateInput';
 import {
   buildMasterPublicBookingUrl,
@@ -520,12 +520,10 @@ export default function MasterSettingsScreen() {
       />
 
       {masterSlug && publicBookingUrl ? (
-        <FreeSlotsShareCardModal
+        <MasterFreeSlotsShareHost
           visible={freeSlotsVisible}
           onClose={() => setFreeSlotsVisible(false)}
-          slug={masterSlug}
-          bookingUrl={publicBookingUrl}
-          masterNameFallback={settings?.user?.full_name || ''}
+          settings={settings}
         />
       ) : null}
     </ScreenContainer>

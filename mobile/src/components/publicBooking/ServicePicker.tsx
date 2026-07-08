@@ -14,7 +14,9 @@ import {
   Pressable,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { PublicService } from './types';
+import { publicBookingSheetBottomPadding } from './publicBookingSafeArea';
 
 interface ServicePickerProps {
   visible: boolean;
@@ -47,6 +49,8 @@ export function ServicePicker({
   nativeVariant = 'android',
   discountForService,
 }: ServicePickerProps) {
+  const insets = useSafeAreaInsets();
+  const sheetBottomPadding = publicBookingSheetBottomPadding(insets);
   const [search, setSearch] = useState('');
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
 
@@ -87,12 +91,13 @@ export function ServicePicker({
   };
 
   return (
-    <Modal visible={visible} transparent animationType="slide">
+    <Modal visible={visible} transparent animationType="slide" statusBarTranslucent>
       <Pressable style={styles.overlay} onPress={onClose}>
         <Pressable
           style={[
             styles.sheet,
             nativeVariant === 'ios' ? styles.sheetIos : styles.sheetAndroid,
+            { paddingBottom: sheetBottomPadding },
           ]}
           onPress={(e) => e.stopPropagation()}
         >
@@ -257,7 +262,6 @@ const styles = StyleSheet.create({
   },
   scroll: {
     paddingHorizontal: 16,
-    paddingBottom: 24,
   },
   category: {
     marginBottom: 8,

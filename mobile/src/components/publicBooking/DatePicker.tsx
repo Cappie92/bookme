@@ -14,7 +14,9 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { formatDateForPicker } from '@src/utils/format';
+import { publicBookingSheetBottomPadding } from './publicBookingSafeArea';
 
 export interface DateOption {
   dateStr: string; // YYYY-MM-DD
@@ -73,6 +75,8 @@ export function DatePicker({
   onRetry,
   nativeVariant = 'android',
 }: DatePickerProps) {
+  const insets = useSafeAreaInsets();
+  const sheetBottomPadding = publicBookingSheetBottomPadding(insets);
   const [viewMonth, setViewMonth] = useState(() => startOfMonth(new Date().getFullYear(), new Date().getMonth()));
 
   const availableSet = useMemo(() => new Set(dates.map((d) => d.dateStr)), [dates]);
@@ -150,12 +154,13 @@ export function DatePicker({
         : null;
 
   return (
-    <Modal visible={visible} transparent animationType="slide">
+    <Modal visible={visible} transparent animationType="slide" statusBarTranslucent>
       <Pressable style={styles.overlay} onPress={onClose}>
         <Pressable
           style={[
             styles.sheet,
             nativeVariant === 'ios' ? styles.sheetIos : styles.sheetAndroid,
+            { paddingBottom: sheetBottomPadding },
           ]}
           onPress={(e) => e.stopPropagation()}
         >
@@ -268,7 +273,7 @@ export function DatePicker({
                   Выбрано: {selectedHint}
                 </Text>
               ) : (
-                <Text style={styles.hintMuted}>Нажмите доступный день — окно закроется автоматически</Text>
+                <Text style={styles.hintMuted}>Выберите доступный день — окно закроется автоматически</Text>
               )}
             </ScrollView>
           )}
@@ -387,7 +392,6 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingHorizontal: 16,
-    paddingBottom: 28,
   },
   monthRow: {
     flexDirection: 'row',
