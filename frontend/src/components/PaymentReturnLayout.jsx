@@ -32,4 +32,5 @@ export function PaymentReturnLayout({ children, media, testId }) {
   )
 }
 
+export default PaymentReturnLayout
 export { ctaClassName, secondaryLinkClassName }
