@@ -2955,6 +2955,11 @@ class PaymentOut(BaseModel):
         from_attributes = True
 
 
+class PaymentPublicStatusOut(BaseModel):
+    status: str
+    subscription_apply_status: Optional[str] = None
+
+
 class LoyaltyTransactionOut(BaseModel):
     id: int
     master_id: int

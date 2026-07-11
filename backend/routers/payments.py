@@ -26,7 +26,8 @@ from schemas import (
     SubscriptionPaymentInitRequest,
     DepositPaymentInitRequest,
     PaymentInitResponse,
-    PaymentOut
+    PaymentOut,
+    PaymentPublicStatusOut,
 )
 from auth import get_current_user, get_current_active_user
 from constants import duration_months_to_days
@@ -700,6 +701,29 @@ async def robokassa_result(
 
     _apply_promo_rewards_best_effort(db, payment.id, context="robokassa_after_apply")
     return f"OK{invoice_id}"
+
+
+@router.get("/public-status", response_model=PaymentPublicStatusOut)
+async def get_payment_public_status(
+    payment: str = Query(..., description="Публичный идентификатор платежа"),
+    db: Session = Depends(get_db),
+):
+    """
+    Публичная проверка статуса оплаты по Payment.public_id (без авторизации).
+    Возвращает только безопасный минимум для return URL после оплаты в системном браузере.
+    """
+    public_id = (payment or "").strip()
+    if not public_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payment not found")
+
+    payment_row = db.query(Payment).filter(Payment.public_id == public_id).first()
+    if not payment_row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payment not found")
+
+    return PaymentPublicStatusOut(
+        status=payment_row.status,
+        subscription_apply_status=payment_row.subscription_apply_status,
+    )
 
 
 @router.get("/status", response_model=List[PaymentOut])
