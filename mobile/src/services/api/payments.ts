@@ -7,6 +7,7 @@ export interface PaymentInitRequest {
   upgrade_type?: string;
   calculation_id?: number | null;
   enable_auto_renewal?: boolean;
+  payment_source?: 'web' | 'mobile_app';
   amount?: number; // Для пополнения баланса
 }
 

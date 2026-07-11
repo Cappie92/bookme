@@ -17,6 +17,15 @@ import { logger } from '@src/utils/logger';
 import { env } from '@src/config/env';
 import { withTimeout } from '@src/utils/promiseWithTimeout';
 import { parsePublicMasterSlugFromUrl } from '@src/utils/parsePublicMasterDeepLink';
+import {
+  appInternalRouteToPath,
+  parseAppInternalRouteFromUrl,
+} from '@src/utils/parseAppInternalRoute';
+import {
+  clearPendingMasterRoute,
+  peekPendingMasterRoute,
+  setPendingMasterRoute,
+} from '@src/utils/pendingMasterRoute';
 import { installMobileErrorDebugHandlers } from '@src/debug/mobileErrorDebugBootstrap';
 import { MobileErrorDebugPanel } from '@src/debug/MobileErrorDebugPanel';
 import { authTrace } from '@src/debug/authRuntimeTrace';
@@ -33,6 +42,17 @@ let didNavigateSlugOnce: string | null = null;
 let lastDeeplinkSlug: string | null = null;
 let lastDeeplinkAtMs: number = 0;
 const WARM_PRIORITY_MS = 10000;
+
+function navigateToSubscriptionsRoute(source: string) {
+  try {
+    if (__DEV__ && (env.DEBUG_AUTH || env.DEBUG_LOGS)) {
+      logger.debug('auth', `[DEEPLINK] navigate -> /subscriptions (${source})`);
+    }
+    router.replace('/subscriptions' as any);
+  } catch (e) {
+    if (__DEV__ && env.DEBUG_AUTH) logger.debug('auth', '[DEEPLINK] subscriptions replace error', e);
+  }
+}
 
 function Splash() {
   return (
@@ -136,6 +156,16 @@ function AuthGate({ children, rootInstanceId }: { children: React.ReactNode; roo
         if (cancelled) return;
         initialUrlResolvedRef.current = true;
         if (initialUrlResult !== null) return;
+        const internalRoute = parseAppInternalRouteFromUrl(url);
+        if (internalRoute) {
+          setPendingMasterRoute(appInternalRouteToPath(internalRoute) as '/subscriptions');
+          initialUrlResult = { isPublic: false, slug: null, url, source: 'initial' };
+          setInitialUrlIsPublic(false);
+          if (__DEV__ && (env.DEBUG_AUTH || env.DEBUG_LOGS)) {
+            logger.debug('auth', '[DEEPLINK] initialUrl internalRoute=', internalRoute, 'url=', url);
+          }
+          return;
+        }
         const parsedSlug = parsePublicMasterSlugFromUrl(url);
         if (parsedSlug) {
           initialUrlResult = { isPublic: true, slug: parsedSlug, url, source: 'initial' };
@@ -190,6 +220,12 @@ function AuthGate({ children, rootInstanceId }: { children: React.ReactNode; roo
   // Warm deeplink: приоритет над initial; синхронизируем initialUrlResult чтобы не откатиться на старый slug.
   useEffect(() => {
     const handler = ({ url }: { url: string }) => {
+      const internalRoute = parseAppInternalRouteFromUrl(url);
+      if (internalRoute) {
+        setPendingMasterRoute(appInternalRouteToPath(internalRoute) as '/subscriptions');
+        navigateToSubscriptionsRoute('event');
+        return;
+      }
       const parsedSlug = parsePublicMasterSlugFromUrl(url);
       if (!parsedSlug) return;
       const currentPath = pathStr || '';
@@ -221,6 +257,7 @@ function AuthGate({ children, rootInstanceId }: { children: React.ReactNode; roo
     if (target === '/client/dashboard' && (pathStr.includes('client/dashboard') || pathStr.includes('client')))
       return true;
     if (target === '/' && (pathStr === '/' || pathStr === '' || pathStr.includes('(master)'))) return true;
+    if (target === '/subscriptions' && pathStr.includes('subscriptions')) return true;
     if (t.startsWith('m/') && pathStr.includes('m/')) return true;
     return false;
   };
@@ -321,7 +358,17 @@ function AuthGate({ children, rootInstanceId }: { children: React.ReactNode; roo
 
     withTimeout(getPublicBookingDraft(), DRAFT_TIMEOUT_MS)
       .then((draft) => {
-        const target = isDraftValidForPostLoginRedirect(draft) ? `/m/${draft.slug}` : isClient ? '/client/dashboard' : '/';
+        const pendingRoute = !isClient ? peekPendingMasterRoute() : null;
+        const target =
+          pendingRoute ??
+          (isDraftValidForPostLoginRedirect(draft)
+            ? `/m/${draft.slug}`
+            : isClient
+              ? '/client/dashboard'
+              : '/');
+        if (pendingRoute) {
+          clearPendingMasterRoute();
+        }
         authTrace(`[AuthGate] redirect target=${target} draft=${isDraftValidForPostLoginRedirect(draft) ? 'valid' : 'none'}`);
         if (__DEV__ && env.DEBUG_AUTH) logger.debug('auth', '[AuthGate] redirect →', target, { draftValid: isDraftValidForPostLoginRedirect(draft), isClient });
         doRedirect(target);

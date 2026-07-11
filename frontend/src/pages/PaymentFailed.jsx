@@ -1,20 +1,24 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { CheckCircleIcon } from '@heroicons/react/24/solid'
-import PaymentReturnLayout, {
-  ctaClassName,
-  secondaryLinkClassName,
-} from '../components/PaymentReturnLayout'
+import PaymentReturnLayout, { ctaClassName } from '../components/PaymentReturnLayout'
+import { PaymentReturnCtaGroup } from '../components/PaymentReturnCta'
 import {
   fetchPaymentPublicStatus,
   resolvePaymentVerifyState,
 } from '../utils/paymentPublicStatus'
+import {
+  isMobileAppPaymentSource,
+  normalizePaymentSource,
+  WEB_MASTER_TARIFF_PATH,
+} from '../utils/paymentReturnFlow'
 
 function PaymentFailed() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const paymentPublicId = searchParams.get('payment')
   const [verifyState, setVerifyState] = useState('loading')
+  const [paymentSource, setPaymentSource] = useState('web')
   const [countdown, setCountdown] = useState(10)
 
   const verifyPayment = useCallback(async () => {
@@ -26,6 +30,9 @@ function PaymentFailed() {
     setVerifyState('loading')
     try {
       const result = await fetchPaymentPublicStatus(paymentPublicId)
+      if (result.kind === 'ok' && result.data) {
+        setPaymentSource(normalizePaymentSource(result.data.payment_source))
+      }
       setVerifyState(resolvePaymentVerifyState(result))
     } catch {
       setVerifyState('error')
@@ -33,7 +40,7 @@ function PaymentFailed() {
   }, [paymentPublicId])
 
   const handleGoToDashboard = useCallback(() => {
-    if (paymentPublicId) {
+    if (!isMobileAppPaymentSource(paymentSource) && paymentPublicId) {
       const savedState = localStorage.getItem(`payment_state_${paymentPublicId}`)
       if (savedState) {
         try {
@@ -45,8 +52,8 @@ function PaymentFailed() {
         }
       }
     }
-    navigate('/master/tariff')
-  }, [navigate, paymentPublicId])
+    navigate(WEB_MASTER_TARIFF_PATH)
+  }, [navigate, paymentPublicId, paymentSource])
 
   useEffect(() => {
     void verifyPayment()
@@ -57,7 +64,8 @@ function PaymentFailed() {
       verifyState === 'loading' ||
       verifyState === 'success' ||
       verifyState === 'activating' ||
-      verifyState === 'pending'
+      verifyState === 'pending' ||
+      isMobileAppPaymentSource(paymentSource)
     ) {
       return
     }
@@ -74,7 +82,7 @@ function PaymentFailed() {
     }, 1000)
 
     return () => clearInterval(timer)
-  }, [handleGoToDashboard, verifyState])
+  }, [handleGoToDashboard, paymentSource, verifyState])
 
   const handleGoToSuccessPage = () => {
     const query = paymentPublicId ? `?payment=${encodeURIComponent(paymentPublicId)}` : ''
@@ -103,12 +111,12 @@ function PaymentFailed() {
             Оплата прошла успешно
           </h1>
           <p className="text-base text-gray-600 mb-6 break-words">
-            Платёж уже подтверждён. Перейдите в личный кабинет.
+            {isMobileAppPaymentSource(paymentSource)
+              ? 'Платёж уже подтверждён. Вернитесь в приложение или откройте личный кабинет в браузере.'
+              : 'Платёж уже подтверждён. Перейдите в личный кабинет.'}
           </p>
-          <button onClick={handleGoToDashboard} className={`${ctaClassName} mb-4`}>
-            Личный кабинет
-          </button>
-          <button onClick={handleGoToSuccessPage} className={secondaryLinkClassName}>
+          <PaymentReturnCtaGroup paymentSource={paymentSource} onWebDashboard={handleGoToDashboard} />
+          <button onClick={handleGoToSuccessPage} className="text-[#4CAF50] hover:text-[#43A047] font-medium w-full max-w-sm text-center mt-2">
             Страница успешной оплаты
           </button>
         </>
@@ -127,9 +135,7 @@ function PaymentFailed() {
           <button onClick={() => void verifyPayment()} className={`${ctaClassName} mb-4`}>
             Проверить ещё раз
           </button>
-          <button onClick={handleGoToDashboard} className={secondaryLinkClassName}>
-            Личный кабинет
-          </button>
+          <PaymentReturnCtaGroup paymentSource={paymentSource} onWebDashboard={handleGoToDashboard} />
         </>
       )
     }
@@ -146,9 +152,7 @@ function PaymentFailed() {
           <button onClick={() => void verifyPayment()} className={`${ctaClassName} mb-4`}>
             Проверить ещё раз
           </button>
-          <button onClick={handleGoToDashboard} className={secondaryLinkClassName}>
-            Личный кабинет
-          </button>
+          <PaymentReturnCtaGroup paymentSource={paymentSource} onWebDashboard={handleGoToDashboard} />
         </>
       )
     }
@@ -161,17 +165,20 @@ function PaymentFailed() {
         <p className="text-base text-gray-600 mb-6 break-words">
           Повторите попытку оплаты или вернитесь в личный кабинет
         </p>
-        <button onClick={handleGoToDashboard} className={`${ctaClassName} mb-4`}>
-          Личный кабинет
-        </button>
+        <PaymentReturnCtaGroup paymentSource={paymentSource} onWebDashboard={handleGoToDashboard} />
         {paymentPublicId ? (
-          <button onClick={() => void verifyPayment()} className={`${secondaryLinkClassName} mb-4`}>
+          <button
+            onClick={() => void verifyPayment()}
+            className="text-[#4CAF50] hover:text-[#43A047] font-medium w-full max-w-sm text-center mb-4 mt-2"
+          >
             Проверить статус ещё раз
           </button>
         ) : null}
-        <p className="text-sm text-gray-500 break-words">
-          Перенаправление через {countdown} сек…
-        </p>
+        {!isMobileAppPaymentSource(paymentSource) ? (
+          <p className="text-sm text-gray-500 break-words">
+            Перенаправление через {countdown} сек…
+          </p>
+        ) : null}
       </>
     )
   }

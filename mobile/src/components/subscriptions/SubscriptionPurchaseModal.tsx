@@ -712,6 +712,7 @@ export function SubscriptionPurchaseModal({
         upgrade_type: upgradeType,
         calculation_id: calculation.calculation_id,
         enable_auto_renewal: enableAutoRenewal,
+        payment_source: 'mobile_app',
       });
 
       if (payment && (payment as any).requires_payment === false) {

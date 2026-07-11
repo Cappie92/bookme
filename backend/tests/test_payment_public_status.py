@@ -57,7 +57,7 @@ def test_public_status_returns_paid_applied_without_authorization(client, db):
 
     assert response.status_code == 200, response.text
     data = response.json()
-    assert data == {"status": "paid", "subscription_apply_status": "applied"}
+    assert data == {"status": "paid", "subscription_apply_status": "applied", "payment_source": "web"}
 
 
 def test_public_status_response_has_no_internal_or_personal_fields(client, db):
@@ -67,7 +67,7 @@ def test_public_status_response_has_no_internal_or_personal_fields(client, db):
     response = client.get(f"/api/payments/public-status?payment={payment.public_id}")
     data = response.json()
 
-    assert set(data.keys()) == {"status", "subscription_apply_status"}
+    assert set(data.keys()) == {"status", "subscription_apply_status", "payment_source"}
     forbidden = {
         "id",
         "public_id",

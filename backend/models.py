@@ -2263,6 +2263,9 @@ class Payment(Base):
     subscription_apply_status = Column(String, nullable=False, default='pending', index=True)
     subscription_applied_at = Column(DateTime, nullable=True)
 
+    # Источник инициации оплаты (только UX return flow): 'web' | 'mobile_app'
+    payment_source = Column(String, nullable=False, default='web', server_default='web')
+
     # Метаданные для восстановления состояния модального окна
     payment_metadata = Column(JSON, nullable=True)  # calculation_id, upgrade_type, selected_duration, etc.
     

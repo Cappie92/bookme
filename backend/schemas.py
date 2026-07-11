@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, time, date
 from enum import Enum
-from typing import List, Optional, Any, Dict
+from typing import List, Optional, Any, Dict, Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
@@ -2919,6 +2919,7 @@ class SubscriptionPaymentInitRequest(BaseModel):
     upgrade_type: Optional[str] = 'immediate'  # 'immediate' или 'after_expiry'
     calculation_id: Optional[int] = None
     enable_auto_renewal: bool = False
+    payment_source: Optional[Literal["web", "mobile_app"]] = "web"
 
 
 class DepositPaymentInitRequest(BaseModel):
@@ -2958,6 +2959,7 @@ class PaymentOut(BaseModel):
 class PaymentPublicStatusOut(BaseModel):
     status: str
     subscription_apply_status: Optional[str] = None
+    payment_source: Literal["web", "mobile_app"] = "web"
 
 
 class LoyaltyTransactionOut(BaseModel):

@@ -107,6 +107,14 @@ export default ({ config }: ConfigContext): ExpoConfig => {
           data: [{ scheme: 'dedato', pathPrefix: '/m' }],
           category: ['BROWSABLE', 'DEFAULT'],
         },
+        {
+          action: 'VIEW',
+          data: [
+            { scheme: 'dedato', host: 'subscriptions' },
+            { scheme: 'dedato', pathPrefix: '/subscriptions' },
+          ],
+          category: ['BROWSABLE', 'DEFAULT'],
+        },
       ],
     },
     web: {

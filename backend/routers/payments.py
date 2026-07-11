@@ -174,6 +174,7 @@ async def init_subscription_payment(
     invoice_id = generate_invoice_id(current_user.id)
     
     # Создаем запись Payment
+    payment_source = payment_request.payment_source or "web"
     payment = Payment(
         user_id=current_user.id,
         amount=total_price,
@@ -184,6 +185,7 @@ async def init_subscription_payment(
         plan_id=plan.id,
         is_recurring=payment_request.enable_auto_renewal,
         subscription_apply_status='pending',
+        payment_source=payment_source,
         payment_metadata={
             "calculation_id": payment_request.calculation_id,
             "upgrade_type": payment_request.upgrade_type,
@@ -723,6 +725,7 @@ async def get_payment_public_status(
     return PaymentPublicStatusOut(
         status=payment_row.status,
         subscription_apply_status=payment_row.subscription_apply_status,
+        payment_source=payment_row.payment_source or "web",
     )
 
 
