@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   buildSubscriptionPointsCalculatePayload,
   computePeriodPriceBreakdown,
+  formatPeriodDiscountLabel,
   formatPointsLabel,
   getMaxSubscriptionPointsToUse,
   isNoSubscriptionResponse,
@@ -109,7 +110,7 @@ describe('subscriptionModalPoints', () => {
       expect(breakdown.periodTotal - 481).toBe(2729)
     })
 
-    it('1 month plan has no period discount row', () => {
+    it('Premium 1 month shows zero period discount explicitly', () => {
       const breakdown = computePeriodPriceBreakdown({
         price1Month: 1160,
         durationMonths: 1,
@@ -117,7 +118,11 @@ describe('subscriptionModalPoints', () => {
         savingsPercent: null,
       })
       expect(breakdown.regularTotal).toBe(1160)
-      expect(breakdown.showPeriodDiscount).toBe(false)
+      expect(breakdown.periodDiscount).toBe(0)
+      expect(breakdown.periodDiscountPercent).toBe(0)
+      expect(breakdown.discountedTotal).toBe(1160)
+      expect(breakdown.showPeriodDiscount).toBe(true)
+      expect(formatPeriodDiscountLabel(breakdown)).toBe('0 ₽ (0%)')
     })
   })
 })

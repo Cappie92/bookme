@@ -71,8 +71,20 @@ export function computePeriodPriceBreakdown({
   return {
     regularTotal,
     periodTotal: period,
+    discountedTotal: period,
     savingsAmount,
+    periodDiscount: savingsAmount,
     savingsPercent: roundedPercent,
-    showPeriodDiscount: duration > 1 && savingsAmount > 0,
+    periodDiscountPercent: roundedPercent,
+    showPeriodDiscount: true,
   }
+}
+
+export function formatPeriodDiscountLabel({ savingsAmount, savingsPercent }) {
+  const amount = Math.max(0, Math.round(Number(savingsAmount) || 0))
+  const percent = Math.max(0, Math.round(Number(savingsPercent) || 0))
+  if (amount > 0) {
+    return `−${amount.toLocaleString('ru-RU')} ₽ (${percent}%)`
+  }
+  return `0 ₽ (0%)`
 }

@@ -8,6 +8,7 @@ import { useModal } from '../hooks/useModal'
 import {
   buildSubscriptionPointsCalculatePayload,
   computePeriodPriceBreakdown,
+  formatPeriodDiscountLabel,
   formatPointsLabel,
   getMaxSubscriptionPointsToUse,
   resolveSubscriptionPointsBalance,
@@ -672,17 +673,15 @@ export default function SubscriptionModal({ isOpen, onClose, isFreePlan, current
                               {formatPrice(periodBreakdown.regularTotal)} ₽
                             </span>
                           </div>
-                          {periodBreakdown.showPeriodDiscount ? (
-                            <div className="flex justify-between gap-4">
-                              <span className="text-gray-600">Скидка за период</span>
-                              <span
-                                className="font-semibold text-green-700"
-                                data-testid="tariff-period-savings"
-                              >
-                                −{formatPrice(periodBreakdown.savingsAmount)} ₽ ({periodBreakdown.savingsPercent}%)
-                              </span>
-                            </div>
-                          ) : null}
+                          <div className="flex justify-between gap-4">
+                            <span className="text-gray-600">Скидка за период</span>
+                            <span
+                              className={`font-semibold ${periodBreakdown.savingsAmount > 0 ? 'text-green-700' : 'text-gray-900'}`}
+                              data-testid="tariff-period-savings"
+                            >
+                              {formatPeriodDiscountLabel(periodBreakdown)}
+                            </span>
+                          </div>
                           <div className="flex justify-between gap-4">
                             <span className="text-gray-600">Стоимость со скидкой</span>
                             <span className="font-semibold text-gray-900" data-testid="tariff-period-total">
