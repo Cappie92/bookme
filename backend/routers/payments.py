@@ -43,6 +43,11 @@ from utils.balance_utils import (
     get_user_available_balance,
     add_balance_transaction_no_commit,
 )
+from utils.subscription_payment_deposit import (
+    SubscriptionDepositValidationError,
+    build_subscription_deposit_description,
+    resolve_subscription_deposit_amount,
+)
 from services.promo_engine import apply_promo_rewards_for_first_payment
 from services.subscription_points import (
     InsufficientSubscriptionPointsError,
@@ -430,21 +435,42 @@ async def robokassa_result(
         if payment_locked.payment_type == 'subscription':
             if not payment_locked.subscription_apply_status:
                 payment_locked.subscription_apply_status = 'pending'
-            meta = payment_locked.payment_metadata or {}
+            meta = dict(payment_locked.payment_metadata or {})
             if meta.get("subscription_deposit_applied") is not True:
+                try:
+                    deposit_amount, points_used, _snapshot = resolve_subscription_deposit_amount(
+                        db, payment_locked
+                    )
+                except SubscriptionDepositValidationError as exc:
+                    db.rollback()
+                    logger.error(
+                        "robokassa_result phase1 deposit validation failed invoice_id=%s payment_id=%s err=%s",
+                        invoice_id,
+                        payment_locked.id,
+                        exc,
+                    )
+                    return f"ERROR: Invalid subscription deposit: {exc}"
+
                 user_balance = db.query(UserBalance).filter(UserBalance.user_id == payment_locked.user_id).with_for_update().first()
                 if not user_balance:
                     user_balance = UserBalance(user_id=payment_locked.user_id, balance=0, currency="RUB")
                     db.add(user_balance)
                     db.flush()
+                balance_before = float(user_balance.balance or 0)
                 add_balance_transaction_no_commit(
                     db=db,
                     user_id=payment_locked.user_id,
-                    amount=payment_locked.amount,
+                    amount=deposit_amount,
                     transaction_type=TransactionType.DEPOSIT,
-                    description=f"Оплата подписки через Robokassa (платеж {payment_locked.id})",
+                    description=build_subscription_deposit_description(payment_locked.id, points_used),
                 )
+                balance_after = float(user_balance.balance or 0)
                 meta["subscription_deposit_applied"] = True
+                meta["subscription_deposit_amount"] = deposit_amount
+                if points_used > 0:
+                    meta["subscription_points_subsidy_rub"] = points_used
+                meta["subscription_deposit_balance_before"] = balance_before
+                meta["subscription_deposit_balance_after"] = balance_after
                 payment_locked.payment_metadata = meta
 
         db.commit()
