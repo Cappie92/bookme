@@ -1,5 +1,5 @@
 import { env } from '@src/config/env';
-import { normalizeMasterDomainSlug } from '@src/utils/masterDomainSlug';
+import { masterDomainSlugFromStored } from '@src/utils/masterDomainSlug';
 
 export function normalizeWebBaseUrl(base: string | null | undefined): string {
   const b = String(base || '').trim();
@@ -13,14 +13,14 @@ export function buildMasterPublicBookingUrl(
   baseUrl?: string | null
 ): string | null {
   const webBase = normalizeWebBaseUrl(baseUrl || env.WEB_URL || 'https://dedato.ru');
-  const slug = normalizeMasterDomainSlug(domain || '');
+  const slug = masterDomainSlugFromStored(domain);
   if (!webBase || !slug) return null;
   return `${webBase}/m/${slug}`;
 }
 
 /** Внутренний route expo-router для публичной записи. */
 export function buildMasterPublicRoutePath(domain: string | null | undefined): string | null {
-  const slug = normalizeMasterDomainSlug(domain || '');
+  const slug = masterDomainSlugFromStored(domain);
   if (!slug) return null;
   return `/m/${encodeURIComponent(slug)}`;
 }

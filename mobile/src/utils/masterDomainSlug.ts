@@ -1,4 +1,9 @@
-/** Нормализация slug страницы записи мастера (/m/{slug}). */
+/** Slug из сохранённого master.domain — сохраняем регистр из БД. */
+export function masterDomainSlugFromStored(raw: string | null | undefined): string {
+  return String(raw || '').trim();
+}
+
+/** Нормализация slug, вводимого мастером в форме (custom domain). */
 export function normalizeMasterDomainSlug(raw: string): string {
   return raw.trim().toLowerCase().replace(/\s+/g, '-');
 }

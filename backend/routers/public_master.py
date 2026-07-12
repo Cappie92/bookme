@@ -41,6 +41,7 @@ from utils.loyalty_discounts import (
 from utils.booking_factory import normalize_booking_fields, BookingOwnerError
 from models import Booking, BookingStatus, Service, AppliedDiscount, OwnerType
 from utils.yandex_maps_url import build_yandex_maps_url
+from utils.master_domain_lookup import get_master_by_domain_slug
 
 router = APIRouter(prefix="/api/public/masters", tags=["public_master"])
 logger = logging.getLogger(__name__)
@@ -183,8 +184,8 @@ class BookingPricePreviewOut(BaseModel):
 
 
 def _get_master_by_slug(db: Session, slug: str) -> Optional[Master]:
-    """Resolve slug (masters.domain) to Master. Master-only."""
-    return db.query(Master).filter(Master.domain == slug).first()
+    """Resolve slug (masters.domain) to Master. Master-only, case-insensitive."""
+    return get_master_by_domain_slug(db, slug)
 
 
 def _reference_preview_start_utc(db: Session, master_id: int) -> datetime:

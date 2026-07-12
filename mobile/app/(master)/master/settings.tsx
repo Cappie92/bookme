@@ -15,7 +15,7 @@ import {
   buildMasterPublicBookingUrl,
   buildMasterPublicRoutePath,
 } from '@src/utils/masterPublicBooking';
-import { normalizeMasterDomainSlug } from '@src/utils/masterDomainSlug';
+import { masterDomainSlugFromStored } from '@src/utils/masterDomainSlug';
 import { getMasterSettings, MasterSettings } from '@src/services/api/master';
 import { useAuth } from '@src/auth/AuthContext';
 import { router, usePathname } from 'expo-router';
@@ -104,7 +104,7 @@ export default function MasterSettingsScreen() {
   );
 
   const masterSlug = useMemo(
-    () => normalizeMasterDomainSlug(settings?.master?.domain || ''),
+    () => masterDomainSlugFromStored(settings?.master?.domain),
     [settings?.master?.domain]
   );
 

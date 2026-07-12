@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as Clipboard from 'expo-clipboard';
 import { buildMasterPublicBookingUrl } from '@src/utils/masterPublicBooking';
-import { normalizeMasterDomainSlug } from '@src/utils/masterDomainSlug';
+import { masterDomainSlugFromStored } from '@src/utils/masterDomainSlug';
 import { env } from '@src/config/env';
 import type { MasterSettings } from '@src/services/api/master';
 
@@ -17,7 +17,7 @@ export function useMasterQuickActions(masterSettings: MasterSettings | null) {
   );
 
   const masterSlug = useMemo(
-    () => normalizeMasterDomainSlug(masterSettings?.master?.domain || ''),
+    () => masterDomainSlugFromStored(masterSettings?.master?.domain),
     [masterSettings?.master?.domain]
   );
 

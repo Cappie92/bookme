@@ -6,6 +6,7 @@ from models import Salon, IndieMaster, Master, MasterPageModule, Booking, Bookin
 from typing import Optional
 from datetime import datetime
 from schemas import ServicePublicOut, ServicesPublicResponse, DomainSubdomainInfoOut
+from utils.master_domain_lookup import get_master_by_domain_slug
 
 router = APIRouter(
     prefix="/api/domain",
@@ -65,7 +66,7 @@ async def get_subdomain_info(subdomain: str, db: Session = Depends(get_db)):
         }
     
     # Проверяем, существует ли мастер с таким доменом
-    master = db.query(Master).filter(Master.domain == subdomain).first()
+    master = get_master_by_domain_slug(db, subdomain)
     if master:
         # Получаем информацию о пользователе
         user = master.user
@@ -144,7 +145,7 @@ async def get_subdomain_services(subdomain: str, db: Session = Depends(get_db)):
         return {"services": services}
     
     # Проверяем, существует ли мастер с таким доменом
-    master = db.query(Master).filter(Master.domain == subdomain).first()
+    master = get_master_by_domain_slug(db, subdomain)
     if master:
         services = []
         # Используем master_services (собственные услуги мастера), а не services (услуги салона)
@@ -248,7 +249,7 @@ async def check_subdomain_availability(subdomain: str, db: Session = Depends(get
         return {"available": False, "owner_type": "master"}
     
     # Проверяем, существует ли мастер с таким доменом
-    master = db.query(Master).filter(Master.domain == subdomain).first()
+    master = get_master_by_domain_slug(db, subdomain)
     if master:
         return {"available": False, "owner_type": "master"}
     
@@ -263,7 +264,7 @@ async def get_subdomain_bookings_limit(subdomain: str, db: Session = Depends(get
     Публичный эндпоинт для проверки лимита на странице записи.
     """
     # Находим мастера по поддомену
-    master = db.query(Master).filter(Master.domain == subdomain).first()
+    master = get_master_by_domain_slug(db, subdomain)
     if not master:
         # Проверяем indie_master
         indie_master = db.query(IndieMaster).filter(IndieMaster.domain == subdomain).first()

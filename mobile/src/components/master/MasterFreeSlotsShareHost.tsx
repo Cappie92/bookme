@@ -2,7 +2,7 @@ import React from 'react';
 import { MasterSettings } from '@src/services/api/master';
 import { FreeSlotsShareCardModal } from '@src/components/modals/FreeSlotsShareCardModal';
 import { buildMasterPublicBookingUrl } from '@src/utils/masterPublicBooking';
-import { normalizeMasterDomainSlug } from '@src/utils/masterDomainSlug';
+import { masterDomainSlugFromStored } from '@src/utils/masterDomainSlug';
 import { env } from '@src/config/env';
 
 interface MasterFreeSlotsShareHostProps {
@@ -13,7 +13,7 @@ interface MasterFreeSlotsShareHostProps {
 
 /** Единая точка монтирования модалки «Пост для соцсетей» (dashboard + settings). */
 export function MasterFreeSlotsShareHost({ visible, onClose, settings }: MasterFreeSlotsShareHostProps) {
-  const slug = normalizeMasterDomainSlug(settings?.master?.domain || '');
+  const slug = masterDomainSlugFromStored(settings?.master?.domain);
   const bookingUrl = buildMasterPublicBookingUrl(settings?.master?.domain, env.WEB_URL);
 
   if (!slug || !bookingUrl) return null;
