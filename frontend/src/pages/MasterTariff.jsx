@@ -16,6 +16,13 @@ import {
 import { API_BASE_URL } from '../utils/config'
 import { apiGet } from '../utils/api'
 import { fetchCurrentSubscription } from '../utils/subscriptionsApi'
+import {
+  formatSubscriptionPointsRemaining,
+  formatSubscriptionPointsSignedAmount,
+  getSubscriptionPointsAmountColorClass,
+  getSubscriptionPointsHistorySubtitle,
+  getSubscriptionPointsHistoryTitle,
+} from '../utils/subscriptionPointsHistory'
 import { Button } from '../components/ui'
 import SubscriptionModal from '../components/SubscriptionModal'
 import Tooltip from '../components/Tooltip'
@@ -537,27 +544,6 @@ export default function MasterTariff({ canCustomizeDomain, onRefreshSubscription
 
   const formatPoints = (value) => `${Math.round(Number(value || 0)).toLocaleString('ru-RU')} баллов`
 
-  const getPointsTraceTitle = (item) => {
-    const promo = item?.promo || {}
-    if (promo.recipient_role === 'referrer') {
-      return promo.invited_master_name_masked
-        ? `За приглашённого мастера ${promo.invited_master_name_masked}`
-        : 'За приглашённого мастера'
-    }
-    if (promo.recipient_role === 'beneficiary') return 'По применённому промокоду'
-    return item?.description || 'Начисление бонусных баллов'
-  }
-
-  const getPointsTraceSubtitle = (item) => {
-    const promo = item?.promo || {}
-    const parts = []
-    if (promo.promo_code) parts.push(`Промокод ${promo.promo_code}`)
-    if (promo.campaign_type) parts.push(promo.campaign_type === 'master_referral' ? 'реферальная программа' : 'промо-кампания')
-    if (promo.period_months) parts.push(`${promo.period_months} мес.`)
-    if (promo.percent) parts.push(`${promo.percent}%`)
-    return parts.join(' · ')
-  }
-
   // Загружаем список тарифных планов для выбора в автопродлении
   useEffect(() => {
     if (autoRenewal) {
@@ -842,21 +828,34 @@ export default function MasterTariff({ canCustomizeDomain, onRefreshSubscription
                 </div>
                 {subscriptionPoints?.items?.length ? (
                   <div className="space-y-3">
-                    {subscriptionPoints.items.map((item) => (
-                      <div key={item.id} className="rounded-lg border border-gray-200 p-3">
+                    {subscriptionPoints.items.map((item) => {
+                      const subtitle = getSubscriptionPointsHistorySubtitle(item)
+                      return (
+                      <div key={item.id} className="rounded-lg border border-gray-200 p-3" data-testid={`subscription-points-item-${item.id}`}>
                         <div className="flex items-start justify-between gap-3">
                           <div>
-                            <div className="font-medium text-gray-900">{getPointsTraceTitle(item)}</div>
-                            <div className="text-sm text-gray-600 mt-1">{getPointsTraceSubtitle(item) || item.description}</div>
-                            <div className="text-xs text-gray-500 mt-1">{formatDateTime(item.created_at)} · {item.status || item.direction || 'active'}</div>
+                            <div className="font-medium text-gray-900" data-testid="subscription-points-item-title">
+                              {getSubscriptionPointsHistoryTitle(item)}
+                            </div>
+                            {subtitle ? (
+                              <div className="text-sm text-gray-600 mt-1">{subtitle}</div>
+                            ) : null}
+                            <div className="text-xs text-gray-500 mt-1">{formatDateTime(item.created_at)}</div>
                           </div>
                           <div className="text-right">
-                            <div className="font-semibold text-green-700">+{formatPoints(item.amount)}</div>
-                            <div className="text-xs text-gray-500">осталось {formatPoints(item.remaining_amount)}</div>
+                            <div
+                              className={`font-semibold ${getSubscriptionPointsAmountColorClass(item.direction)}`}
+                              data-testid="subscription-points-item-amount"
+                            >
+                              {formatSubscriptionPointsSignedAmount(item.amount, item.direction)}
+                            </div>
+                            <div className="text-xs text-gray-500" data-testid="subscription-points-item-remaining">
+                              {formatSubscriptionPointsRemaining(item.remaining_amount)}
+                            </div>
                           </div>
                         </div>
                       </div>
-                    ))}
+                    )})}
                   </div>
                 ) : (
                   <div className="rounded-lg bg-gray-50 border border-gray-200 p-4 text-sm text-gray-600" data-testid="subscription-points-empty">
