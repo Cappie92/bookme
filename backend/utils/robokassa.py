@@ -3,25 +3,59 @@
 """
 import hashlib
 import logging
-import time
 from typing import Any, Dict, Optional, Tuple
 from urllib.parse import urlencode, urlparse
 
 logger = logging.getLogger(__name__)
 
+# Официальный диапазон Robokassa InvId (int64, положительный).
+ROBOKASSA_INVID_MIN = 1
+ROBOKASSA_INVID_MAX = 9223372036854775807
+
+
+def robokassa_invoice_id_from_payment_id(payment_id: int) -> str:
+    """
+    Числовой Robokassa InvId на основе уникального Payment.id (строка из цифр).
+
+    Уникальность обеспечивается PK payments.id и unique index на robokassa_invoice_id.
+    """
+    pid = int(payment_id)
+    if pid < ROBOKASSA_INVID_MIN:
+        raise ValueError(f"Robokassa InvId must be >= {ROBOKASSA_INVID_MIN}, got payment_id={pid}")
+    if pid > ROBOKASSA_INVID_MAX:
+        raise ValueError(f"payment_id {pid} exceeds Robokassa InvId maximum {ROBOKASSA_INVID_MAX}")
+    return str(pid)
+
+
+def is_robokassa_numeric_invoice_id(invoice_id: str) -> bool:
+    """True, если invoice_id — только цифры в допустимом диапазоне Robokassa."""
+    if invoice_id is None:
+        return False
+    value = str(invoice_id).strip()
+    if not value.isdigit():
+        return False
+    try:
+        n = int(value)
+    except ValueError:
+        return False
+    return ROBOKASSA_INVID_MIN <= n <= ROBOKASSA_INVID_MAX
+
+
+def is_temp_robokassa_invoice_placeholder(invoice_id: str) -> bool:
+    """Временный placeholder до flush/commit; не отправляется в Robokassa."""
+    return bool(invoice_id) and str(invoice_id).startswith("tmp-")
+
 
 def generate_invoice_id(user_id: int) -> str:
     """
-    Генерация уникального InvoiceID в формате INV-{timestamp}-{user_id}
-    
-    Args:
-        user_id: ID пользователя
-        
-    Returns:
-        Строка с InvoiceID
+    Deprecated: Robokassa требует числовой InvId.
+
+    Используйте robokassa_invoice_id_from_payment_id(payment.id) после persist Payment.
     """
-    timestamp = int(time.time())
-    return f"INV-{timestamp}-{user_id}"
+    raise RuntimeError(
+        "generate_invoice_id(user_id) is removed: assign robokassa_invoice_id from Payment.id "
+        "via persist_new_robokassa_payment()"
+    )
 
 
 def generate_signature(merchant_login: str, amount: float, invoice_id: str, password: str) -> str:

@@ -101,3 +101,44 @@ def persist_new_payment(db: Session, payment: Any) -> Any:
             if attempt >= _MAX_ATTEMPTS - 1:
                 raise RuntimeError("Could not persist payment with unique public_id") from exc
     raise RuntimeError("Could not persist payment with unique public_id")
+
+
+def _temp_robokassa_invoice_placeholder() -> str:
+    return f"tmp-{secrets.token_hex(16)}"
+
+
+def _is_robokassa_invoice_integrity_error(exc: IntegrityError) -> bool:
+    err = str(getattr(exc, "orig", exc)).lower()
+    return "robokassa_invoice_id" in err or "idx_payment_robokassa_invoice" in err
+
+
+def persist_new_robokassa_payment(db: Session, payment: Any) -> Any:
+    """
+    Сохраняет Payment для Robokassa:
+    flush → robokassa_invoice_id = str(payment.id) → commit.
+
+    Временный placeholder существует только внутри транзакции до commit.
+    """
+    from utils.robokassa import robokassa_invoice_id_from_payment_id
+
+    for attempt in range(_MAX_ATTEMPTS):
+        if attempt > 0:
+            payment.public_id = None
+        payment.robokassa_invoice_id = _temp_robokassa_invoice_placeholder()
+        db.add(payment)
+        try:
+            db.flush()
+            payment.robokassa_invoice_id = robokassa_invoice_id_from_payment_id(payment.id)
+            db.commit()
+            db.refresh(payment)
+            return payment
+        except IntegrityError as exc:
+            db.rollback()
+            if _is_public_id_integrity_error(exc) or _is_robokassa_invoice_integrity_error(exc):
+                if attempt >= _MAX_ATTEMPTS - 1:
+                    raise RuntimeError(
+                        "Could not persist Robokassa payment with unique public_id/invoice_id"
+                    ) from exc
+                continue
+            raise
+    raise RuntimeError("Could not persist Robokassa payment with unique public_id/invoice_id")

@@ -32,7 +32,6 @@ from schemas import (
 from auth import get_current_user, get_current_active_user
 from constants import duration_months_to_days
 from utils.robokassa import (
-    generate_invoice_id,
     generate_payment_url,
     generate_result_signature,
     verify_result_notification,
@@ -175,17 +174,14 @@ async def init_subscription_payment(
     
     # Важно: расчет доплаты/кредита должен приходить через calculation_id (snapshot)
     
-    # Генерируем InvoiceID
-    invoice_id = generate_invoice_id(current_user.id)
-    
-    # Создаем запись Payment
+    # Создаём Payment; числовой Robokassa InvId = str(payment.id) после flush (persist_new_robokassa_payment)
     payment_source = payment_request.payment_source or "web"
     payment = Payment(
         user_id=current_user.id,
         amount=total_price,
         status='pending',
         payment_type='subscription',
-        robokassa_invoice_id=invoice_id,
+        robokassa_invoice_id="tmp-pending",
         subscription_period=payment_request.payment_period,
         plan_id=plan.id,
         is_recurring=payment_request.enable_auto_renewal,
@@ -199,9 +195,10 @@ async def init_subscription_payment(
             "plan_display_name": plan.display_name
         }
     )
-    
-    from utils.payment_public_id import persist_new_payment
-    payment = persist_new_payment(db, payment)
+
+    from utils.payment_public_id import persist_new_robokassa_payment
+    payment = persist_new_robokassa_payment(db, payment)
+    invoice_id = payment.robokassa_invoice_id
     
     # Получаем конфигурацию Robokassa
     from settings import get_settings
