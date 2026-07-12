@@ -190,4 +190,43 @@ describe('getDisplayDaysRemaining', () => {
       points_amount: 1500,
     });
   });
+
+  it('passes subscription_points_to_use in calculate request', async () => {
+    const mockResponse = {
+      calculation_id: 11,
+      plan_id: 2,
+      plan_name: 'Pro',
+      duration_months: 1,
+      total_price: 1000,
+      monthly_price: 1000,
+      daily_price: 34,
+      price_per_month_display: 1000,
+      reserved_balance: 0,
+      price_before_points: 1000,
+      subscription_points_available: 300,
+      subscription_points_used: 300,
+      final_price: 700,
+      upgrade_type: 'immediate',
+      new_plan_display_order: 2,
+      requires_immediate_payment: true,
+      requires_payment: true,
+    };
+    (apiClient.post as jest.Mock).mockResolvedValue({ data: mockResponse });
+
+    const result = await calculateSubscription({
+      plan_id: 2,
+      duration_months: 1,
+      upgrade_type: 'immediate',
+      subscription_points_to_use: 300,
+    });
+
+    expect(apiClient.post).toHaveBeenCalledWith('/api/subscriptions/calculate', {
+      plan_id: 2,
+      duration_months: 1,
+      upgrade_type: 'immediate',
+      subscription_points_to_use: 300,
+    });
+    expect(result.subscription_points_used).toBe(300);
+    expect(result.final_price).toBe(700);
+  });
 });

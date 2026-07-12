@@ -17,6 +17,7 @@ from sqlalchemy import (
     JSON,
     UniqueConstraint,
     Index,
+    text,
 )
 from sqlalchemy.orm import relationship
 
@@ -798,6 +799,11 @@ class SubscriptionPriceSnapshot(Base):
     reserved_balance = Column(Float, default=0.0)  # Зарезервированный баланс на момент расчета
     credit_amount = Column(Float, nullable=False, default=0.0)  # Кредит для immediate upgrade (только из old_reserved)
     final_price = Column(Float, nullable=False)  # Итоговая цена с учетом резерва
+    price_before_points = Column(Float, nullable=True)  # Цена до списания subscription points
+    subscription_points_used = Column(Integer, nullable=False, default=0, server_default="0")
+    subscription_points_debit_ledger_id = Column(
+        Integer, ForeignKey("subscription_points_ledger.id"), nullable=True
+    )
     upgrade_type = Column(String, nullable=True)  # 'immediate', 'after_expiry', 'renewal', 'downgrade'
     is_downgrade = Column(Boolean, nullable=False, default=False)
     forced_upgrade_type = Column(String, nullable=True)
@@ -938,6 +944,7 @@ class SubscriptionPointsSourceType(str, enum.Enum):
     PROMO_REWARD_GRANT = "promo_reward_grant"
     MANUAL_ADJUSTMENT = "manual_adjustment"
     SUBSCRIPTION_PAYMENT = "subscription_payment"
+    SUBSCRIPTION_SNAPSHOT = "subscription_snapshot"
     FUTURE_SOURCE = "future_source"
 
 
@@ -2026,6 +2033,15 @@ class SubscriptionPointsLedger(Base):
         Index("idx_subscription_points_master", "master_id"),
         Index("idx_subscription_points_source", "source_type", "source_id"),
         Index("idx_subscription_points_status", "status"),
+        Index(
+            "uq_subscription_points_debit_source",
+            "master_id",
+            "source_type",
+            "source_id",
+            unique=True,
+            sqlite_where=text("direction = 'DEBIT'"),
+            postgresql_where=text("direction = 'DEBIT'"),
+        ),
     )
 
 

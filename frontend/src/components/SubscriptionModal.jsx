@@ -19,6 +19,8 @@ export default function SubscriptionModal({ isOpen, onClose, isFreePlan, current
   const [calculationId, setCalculationId] = useState(null)
   const [calculationMeta, setCalculationMeta] = useState(null)
   const [enableAutoRenewal, setEnableAutoRenewal] = useState(false)
+  const [useSubscriptionPoints, setUseSubscriptionPoints] = useState(false)
+  const [subscriptionPointsToUse, setSubscriptionPointsToUse] = useState(0)
   const calculationRequestIdRef = useRef(0)
   const calculationIdRef = useRef(null)
 
@@ -60,6 +62,8 @@ export default function SubscriptionModal({ isOpen, onClose, isFreePlan, current
       calculationIdRef.current = null
       setLoadingCalculation(false)
       setEnableAutoRenewal(false)
+      setUseSubscriptionPoints(false)
+      setSubscriptionPointsToUse(0)
       setLoadingPayment(false)
     }
   }, [isOpen])
@@ -163,7 +167,7 @@ export default function SubscriptionModal({ isOpen, onClose, isFreePlan, current
     setUpgradeType(nextUpgradeType)
   }
 
-  const calculateSubscription = async (plan, durationMonths, upgradeTypeToUse) => {
+  const calculateSubscription = async (plan, durationMonths, upgradeTypeToUse, pointsToUse = 0) => {
     if (!plan || !durationMonths) return
     
     const requestId = calculationRequestIdRef.current + 1
@@ -191,7 +195,8 @@ export default function SubscriptionModal({ isOpen, onClose, isFreePlan, current
         body: JSON.stringify({
           plan_id: plan.id,
           duration_months: durationMonths,
-          upgrade_type: upgradeTypeToUse
+          upgrade_type: upgradeTypeToUse,
+          subscription_points_to_use: Math.max(0, Number(pointsToUse) || 0),
         })
       })
       
@@ -243,9 +248,14 @@ export default function SubscriptionModal({ isOpen, onClose, isFreePlan, current
 
   useEffect(() => {
     if (!isOpen || !selectedPlan || !selectedDuration) return
-    calculateSubscription(selectedPlan, selectedDuration, upgradeType)
+    calculateSubscription(
+      selectedPlan,
+      selectedDuration,
+      upgradeType,
+      useSubscriptionPoints ? subscriptionPointsToUse : 0
+    )
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, selectedPlan?.id, selectedDuration, upgradeType])
+  }, [isOpen, selectedPlan?.id, selectedDuration, upgradeType, useSubscriptionPoints, subscriptionPointsToUse])
 
   const getPlanHighlights = (plan) => {
     const features = getPlanFeatures(plan, serviceFunctions)
@@ -566,6 +576,76 @@ export default function SubscriptionModal({ isOpen, onClose, isFreePlan, current
                     </div>
                   ) : currentCalculation ? (
                     <div className="space-y-2 text-sm">
+                      {typeof currentCalculation.subscription_points_available === 'number' &&
+                      currentCalculation.upgrade_type === 'immediate' ? (
+                        <div className="border rounded-lg p-3 bg-gray-50 space-y-2">
+                          <div className="flex justify-between gap-4">
+                            <span className="text-gray-600">Баллы</span>
+                            <span className="font-semibold text-gray-900" data-testid="tariff-points-available">
+                              {currentCalculation.subscription_points_available}
+                            </span>
+                          </div>
+                          <label className="flex items-center justify-between gap-3">
+                            <span className="text-gray-700">Использовать баллы</span>
+                            <input
+                              type="checkbox"
+                              checked={useSubscriptionPoints}
+                              onChange={(e) => {
+                                const enabled = e.target.checked
+                                setUseSubscriptionPoints(enabled)
+                                if (enabled) {
+                                  const priceBefore = Number(
+                                    currentCalculation.price_before_points ?? currentCalculation.total_price ?? 0
+                                  )
+                                  const available = Number(currentCalculation.subscription_points_available ?? 0)
+                                  setSubscriptionPointsToUse(Math.min(available, Math.floor(priceBefore)))
+                                } else {
+                                  setSubscriptionPointsToUse(0)
+                                }
+                              }}
+                              className="w-5 h-5 text-green-600 border-gray-300 rounded focus:ring-green-500"
+                              data-testid="tariff-use-points-toggle"
+                            />
+                          </label>
+                          {useSubscriptionPoints ? (
+                            <div>
+                              <label className="block text-xs text-gray-500 mb-1">Списать баллов (1 балл = 1 ₽)</label>
+                              <input
+                                type="number"
+                                min={0}
+                                max={Math.min(
+                                  Number(currentCalculation.subscription_points_available ?? 0),
+                                  Math.floor(Number(currentCalculation.price_before_points ?? currentCalculation.total_price ?? 0))
+                                )}
+                                value={subscriptionPointsToUse}
+                                onChange={(e) => {
+                                  const raw = Number(e.target.value)
+                                  if (Number.isNaN(raw)) return
+                                  setSubscriptionPointsToUse(Math.max(0, Math.floor(raw)))
+                                }}
+                                className="w-full border rounded-lg px-3 py-2 text-sm"
+                                data-testid="tariff-points-input"
+                              />
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : null}
+                      {Number(currentCalculation.subscription_points_used) > 0 ? (
+                        <>
+                          <div className="flex justify-between gap-4">
+                            <span className="text-gray-600">Цена до баллов</span>
+                            <span className="font-semibold text-gray-900" data-testid="tariff-price-before-points">
+                              {formatPrice(currentCalculation.price_before_points ?? currentCalculation.total_price)} ₽
+                            </span>
+                          </div>
+                          <div className="flex justify-between gap-4">
+                            <span className="text-gray-600">Списать баллов</span>
+                            <span className="font-semibold text-gray-900" data-testid="tariff-points-used">
+                              −{currentCalculation.subscription_points_used}
+                            </span>
+                          </div>
+                        </>
+                      ) : null}
                       <div className="flex justify-between gap-4">
                         <span className="text-gray-600">К оплате</span>
                         <span className="font-semibold text-gray-900" data-testid="tariff-final-price">{formatPrice(currentCalculation.final_price)} ₽</span>
@@ -618,10 +698,12 @@ export default function SubscriptionModal({ isOpen, onClose, isFreePlan, current
                   type="button"
                   onClick={handlePaymentInit}
                   data-testid="tariff-payment-button"
-                  disabled={!currentCalculation || loadingCalculation || loadingPayment || Number(currentCalculation.final_price) <= 0}
+                  disabled={!currentCalculation || loadingCalculation || loadingPayment}
                   className="w-full px-4 py-3 rounded-lg bg-[#4CAF50] text-white font-semibold hover:bg-[#45A049] disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  {Number(currentCalculation?.final_price) <= 0 ? 'Оплата не требуется' : (loadingPayment ? 'Переход…' : 'Перейти к оплате')}
+                  {Number(currentCalculation?.final_price) <= 0
+                    ? (loadingPayment ? 'Применяем…' : 'Применить тариф')
+                    : (loadingPayment ? 'Переход…' : 'Перейти к оплате')}
                 </button>
               </div>
             </div>

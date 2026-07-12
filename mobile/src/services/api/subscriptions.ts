@@ -61,6 +61,7 @@ export interface SubscriptionCalculationRequest {
   plan_id: number;
   duration_months: 1 | 3 | 6 | 12;
   upgrade_type?: 'immediate' | 'after_expiry';
+  subscription_points_to_use?: number;
 }
 
 export type PromoPreview = {
@@ -109,6 +110,10 @@ export interface SubscriptionCalculationResponse {
   available_balance?: number | null;
   can_pay_from_balance?: boolean | null;
   promo_preview?: PromoPreview | null;
+  price_before_points?: number | null;
+  subscription_points_available?: number | null;
+  subscription_points_used?: number | null;
+  requires_payment?: boolean | null;
 }
 
 function pickPromoPreview(raw: Record<string, any>, calculation: Record<string, any>): PromoPreview | null {

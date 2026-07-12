@@ -45,6 +45,11 @@ from utils.balance_utils import (
     add_balance_transaction_no_commit,
 )
 from services.promo_engine import apply_promo_rewards_for_first_payment
+from services.subscription_points import (
+    InsufficientSubscriptionPointsError,
+    apply_snapshot_subscription_points_debit,
+    get_master_id_for_user,
+)
 router = APIRouter(
     prefix="/payments",
     tags=["payments"],
@@ -529,6 +534,15 @@ async def robokassa_result(
             raise RuntimeError("Snapshot expired")
         if abs(float(snapshot.final_price) - float(payment.amount)) > 0.01:
             raise RuntimeError("Amount mismatch vs snapshot.final_price")
+
+        master_id = get_master_id_for_user(db, payment.user_id)
+        if master_id and int(getattr(snapshot, "subscription_points_used", 0) or 0) > 0:
+            apply_snapshot_subscription_points_debit(
+                db,
+                snapshot=snapshot,
+                master_id=master_id,
+                payment_id=payment.id,
+            )
 
         user = db.query(User).filter(User.id == payment.user_id).first()
         if not user:

@@ -10,6 +10,7 @@ import {
   Switch,
   Alert,
   Dimensions,
+  TextInput,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -221,6 +222,99 @@ function StepPlan({
 
 const BRAND_GREEN = '#4CAF50';
 
+function SubscriptionPointsControls({
+  calculation,
+  useSubscriptionPoints,
+  subscriptionPointsToUse,
+  onToggleUsePoints,
+  onChangePointsToUse,
+}: {
+  calculation: SubscriptionCalculationResponse | null;
+  useSubscriptionPoints: boolean;
+  subscriptionPointsToUse: number;
+  onToggleUsePoints: (enabled: boolean) => void;
+  onChangePointsToUse: (value: number) => void;
+}) {
+  if (
+    !calculation ||
+    calculation.upgrade_type !== 'immediate' ||
+    typeof calculation.subscription_points_available !== 'number'
+  ) {
+    return null;
+  }
+
+  const priceBefore = Math.floor(
+    Number(calculation.price_before_points ?? calculation.total_price ?? 0)
+  );
+  const available = Math.max(0, Number(calculation.subscription_points_available ?? 0));
+  const maxPoints = Math.min(available, priceBefore);
+
+  return (
+    <View style={styles.pointsCard} testID="subscription-points-controls">
+      <View style={styles.tableRow}>
+        <Text style={styles.tableKey}>Баллы</Text>
+        <Text style={styles.tableVal} testID="subscription-points-available">
+          {available}
+        </Text>
+      </View>
+      <View style={styles.switchRowCompact}>
+        <Text style={styles.switchLabel}>Использовать баллы</Text>
+        <Switch
+          value={useSubscriptionPoints}
+          onValueChange={onToggleUsePoints}
+          trackColor={{ false: '#D1D5DB', true: BRAND_GREEN }}
+          thumbColor="#FFFFFF"
+          ios_backgroundColor="#D1D5DB"
+          testID="subscription-use-points-toggle"
+        />
+      </View>
+      {useSubscriptionPoints ? (
+        <>
+          <Text style={styles.pointsHint}>1 балл = 1 ₽</Text>
+          <TextInput
+            value={String(subscriptionPointsToUse)}
+            onChangeText={(text) => {
+              const raw = Number(text.replace(/[^\d]/g, ''));
+              if (Number.isNaN(raw)) {
+                onChangePointsToUse(0);
+                return;
+              }
+              onChangePointsToUse(Math.max(0, Math.min(maxPoints, Math.floor(raw))));
+            }}
+            keyboardType="number-pad"
+            style={styles.pointsInput}
+            testID="subscription-points-input"
+          />
+        </>
+      ) : null}
+    </View>
+  );
+}
+
+function SubscriptionPointsBreakdown({
+  calculation,
+}: {
+  calculation: SubscriptionCalculationResponse | null;
+}) {
+  if (!calculation || !Number(calculation.subscription_points_used)) return null;
+  return (
+    <>
+      <View style={styles.tableRow}>
+        <Text style={styles.tableKey}>Цена до баллов</Text>
+        <Text style={styles.tableVal} testID="subscription-price-before-points">
+          {formatMoney(calculation.price_before_points ?? calculation.total_price)}
+        </Text>
+      </View>
+      <View style={styles.tableRow}>
+        <Text style={styles.tableKey}>Списать баллов</Text>
+        <Text style={styles.tableVal} testID="subscription-points-used">
+          −{calculation.subscription_points_used}
+        </Text>
+      </View>
+    </>
+  );
+}
+
 function StepPeriod({
   selectedPlan,
   currentPlanLabel,
@@ -232,6 +326,10 @@ function StepPeriod({
   isDowngrade,
   loadingCalculation,
   calculation,
+  useSubscriptionPoints,
+  subscriptionPointsToUse,
+  onToggleUsePoints,
+  onChangePointsToUse,
 }: {
   selectedPlan: SubscriptionPlan | null;
   currentPlanLabel: string | null;
@@ -243,6 +341,10 @@ function StepPeriod({
   isDowngrade: boolean;
   loadingCalculation: boolean;
   calculation: SubscriptionCalculationResponse | null;
+  useSubscriptionPoints: boolean;
+  subscriptionPointsToUse: number;
+  onToggleUsePoints: (enabled: boolean) => void;
+  onChangePointsToUse: (value: number) => void;
 }) {
   const selectedSavings =
     selectedPlan && selectedDuration
@@ -305,6 +407,14 @@ function StepPeriod({
           <CalculationLoadingState />
         ) : calculation ? (
           <>
+            <SubscriptionPointsControls
+              calculation={calculation}
+              useSubscriptionPoints={useSubscriptionPoints}
+              subscriptionPointsToUse={subscriptionPointsToUse}
+              onToggleUsePoints={onToggleUsePoints}
+              onChangePointsToUse={onChangePointsToUse}
+            />
+            <SubscriptionPointsBreakdown calculation={calculation} />
             <View style={styles.tableRow}>
               <Text style={[styles.tableKey, styles.tableKeyStrong]}>К оплате</Text>
               <Text style={[styles.tableVal, styles.tableValStrong]} numberOfLines={1}>
@@ -403,6 +513,7 @@ function StepCheckout({
                 </Text>
               </View>
             ) : null}
+            <SubscriptionPointsBreakdown calculation={calculation} />
             <View style={styles.tableRow}>
               <Text style={[styles.tableKey, styles.tableKeyStrong]}>К оплате</Text>
               <Text style={[styles.tableVal, styles.tableValStrong]} numberOfLines={1}>
@@ -493,6 +604,8 @@ export function SubscriptionPurchaseModal({
   const [loadingCalculation, setLoadingCalculation] = React.useState(false);
   const [loadingPayment, setLoadingPayment] = React.useState(false);
   const [paymentOpened, setPaymentOpened] = React.useState(false);
+  const [useSubscriptionPoints, setUseSubscriptionPoints] = React.useState(false);
+  const [subscriptionPointsToUse, setSubscriptionPointsToUse] = React.useState(0);
   const calculationRequestSeq = React.useRef(0);
   const calculationIdRef = React.useRef<number | null>(null);
 
@@ -526,6 +639,8 @@ export function SubscriptionPurchaseModal({
       setCalculation(null);
       setUpgradeType('immediate');
       setEnableAutoRenewal(false);
+      setUseSubscriptionPoints(false);
+      setSubscriptionPointsToUse(0);
       setLoadingCalculation(false);
       setLoadingPayment(false);
       setPaymentOpened(false);
@@ -612,6 +727,7 @@ export function SubscriptionPurchaseModal({
       plan_id: plan.id,
       duration_months: duration,
       upgrade_type: upgradeTypeToUse,
+      subscription_points_to_use: useSubscriptionPoints ? Math.max(0, subscriptionPointsToUse) : 0,
     };
     const requestId = calculationRequestSeq.current + 1;
     calculationRequestSeq.current = requestId;
@@ -639,7 +755,23 @@ export function SubscriptionPurchaseModal({
         setLoadingCalculation(false);
       }
     }
-  }, [visible, selectedPlan, selectedDuration, upgradeType]);
+  }, [visible, selectedPlan, selectedDuration, upgradeType, useSubscriptionPoints, subscriptionPointsToUse]);
+
+  const handleToggleUseSubscriptionPoints = React.useCallback(
+    (enabled: boolean) => {
+      setUseSubscriptionPoints(enabled);
+      if (enabled && calculation) {
+        const priceBefore = Math.floor(
+          Number(calculation.price_before_points ?? calculation.total_price ?? 0)
+        );
+        const available = Math.max(0, Number(calculation.subscription_points_available ?? 0));
+        setSubscriptionPointsToUse(Math.min(available, priceBefore));
+      } else {
+        setSubscriptionPointsToUse(0);
+      }
+    },
+    [calculation]
+  );
 
   React.useEffect(() => {
     calculateSelectedSubscription();
@@ -856,6 +988,10 @@ export function SubscriptionPurchaseModal({
           isDowngrade={!!currentPlanDisplayOrder && !!selectedPlan && selectedPlan.display_order < currentPlanDisplayOrder}
           loadingCalculation={loadingCalculation}
           calculation={calculation}
+          useSubscriptionPoints={useSubscriptionPoints}
+          subscriptionPointsToUse={subscriptionPointsToUse}
+          onToggleUsePoints={handleToggleUseSubscriptionPoints}
+          onChangePointsToUse={setSubscriptionPointsToUse}
         />
       );
     }
@@ -1258,6 +1394,31 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: '#5b6b84',
     fontWeight: '600',
+  },
+  pointsCard: {
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: '#eee',
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    backgroundColor: '#F9FAFB',
+  },
+  pointsHint: {
+    marginTop: 6,
+    marginBottom: 6,
+    fontSize: 11,
+    color: '#666',
+    fontWeight: '600',
+  },
+  pointsInput: {
+    borderWidth: 1,
+    borderColor: '#D1D5DB',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 15,
+    backgroundColor: '#fff',
   },
   breakdownHint: {
     marginTop: 8,

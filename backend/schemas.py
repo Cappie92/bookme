@@ -1237,6 +1237,7 @@ class SubscriptionCalculationRequest(BaseModel):
     plan_id: int
     duration_months: int  # 1, 3, 6, 12
     upgrade_type: Optional[str] = "immediate"  # "immediate" или "after_expiry"
+    subscription_points_to_use: Optional[int] = 0
 
 
 class PromoPreviewResponse(BaseModel):
@@ -1295,6 +1296,11 @@ class SubscriptionCalculationResponse(BaseModel):
     available_balance: Optional[float] = None
     can_pay_from_balance: Optional[bool] = None
     promo_preview: Optional[PromoPreviewResponse] = None
+
+    price_before_points: Optional[float] = None
+    subscription_points_available: Optional[int] = None
+    subscription_points_used: Optional[int] = None
+    requires_payment: Optional[bool] = None
 
 
 class PromoApplyRequest(BaseModel):

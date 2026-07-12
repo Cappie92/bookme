@@ -21,6 +21,7 @@ from models import (
     UserBalance,
     TransactionType,
     Payment,
+    Master,
 )
 from schemas import (
     SubscriptionCreate, 
@@ -47,7 +48,15 @@ from utils.balance_utils import (
     add_balance_transaction_no_commit,
     compute_subscription_days_remaining,
 )
-from services.promo_engine import build_promo_preview_for_subscription_calculation
+from services.promo_engine import build_promo_preview_for_subscription_calculation, get_subscription_points_balance
+from services.subscription_points import (
+    InsufficientSubscriptionPointsError,
+    SubscriptionPointsValidationError,
+    apply_snapshot_subscription_points_debit,
+    compute_subscription_points_redemption,
+    get_master_id_for_user,
+    normalize_subscription_points_to_use,
+)
 from services.promo_engine import apply_promo_rewards_for_first_payment
 
 router = APIRouter(
@@ -880,6 +889,13 @@ async def calculate_subscription_cost(
     
     # Очищаем истекшие snapshots перед созданием нового
     cleanup_expired_snapshots(db)
+
+    try:
+        requested_subscription_points = normalize_subscription_points_to_use(
+            calculation_request.subscription_points_to_use
+        )
+    except SubscriptionPointsValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     
     # Определяем тип подписки
     subscription_type = None
@@ -1024,6 +1040,26 @@ async def calculate_subscription_cost(
     # MVP: кредит из резерва отключён. Оплата с баланса — отдельный endpoint apply-upgrade-balance.
     credit_amount = 0.0
     final_price = max(0.0, float(total_price))
+    price_before_points = float(final_price)
+    subscription_points_available = 0
+    subscription_points_used = 0
+
+    if subscription_type == SubscriptionType.MASTER and effective_upgrade_type == "immediate":
+        master_profile = db.query(Master).filter(Master.user_id == current_user.id).first()
+        if master_profile:
+            subscription_points_available = get_subscription_points_balance(db, master_profile.id)
+            if requested_subscription_points > 0:
+                subscription_points_used, final_price = compute_subscription_points_redemption(
+                    price_before_points=price_before_points,
+                    requested_points=requested_subscription_points,
+                    available_points=subscription_points_available,
+                )
+    elif requested_subscription_points > 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Subscription points можно использовать только мастером при немедленном применении тарифа",
+        )
+
     requires_immediate_payment = final_price > 0
 
     current_plan_credit = 0.0
@@ -1047,8 +1083,19 @@ async def calculate_subscription_cost(
             f"К оплате {math.ceil(final_price)} ₽. На балансе {math.ceil(available_balance)} ₽"
             + (" — недостаточно, нужна оплата картой." if available_balance < final_price else ".")
         )
+        if subscription_points_used > 0:
+            breakdown_text = (
+                f"Списано {subscription_points_used} баллов (−{subscription_points_used} ₽). "
+                f"К оплате {math.ceil(final_price)} ₽."
+            )
     else:
-        breakdown_text = "Доплата не требуется — можно применить тариф без оплаты."
+        if subscription_points_used > 0:
+            breakdown_text = (
+                f"Оплата полностью баллами ({subscription_points_used} баллов). "
+                "Можно применить тариф без оплаты картой."
+            )
+        else:
+            breakdown_text = "Доплата не требуется — можно применить тариф без оплаты."
 
     promo_preview = None
     if subscription_type == SubscriptionType.MASTER and current_user.role.value in ["master", "indie"]:
@@ -1090,6 +1137,8 @@ async def calculate_subscription_cost(
         reserved_balance=0.0,
         credit_amount=0.0,
         final_price=final_price,
+        price_before_points=price_before_points,
+        subscription_points_used=subscription_points_used,
         upgrade_type=effective_upgrade_type,
         is_downgrade=is_downgrade,
         forced_upgrade_type=forced_upgrade_type,
@@ -1158,6 +1207,10 @@ async def calculate_subscription_cost(
         available_balance=available_balance,
         can_pay_from_balance=can_pay_from_balance,
         promo_preview=promo_preview,
+        price_before_points=price_before_points,
+        subscription_points_available=subscription_points_available,
+        subscription_points_used=subscription_points_used,
+        requires_payment=requires_immediate_payment,
     )
 
 
@@ -1245,6 +1298,18 @@ async def apply_upgrade_free(
                     "already_applied": True,
                     "subscription_id": snapshot.applied_subscription_id,
                 }
+
+            master_id = get_master_id_for_user(db, current_user.id)
+            if master_id:
+                try:
+                    apply_snapshot_subscription_points_debit(
+                        db, snapshot=snapshot, master_id=master_id, payment_id=None
+                    )
+                except InsufficientSubscriptionPointsError as exc:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail={"message": "Недостаточно subscription points", "error": str(exc)},
+                    ) from exc
 
             from utils.subscription_features import get_effective_subscription
             current_subscription = get_effective_subscription(db, current_user.id, subscription_type, now_utc=now)
@@ -1382,6 +1447,18 @@ async def apply_upgrade_balance(
                     "subscription_id": snapshot.applied_subscription_id,
                     "balance_after": float(ub.balance),
                 }
+
+            master_id = get_master_id_for_user(db, current_user.id)
+            if master_id:
+                try:
+                    apply_snapshot_subscription_points_debit(
+                        db, snapshot=snapshot, master_id=master_id, payment_id=None
+                    )
+                except InsufficientSubscriptionPointsError as exc:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail={"message": "Недостаточно subscription points", "error": str(exc)},
+                    ) from exc
 
             available = float(get_user_available_balance(db, current_user.id, do_commit=False))
             if available + 0.001 < final_price:
