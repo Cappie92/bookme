@@ -23,7 +23,10 @@
    - **package_name:** `ru.dedato.mobile`.  
    - **SHA-256 (debug keystore, `mobile/android/app/debug.keystore`):**  
      `FA:C6:17:45:DC:09:03:78:6F:B9:ED:E6:2A:96:2B:39:9F:73:48:F0:BB:6F:89:9B:83:32:66:75:91:03:3B:9C`  
-     — подходит для **локальных / preview APK**, подписанных debug keystore (см. `android/app/build.gradle`).  
+     — подходит для **локальных debug APK**, подписанных debug keystore (см. `android/app/build.gradle`).  
+   - **SHA-256 (preview / local release APK, `ru.dedato.mobile`):**  
+     `62:D7:48:F9:B3:57:30:28:6F:4E:1F:3C:BA:4A:DB:7E:26:F4:4B:DC:62:AD:B8:07:FE:40:F3:F9:C1:AD:35:BA`  
+     — для **preview APK** (EAS internal / локальная сборка с release-подписью, не debug keystore).  
    - **EAS production / Play App Signing:** добавьте отпечаток из [Play Console → App integrity](https://play.google.com/console) или `eas credentials -p android` в массив `sha256_cert_fingerprints`.
 
 3. **Деплой на сервер:** `./scripts/deploy-well-known.sh` (копирует файлы в `/var/www/dedato-well-known/`, патчит nginx).
