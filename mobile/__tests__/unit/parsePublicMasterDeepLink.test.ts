@@ -23,11 +23,17 @@ describe('parsePublicMasterSlugFromUrl', () => {
     expect(parsePublicMasterSlugFromUrl('dedato:///m/qa-smoke-public')).toBe('qa-smoke-public');
     expect(parsePublicMasterSlugFromUrl('dedato://m/my-master')).toBe('my-master');
     expect(parsePublicMasterSlugFromUrl('dedato://m/foo-bar/')).toBe('foo-bar');
+    expect(parsePublicMasterSlugFromUrl('dedato:///m/m-5haJFCMx')).toBe('m-5haJFCMx');
   });
 
   it('parses https for trusted host', () => {
     expect(parsePublicMasterSlugFromUrl('https://dedato.ru/m/slug1')).toBe('slug1');
     expect(parsePublicMasterSlugFromUrl('https://www.dedato.ru/m/slug2')).toBe('slug2');
+    expect(parsePublicMasterSlugFromUrl('https://www.dedato.ru/m/m-5haJFCMx')).toBe('m-5haJFCMx');
+  });
+
+  it('parses dedato custom scheme without lowercasing slug', () => {
+    expect(parsePublicMasterSlugFromUrl('dedato:///m/m-5haJFCMx')).toBe('m-5haJFCMx');
   });
 
   it('rejects untrusted host', () => {

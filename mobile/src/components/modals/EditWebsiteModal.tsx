@@ -254,8 +254,7 @@ export function EditWebsiteModal({
 
   const slug = normalizeMasterDomainSlug(form.domain || settings?.master?.domain || '');
   const publicBookingUrl = buildMasterPublicBookingUrl(
-    form.domain || settings?.master?.domain,
-    frontendBaseUrl || env.WEB_URL
+    form.domain || settings?.master?.domain
   );
   const publicRoutePath = buildMasterPublicRoutePath(form.domain || settings?.master?.domain);
   const isIOS = Platform.OS === 'ios';

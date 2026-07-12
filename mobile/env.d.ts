@@ -3,6 +3,8 @@ declare module '@env' {
   /** Только dev: Android может подменить API_URL (эмулятор: host 10.0.2.2). В prod не используется. */
   export const API_URL_ANDROID: string | undefined;
   export const WEB_URL: string | undefined;
+  /** Канонический HTTPS origin для share/copy App Links (/m/{slug}). Например https://www.dedato.ru */
+  export const PUBLIC_APP_LINK_ORIGIN: string | undefined;
   /** Доп. хосты для HTTPS deep links (через запятую), если не совпадают с WEB_URL. См. docs/mobile/UNIVERSAL_APP_LINKS.md */
   export const EXTRA_UNIVERSAL_LINK_HOSTS: string | undefined;
   export const DEBUG_HTTP: string | undefined;

@@ -1,7 +1,7 @@
 import React, { forwardRef, useMemo } from 'react';
 import { View, Text, StyleSheet, type ViewStyle } from 'react-native';
 import { Image } from 'expo-image';
-import { env } from '@src/config/env';
+import { getPublicAppLinkOrigin } from '@src/config/publicAppLinkOrigin';
 import { resolveBackendUploadUrl } from '@src/utils/resolveBackendUploadUrl';
 
 /** Как web FreeSlotsShareCardModal: CARD_W × CARD_H = 1080 × 1920 */
@@ -155,7 +155,7 @@ export const FreeSlotsShareCardImage = forwardRef<View, FreeSlotsShareCardImageP
     ref
   ) {
     const photoUri = avatarUrl ? resolveBackendUploadUrl(avatarUrl) : null;
-    const webBase = (env.WEB_URL || 'https://dedato.ru').replace(/\/+$/, '');
+    const webBase = getPublicAppLinkOrigin();
     const logoUri = `${webBase}/dedato-logo-card.png`;
 
     const scale =

@@ -16,6 +16,7 @@
         "API_URL": "https://dedato.ru",
         "WEB_URL": "https://dedato.ru",
         "APP_UNIVERSAL_LINK_HOSTS": "dedato.ru,www.dedato.ru",
+        "PUBLIC_APP_LINK_ORIGIN": "https://www.dedato.ru"
         "YANDEX_MOBILE_AUTH_VISIBLE": "0"
       }
     },
@@ -30,6 +31,7 @@
         "API_URL": "https://dedato.ru",
         "WEB_URL": "https://dedato.ru",
         "APP_UNIVERSAL_LINK_HOSTS": "dedato.ru,www.dedato.ru",
+        "PUBLIC_APP_LINK_ORIGIN": "https://www.dedato.ru"
         "YANDEX_MOBILE_AUTH_VISIBLE": "0"
       }
     }

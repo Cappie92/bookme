@@ -94,7 +94,7 @@ export default function MasterSettingsScreen() {
   );
 
   const publicBookingUrl = useMemo(
-    () => buildMasterPublicBookingUrl(settings?.master?.domain, env.WEB_URL),
+    () => buildMasterPublicBookingUrl(settings?.master?.domain),
     [settings?.master?.domain]
   );
 
@@ -516,7 +516,6 @@ export default function MasterSettingsScreen() {
         onClose={() => setEditWebsiteVisible(false)}
         settings={settings}
         onSave={() => loadSettings('refresh')}
-        frontendBaseUrl={env.WEB_URL}
       />
 
       {masterSlug && publicBookingUrl ? (
