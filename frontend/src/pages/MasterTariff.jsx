@@ -15,6 +15,7 @@ import {
 } from '@heroicons/react/24/outline'
 import { API_BASE_URL } from '../utils/config'
 import { apiGet } from '../utils/api'
+import { fetchCurrentSubscription } from '../utils/subscriptionsApi'
 import { Button } from '../components/ui'
 import SubscriptionModal from '../components/SubscriptionModal'
 import Tooltip from '../components/Tooltip'
@@ -290,22 +291,15 @@ export default function MasterTariff({ canCustomizeDomain, onRefreshSubscription
         setSubscriptionStatus(statusData)
       }
       
-      // Загружаем данные подписки (GET read-only, 404 = no_subscription)
-      const response = await fetch(`/api/subscriptions/my`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      })
-
-      if (response.ok) {
-        const data = await response.json()
+      // Загружаем данные подписки (GET read-only, 404 = no_subscription — штатно)
+      try {
+        const data = await fetchCurrentSubscription()
         setSubscriptionData(data)
-        if (data.auto_renewal !== undefined) {
+        if (data?.auto_renewal !== undefined) {
           setAutoRenewal(data.auto_renewal)
         }
-      } else if (response.status === 404) {
-        setSubscriptionData(null)
+      } catch (error) {
+        console.error('Ошибка загрузки данных подписки:', error)
       }
     } catch (error) {
       console.error('Ошибка загрузки данных подписки:', error)

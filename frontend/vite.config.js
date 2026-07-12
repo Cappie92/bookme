@@ -5,6 +5,10 @@ import path from 'path'
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
+  test: {
+    environment: 'node',
+    include: ['src/**/*.test.js'],
+  },
   resolve: {
     alias: {
       shared: path.resolve(__dirname, '../shared'),
