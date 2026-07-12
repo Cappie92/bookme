@@ -21,6 +21,10 @@ export default function SalonTariff() {
       
       if (response.ok) {
         const data = await response.json()
+        if (data == null) {
+          setSubscriptionData(null)
+          return
+        }
         setSubscriptionData({
           status: data.status,
           plan: data.subscription_type === 'salon' ? 'Салон' : 'Мастер',

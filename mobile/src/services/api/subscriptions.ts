@@ -160,11 +160,12 @@ function isNoSubscription404Payload(data: unknown): boolean {
 /**
  * Получить текущую активную подписку пользователя.
  * GET /api/subscriptions/my — read-only, не создаёт подписку.
- * При отсутствии подписки backend: 404 + detail/message "no_subscription" → null (норма).
+ * При отсутствии подписки: 200 + null (или legacy 404 no_subscription) → null.
  */
 export async function fetchCurrentSubscription(): Promise<Subscription | null> {
   try {
-    const response = await apiClient.get<Subscription>('/api/subscriptions/my');
+    const response = await apiClient.get<Subscription | null>('/api/subscriptions/my');
+    if (response.data == null) return null;
     return response.data;
   } catch (err: any) {
     const status = err?.response?.status;

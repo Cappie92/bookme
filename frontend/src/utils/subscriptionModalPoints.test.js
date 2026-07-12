@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   buildSubscriptionPointsCalculatePayload,
+  computePeriodPriceBreakdown,
   formatPointsLabel,
   getMaxSubscriptionPointsToUse,
   isNoSubscriptionResponse,
@@ -64,7 +65,12 @@ describe('subscriptionModalPoints', () => {
     expect(resolveSubscriptionPointsBalance(null, 120)).toBe(120)
   })
 
-  it('treats 404 no_subscription as normal state', () => {
+  it('treats 200 null as no subscription', () => {
+    expect(isNoSubscriptionResponse(200, null)).toBe(true)
+    expect(isNoSubscriptionResponse(200, { id: 1 })).toBe(false)
+  })
+
+  it('treats legacy 404 no_subscription as normal state', () => {
     expect(isNoSubscriptionResponse(404, { detail: 'no_subscription' })).toBe(true)
     expect(isNoSubscriptionResponse(200, {})).toBe(false)
     expect(isNoSubscriptionResponse(500, { detail: 'error' })).toBe(false)
@@ -76,18 +82,42 @@ describe('subscriptionModalPoints', () => {
     expect(formatPointsLabel(2)).toBe('2 балла')
   })
 
-  it('period savings scenario: price_before 2100, used 300, final 1800', () => {
-    const priceBefore = 2100
-    const used = 300
-    const finalPrice = priceBefore - used
-    expect(finalPrice).toBe(1800)
-    expect(
-      getMaxSubscriptionPointsToUse({
-        pointsBalance: 481,
-        priceBeforePoints: priceBefore,
+  describe('computePeriodPriceBreakdown', () => {
+    it('Premium 3 months without points: 270 ₽ (8%)', () => {
+      const breakdown = computePeriodPriceBreakdown({
+        price1Month: 1160,
+        durationMonths: 3,
+        periodTotal: 3210,
+        savingsPercent: 7.76,
       })
-    ).toBe(481)
-    const savingsPercent = Math.round((760 * 3 - 2100) / (760 * 3) * 100)
-    expect(savingsPercent).toBe(8)
+      expect(breakdown.regularTotal).toBe(3480)
+      expect(breakdown.periodTotal).toBe(3210)
+      expect(breakdown.savingsAmount).toBe(270)
+      expect(breakdown.savingsPercent).toBe(8)
+      expect(breakdown.showPeriodDiscount).toBe(true)
+    })
+
+    it('with 481 points period savings stays 270 ₽ (8%)', () => {
+      const breakdown = computePeriodPriceBreakdown({
+        price1Month: 1160,
+        durationMonths: 3,
+        periodTotal: 3210,
+        savingsPercent: 8,
+      })
+      expect(breakdown.savingsAmount).toBe(270)
+      expect(breakdown.savingsPercent).toBe(8)
+      expect(breakdown.periodTotal - 481).toBe(2729)
+    })
+
+    it('1 month plan has no period discount row', () => {
+      const breakdown = computePeriodPriceBreakdown({
+        price1Month: 1160,
+        durationMonths: 1,
+        periodTotal: 1160,
+        savingsPercent: null,
+      })
+      expect(breakdown.regularTotal).toBe(1160)
+      expect(breakdown.showPeriodDiscount).toBe(false)
+    })
   })
 })

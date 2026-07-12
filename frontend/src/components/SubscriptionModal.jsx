@@ -7,6 +7,7 @@ import { getPlanDisplayName } from '../utils/subscriptionPlanNames'
 import { useModal } from '../hooks/useModal'
 import {
   buildSubscriptionPointsCalculatePayload,
+  computePeriodPriceBreakdown,
   formatPointsLabel,
   getMaxSubscriptionPointsToUse,
   resolveSubscriptionPointsBalance,
@@ -467,11 +468,25 @@ export default function SubscriptionModal({ isOpen, onClose, isFreePlan, current
 
   const formatPrice = (price) => Math.round(price).toLocaleString('ru-RU')
 
+  const currentCalculation = hasCurrentCalculation() ? calculation : null
+
+  const periodBreakdown = useMemo(() => {
+    if (!currentCalculation || !selectedPlan) return null
+    const periodTotal = Number(
+      currentCalculation.price_before_points ?? currentCalculation.total_price ?? 0
+    )
+    return computePeriodPriceBreakdown({
+      price1Month: selectedPlan.price_1month,
+      durationMonths: currentCalculation.duration_months ?? selectedDuration,
+      periodTotal,
+      savingsPercent: currentCalculation.savings_percent,
+    })
+  }, [currentCalculation, selectedPlan, selectedDuration])
+
   if (!isOpen) return null
 
   const isUpgrade =
     currentPlanDisplayOrder && selectedPlan && selectedPlan.display_order > currentPlanDisplayOrder
-  const currentCalculation = hasCurrentCalculation() ? calculation : null
   const isCalculationPending = Boolean(selectedPlan && selectedDuration && !currentCalculation)
 
   const { handleBackdropClick, handleMouseDown } = useModal(onClose)
@@ -649,20 +664,40 @@ export default function SubscriptionModal({ isOpen, onClose, isFreePlan, current
                     </div>
                   ) : currentCalculation ? (
                     <div className="space-y-2 text-sm">
-                      <div className="flex justify-between gap-4">
-                        <span className="text-gray-600">Стоимость</span>
-                        <span className="font-semibold text-gray-900" data-testid="tariff-total-price">
-                          {formatPrice(currentCalculation.total_price)} ₽
-                        </span>
-                      </div>
-                      {currentCalculation.savings_percent ? (
+                      {periodBreakdown ? (
+                        <>
+                          <div className="flex justify-between gap-4">
+                            <span className="text-gray-600">Стоимость</span>
+                            <span className="font-semibold text-gray-900" data-testid="tariff-regular-total">
+                              {formatPrice(periodBreakdown.regularTotal)} ₽
+                            </span>
+                          </div>
+                          {periodBreakdown.showPeriodDiscount ? (
+                            <div className="flex justify-between gap-4">
+                              <span className="text-gray-600">Скидка за период</span>
+                              <span
+                                className="font-semibold text-green-700"
+                                data-testid="tariff-period-savings"
+                              >
+                                −{formatPrice(periodBreakdown.savingsAmount)} ₽ ({periodBreakdown.savingsPercent}%)
+                              </span>
+                            </div>
+                          ) : null}
+                          <div className="flex justify-between gap-4">
+                            <span className="text-gray-600">Стоимость со скидкой</span>
+                            <span className="font-semibold text-gray-900" data-testid="tariff-period-total">
+                              {formatPrice(periodBreakdown.periodTotal)} ₽
+                            </span>
+                          </div>
+                        </>
+                      ) : (
                         <div className="flex justify-between gap-4">
-                          <span className="text-gray-600">Экономия за период</span>
-                          <span className="font-semibold text-gray-900" data-testid="tariff-savings-percent">
-                            {Math.round(currentCalculation.savings_percent)}%
+                          <span className="text-gray-600">Стоимость</span>
+                          <span className="font-semibold text-gray-900" data-testid="tariff-total-price">
+                            {formatPrice(currentCalculation.total_price)} ₽
                           </span>
                         </div>
-                      ) : null}
+                      )}
 
                       {showPointsBlock ? (
                         <div
@@ -705,23 +740,12 @@ export default function SubscriptionModal({ isOpen, onClose, isFreePlan, current
                       ) : null}
 
                       {pointsUsed > 0 ? (
-                        <>
-                          <div className="flex justify-between gap-4">
-                            <span className="text-gray-600">Стоимость до баллов</span>
-                            <span className="font-semibold text-gray-900" data-testid="tariff-price-before-points">
-                              {formatPrice(
-                                currentCalculation.price_before_points ?? currentCalculation.total_price
-                              )}{' '}
-                              ₽
-                            </span>
-                          </div>
-                          <div className="flex justify-between gap-4">
-                            <span className="text-gray-600">Бонусные баллы</span>
-                            <span className="font-semibold text-green-700" data-testid="tariff-points-used">
-                              −{formatPrice(pointsUsed)} ₽
-                            </span>
-                          </div>
-                        </>
+                        <div className="flex justify-between gap-4">
+                          <span className="text-gray-600">Бонусные баллы</span>
+                          <span className="font-semibold text-green-700" data-testid="tariff-points-used">
+                            −{formatPrice(pointsUsed)} ₽
+                          </span>
+                        </div>
                       ) : null}
 
                       <div className="flex justify-between gap-4 pt-1 border-t">

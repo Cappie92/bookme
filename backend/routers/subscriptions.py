@@ -69,17 +69,17 @@ logger = logging.getLogger(__name__)
 
 @router.get(
     "/my",
-    response_model=SubscriptionOut,
+    response_model=Optional[SubscriptionOut],
     summary="Текущая подписка пользователя",
     responses={
         400: {"description": "Только салоны и мастера могут иметь подписки"},
-        404: {"description": "Подписка не найдена"},
+        200: {"description": "Подписка пользователя или null при отсутствии активной подписки"},
     },
 )
 async def get_my_subscription(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
-):
+) -> Optional[SubscriptionOut]:
     """Получить текущую подписку пользователя (мастер/салон)."""
     
     # Определяем тип подписки на основе роли пользователя
@@ -106,10 +106,7 @@ async def get_my_subscription(
         db.rollback()
     
     if not subscription:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="no_subscription",
-        )
+        return None
 
     # DEV-only diagnostics for /my
     from settings import get_settings

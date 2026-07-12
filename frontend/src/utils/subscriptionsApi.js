@@ -3,6 +3,7 @@
  */
 
 import { API_BASE_URL } from './config'
+import { isNoSubscriptionResponse } from './subscriptionModalPoints'
 
 function authHeaders() {
   const token = localStorage.getItem('access_token')
@@ -13,7 +14,8 @@ function authHeaders() {
 }
 
 /**
- * GET /api/subscriptions/my — null при отсутствии подписки (404 no_subscription).
+ * GET /api/subscriptions/my — null при отсутствии подписки (200 + null).
+ * Обратная совместимость: legacy 404 no_subscription во время rolling deploy.
  * Другие ошибки пробрасываются.
  */
 export async function fetchCurrentSubscription() {
@@ -21,33 +23,23 @@ export async function fetchCurrentSubscription() {
     headers: authHeaders(),
   })
 
-  if (response.status === 404) {
-    let payload = null
-    try {
-      payload = await response.json()
-    } catch {
-      payload = null
-    }
-    if (
-      payload?.detail === 'no_subscription' ||
-      payload?.message === 'no_subscription' ||
-      (typeof payload?.detail === 'string' && payload.detail.includes('no_subscription')) ||
-      payload == null
-    ) {
-      return null
-    }
+  let payload = null
+  try {
+    payload = await response.json()
+  } catch {
+    payload = null
+  }
+
+  if (response.ok) {
+    if (payload == null) return null
+    return payload
+  }
+
+  if (isNoSubscriptionResponse(response.status, payload)) {
     return null
   }
 
-  if (!response.ok) {
-    const error = new Error(`HTTP error! status: ${response.status}`)
-    try {
-      error.response = { status: response.status, data: await response.json() }
-    } catch {
-      error.response = { status: response.status, data: null }
-    }
-    throw error
-  }
-
-  return response.json()
+  const error = new Error(`HTTP error! status: ${response.status}`)
+  error.response = { status: response.status, data: payload }
+  throw error
 }
