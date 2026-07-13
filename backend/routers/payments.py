@@ -48,6 +48,7 @@ from utils.subscription_payment_deposit import (
     build_subscription_deposit_description,
     resolve_subscription_deposit_amount,
 )
+from utils.robokassa_signature_audit import safe_log_payload_for_init
 from services.promo_engine import apply_promo_rewards_for_first_payment
 from services.subscription_points import (
     InsufficientSubscriptionPointsError,
@@ -268,6 +269,26 @@ async def init_subscription_payment(
             _domain_path(config.get("fail_url") or ""),
             _domain_path(config.get("result_url") or ""),
         )
+
+        # Расширенная диагностика подписи init (без секретов). Включать только при PAYMENT_URL_DEBUG=1.
+        if s.PAYMENT_URL_DEBUG.strip() == "1" and not robokassa_stub:
+            try:
+                payload = safe_log_payload_for_init(
+                    payment_id=payment.id,
+                    payment_public_id=payment.public_id,
+                    merchant_login=config.get("merchant_login") or "",
+                    amount=float(total_price),
+                    inv_id=str(invoice_id),
+                    is_test=bool(config.get("is_test")),
+                    credential_branch=str(config.get("credential_branch") or ""),
+                    password_1=str(config.get("password_1") or ""),
+                    result_url=str(config.get("result_url") or ""),
+                    success_url=str(success_url_full or ""),
+                    fail_url=str(fail_url_full or ""),
+                )
+                logger.info("payment_subscription_init_signature_debug %s", payload)
+            except Exception:
+                logger.exception("payment_subscription_init_signature_debug failed payment_id=%s", payment.id)
 
     return PaymentInitResponse(
         payment=payment.public_id,
