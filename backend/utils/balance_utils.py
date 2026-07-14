@@ -20,6 +20,11 @@ from models import (
     SubscriptionFreeze,
 )
 from constants import DURATION_DAYS
+from utils.subscription_billing_calc import (
+    compute_daily_charge_amount,
+    subscription_charge_day_index,
+    subscription_period_days,
+)
 
 
 # Функции конвертации удалены - теперь все работает напрямую с рублями
@@ -482,7 +487,7 @@ def process_daily_charge(db: Session, subscription_id: int, charge_date: date = 
             "freeze_id": active_freeze.id
         }
     
-    daily_rate = subscription.daily_rate
+    daily_rate = float(subscription.daily_rate or 0)
     user_balance = get_or_create_user_balance(db, subscription.user_id)
     balance_before = float(user_balance.balance or 0)
 
@@ -491,11 +496,38 @@ def process_daily_charge(db: Session, subscription_id: int, charge_date: date = 
     ).first()
     reserved_before = float(reservation.reserved_amount or 0) if reservation else 0.0
 
-    # charge_amount = int(round(daily_rate)) — целые рубли (совместимость со старыми подписками)
-    charge_amount = max(0, int(round(float(daily_rate or 0))))
+    period_days = subscription_period_days(subscription.start_date, subscription.end_date)
+    chargeable_total = int(round(float(subscription.price or 0)))
+    day_index = subscription_charge_day_index(subscription.start_date, charge_date)
+    charge_amount = compute_daily_charge_amount(chargeable_total, period_days, day_index)
+
+    if chargeable_total <= 0:
+        charge_record = DailySubscriptionCharge(
+            subscription_id=subscription_id,
+            charge_date=charge_date,
+            amount=0.0,
+            daily_rate=daily_rate,
+            balance_before=balance_before,
+            balance_after=balance_before,
+            status=DailyChargeStatus.SUCCESS,
+        )
+        db.add(charge_record)
+        db.commit()
+        return {
+            "success": True,
+            "daily_rate": daily_rate,
+            "charge_amount": 0,
+            "balance_before": balance_before,
+            "balance_after": balance_before,
+            "reserved_before": reserved_before,
+            "reserved_after": reserved_before,
+            "available_after": get_user_available_balance(db, subscription.user_id, do_commit=False),
+            "charge_id": charge_record.id,
+            "zero_chargeable": True,
+        }
 
     if charge_amount <= 0:
-        return {"success": False, "error": "daily_rate is zero"}
+        return {"success": False, "error": "charge_amount is zero for positive chargeable subscription"}
 
     # Списание идёт из резерва подписки; available (balance − reserved) не трогаем отдельно.
     if reserved_before > 0:
@@ -709,9 +741,16 @@ def get_subscription_status(db: Session, user_id: int, subscription_type: str) -
             "limits": plan_limits
         }
     
-    # SSoT: subscription.daily_rate. Для days/can_continue используем округлённый charge (целые рубли)
+    # SSoT: subscription.daily_rate — средняя ставка; фактическое списание — по распределению price/period.
     daily_rate = float(getattr(subscription, "daily_rate", 0.0) or 0.0)
-    charge_per_day = max(0, int(round(daily_rate)))
+    chargeable_total = int(round(float(subscription.price or 0)))
+    period_days = 0
+    if subscription.start_date and subscription.end_date:
+        period_days = max(1, (subscription.end_date.date() - subscription.start_date.date()).days)
+    charge_per_day = 0
+    if chargeable_total > 0 and period_days > 0:
+        from utils.subscription_billing_calc import compute_daily_charge_amount
+        charge_per_day = compute_daily_charge_amount(chargeable_total, period_days, 0)
     days_remaining = int(user_balance.balance // charge_per_day) if charge_per_day > 0 else 0
     days_remaining = max(0, days_remaining)
     
@@ -727,6 +766,8 @@ def get_subscription_status(db: Session, user_id: int, subscription_type: str) -
     is_frozen = active_freeze is not None
     
     if is_always_free:
+        can_continue = not is_frozen
+    elif chargeable_total <= 0:
         can_continue = not is_frozen
     else:
         can_continue = not is_frozen and user_balance.balance >= charge_per_day

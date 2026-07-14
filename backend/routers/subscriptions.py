@@ -36,6 +36,7 @@ from schemas import (
 )
 from auth import get_current_user
 from constants import duration_months_to_days
+from utils.subscription_billing_calc import resolve_subscription_apply_billing
 from utils.subscription_features import get_effective_subscription
 from utils.balance_utils import (
     calculate_subscription_daily_rate,
@@ -1356,9 +1357,13 @@ async def apply_upgrade_free(
                 pass
 
             # создаем новую подписку немедленно (30/90/180/360 дней)
-            total_price_full = float(snapshot.total_price)
             total_days = max(1, duration_months_to_days(int(snapshot.duration_months)))
-            daily_rate = int(math.ceil(total_price_full / total_days)) if total_days else 0
+            apply_billing = resolve_subscription_apply_billing(
+                snapshot,
+                duration_days=total_days,
+            )
+            chargeable_value = float(apply_billing["chargeable_value"])
+            daily_rate = float(apply_billing["daily_rate"])
 
             new_subscription = Subscription(
                 user_id=current_user.id,
@@ -1366,7 +1371,7 @@ async def apply_upgrade_free(
                 status=SubscriptionStatus.ACTIVE,
                 start_date=now,
                 end_date=now + timedelta(days=total_days),
-                price=total_price_full,
+                price=chargeable_value,
                 daily_rate=daily_rate,
                 payment_period=None,
                 is_active=True,
@@ -1399,7 +1404,7 @@ async def apply_upgrade_free(
                     snapshot.id,
                     current_user.id,
                     getattr(current_subscription, "id", None),
-                    float(total_price_full),
+                    float(chargeable_value),
                     new_subscription.id,
                 )
 
@@ -1515,9 +1520,13 @@ async def apply_upgrade_balance(
                 db.add(user_balance)
                 db.flush()
 
-            total_price_full = float(snapshot.total_price)
             total_days = max(1, duration_months_to_days(int(snapshot.duration_months)))
-            daily_rate = int(math.ceil(total_price_full / total_days)) if total_days else 0
+            apply_billing = resolve_subscription_apply_billing(
+                snapshot,
+                duration_days=total_days,
+            )
+            chargeable_value = float(apply_billing["chargeable_value"])
+            daily_rate = float(apply_billing["daily_rate"])
 
             current_subscription = get_effective_subscription(
                 db, current_user.id, subscription_type, now_utc=now
@@ -1548,7 +1557,7 @@ async def apply_upgrade_balance(
                 status=new_status,
                 start_date=start_date,
                 end_date=end_date,
-                price=total_price_full,
+                price=chargeable_value,
                 daily_rate=daily_rate,
                 payment_period=payload.get("payment_period") or "month",
                 is_active=new_is_active,
@@ -1558,16 +1567,16 @@ async def apply_upgrade_balance(
             db.add(new_subscription)
             db.flush()
 
-            package_purchase = abs(final_price - total_price_full) < 0.01
+            package_purchase = abs(final_price - chargeable_value) < 0.01
             if package_purchase:
                 if not move_available_to_reserve(
-                    db, new_subscription, total_price_full, do_commit=False
+                    db, new_subscription, chargeable_value, do_commit=False
                 ):
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
                         detail={
                             "message": "Недостаточно средств на балансе для резервирования подписки",
-                            "required": total_price_full,
+                            "required": chargeable_value,
                             "available": float(
                                 get_user_available_balance(db, current_user.id, do_commit=False)
                             ),
@@ -1585,7 +1594,7 @@ async def apply_upgrade_balance(
                     SubscriptionReservation(
                         user_id=current_user.id,
                         subscription_id=new_subscription.id,
-                        reserved_amount=total_price_full,
+                        reserved_amount=chargeable_value,
                     )
                 )
                 db.flush()

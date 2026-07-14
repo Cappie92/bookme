@@ -210,15 +210,14 @@ def test_resolve_deposit_with_partial_points(client, db: Session, robokassa_stub
     db.expire_all()
     payment = db.query(Payment).filter(Payment.id == payment_id).first()
 
-    assert _deposit_total(db, user_id) == 3210
-    assert payment.payment_metadata.get("subscription_deposit_amount") == 3210
+    assert _deposit_total(db, user_id) == 2729
+    assert payment.payment_metadata.get("subscription_deposit_amount") == 2729
     assert payment.payment_metadata.get("subscription_points_subsidy_rub") == 481
 
     sub = db.query(Subscription).filter(Subscription.id == payment.subscription_id).first()
     balance = db.query(UserBalance).filter(UserBalance.user_id == user_id).first()
-    assert float(sub.price) == 3210
-    assert int(sub.daily_rate) == 36
-    assert int(float(balance.balance) // int(sub.daily_rate)) >= 89
+    assert float(sub.price) == 2729
+    assert abs(float(sub.daily_rate) - (2729 / 90)) < 1e-6
     days = compute_subscription_days_remaining(
         balance_rub=float(balance.balance),
         daily_rate=float(sub.daily_rate),
@@ -226,10 +225,58 @@ def test_resolve_deposit_with_partial_points(client, db: Session, robokassa_stub
         end_date=sub.end_date,
         price=float(sub.price),
     )
-    assert days >= 89
+    assert days >= 87
 
 
-def test_duplicate_result_single_deposit_and_debit(client, db: Session, robokassa_stub):
+def test_resolve_deposit_with_partial_points_daily_rate_matches_chargeable(client, db: Session, robokassa_stub):
+    """deposit=2729; daily_rate = 2729/90 без ceil."""
+    user, master_id = _setup_master(db, phone="+79006661007", email="dep-rate@test.com")
+    plan_id = _create_premium_plan(db)
+    create_subscription_points_credit(
+        db,
+        master_id,
+        481,
+        SubscriptionPointsSourceType.MANUAL_ADJUSTMENT,
+        7,
+        "test",
+    )
+    db.commit()
+    headers = _auth(client, user)
+
+    calc = client.post(
+        "/api/subscriptions/calculate",
+        headers=headers,
+        json={
+            "plan_id": plan_id,
+            "duration_months": 3,
+            "upgrade_type": "immediate",
+            "subscription_points_to_use": 481,
+        },
+    ).json()
+    init = client.post(
+        "/api/payments/subscription/init",
+        headers=headers,
+        json={
+            "plan_id": plan_id,
+            "duration_months": 3,
+            "payment_period": "month",
+            "upgrade_type": "immediate",
+            "calculation_id": calc["calculation_id"],
+        },
+    ).json()
+    payment = db.query(Payment).filter(Payment.public_id == init["payment"]).first()
+    payment_id = payment.id
+    _robokassa_result(client, db, payment_id)
+    db.expire_all()
+
+    payment = db.query(Payment).filter(Payment.id == payment_id).first()
+    sub = db.query(Subscription).filter(Subscription.id == payment.subscription_id).first()
+    assert float(sub.price) == 2729
+    assert abs(float(sub.daily_rate) - (2729 / 90)) < 1e-6
+    assert _deposit_total(db, user.id) == 2729
+
+
+def test_duplicate_result_does_not_change_daily_rate(client, db: Session, robokassa_stub):
     user, master_id = _setup_master(db, phone="+79006661003", email="dep3@test.com")
     plan_id = _create_premium_plan(db)
     create_subscription_points_credit(
@@ -269,10 +316,18 @@ def test_duplicate_result_single_deposit_and_debit(client, db: Session, robokass
     user_id = user.id
 
     _robokassa_result(client, db, payment_id)
+    db.expire_all()
+    payment = db.query(Payment).filter(Payment.id == payment_id).first()
+    sub = db.query(Subscription).filter(Subscription.id == payment.subscription_id).first()
+    rate_after_first = float(sub.daily_rate)
+
     _robokassa_result(client, db, payment_id)
     db.expire_all()
 
-    assert _deposit_total(db, user_id) == 3210
+    assert _deposit_total(db, user_id) == 2729
+    payment = db.query(Payment).filter(Payment.id == payment_id).first()
+    sub = db.query(Subscription).filter(Subscription.id == payment.subscription_id).first()
+    assert float(sub.daily_rate) == rate_after_first
     debits = (
         db.query(SubscriptionPointsLedger)
         .filter(
@@ -334,7 +389,7 @@ def test_phase2_failure_keeps_deposit_without_points_debit(client, db: Session, 
 
     assert payment.status == "paid"
     assert payment.subscription_apply_status == "failed"
-    assert _deposit_total(db, user_id) == 3210
+    assert _deposit_total(db, user_id) == 2729
     assert get_subscription_points_balance(db, master_id) == 481
     assert (
         db.query(SubscriptionPointsLedger)

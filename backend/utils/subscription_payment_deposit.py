@@ -29,7 +29,7 @@ def resolve_subscription_deposit_amount(
     Сумма внутреннего DEPOSIT для subscription payment.
 
     С snapshot (через доверенный calculation_id в metadata):
-      deposit_amount = snapshot.price_before_points (fallback: total_price)
+      deposit_amount = snapshot.final_price (= package_value - points_spent)
 
     Legacy без calculation_id:
       deposit_amount = payment.amount
@@ -72,7 +72,19 @@ def resolve_subscription_deposit_amount(
             f"price_before_points ({price_before}) < payment.amount ({amount_paid})"
         )
 
-    return price_before, points_used, snapshot
+    chargeable_amount = float(getattr(snapshot, "final_price", 0) or 0)
+    if chargeable_amount + MONEY_TOLERANCE < amount_paid:
+        raise SubscriptionDepositValidationError(
+            f"snapshot.final_price ({chargeable_amount}) < payment.amount ({amount_paid})"
+        )
+    expected_chargeable = price_before - points_used
+    if abs(expected_chargeable - chargeable_amount) > MONEY_TOLERANCE:
+        raise SubscriptionDepositValidationError(
+            f"chargeable mismatch: price_before_points ({price_before}) - points ({points_used}) "
+            f"!= final_price ({chargeable_amount})"
+        )
+
+    return chargeable_amount, points_used, snapshot
 
 
 def build_subscription_deposit_description(payment_id: int, points_used: int) -> str:

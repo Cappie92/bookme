@@ -6,6 +6,10 @@ from decimal import Decimal, ROUND_HALF_UP
 from typing import Any, Dict, List, Optional
 
 from constants import DURATION_DAYS, duration_months_to_days
+from utils.subscription_billing_calc import (
+    subscription_exclusive_end,
+    to_display_period,
+)
 from models import (
     Master,
     Payment,
@@ -195,6 +199,10 @@ def _resolve_purchase_duration_months(
     return None
 
 
+def _package_matches_plan_total(plan_total: Decimal, value: Decimal) -> bool:
+    return plan_total > 0 and abs(value - plan_total) <= Decimal("1")
+
+
 def _resolve_package_value_dec(
     db,
     payment: Optional[Payment],
@@ -202,12 +210,42 @@ def _resolve_package_value_dec(
     subscription: Optional[Subscription],
     *,
     purchase_duration_months: Optional[int] = None,
+    points_spent: int = 0,
 ) -> Decimal:
+    """
+    Полная стоимость пакета до списания баллов.
+
+    Приоритет:
+    1. snapshot.price_before_points
+    2. snapshot.total_price + points (если total уже после баллов)
+    3. total пакета из тарифа для duration_months
+    4. subscription.price — только если совпадает с plan total
+    5. payment.amount + points_spent (legacy)
+    """
+    points_dec = _decimal(points_spent)
+
     if snapshot is not None:
         pbp = getattr(snapshot, "price_before_points", None)
         if pbp is not None:
             return _decimal(pbp)
-        return _decimal(getattr(snapshot, "total_price", None))
+
+        snapshot_points = int(getattr(snapshot, "subscription_points_used", 0) or 0)
+        total = _decimal(getattr(snapshot, "total_price", None))
+        if snapshot_points > 0:
+            return total + _decimal(snapshot_points)
+        if points_spent > 0 and total > 0:
+            candidate = total + points_dec
+            if purchase_duration_months in (1, 3, 6, 12) and payment is not None and payment.plan_id:
+                plan = payment.plan or db.query(SubscriptionPlan).filter(
+                    SubscriptionPlan.id == payment.plan_id
+                ).first()
+                if plan is not None:
+                    plan_total = _plan_package_total_dec(plan, int(purchase_duration_months))
+                    if _package_matches_plan_total(plan_total, candidate):
+                        return plan_total
+            return candidate
+        if total > 0:
+            return total
 
     if purchase_duration_months in (1, 3, 6, 12) and payment is not None and payment.plan_id:
         plan = payment.plan
@@ -222,14 +260,27 @@ def _resolve_package_value_dec(
             if plan_total > 0:
                 if subscription is not None:
                     sub_price = _decimal(subscription.price)
-                    if abs(sub_price - plan_total) <= Decimal("1"):
+                    if _package_matches_plan_total(plan_total, sub_price):
                         return sub_price
                 return plan_total
 
     if subscription is not None:
-        return _decimal(subscription.price)
+        sub_price = _decimal(subscription.price)
+        if purchase_duration_months in (1, 3, 6, 12) and payment is not None and payment.plan_id:
+            plan = payment.plan or db.query(SubscriptionPlan).filter(
+                SubscriptionPlan.id == payment.plan_id
+            ).first()
+            if plan is not None:
+                plan_total = _plan_package_total_dec(plan, int(purchase_duration_months))
+                if _package_matches_plan_total(plan_total, sub_price):
+                    return sub_price
+        if purchase_duration_months == 1 or purchase_duration_months is None:
+            return sub_price
+
     if payment is not None:
-        return _decimal(payment.amount)
+        paid = _decimal(payment.amount)
+        if paid > 0 or points_spent > 0:
+            return paid + points_dec
     return Decimal("0")
 
 
@@ -368,11 +419,12 @@ def reconstruct_sequential_subscription_periods(items: List[Dict[str, Any]]) -> 
             start = chain_end
         if start is None:
             continue
-        end = start + timedelta(days=duration_days)
-        chain_end = end
+        end_exclusive = subscription_exclusive_end(start, duration_days)
+        chain_end = end_exclusive
         payment_id = item.get("payment_id")
         if payment_id is not None:
-            period_by_payment_id[int(payment_id)] = (start, end)
+            display_start, display_end = to_display_period(start, end_exclusive)
+            period_by_payment_id[int(payment_id)] = (display_start, display_end)
 
     result: List[Dict[str, Any]] = []
     for item in items:
@@ -408,12 +460,22 @@ def resolve_subscription_payment_billing(
         subscription = payment.subscription
 
     purchase_duration_months = _resolve_purchase_duration_months(payment, snapshot)
+
+    master_id = _resolve_master_id(db, payment)
+    points_spent, points_earned = _resolve_points_movements(
+        db,
+        payment,
+        snapshot,
+        master_id=master_id,
+    )
+
     package_value_dec = _resolve_package_value_dec(
         db,
         payment,
         snapshot,
         subscription,
         purchase_duration_months=purchase_duration_months,
+        points_spent=points_spent,
     )
     duration_months = _resolve_duration_months(
         db,
@@ -423,13 +485,6 @@ def resolve_subscription_payment_billing(
         package_value_dec=package_value_dec,
     )
 
-    master_id = _resolve_master_id(db, payment)
-    points_spent, points_earned = _resolve_points_movements(
-        db,
-        payment,
-        snapshot,
-        master_id=master_id,
-    )
     points_used = points_spent
 
     package_value = float(package_value_dec or Decimal("0"))
@@ -453,6 +508,8 @@ def resolve_subscription_payment_billing(
 
     subscription_start_date = subscription.start_date if subscription else None
     subscription_end_date = subscription.end_date if subscription else None
+    if subscription_start_date and subscription_end_date:
+        _, subscription_end_date = to_display_period(subscription_start_date, subscription_end_date)
 
     status = payment.status if payment is not None else "unknown"
     subscription_apply_status = (

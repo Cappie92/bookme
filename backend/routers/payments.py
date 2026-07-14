@@ -32,6 +32,9 @@ from schemas import (
 )
 from auth import get_current_user, get_current_active_user
 from constants import duration_months_to_days
+from utils.subscription_billing_calc import (
+    resolve_subscription_apply_billing,
+)
 from utils.robokassa import (
     generate_payment_url,
     generate_result_signature,
@@ -666,9 +669,12 @@ async def robokassa_result(
         )
         _duration_days = max(1, duration_months_to_days(_dm))
 
-        import math
-        total_price_full = float(snapshot.total_price)
-        daily_rate = int(math.ceil(total_price_full / _duration_days)) if _duration_days else 0
+        apply_billing = resolve_subscription_apply_billing(
+            snapshot,
+            duration_days=_duration_days,
+        )
+        chargeable_value = float(apply_billing["chargeable_value"])
+        daily_rate = float(apply_billing["daily_rate"])
 
         new_subscription = Subscription(
             user_id=payment.user_id,
@@ -676,7 +682,7 @@ async def robokassa_result(
             status=new_status,
             start_date=start_date,
             end_date=end_date,
-            price=total_price_full,
+            price=chargeable_value,
             daily_rate=daily_rate,
             payment_period=payment.subscription_period,
             is_active=new_is_active,

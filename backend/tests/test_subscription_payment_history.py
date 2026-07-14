@@ -32,6 +32,7 @@ from models import (
     User,
     UserRole,
 )
+from constants import duration_months_to_days
 from utils.payment_public_id import persist_new_robokassa_payment
 from services.promo_engine import create_subscription_points_credit
 from utils.subscription_payment_display import (
@@ -95,7 +96,18 @@ def _auth(client, user):
     return {"Authorization": f"Bearer {resp.json()['access_token']}"}
 
 
-def _create_snapshot(db, user_id, plan_id, *, duration_months=3, total_price=3210.0, final_price=3210.0, points_used=0):
+def _create_snapshot(
+    db,
+    user_id,
+    plan_id,
+    *,
+    duration_months=3,
+    total_price=3210.0,
+    final_price=3210.0,
+    points_used=0,
+    price_before_points=None,
+):
+    pbp = price_before_points if price_before_points is not None else total_price
     snapshot = SubscriptionPriceSnapshot(
         user_id=user_id,
         plan_id=plan_id,
@@ -110,7 +122,7 @@ def _create_snapshot(db, user_id, plan_id, *, duration_months=3, total_price=321
         reserved_balance=0.0,
         credit_amount=0.0,
         final_price=final_price,
-        price_before_points=total_price,
+        price_before_points=pbp,
         subscription_points_used=points_used,
         upgrade_type="immediate",
         expires_at=datetime.utcnow() + timedelta(minutes=20),
@@ -462,13 +474,59 @@ def test_legacy_wrong_subscription_price_uses_plan_total_not_monthly_price(db):
         plan.id,
         None,
         sub,
+        amount=3210.0,
         metadata={"selected_duration": 3, "plan_display_name": "Premium"},
+    )
+
+    billing = resolve_subscription_payment_billing(db, payment=payment)
+
+    assert billing["duration_months"] == 3
+    assert billing["package_value"] == 3210.0
+    assert billing["monthly_price"] == 1070.0
+
+
+def test_legacy_payment_amount_3210_with_wrong_subscription_price_1160(db):
+    """386,67 ₽/мес = 1160/3 — regression: package_value must be 3210 from payment.amount."""
+    user = _create_master_user(db, phone="+79001119902", email="legacy-amount@test.com")
+    plan = _create_plan(db)
+    sub = _create_subscription(db, user.id, plan.id, price=1160.0, duration_days=90)
+    payment = _create_payment(
+        db,
+        user.id,
+        plan.id,
+        None,
+        sub,
+        amount=3210.0,
+        metadata={"selected_duration": 3},
     )
 
     billing = resolve_subscription_payment_billing(db, payment=payment)
 
     assert billing["package_value"] == 3210.0
     assert billing["monthly_price"] == 1070.0
+
+
+def test_partial_points_2729_plus_481_resolves_package_3210(db):
+    user = _create_master_user(db, phone="+79001119903", email="partial-points@test.com")
+    plan = _create_plan(db)
+    snapshot = _create_snapshot(
+        db,
+        user.id,
+        plan.id,
+        total_price=2729.0,
+        final_price=2729.0,
+        points_used=481,
+        price_before_points=3210.0,
+    )
+    sub = _create_subscription(db, user.id, plan.id, price=3210.0)
+    payment = _create_payment(db, user.id, plan.id, snapshot, sub, amount=2729.0)
+
+    billing = resolve_subscription_payment_billing(db, payment=payment)
+
+    assert billing["package_value"] == 3210.0
+    assert billing["monthly_price"] == 1070.0
+    assert billing["amount_paid"] == 2729.0
+    assert billing["points_spent"] == 481
 
 
 def test_points_spent_only_from_snapshot(db):
@@ -695,8 +753,14 @@ def test_reconstruct_four_sequential_one_month_periods(db):
 
     assert len(successful) == 4
     for index in range(3):
-        assert successful[index]["subscription_end_date"] == successful[index + 1]["subscription_start_date"]
-    assert (successful[0]["subscription_end_date"] - successful[0]["subscription_start_date"]).days == 30
+        prev_end = successful[index]["subscription_end_date"]
+        next_start = successful[index + 1]["subscription_start_date"]
+        assert next_start - prev_end == timedelta(days=1)
+    period_days = duration_months_to_days(1)
+    for item in successful:
+        assert (
+            item["subscription_end_date"] - item["subscription_start_date"]
+        ).days == period_days - 1
 
 
 def test_three_month_purchase_after_active_starts_at_previous_end(db):
@@ -726,8 +790,14 @@ def test_three_month_purchase_after_active_starts_at_previous_end(db):
     by_payment = {item["payment_id"]: item for item in items}
 
     assert by_payment[pay1.id]["subscription_start_date"] == base
-    assert by_payment[pay2.id]["subscription_start_date"] == by_payment[pay1.id]["subscription_end_date"]
-    assert (by_payment[pay2.id]["subscription_end_date"] - by_payment[pay2.id]["subscription_start_date"]).days == 90
+    assert (
+        by_payment[pay2.id]["subscription_start_date"]
+        - by_payment[pay1.id]["subscription_end_date"]
+    ) == timedelta(days=1)
+    assert (
+        by_payment[pay2.id]["subscription_end_date"]
+        - by_payment[pay2.id]["subscription_start_date"]
+    ).days == duration_months_to_days(3) - 1
 
 
 def test_history_api_includes_points_and_period_fields(client, db):
