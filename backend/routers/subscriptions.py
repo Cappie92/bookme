@@ -135,6 +135,7 @@ async def get_my_subscription(
     plan_display_name = None
     plan_features = {}
     plan_limits = {}
+    plan = None
     if subscription.plan_id:
         from models import SubscriptionPlan
         plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.id == subscription.plan_id).first()
@@ -193,6 +194,43 @@ async def get_my_subscription(
             plan_name,
         )
 
+    billing_fields = {
+        "duration_months": None,
+        "package_value": None,
+        "monthly_price": None,
+        "amount_paid": None,
+        "points_used": None,
+    }
+    if plan_name and plan_name != "Free":
+        from models import Payment as PaymentModel
+        from utils.subscription_payment_display import resolve_subscription_payment_billing
+
+        paid_payment = (
+            db.query(PaymentModel)
+            .filter(
+                PaymentModel.user_id == current_user.id,
+                PaymentModel.payment_type == "subscription",
+                PaymentModel.subscription_id == subscription.id,
+                PaymentModel.status == "paid",
+            )
+            .order_by(PaymentModel.paid_at.desc().nullslast(), PaymentModel.id.desc())
+            .first()
+        )
+        plan_obj = plan if subscription.plan_id else None
+        billing = resolve_subscription_payment_billing(
+            db,
+            payment=paid_payment,
+            subscription=subscription,
+            plan=plan_obj,
+        )
+        billing_fields = {
+            "duration_months": billing["duration_months"],
+            "package_value": billing["package_value"],
+            "monthly_price": billing["monthly_price"],
+            "amount_paid": billing["amount_paid"],
+            "points_used": billing["points_used"],
+        }
+
     # Преобразуем объект Subscription в формат SubscriptionOut
     return {
         "id": subscription.id,
@@ -215,6 +253,7 @@ async def get_my_subscription(
         "plan_display_name": plan_display_name,
         "features": plan_features,
         "limits": plan_limits,
+        **billing_fields,
     }
 
 

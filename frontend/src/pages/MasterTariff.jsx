@@ -8,7 +8,6 @@ import {
   Cog6ToothIcon,
   CreditCardIcon,
   InboxIcon,
-  LockClosedIcon,
   PresentationChartLineIcon,
   ScissorsIcon,
   XMarkIcon,
@@ -25,13 +24,21 @@ import {
 } from '../utils/subscriptionPointsHistory'
 import { Button } from '../components/ui'
 import SubscriptionModal from '../components/SubscriptionModal'
-import Tooltip from '../components/Tooltip'
 import {
   getMasterTariffComparisonRows,
   splitTariffComparisonColumns,
 } from '../utils/subscriptionFeatures'
 import { getPlanDisplayName } from '../utils/subscriptionPlanNames'
 import { formatMoney } from '../utils/formatMoney'
+import {
+  MASTER_TARIFF_HISTORY_SECTION_ID,
+  MASTER_TARIFF_NAV_ITEMS,
+  formatHistoryDate,
+  formatPaymentStatusLabel,
+  formatPricePerMonth,
+  resolveSubscriptionCostDisplay,
+  splitPaymentHistory,
+} from '../utils/subscriptionBilling'
 import {
   PROMO_FIRST_PAYMENT_ONLY_MESSAGE,
   applyMasterPromoCode,
@@ -247,6 +254,9 @@ export default function MasterTariff({ canCustomizeDomain, onRefreshSubscription
   const [promoMessage, setPromoMessage] = useState('')
   const [promoError, setPromoError] = useState('')
   const [promoLoading, setPromoLoading] = useState(false)
+  const [paymentHistory, setPaymentHistory] = useState([])
+  const [paymentHistoryLoading, setPaymentHistoryLoading] = useState(false)
+  const [paymentHistoryError, setPaymentHistoryError] = useState('')
   
   const refreshSubscriptionFeatures = onRefreshSubscriptionFeatures || (() => {})
 
@@ -257,8 +267,26 @@ export default function MasterTariff({ canCustomizeDomain, onRefreshSubscription
   }, [])
 
   useEffect(() => {
-    // Variant A: не показываем "кошелек/баланс" пользователю
+    if (activeSection === MASTER_TARIFF_HISTORY_SECTION_ID) {
+      loadPaymentHistory()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeSection])
+
+  const loadPaymentHistory = async () => {
+    setPaymentHistoryLoading(true)
+    setPaymentHistoryError('')
+    try {
+      const data = await apiGet('/api/payments/subscription/history')
+      setPaymentHistory(Array.isArray(data) ? data : [])
+    } catch (error) {
+      console.error('Ошибка загрузки истории оплат:', error)
+      setPaymentHistory([])
+      setPaymentHistoryError('Не удалось загрузить историю оплат')
+    } finally {
+      setPaymentHistoryLoading(false)
+    }
+  }
 
   // Variant A: loadPaymentData удален (кошелек/баланс скрыт из UI)
 
@@ -582,6 +610,8 @@ export default function MasterTariff({ canCustomizeDomain, onRefreshSubscription
   const tariffComparisonRows = getMasterTariffComparisonRows(planData, isAlwaysFree)
   const { left: tariffLeftCol, right: tariffRightCol } = splitTariffComparisonColumns(tariffComparisonRows)
   const canFreeze = freezeInfo?.can_freeze && !isFreePlan
+  const subscriptionCostDisplay = resolveSubscriptionCostDisplay(subscriptionData)
+  const { successful: successfulPayments, other: otherPayments } = splitPaymentHistory(paymentHistory)
 
   return (
     <div>
@@ -589,53 +619,21 @@ export default function MasterTariff({ canCustomizeDomain, onRefreshSubscription
           
           {/* Навигация по разделам */}
           <div className="flex space-x-1 mb-8">
-            <button
-              onClick={() => setActiveSection('subscription')}
-              className={`flex-1 py-3 px-4 rounded-md text-sm font-medium transition-colors ${
-                activeSection === 'subscription'
-                  ? 'bg-[#4CAF50] text-white shadow-sm'
-                  : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
-              }`}
-            >
-              Моя подписка
-            </button>
-            <button
-              onClick={() => setActiveSection('payment')}
-              className={`flex-1 py-3 px-4 rounded-md text-sm font-medium transition-colors ${
-                activeSection === 'payment'
-                  ? 'bg-[#4CAF50] text-white shadow-sm'
-                  : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
-              }`}
-            >
-              Оплата
-            </button>
-            {!canCustomizeDomain ? (
-              <div className="flex-1">
-                <div className="relative w-full">
-                  <Tooltip text="Доступно на тарифах Basic, Pro и Premium. Купите подписку для доступа к этой функции." position="top">
-                    <button
-                      type="button"
-                      onClick={() => setShowSubscriptionModal(true)}
-                      className="inline-flex w-full items-center justify-center gap-2 py-3 px-4 rounded-md text-sm font-medium transition-colors text-gray-400 bg-gray-100 hover:bg-gray-200"
-                    >
-                      Собственный сайт
-                      <LockClosedIcon className="h-4 w-4 shrink-0 text-gray-400" strokeWidth={2} aria-hidden />
-                    </button>
-                  </Tooltip>
-                </div>
-              </div>
-            ) : (
+            {MASTER_TARIFF_NAV_ITEMS.map((item) => (
               <button
-                onClick={() => setActiveSection('website')}
+                key={item.id}
+                type="button"
+                onClick={() => setActiveSection(item.id)}
+                data-testid={`tariff-section-${item.id}`}
                 className={`flex-1 py-3 px-4 rounded-md text-sm font-medium transition-colors ${
-                  activeSection === 'website'
+                  activeSection === item.id
                     ? 'bg-[#4CAF50] text-white shadow-sm'
                     : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
                 }`}
               >
-                Собственный сайт
+                {item.label}
               </button>
-            )}
+            ))}
           </div>
 
           {/* Раздел: Моя подписка */}
@@ -680,12 +678,24 @@ export default function MasterTariff({ canCustomizeDomain, onRefreshSubscription
                       </span>
                   </div>
                   
-                  <div className="flex justify-between items-center p-4 bg-gray-50 rounded-lg">
-                    <span className="text-gray-600">Стоимость</span>
-                      <span className="font-medium">
-                        {isFreePlan ? 'Бесплатно' : subscriptionData?.price ? `${subscriptionData.price} ₽/мес` : '—'}
+                  <div className="flex justify-between items-start p-4 bg-gray-50 rounded-lg gap-4">
+                    <span className="text-gray-600 shrink-0">Стоимость</span>
+                    <div className="text-right">
+                      <span className="font-medium" data-testid="subscription-monthly-price">
+                        {isFreePlan ? 'Бесплатно' : subscriptionCostDisplay.monthlyLabel}
                       </span>
+                      {!isFreePlan && subscriptionCostDisplay.packageSummary ? (
+                        <div className="text-sm text-gray-500 mt-1" data-testid="subscription-package-summary">
+                          {subscriptionCostDisplay.packageSummary}
+                        </div>
+                      ) : null}
+                      {!isFreePlan && subscriptionCostDisplay.paymentBreakdown ? (
+                        <div className="text-sm text-gray-500 mt-1" data-testid="subscription-payment-breakdown">
+                          {subscriptionCostDisplay.paymentBreakdown}
+                        </div>
+                      ) : null}
                     </div>
+                  </div>
                     
                     {/* Кнопка покупки/продления подписки */}
                     <button
@@ -990,87 +1000,125 @@ export default function MasterTariff({ canCustomizeDomain, onRefreshSubscription
             </div>
           )}
 
-          {/* Раздел: Собственный сайт */}
-          {activeSection === 'website' && (
-            <div className="bg-white rounded-lg shadow-sm border p-2">
-              {!canCustomizeDomain && (
-                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6">
-                  <p className="text-yellow-800">
-                    Для доступа к функции "Собственный сайт" требуется тариф Basic, Pro или Premium. 
-                    <button
-                      onClick={() => setShowSubscriptionModal(true)}
-                      className="underline ml-1 font-medium"
-                    >
-                      Купить подписку
-                    </button>
-                  </p>
+          {/* Раздел: История оплат */}
+          {activeSection === MASTER_TARIFF_HISTORY_SECTION_ID && (
+            <div className="bg-white rounded-lg shadow-sm border p-4 sm:p-6" data-testid="payment-history-section">
+              <h2 className="text-xl font-semibold text-gray-900 mb-6">История оплат</h2>
+
+              {paymentHistoryLoading ? (
+                <div className="text-sm text-gray-600">Загрузка истории…</div>
+              ) : paymentHistoryError ? (
+                <div className="rounded-lg bg-red-50 border border-red-200 p-4 text-sm text-red-700">
+                  {paymentHistoryError}
+                </div>
+              ) : successfulPayments.length === 0 && otherPayments.length === 0 ? (
+                <div
+                  className="rounded-lg bg-gray-50 border border-gray-200 p-6 text-sm text-gray-600 text-center"
+                  data-testid="payment-history-empty"
+                >
+                  История оплат пока пуста
+                </div>
+              ) : (
+                <div className="space-y-8">
+                  {successfulPayments.length > 0 ? (
+                    <div className="space-y-4" data-testid="payment-history-successful">
+                      {successfulPayments.map((item) => (
+                        <div
+                          key={item.public_id || item.payment_id}
+                          className="rounded-lg border border-gray-200 p-4"
+                          data-testid={`payment-history-item-${item.public_id || item.payment_id}`}
+                        >
+                          <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 mb-4">
+                            <div>
+                              <div className="font-medium text-gray-900">
+                                {item.plan_display_name || item.plan_name || 'Подписка'}
+                              </div>
+                              <div className="text-sm text-gray-500 mt-1">
+                                {formatHistoryDate(item.paid_at)}
+                              </div>
+                            </div>
+                            <span className="inline-flex self-start px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                              {formatPaymentStatusLabel(item.status)}
+                            </span>
+                          </div>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                            <div className="rounded-lg bg-gray-50 p-3">
+                              <div className="text-gray-500">Срок пакета</div>
+                              <div className="font-medium text-gray-900 mt-1">
+                                {item.duration_months} {item.duration_months === 1 ? 'месяц' : item.duration_months < 5 ? 'месяца' : 'месяцев'}
+                              </div>
+                            </div>
+                            <div className="rounded-lg bg-gray-50 p-3">
+                              <div className="text-gray-500">Стоимость месяца</div>
+                              <div className="font-medium text-gray-900 mt-1">
+                                {formatPricePerMonth(item.monthly_price)}
+                              </div>
+                            </div>
+                            <div className="rounded-lg bg-gray-50 p-3">
+                              <div className="text-gray-500">Оплачено</div>
+                              <div className="font-medium text-gray-900 mt-1">
+                                {formatMoney(item.amount_paid)}
+                                {item.points_used > 0 ? (
+                                  <span className="block text-xs text-gray-500 mt-1">
+                                    + {item.points_used.toLocaleString('ru-RU')} баллов
+                                  </span>
+                                ) : null}
+                              </div>
+                            </div>
+                            <div className="rounded-lg bg-gray-50 p-3">
+                              <div className="text-gray-500">Пакет</div>
+                              <div className="font-medium text-gray-900 mt-1">
+                                {formatMoney(item.package_value)}
+                              </div>
+                            </div>
+                            <div className="rounded-lg bg-gray-50 p-3">
+                              <div className="text-gray-500">Начало подписки</div>
+                              <div className="font-medium text-gray-900 mt-1">
+                                {formatHistoryDate(item.subscription_start_date)}
+                              </div>
+                            </div>
+                            <div className="rounded-lg bg-gray-50 p-3">
+                              <div className="text-gray-500">Окончание подписки</div>
+                              <div className="font-medium text-gray-900 mt-1">
+                                {formatHistoryDate(item.subscription_end_date)}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+
+                  {otherPayments.length > 0 ? (
+                    <div>
+                      <h3 className="text-sm font-semibold text-gray-700 mb-3">Другие попытки оплаты</h3>
+                      <div className="space-y-3" data-testid="payment-history-other">
+                        {otherPayments.map((item) => (
+                          <div
+                            key={item.public_id || item.payment_id}
+                            className="rounded-lg border border-dashed border-gray-300 p-4"
+                            data-testid={`payment-history-other-${item.public_id || item.payment_id}`}
+                          >
+                            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                              <div>
+                                <div className="font-medium text-gray-900">
+                                  {item.plan_display_name || item.plan_name || 'Подписка'}
+                                </div>
+                                <div className="text-sm text-gray-500">
+                                  {formatHistoryDate(item.paid_at)} · {formatMoney(item.amount_paid || item.package_value)}
+                                </div>
+                              </div>
+                              <span className="inline-flex self-start px-2.5 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-700">
+                                {formatPaymentStatusLabel(item.status)}
+                              </span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
               )}
-              <h2 className="text-xl font-semibold text-gray-900 mb-6">Собственный сайт</h2>
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="space-y-4">
-                  <div className="p-4 bg-gray-50 rounded-lg">
-                    <h3 className="font-medium text-gray-900 mb-3">Текущий статус</h3>
-                    <div className="space-y-2">
-                      <div className="flex items-center">
-                        <div className="w-3 h-3 bg-red-500 rounded-full mr-3"></div>
-                        <span className="text-gray-600">Домен не подключен</span>
-                      </div>
-                      <p className="text-sm text-gray-500">
-                        У вас пока нет собственного домена. Подключите его для создания персонального сайта.
-                      </p>
-                    </div>
-                  </div>
-                  
-                  <div className="p-4 bg-[#DFF5EC] rounded-lg">
-                    <h3 className="font-medium text-[#4CAF50] mb-3">Возможности</h3>
-                    <ul className="space-y-2 text-sm text-[#4CAF50]">
-                      <li>• Персональный домен (например, master.ru)</li>
-                      <li>• Индивидуальный дизайн</li>
-                      <li>• Портфолио работ</li>
-                      <li>• Отзывы клиентов</li>
-                      <li>• SEO-продвижение</li>
-                    </ul>
-                  </div>
-                </div>
-                
-                <div className="space-y-4">
-                  <div className="p-4 bg-yellow-50 rounded-lg">
-                    <h3 className="font-medium text-yellow-900 mb-3">Стоимость</h3>
-                    <div className="space-y-2 text-sm">
-                      <div className="flex justify-between">
-                        <span className="text-yellow-700">Регистрация домена:</span>
-                        <span className="font-medium">от 500 ₽/год</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-yellow-700">Создание сайта:</span>
-                        <span className="font-medium">1500 ₽</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-yellow-700">Поддержка:</span>
-                        <span className="font-medium">300 ₽/мес</span>
-                      </div>
-                    </div>
-                  </div>
-                  
-                  <div className="p-4 bg-green-50 rounded-lg">
-                    <h3 className="font-medium text-green-900 mb-3">Преимущества</h3>
-                    <ul className="space-y-1 text-sm text-green-700">
-                      <li>• Персональный бренд</li>
-                      <li>• Больше клиентов</li>
-                      <li>• Высокие цены</li>
-                      <li>• Независимость</li>
-                    </ul>
-                  </div>
-                </div>
-              </div>
-              
-              <div className="mt-6">
-                <Button>
-                  Подключить домен
-                </Button>
-              </div>
             </div>
           )}
 

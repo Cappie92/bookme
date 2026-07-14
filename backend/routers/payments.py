@@ -28,6 +28,7 @@ from schemas import (
     PaymentInitResponse,
     PaymentOut,
     PaymentPublicStatusOut,
+    SubscriptionPaymentHistoryItem,
 )
 from auth import get_current_user, get_current_active_user
 from constants import duration_months_to_days
@@ -934,4 +935,35 @@ async def activate_subscription_after_payment(
         "message": "Подписка активирована",
         "subscription_id": subscription.id
     }
+
+
+@router.get("/subscription/history", response_model=List[SubscriptionPaymentHistoryItem])
+async def get_subscription_payment_history(
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    """
+    История платежей за подписку текущего мастера (read-only).
+
+    Возвращает все попытки оплаты подписки; успешные покупки помечены is_successful_purchase.
+    """
+    if current_user.role.value not in ("master", "indie"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="История оплат доступна только мастерам",
+        )
+
+    from utils.subscription_payment_display import build_payment_history_item
+
+    payments = (
+        db.query(Payment)
+        .filter(
+            Payment.user_id == current_user.id,
+            Payment.payment_type == "subscription",
+        )
+        .order_by(Payment.paid_at.desc().nullslast(), Payment.created_at.desc())
+        .all()
+    )
+
+    return [build_payment_history_item(db, payment) for payment in payments]
 

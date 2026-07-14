@@ -1227,9 +1227,33 @@ class SubscriptionOut(BaseModel):
     plan_display_name: Optional[str] = None
     features: Optional[Dict[str, Any]] = {}  # Функции плана подписки
     limits: Optional[Dict[str, Any]] = {}  # Лимиты плана подписки
+    # Фактическая стоимость текущего пакета (read-only, для UI «Мой тариф»)
+    duration_months: Optional[int] = None
+    package_value: Optional[float] = None
+    monthly_price: Optional[float] = None
+    amount_paid: Optional[float] = None
+    points_used: Optional[int] = None
 
     class Config:
         from_attributes = True
+
+
+class SubscriptionPaymentHistoryItem(BaseModel):
+    payment_id: int
+    public_id: str
+    paid_at: Optional[datetime] = None
+    plan_name: Optional[str] = None
+    plan_display_name: Optional[str] = None
+    duration_months: int
+    amount_paid: float
+    points_used: int = 0
+    package_value: float
+    monthly_price: float
+    subscription_start_date: Optional[datetime] = None
+    subscription_end_date: Optional[datetime] = None
+    status: str
+    subscription_apply_status: Optional[str] = None
+    is_successful_purchase: bool = False
 
 
 class SubscriptionCalculationRequest(BaseModel):
