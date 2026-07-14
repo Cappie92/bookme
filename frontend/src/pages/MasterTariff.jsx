@@ -24,6 +24,7 @@ import {
 } from '../utils/subscriptionPointsHistory'
 import { Button } from '../components/ui'
 import SubscriptionModal from '../components/SubscriptionModal'
+import PaymentHistoryTable from '../components/PaymentHistoryTable'
 import {
   getMasterTariffComparisonRows,
   splitTariffComparisonColumns,
@@ -33,9 +34,6 @@ import { formatMoney } from '../utils/formatMoney'
 import {
   MASTER_TARIFF_HISTORY_SECTION_ID,
   MASTER_TARIFF_NAV_ITEMS,
-  formatHistoryDate,
-  formatPaymentStatusLabel,
-  formatPricePerMonth,
   resolveSubscriptionCostDisplay,
   splitPaymentHistory,
 } from '../utils/subscriptionBilling'
@@ -1019,101 +1017,18 @@ export default function MasterTariff({ canCustomizeDomain, onRefreshSubscription
                   История оплат пока пуста
                 </div>
               ) : (
-                <div className="space-y-8">
+                <div className="space-y-6">
                   {successfulPayments.length > 0 ? (
-                    <div className="space-y-4" data-testid="payment-history-successful">
-                      {successfulPayments.map((item) => (
-                        <div
-                          key={item.public_id || item.payment_id}
-                          className="rounded-lg border border-gray-200 p-4"
-                          data-testid={`payment-history-item-${item.public_id || item.payment_id}`}
-                        >
-                          <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 mb-4">
-                            <div>
-                              <div className="font-medium text-gray-900">
-                                {item.plan_display_name || item.plan_name || 'Подписка'}
-                              </div>
-                              <div className="text-sm text-gray-500 mt-1">
-                                {formatHistoryDate(item.paid_at)}
-                              </div>
-                            </div>
-                            <span className="inline-flex self-start px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                              {formatPaymentStatusLabel(item.status)}
-                            </span>
-                          </div>
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-                            <div className="rounded-lg bg-gray-50 p-3">
-                              <div className="text-gray-500">Срок пакета</div>
-                              <div className="font-medium text-gray-900 mt-1">
-                                {item.duration_months} {item.duration_months === 1 ? 'месяц' : item.duration_months < 5 ? 'месяца' : 'месяцев'}
-                              </div>
-                            </div>
-                            <div className="rounded-lg bg-gray-50 p-3">
-                              <div className="text-gray-500">Стоимость месяца</div>
-                              <div className="font-medium text-gray-900 mt-1">
-                                {formatPricePerMonth(item.monthly_price)}
-                              </div>
-                            </div>
-                            <div className="rounded-lg bg-gray-50 p-3">
-                              <div className="text-gray-500">Оплачено</div>
-                              <div className="font-medium text-gray-900 mt-1">
-                                {formatMoney(item.amount_paid)}
-                                {item.points_used > 0 ? (
-                                  <span className="block text-xs text-gray-500 mt-1">
-                                    + {item.points_used.toLocaleString('ru-RU')} баллов
-                                  </span>
-                                ) : null}
-                              </div>
-                            </div>
-                            <div className="rounded-lg bg-gray-50 p-3">
-                              <div className="text-gray-500">Пакет</div>
-                              <div className="font-medium text-gray-900 mt-1">
-                                {formatMoney(item.package_value)}
-                              </div>
-                            </div>
-                            <div className="rounded-lg bg-gray-50 p-3">
-                              <div className="text-gray-500">Начало подписки</div>
-                              <div className="font-medium text-gray-900 mt-1">
-                                {formatHistoryDate(item.subscription_start_date)}
-                              </div>
-                            </div>
-                            <div className="rounded-lg bg-gray-50 p-3">
-                              <div className="text-gray-500">Окончание подписки</div>
-                              <div className="font-medium text-gray-900 mt-1">
-                                {formatHistoryDate(item.subscription_end_date)}
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
+                    <div data-testid="payment-history-successful">
+                      <PaymentHistoryTable items={successfulPayments} testIdPrefix="payment-history-row" />
                     </div>
                   ) : null}
 
                   {otherPayments.length > 0 ? (
                     <div>
-                      <h3 className="text-sm font-semibold text-gray-700 mb-3">Другие попытки оплаты</h3>
-                      <div className="space-y-3" data-testid="payment-history-other">
-                        {otherPayments.map((item) => (
-                          <div
-                            key={item.public_id || item.payment_id}
-                            className="rounded-lg border border-dashed border-gray-300 p-4"
-                            data-testid={`payment-history-other-${item.public_id || item.payment_id}`}
-                          >
-                            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                              <div>
-                                <div className="font-medium text-gray-900">
-                                  {item.plan_display_name || item.plan_name || 'Подписка'}
-                                </div>
-                                <div className="text-sm text-gray-500">
-                                  {formatHistoryDate(item.paid_at)} · {formatMoney(item.amount_paid || item.package_value)}
-                                </div>
-                              </div>
-                              <span className="inline-flex self-start px-2.5 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-700">
-                                {formatPaymentStatusLabel(item.status)}
-                              </span>
-                            </div>
-                          </div>
-                        ))}
+                      <h3 className="text-sm font-semibold text-gray-700 mb-2">Другие попытки оплаты</h3>
+                      <div data-testid="payment-history-other">
+                        <PaymentHistoryTable items={otherPayments} testIdPrefix="payment-history-other-row" />
                       </div>
                     </div>
                   ) : null}

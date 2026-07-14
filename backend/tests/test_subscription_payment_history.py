@@ -131,7 +131,21 @@ def _create_payment(
     status="paid",
     amount=3210.0,
     apply_status="applied",
+    metadata=None,
 ):
+    meta = {
+        "calculation_id": snapshot.id if snapshot else None,
+        "selected_duration": snapshot.duration_months if snapshot else None,
+        "plan_name": "PremiumHistory",
+        "plan_display_name": "Premium",
+    }
+    if metadata is not None:
+        meta.update(metadata)
+    if meta.get("calculation_id") is None:
+        meta.pop("calculation_id", None)
+    if meta.get("selected_duration") is None:
+        meta.pop("selected_duration", None)
+
     payment = Payment(
         user_id=user_id,
         amount=amount,
@@ -142,12 +156,7 @@ def _create_payment(
         subscription_id=subscription.id,
         subscription_apply_status=apply_status,
         paid_at=datetime.utcnow() if status == "paid" else None,
-        payment_metadata={
-            "calculation_id": snapshot.id,
-            "selected_duration": snapshot.duration_months,
-            "plan_name": "PremiumHistory",
-            "plan_display_name": "Premium",
-        },
+        payment_metadata=meta,
     )
     payment = persist_new_robokassa_payment(db, payment)
     db.commit()
@@ -269,3 +278,92 @@ def test_build_payment_history_item(db):
     assert item["points_used"] == 481
     assert item["package_value"] == 3210.0
     assert item["monthly_price"] == 1070
+
+
+def test_legacy_payment_uses_metadata_duration_not_short_subscription_dates(db):
+    user = _create_master_user(db, phone="+79001118884", email="legacy-meta@test.com")
+    plan = _create_plan(db)
+    snapshot = _create_snapshot(db, user.id, plan.id)
+    # Подписка ошибочно выглядит как 1 месяц по датам
+    sub = _create_subscription(db, user.id, plan.id, price=3210.0, duration_days=30)
+    payment = _create_payment(
+        db,
+        user.id,
+        plan.id,
+        snapshot,
+        sub,
+        metadata={"selected_duration": 3, "calculation_id": None},
+    )
+
+    billing = resolve_subscription_payment_billing(db, payment=payment)
+
+    assert billing["duration_months"] == 3
+    assert billing["package_value"] == 3210.0
+    assert billing["monthly_price"] == 1070.0
+
+
+def test_legacy_payment_without_snapshot_infers_duration_from_package_value(db):
+    user = _create_master_user(db, phone="+79001118885", email="legacy-package@test.com")
+    plan = _create_plan(db)
+    sub = _create_subscription(db, user.id, plan.id, price=3210.0, duration_days=30)
+    payment = _create_payment(
+        db,
+        user.id,
+        plan.id,
+        None,
+        sub,
+        metadata={"plan_name": "PremiumHistory", "plan_display_name": "Premium"},
+    )
+
+    billing = resolve_subscription_payment_billing(db, payment=payment)
+
+    assert billing["duration_months"] == 3
+    assert billing["monthly_price"] == 1070.0
+
+
+def test_history_api_legacy_3_month_purchase_shows_1070_per_month(client, db):
+    user = _create_master_user(db, phone="+79001118886", email="legacy-api@test.com")
+    plan = _create_plan(db)
+    sub = _create_subscription(db, user.id, plan.id, price=3210.0, duration_days=30)
+    _create_payment(
+        db,
+        user.id,
+        plan.id,
+        None,
+        sub,
+        metadata={"selected_duration": 3, "plan_display_name": "Premium"},
+    )
+
+    headers = _auth(client, user)
+    rows = client.get("/api/payments/subscription/history", headers=headers).json()
+
+    assert len(rows) == 1
+    assert rows[0]["duration_months"] == 3
+    assert rows[0]["package_value"] == 3210.0
+    assert rows[0]["monthly_price"] == 1070.0
+
+
+def test_pending_payment_without_snapshot_uses_payment_amount_as_package_value(db):
+    user = _create_master_user(db, phone="+79001118887", email="pending-legacy@test.com")
+    plan = _create_plan(db)
+    payment = Payment(
+        user_id=user.id,
+        amount=1160.0,
+        status="pending",
+        payment_type="subscription",
+        robokassa_invoice_id="tmp",
+        plan_id=plan.id,
+        subscription_id=None,
+        subscription_apply_status="pending",
+        payment_metadata={"selected_duration": 1, "plan_display_name": "Premium"},
+    )
+    payment = persist_new_robokassa_payment(db, payment)
+    db.commit()
+    db.refresh(payment)
+
+    billing = resolve_subscription_payment_billing(db, payment=payment)
+
+    assert billing["package_value"] == 1160.0
+    assert billing["amount_paid"] == 1160.0
+    assert billing["duration_months"] == 1
+    assert billing["monthly_price"] == 1160.0
