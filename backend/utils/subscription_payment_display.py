@@ -1,11 +1,23 @@
 """Read-only расчёт стоимости подписки для UI (карточка тарифа, история оплат)."""
 from __future__ import annotations
 
+from datetime import datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
-from constants import DURATION_DAYS
-from models import Payment, Subscription, SubscriptionPlan, SubscriptionPriceSnapshot
+from constants import DURATION_DAYS, duration_months_to_days
+from models import (
+    Master,
+    Payment,
+    PromoRewardGrant,
+    PromoRewardGrantStatus,
+    Subscription,
+    SubscriptionPlan,
+    SubscriptionPointsDirection,
+    SubscriptionPointsLedger,
+    SubscriptionPointsSourceType,
+    SubscriptionPriceSnapshot,
+)
 
 
 def _decimal(value: Any) -> Decimal:
@@ -150,21 +162,228 @@ def _resolve_snapshot(db, payment: Optional[Payment]) -> Optional[SubscriptionPr
     )
 
 
+def _plan_monthly_price_dec(plan: SubscriptionPlan, duration_months: int) -> Decimal:
+    months = int(duration_months or 0)
+    if months == 1:
+        return _decimal(getattr(plan, "price_1month", None))
+    if months == 3:
+        return _decimal(getattr(plan, "price_3months", None))
+    if months == 6:
+        return _decimal(getattr(plan, "price_6months", None))
+    if months == 12:
+        return _decimal(getattr(plan, "price_12months", None))
+    return Decimal("0")
+
+
+def _plan_package_total_dec(plan: SubscriptionPlan, duration_months: int) -> Decimal:
+    monthly = _plan_monthly_price_dec(plan, duration_months)
+    if monthly <= 0:
+        return Decimal("0")
+    return monthly * int(duration_months)
+
+
+def _resolve_purchase_duration_months(
+    payment: Optional[Payment],
+    snapshot: Optional[SubscriptionPriceSnapshot],
+) -> Optional[int]:
+    """Срок пакета только из данных момента покупки (metadata / snapshot)."""
+    from_meta = _duration_from_payment_metadata(payment)
+    if from_meta in (1, 3, 6, 12):
+        return from_meta
+    if snapshot and snapshot.duration_months in (1, 3, 6, 12):
+        return int(snapshot.duration_months)
+    return None
+
+
 def _resolve_package_value_dec(
+    db,
+    payment: Optional[Payment],
     snapshot: Optional[SubscriptionPriceSnapshot],
     subscription: Optional[Subscription],
-    payment: Optional[Payment] = None,
+    *,
+    purchase_duration_months: Optional[int] = None,
 ) -> Decimal:
     if snapshot is not None:
         pbp = getattr(snapshot, "price_before_points", None)
         if pbp is not None:
             return _decimal(pbp)
         return _decimal(getattr(snapshot, "total_price", None))
+
+    if purchase_duration_months in (1, 3, 6, 12) and payment is not None and payment.plan_id:
+        plan = payment.plan
+        if plan is None:
+            plan = (
+                db.query(SubscriptionPlan)
+                .filter(SubscriptionPlan.id == payment.plan_id)
+                .first()
+            )
+        if plan is not None:
+            plan_total = _plan_package_total_dec(plan, int(purchase_duration_months))
+            if plan_total > 0:
+                if subscription is not None:
+                    sub_price = _decimal(subscription.price)
+                    if abs(sub_price - plan_total) <= Decimal("1"):
+                        return sub_price
+                return plan_total
+
     if subscription is not None:
         return _decimal(subscription.price)
     if payment is not None:
         return _decimal(payment.amount)
     return Decimal("0")
+
+
+def _resolve_master_id(db, payment: Optional[Payment]) -> Optional[int]:
+    if payment is None:
+        return None
+    master = db.query(Master).filter(Master.user_id == payment.user_id).first()
+    return master.id if master else None
+
+
+def _resolve_points_spent(
+    db,
+    payment: Optional[Payment],
+    snapshot: Optional[SubscriptionPriceSnapshot],
+    *,
+    master_id: Optional[int] = None,
+) -> int:
+    points_spent = 0
+    if master_id and payment is not None:
+        debits = (
+            db.query(SubscriptionPointsLedger)
+            .filter(
+                SubscriptionPointsLedger.master_id == master_id,
+                SubscriptionPointsLedger.direction == SubscriptionPointsDirection.DEBIT,
+                SubscriptionPointsLedger.source_type == SubscriptionPointsSourceType.SUBSCRIPTION_PAYMENT,
+                SubscriptionPointsLedger.source_id == payment.id,
+            )
+            .all()
+        )
+        points_spent = sum(int(getattr(entry, "amount", 0) or 0) for entry in debits)
+
+    if points_spent == 0 and snapshot is not None:
+        points_spent = int(getattr(snapshot, "subscription_points_used", 0) or 0)
+    return points_spent
+
+
+def _resolve_points_earned(
+    db,
+    payment: Optional[Payment],
+    *,
+    master_id: Optional[int] = None,
+) -> int:
+    if not master_id or payment is None:
+        return 0
+
+    grant_ids = [
+        grant_id
+        for (grant_id,) in db.query(PromoRewardGrant.id)
+        .filter(
+            PromoRewardGrant.payment_id == payment.id,
+            PromoRewardGrant.recipient_master_id == master_id,
+        )
+        .all()
+    ]
+    points_earned = 0
+    if grant_ids:
+        credits = (
+            db.query(SubscriptionPointsLedger)
+            .filter(
+                SubscriptionPointsLedger.master_id == master_id,
+                SubscriptionPointsLedger.direction == SubscriptionPointsDirection.CREDIT,
+                SubscriptionPointsLedger.source_type == SubscriptionPointsSourceType.PROMO_REWARD_GRANT,
+                SubscriptionPointsLedger.source_id.in_(grant_ids),
+            )
+            .all()
+        )
+        points_earned = sum(int(getattr(entry, "amount", 0) or 0) for entry in credits)
+
+    if points_earned == 0:
+        grants = (
+            db.query(PromoRewardGrant)
+            .filter(
+                PromoRewardGrant.payment_id == payment.id,
+                PromoRewardGrant.recipient_master_id == master_id,
+                PromoRewardGrant.status == PromoRewardGrantStatus.APPLIED,
+            )
+            .all()
+        )
+        points_earned = sum(
+            int(getattr(grant, "points_amount", 0) or 0)
+            for grant in grants
+            if not getattr(grant, "subscription_points_ledger_id", None)
+        )
+
+    return points_earned
+
+
+def _resolve_points_movements(
+    db,
+    payment: Optional[Payment],
+    snapshot: Optional[SubscriptionPriceSnapshot],
+    *,
+    master_id: Optional[int] = None,
+) -> tuple[int, int]:
+    points_spent = _resolve_points_spent(
+        db, payment, snapshot, master_id=master_id
+    )
+    points_earned = _resolve_points_earned(db, payment, master_id=master_id)
+    return points_spent, points_earned
+
+
+def _as_naive_datetime(value: Any) -> Optional[datetime]:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        if value.tzinfo is not None:
+            return value.replace(tzinfo=None)
+        return value
+    return None
+
+
+def reconstruct_sequential_subscription_periods(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Display-only: выстраивает успешные покупки в непрерывную цепочку периодов.
+
+    Не изменяет данные в БД — только корректирует start/end для истории оплат.
+    """
+    successful = sorted(
+        [item for item in items if item.get("is_successful_purchase")],
+        key=lambda item: (
+            _as_naive_datetime(item.get("paid_at")) or datetime.min,
+            item.get("payment_id") or 0,
+        ),
+    )
+    chain_end: Optional[datetime] = None
+    period_by_payment_id: Dict[int, tuple[datetime, datetime]] = {}
+
+    for item in successful:
+        duration_months = int(item.get("duration_months") or 1)
+        duration_days = duration_months_to_days(duration_months)
+        if chain_end is None:
+            start = _as_naive_datetime(item.get("subscription_start_date")) or _as_naive_datetime(
+                item.get("paid_at")
+            )
+        else:
+            start = chain_end
+        if start is None:
+            continue
+        end = start + timedelta(days=duration_days)
+        chain_end = end
+        payment_id = item.get("payment_id")
+        if payment_id is not None:
+            period_by_payment_id[int(payment_id)] = (start, end)
+
+    result: List[Dict[str, Any]] = []
+    for item in items:
+        updated = dict(item)
+        payment_id = updated.get("payment_id")
+        if payment_id is not None and int(payment_id) in period_by_payment_id:
+            start, end = period_by_payment_id[int(payment_id)]
+            updated["subscription_start_date"] = start
+            updated["subscription_end_date"] = end
+        result.append(updated)
+    return result
 
 
 def resolve_subscription_payment_billing(
@@ -188,7 +407,14 @@ def resolve_subscription_payment_billing(
     if subscription is None and payment is not None and payment.subscription_id:
         subscription = payment.subscription
 
-    package_value_dec = _resolve_package_value_dec(snapshot, subscription, payment)
+    purchase_duration_months = _resolve_purchase_duration_months(payment, snapshot)
+    package_value_dec = _resolve_package_value_dec(
+        db,
+        payment,
+        snapshot,
+        subscription,
+        purchase_duration_months=purchase_duration_months,
+    )
     duration_months = _resolve_duration_months(
         db,
         payment,
@@ -197,9 +423,14 @@ def resolve_subscription_payment_billing(
         package_value_dec=package_value_dec,
     )
 
-    points_used = 0
-    if snapshot is not None:
-        points_used = int(getattr(snapshot, "subscription_points_used", 0) or 0)
+    master_id = _resolve_master_id(db, payment)
+    points_spent, points_earned = _resolve_points_movements(
+        db,
+        payment,
+        snapshot,
+        master_id=master_id,
+    )
+    points_used = points_spent
 
     package_value = float(package_value_dec or Decimal("0"))
     amount_paid = float(_decimal(payment.amount)) if payment is not None else 0.0
@@ -236,6 +467,8 @@ def resolve_subscription_payment_billing(
         "package_value": package_value,
         "amount_paid": amount_paid,
         "points_used": points_used,
+        "points_spent": points_spent,
+        "points_earned": points_earned,
         "monthly_price": monthly_price,
         "plan_name": plan_name,
         "plan_display_name": plan_display_name,
@@ -261,6 +494,8 @@ def build_payment_history_item(db, payment: Payment) -> Dict[str, Any]:
         "duration_months": billing["duration_months"],
         "amount_paid": billing["amount_paid"],
         "points_used": billing["points_used"],
+        "points_spent": billing["points_spent"],
+        "points_earned": billing["points_earned"],
         "package_value": billing["package_value"],
         "monthly_price": billing["monthly_price"],
         "subscription_start_date": billing["subscription_start_date"],
@@ -269,3 +504,8 @@ def build_payment_history_item(db, payment: Payment) -> Dict[str, Any]:
         "subscription_apply_status": billing["subscription_apply_status"],
         "is_successful_purchase": billing["is_successful_purchase"],
     }
+
+
+def build_subscription_payment_history(db, payments: List[Payment]) -> List[Dict[str, Any]]:
+    items = [build_payment_history_item(db, payment) for payment in payments]
+    return reconstruct_sequential_subscription_periods(items)

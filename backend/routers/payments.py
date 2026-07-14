@@ -650,18 +650,21 @@ async def robokassa_result(
                 # best-effort: если не смогли сравнить, не форсим
                 pass
 
-        # Start date
-        if effective_upgrade_type == "after_expiry" and current_subscription:
-            start_date = current_subscription.end_date
-        else:
-            start_date = now
+        # Start date: продление от конца текущей цепочки, если она ещё не истекла
+        from utils.subscription_apply_dates import resolve_new_subscription_period
 
         _dm = int(getattr(snapshot, "duration_months", 1) or 1)
+        start_date, end_date, new_status, new_is_active = resolve_new_subscription_period(
+            db,
+            user_id=payment.user_id,
+            subscription_type=subscription_type,
+            plan_id=int(snapshot.plan_id),
+            duration_months=_dm,
+            effective_upgrade_type=effective_upgrade_type,
+            current_subscription=current_subscription,
+            now=now,
+        )
         _duration_days = max(1, duration_months_to_days(_dm))
-        end_date = start_date + timedelta(days=_duration_days)
-        will_start_now = start_date <= now
-        new_status = SubscriptionStatus.ACTIVE if will_start_now else SubscriptionStatus.PENDING
-        new_is_active = True if will_start_now else False
 
         import math
         total_price_full = float(snapshot.total_price)
@@ -692,8 +695,12 @@ async def robokassa_result(
         db.add(new_res)
         db.flush()
 
-        # Деактивируем старую подписку при immediate upgrade
-        if effective_upgrade_type == "immediate" and current_subscription:
+        # Деактивируем текущую подписку только при немедленном старте новой (immediate upgrade)
+        if (
+            effective_upgrade_type == "immediate"
+            and current_subscription
+            and new_is_active
+        ):
             current_subscription.status = SubscriptionStatus.EXPIRED
             current_subscription.is_active = False
 
@@ -953,7 +960,7 @@ async def get_subscription_payment_history(
             detail="История оплат доступна только мастерам",
         )
 
-    from utils.subscription_payment_display import build_payment_history_item
+    from utils.subscription_payment_display import build_subscription_payment_history
 
     payments = (
         db.query(Payment)
@@ -965,5 +972,5 @@ async def get_subscription_payment_history(
         .all()
     )
 
-    return [build_payment_history_item(db, payment) for payment in payments]
+    return build_subscription_payment_history(db, payments)
 

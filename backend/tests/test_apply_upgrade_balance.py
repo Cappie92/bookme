@@ -9,6 +9,7 @@ from models import (
     Subscription,
     SubscriptionPlan,
     SubscriptionPriceSnapshot,
+    SubscriptionReservation,
     SubscriptionStatus,
     SubscriptionType,
     User,
@@ -169,6 +170,8 @@ def test_apply_upgrade_balance_three_months_days_remaining(client, db):
     db.add(sub_old)
     db.add(UserBalance(user_id=user.id, balance=5000.0, currency="RUB"))
     db.commit()
+    sub_old_id = sub_old.id
+    sub_old_end = sub_old.end_date
 
     snap = SubscriptionPriceSnapshot(
         user_id=user.id,
@@ -204,7 +207,18 @@ def test_apply_upgrade_balance_three_months_days_remaining(client, db):
     data = my.json()
     assert data["days_remaining"] >= period_days - 3
     assert data["days_remaining"] <= period_days + 2
-    assert float(data.get("reserved_amount") or 0) == pytest.approx(total_price, abs=0.01)
+
+    new_sub = db.query(Subscription).filter(Subscription.id == resp.json()["subscription_id"]).first()
+    assert new_sub is not None
+    assert new_sub.status == SubscriptionStatus.ACTIVE
+    assert new_sub.start_date <= datetime.utcnow() + timedelta(minutes=1)
+    reservation = (
+        db.query(SubscriptionReservation)
+        .filter(SubscriptionReservation.subscription_id == new_sub.id)
+        .first()
+    )
+    assert reservation is not None
+    assert float(reservation.reserved_amount or 0) == pytest.approx(total_price, abs=0.01)
     assert float(resp.json()["balance_after"]) == pytest.approx(5000.0, abs=0.01)
     from utils.balance_utils import get_user_available_balance
 

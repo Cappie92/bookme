@@ -3,7 +3,9 @@ import {
   MASTER_TARIFF_NAV_ITEMS,
   computeMonthlyPrice,
   formatPackageSummary,
+  formatPaidAmountWithPoints,
   formatPaymentBreakdown,
+  formatPeriodRange,
   formatPricePerMonth,
   isSuccessfulSubscriptionPayment,
   resolveSubscriptionCostDisplay,
@@ -65,5 +67,30 @@ describe('subscriptionBilling', () => {
   it('formatPricePerMonth omits decimal cents for whole amounts', () => {
     expect(formatPricePerMonth(1160)).toBe('1 160 ₽/мес')
     expect(formatPackageSummary(1, 1160)).toBe('Пакет: 1 месяц за 1 160 ₽')
+  })
+
+  it('formatPeriodRange renders compact period', () => {
+    expect(formatPeriodRange('2026-07-12T10:00:00', '2026-10-10T10:00:00')).toBe('12.07.26–10.10.26')
+    expect(formatPeriodRange(null, '2026-10-10T10:00:00')).toBe('—')
+  })
+
+  it('formatPaidAmountWithPoints builds spent and earned parts', () => {
+    const both = formatPaidAmountWithPoints(2729, 481, 321)
+    expect(both.amountLabel).toBe('2 729 ₽')
+    expect(both.parts).toEqual([
+      { text: '-481 балл', tone: 'spent' },
+      { text: '+321 балл', tone: 'earned' },
+    ])
+
+    const spentOnly = formatPaidAmountWithPoints(2729, 481, 0)
+    expect(spentOnly.parts).toHaveLength(1)
+    expect(spentOnly.parts[0].tone).toBe('spent')
+
+    const earnedOnly = formatPaidAmountWithPoints(3210, 0, 321)
+    expect(earnedOnly.parts).toHaveLength(1)
+    expect(earnedOnly.parts[0].tone).toBe('earned')
+
+    const none = formatPaidAmountWithPoints(3210, 0, 0)
+    expect(none.parts).toHaveLength(0)
   })
 })

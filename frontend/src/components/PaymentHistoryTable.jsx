@@ -2,30 +2,40 @@ import React from 'react'
 import {
   formatDurationMonthsLabel,
   formatHistoryDate,
+  formatPaidAmountWithPoints,
   formatPaymentStatusLabel,
+  formatPeriodRange,
   formatPricePerMonth,
 } from '../utils/subscriptionBilling'
-import { formatMoney } from '../utils/formatMoney'
 
-function formatPointsLabel(points) {
-  const value = Number(points)
-  if (!Number.isFinite(value) || value <= 0) return ''
-  const mod100 = value % 100
-  const mod10 = value % 10
-  let word = 'баллов'
-  if (mod100 < 11 || mod100 > 14) {
-    if (mod10 === 1) word = 'балл'
-    else if (mod10 >= 2 && mod10 <= 4) word = 'балла'
-  }
-  return `${value.toLocaleString('ru-RU')} ${word}`
-}
+function PaidAmountCell({ item }) {
+  const { amountLabel, parts } = formatPaidAmountWithPoints(
+    item.amount_paid,
+    item.points_spent ?? item.points_used,
+    item.points_earned
+  )
 
-function formatPaidCell(item) {
-  const paid = formatMoney(item.amount_paid)
-  if (item.points_used > 0) {
-    return `${paid} + ${formatPointsLabel(item.points_used)}`
+  if (!parts.length) {
+    return amountLabel
   }
-  return paid
+
+  return (
+    <span className="whitespace-nowrap">
+      {amountLabel}{' '}
+      <span>
+        (
+        {parts.map((part, index) => (
+          <React.Fragment key={part.tone}>
+            {index > 0 ? ', ' : ''}
+            <span className={part.tone === 'spent' ? 'text-red-600' : 'text-green-600'}>
+              {part.text}
+            </span>
+          </React.Fragment>
+        ))}
+        )
+      </span>
+    </span>
+  )
 }
 
 function PaymentHistoryTable({ items, testIdPrefix = 'payment-history-row' }) {
@@ -35,7 +45,7 @@ function PaymentHistoryTable({ items, testIdPrefix = 'payment-history-row' }) {
 
   return (
     <div className="overflow-x-auto -mx-1" data-testid={`${testIdPrefix}-table`}>
-      <table className="min-w-[1100px] w-full text-sm border-collapse">
+      <table className="min-w-[920px] w-full text-sm border-collapse">
         <thead>
           <tr className="border-b border-gray-200 text-left text-xs uppercase tracking-wide text-gray-500">
             <th className="py-2 px-2 font-medium whitespace-nowrap">Дата оплаты</th>
@@ -43,8 +53,7 @@ function PaymentHistoryTable({ items, testIdPrefix = 'payment-history-row' }) {
             <th className="py-2 px-2 font-medium whitespace-nowrap">Срок пакета</th>
             <th className="py-2 px-2 font-medium whitespace-nowrap">Оплачено</th>
             <th className="py-2 px-2 font-medium whitespace-nowrap">Стоимость месяца</th>
-            <th className="py-2 px-2 font-medium whitespace-nowrap">Начало</th>
-            <th className="py-2 px-2 font-medium whitespace-nowrap">Окончание</th>
+            <th className="py-2 px-2 font-medium whitespace-nowrap">Период</th>
             <th className="py-2 px-2 font-medium whitespace-nowrap">Статус</th>
           </tr>
         </thead>
@@ -64,15 +73,14 @@ function PaymentHistoryTable({ items, testIdPrefix = 'payment-history-row' }) {
               <td className="py-2 px-2 whitespace-nowrap text-gray-900">
                 {formatDurationMonthsLabel(item.duration_months)}
               </td>
-              <td className="py-2 px-2 whitespace-nowrap text-gray-900">{formatPaidCell(item)}</td>
+              <td className="py-2 px-2 whitespace-nowrap text-gray-900">
+                <PaidAmountCell item={item} />
+              </td>
               <td className="py-2 px-2 whitespace-nowrap text-gray-900">
                 {formatPricePerMonth(item.monthly_price)}
               </td>
               <td className="py-2 px-2 whitespace-nowrap text-gray-700">
-                {formatHistoryDate(item.subscription_start_date)}
-              </td>
-              <td className="py-2 px-2 whitespace-nowrap text-gray-700">
-                {formatHistoryDate(item.subscription_end_date)}
+                {formatPeriodRange(item.subscription_start_date, item.subscription_end_date)}
               </td>
               <td className="py-2 px-2 whitespace-nowrap">
                 <span

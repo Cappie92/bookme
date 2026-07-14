@@ -1528,16 +1528,30 @@ async def apply_upgrade_balance(
             except Exception:
                 pass
 
+            from utils.subscription_apply_dates import resolve_new_subscription_period
+
+            effective_upgrade_type = snapshot.upgrade_type or "immediate"
+            start_date, end_date, new_status, new_is_active = resolve_new_subscription_period(
+                db,
+                user_id=current_user.id,
+                subscription_type=subscription_type,
+                plan_id=int(snapshot.plan_id),
+                duration_months=int(snapshot.duration_months),
+                effective_upgrade_type=effective_upgrade_type,
+                current_subscription=current_subscription,
+                now=now,
+            )
+
             new_subscription = Subscription(
                 user_id=current_user.id,
                 subscription_type=subscription_type,
-                status=SubscriptionStatus.ACTIVE,
-                start_date=now,
-                end_date=now + timedelta(days=total_days),
+                status=new_status,
+                start_date=start_date,
+                end_date=end_date,
                 price=total_price_full,
                 daily_rate=daily_rate,
                 payment_period=payload.get("payment_period") or "month",
-                is_active=True,
+                is_active=new_is_active,
                 auto_renewal=enable_auto_renewal,
                 plan_id=snapshot.plan_id,
             )
@@ -1576,7 +1590,7 @@ async def apply_upgrade_balance(
                 )
                 db.flush()
 
-            if current_subscription:
+            if current_subscription and new_is_active:
                 current_subscription.status = SubscriptionStatus.EXPIRED
                 current_subscription.is_active = False
 

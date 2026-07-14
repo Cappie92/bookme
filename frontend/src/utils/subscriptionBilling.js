@@ -68,6 +68,69 @@ export function formatPackageSummary(durationMonths, packageValue) {
 }
 
 /**
+ * @param {string|null|undefined} startDate
+ * @param {string|null|undefined} endDate
+ */
+export function formatPeriodRange(startDate, endDate) {
+  const formatShort = (dateString) => {
+    if (!dateString) return null
+    const date = new Date(dateString)
+    if (Number.isNaN(date.getTime())) return null
+    const dd = String(date.getDate()).padStart(2, '0')
+    const mm = String(date.getMonth() + 1).padStart(2, '0')
+    const yy = String(date.getFullYear()).slice(-2)
+    return `${dd}.${mm}.${yy}`
+  }
+
+  const start = formatShort(startDate)
+  const end = formatShort(endDate)
+  if (!start || !end) return '—'
+  return `${start}–${end}`
+}
+
+/**
+ * @param {number} points
+ */
+export function formatPointsWord(points) {
+  const value = Math.abs(Number(points))
+  if (!Number.isFinite(value) || value <= 0) return 'баллов'
+  const mod100 = value % 100
+  const mod10 = value % 10
+  if (mod100 < 11 || mod100 > 14) {
+    if (mod10 === 1) return 'балл'
+    if (mod10 >= 2 && mod10 <= 4) return 'балла'
+  }
+  return 'баллов'
+}
+
+/**
+ * @param {number|null|undefined} amountPaid
+ * @param {number|null|undefined} pointsSpent
+ * @param {number|null|undefined} pointsEarned
+ */
+export function formatPaidAmountWithPoints(amountPaid, pointsSpent, pointsEarned) {
+  const spent = Math.round(Number(pointsSpent ?? 0))
+  const earned = Math.round(Number(pointsEarned ?? 0))
+  const parts = []
+  if (spent > 0) {
+    parts.push({
+      text: `-${spent.toLocaleString('ru-RU')} ${formatPointsWord(spent)}`,
+      tone: 'spent',
+    })
+  }
+  if (earned > 0) {
+    parts.push({
+      text: `+${earned.toLocaleString('ru-RU')} ${formatPointsWord(earned)}`,
+      tone: 'earned',
+    })
+  }
+  return {
+    amountLabel: formatMoney(amountPaid),
+    parts,
+  }
+}
+
+/**
  * @param {number|null|undefined} amountPaid
  * @param {number|null|undefined} pointsUsed
  */

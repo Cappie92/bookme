@@ -1247,6 +1247,8 @@ class SubscriptionPaymentHistoryItem(BaseModel):
     duration_months: int
     amount_paid: float
     points_used: int = 0
+    points_spent: int = 0
+    points_earned: int = 0
     package_value: float
     monthly_price: float
     subscription_start_date: Optional[datetime] = None
