@@ -95,6 +95,54 @@ def test_public_status_unknown_public_id_returns_404(client):
     assert response.json()["detail"] == "Payment not found"
 
 
+def test_public_status_missing_lookup_key_returns_404(client):
+    response = client.get("/api/payments/public-status")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Payment not found"
+
+
+def test_public_status_by_invoice_id(client, db):
+    user = _create_master_user(db)
+    payment = _create_payment(db, user.id, status="paid", subscription_apply_status="applied")
+    payment.robokassa_invoice_id = "20"
+    db.commit()
+
+    response = client.get("/api/payments/public-status?invoice_id=20")
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {
+        "status": "paid",
+        "subscription_apply_status": "applied",
+        "payment_source": "web",
+    }
+
+
+def test_public_status_unknown_invoice_id_returns_404(client):
+    response = client.get("/api/payments/public-status?invoice_id=999999")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Payment not found"
+
+
+def test_public_status_payment_takes_precedence_over_invoice_id(client, db):
+    user = _create_master_user(db)
+    payment = _create_payment(db, user.id, status="paid", subscription_apply_status="applied")
+    payment.robokassa_invoice_id = "20"
+    db.commit()
+
+    other = _create_payment(db, user.id, status="pending", subscription_apply_status="pending")
+    other.robokassa_invoice_id = "99"
+    db.commit()
+
+    response = client.get(
+        f"/api/payments/public-status?payment={payment.public_id}&invoice_id=99"
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "paid"
+
+
 def test_authenticated_status_still_requires_auth(client, db):
     user = _create_master_user(db)
     payment = _create_payment(db, user.id)

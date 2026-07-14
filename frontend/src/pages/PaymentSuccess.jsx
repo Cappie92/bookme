@@ -8,6 +8,7 @@ import { metrikaInitOnce, metrikaGoal } from '../analytics/metrika'
 import { M } from '../analytics/metrikaEvents'
 import {
   fetchPaymentPublicStatus,
+  parsePaymentSuccessQuery,
   resolvePaymentVerifyState,
 } from '../utils/paymentPublicStatus'
 import {
@@ -19,20 +20,21 @@ import {
 function PaymentSuccess() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
-  const paymentPublicId = searchParams.get('payment')
+  const { paymentPublicId, invoiceId } = parsePaymentSuccessQuery(searchParams)
+  const lookupKey = paymentPublicId || invoiceId || 'none'
   const [verifyState, setVerifyState] = useState('loading')
   const [paymentSource, setPaymentSource] = useState('web')
   const [countdown, setCountdown] = useState(10)
 
   const verifyPayment = useCallback(async () => {
-    if (!paymentPublicId) {
+    if (!paymentPublicId && !invoiceId) {
       setVerifyState('not_found')
       return
     }
 
     setVerifyState('loading')
     try {
-      const result = await fetchPaymentPublicStatus(paymentPublicId)
+      const result = await fetchPaymentPublicStatus({ paymentPublicId, invoiceId })
       if (result.kind === 'ok' && result.data) {
         setPaymentSource(normalizePaymentSource(result.data.payment_source))
       }
@@ -40,7 +42,7 @@ function PaymentSuccess() {
     } catch {
       setVerifyState('error')
     }
-  }, [paymentPublicId])
+  }, [paymentPublicId, invoiceId])
 
   useEffect(() => {
     void verifyPayment()
@@ -51,15 +53,18 @@ function PaymentSuccess() {
       return
     }
 
-    const k = `dedato_ym_subscription_ok_${paymentPublicId || 'none'}`
+    const k = `dedato_ym_subscription_ok_${lookupKey}`
     if (window.sessionStorage.getItem(k) === '1') {
       return
     }
     window.sessionStorage.setItem(k, '1')
     void metrikaInitOnce().then(() => {
-      metrikaGoal(M.PAYMENT_SUBSCRIPTION_SUCCESS, { payment: paymentPublicId || undefined })
+      metrikaGoal(M.PAYMENT_SUBSCRIPTION_SUCCESS, {
+        payment: paymentPublicId || undefined,
+        invoice_id: invoiceId || undefined,
+      })
     })
-  }, [verifyState, paymentPublicId])
+  }, [verifyState, paymentPublicId, invoiceId, lookupKey])
 
   useEffect(() => {
     if (verifyState !== 'success' || isMobileAppPaymentSource(paymentSource)) {
@@ -85,7 +90,13 @@ function PaymentSuccess() {
   }
 
   const handleGoToFailPage = () => {
-    const query = paymentPublicId ? `?payment=${encodeURIComponent(paymentPublicId)}` : ''
+    const params = new URLSearchParams()
+    if (paymentPublicId) {
+      params.set('payment', paymentPublicId)
+    } else if (invoiceId) {
+      params.set('InvId', invoiceId)
+    }
+    const query = params.toString() ? `?${params.toString()}` : ''
     navigate(`/payment/failed${query}`)
   }
 

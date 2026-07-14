@@ -2,10 +2,50 @@
  * Публичная проверка статуса оплаты (без auth) для return URL в системном браузере.
  */
 
-export async function fetchPaymentPublicStatus(paymentPublicId) {
-  const response = await fetch(
-    `/api/payments/public-status?payment=${encodeURIComponent(paymentPublicId)}`
-  )
+/**
+ * @param {URLSearchParams|{get:(key:string)=>string|null}} searchParams
+ */
+export function parsePaymentSuccessQuery(searchParams) {
+  const paymentPublicId = (searchParams.get('payment') || '').trim() || null
+  const invoiceId =
+    (searchParams.get('InvId') || searchParams.get('inv_id') || '').trim() || null
+  return { paymentPublicId, invoiceId }
+}
+
+/**
+ * @param {{ paymentPublicId?: string|null, invoiceId?: string|null }} lookup
+ */
+export function buildPublicStatusQuery(lookup = {}) {
+  const params = new URLSearchParams()
+  const paymentPublicId = (lookup.paymentPublicId || '').trim()
+  const invoiceId = (lookup.invoiceId || '').trim()
+  if (paymentPublicId) {
+    params.set('payment', paymentPublicId)
+  } else if (invoiceId) {
+    params.set('invoice_id', invoiceId)
+  }
+  return params
+}
+
+/**
+ * @param {{ paymentPublicId?: string|null, invoiceId?: string|null }|string|null} lookup
+ */
+export async function fetchPaymentPublicStatus(lookup = {}) {
+  const normalized =
+    typeof lookup === 'string' ? { paymentPublicId: lookup } : lookup || {}
+  const paymentPublicId = (normalized.paymentPublicId || '').trim() || null
+  const invoiceId = (normalized.invoiceId || '').trim() || null
+
+  if (!paymentPublicId && !invoiceId) {
+    return { kind: 'not_found' }
+  }
+
+  const params = buildPublicStatusQuery({ paymentPublicId, invoiceId })
+  if (!params.toString()) {
+    return { kind: 'not_found' }
+  }
+
+  const response = await fetch(`/api/payments/public-status?${params}`)
   if (response.status === 404) {
     return { kind: 'not_found' }
   }
