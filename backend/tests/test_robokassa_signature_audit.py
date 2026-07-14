@@ -20,12 +20,13 @@ def test_signature_fixed_vector_md5_utf8():
 
 
 def test_generate_payment_url_outsum_two_decimals_and_numeric_invid():
+    password = "q8A2v"
     url = generate_payment_url(
         merchant_login="dedato",
         amount=1160,
         invoice_id="8",
         description="X",
-        password_1="q8A2v",
+        password_1=password,
         is_test=True,
         result_url="https://example.com/result",
         success_url="https://example.com/s",
@@ -36,7 +37,84 @@ def test_generate_payment_url_outsum_two_decimals_and_numeric_invid():
     assert qs["OutSum"][0] == "1160.00"
     assert qs["InvId"][0] == "8"
     assert qs["MerchantLogin"][0] == "dedato"
-    assert "SignatureValue" in qs
+    assert qs["Description"][0] == "X"
+    assert qs["IsTest"][0] == "1"
+    expected_sig = generate_signature("dedato", 1160, "8", password)
+    assert qs["SignatureValue"][0] == expected_sig
+    for forbidden in (
+        "ResultURL",
+        "SuccessURL",
+        "FailURL",
+        "ResultUrl2",
+        "SuccessUrl2",
+        "FailUrl2",
+    ):
+        assert forbidden not in qs
+
+
+def test_generate_payment_url_ignores_redirect_urls_even_when_passed():
+    """result/success/fail URL в сигнатуре — только совместимость; в query их нет."""
+    url = generate_payment_url(
+        merchant_login="dedato",
+        amount=1160,
+        invoice_id="8",
+        description="Test",
+        password_1="secret",
+        is_test=False,
+        result_url="https://api.example.com/api/payments/robokassa/result",
+        success_url="https://app.example.com/payment/success?payment=abc",
+        fail_url="https://app.example.com/payment/fail?payment=abc",
+    )
+    qs = parse_qs(urlparse(url).query)
+    assert set(qs.keys()) == {
+        "MerchantLogin",
+        "OutSum",
+        "InvId",
+        "Description",
+        "SignatureValue",
+    }
+    assert "example.com" not in url
+
+
+def test_generate_payment_url_filters_forbidden_kwargs_case_insensitive():
+    """Redirect-параметры в **kwargs не попадают в URL; Culture/Encoding — попадают."""
+    url = generate_payment_url(
+        merchant_login="dedato",
+        amount=1160,
+        invoice_id="8",
+        description="Test",
+        password_1="secret",
+        is_test=True,
+        ResultURL="https://evil.example/result",
+        successurl="https://evil.example/success",
+        FailUrl2="https://evil.example/fail2",
+        resulturl2="https://evil.example/result2",
+        SuccessUrl2="https://evil.example/success2",
+        failurl="https://evil.example/fail",
+        Culture="ru",
+        Encoding="utf-8",
+    )
+    qs = parse_qs(urlparse(url).query)
+    forbidden = {
+        "ResultURL",
+        "SuccessURL",
+        "FailURL",
+        "ResultUrl2",
+        "SuccessUrl2",
+        "FailUrl2",
+        "resulturl",
+        "successurl",
+        "failurl",
+        "resulturl2",
+        "successurl2",
+        "failurl2",
+    }
+    for key in forbidden:
+        assert key not in qs
+    assert "evil.example" not in url
+    assert qs["Culture"][0] == "ru"
+    assert qs["Encoding"][0] == "utf-8"
+    assert qs["IsTest"][0] == "1"
 
 
 def test_signature_does_not_depend_on_description_or_istest():

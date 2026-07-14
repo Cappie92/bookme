@@ -12,6 +12,23 @@ logger = logging.getLogger(__name__)
 ROBOKASSA_INVID_MIN = 1
 ROBOKASSA_INVID_MAX = 9223372036854775807
 
+# Параметры redirect/callback не передаются в стартовый URL (настраиваются в ЛК Robokassa).
+_FORBIDDEN_PAYMENT_URL_KWARGS = frozenset(
+    {
+        "resulturl",
+        "successurl",
+        "failurl",
+        "resulturl2",
+        "successurl2",
+        "failurl2",
+    }
+)
+
+
+def _filter_payment_url_kwargs(kwargs: Dict[str, Any]) -> Dict[str, Any]:
+    """Исключить redirect-параметры из kwargs; исходный dict не мутировать."""
+    return {k: v for k, v in kwargs.items() if k.lower() not in _FORBIDDEN_PAYMENT_URL_KWARGS}
+
 
 def robokassa_invoice_id_from_payment_id(payment_id: int) -> str:
     """
@@ -237,33 +254,27 @@ def generate_payment_url(
     **kwargs
 ) -> str:
     """
-    Генерация URL для оплаты через Robokassa
-    
-    Args:
-        merchant_login: Логин магазина
-        amount: Сумма платежа
-        invoice_id: Номер счета
-        description: Описание платежа
-        password_1: Пароль #1
-        is_test: Тестовый режим
-        result_url: URL для уведомлений (ResultURL)
-        success_url: URL для успешной оплаты (SuccessURL)
-        fail_url: URL для неуспешной оплаты (FailURL)
-        **kwargs: Дополнительные параметры (Culture, Encoding, etc.)
-        
-    Returns:
-        URL для перехода к оплате
+    Генерация URL для оплаты через Robokassa.
+
+    ResultURL / SuccessURL / FailURL не передаются в query: адреса настраиваются
+    статически в личном кабинете Robokassa. Production:
+
+    - Result URL: https://dedato.ru/api/payments/robokassa/result
+    - Success URL: https://dedato.ru/payment/success
+    - Fail URL: https://dedato.ru/payment/failed
+
+    Для динамических URL нужны ResultUrl2 / SuccessUrl2 / FailUrl2 и расширенная
+    подпись — DeDato их не использует.
+
+    Аргументы result_url / success_url / fail_url сохранены для обратной совместимости
+    вызовов, но в params не включаются.
+
+    Подпись: MD5(MerchantLogin:OutSum:InvId:Password#1).
     """
-    # Генерируем подпись
     signature = generate_signature(merchant_login, amount, invoice_id, password_1)
-    
-    # Базовый URL
-    if is_test:
-        base_url = "https://auth.robokassa.ru/Merchant/Index.aspx"
-    else:
-        base_url = "https://auth.robokassa.ru/Merchant/Index.aspx"
-    
-    # Параметры запроса
+
+    base_url = "https://auth.robokassa.ru/Merchant/Index.aspx"
+
     params = {
         "MerchantLogin": merchant_login,
         "OutSum": f"{amount:.2f}",
@@ -271,24 +282,12 @@ def generate_payment_url(
         "Description": description,
         "SignatureValue": signature,
     }
-    
-    # Добавляем опциональные параметры
+
     if is_test:
         params["IsTest"] = "1"
-    
-    if result_url:
-        params["ResultURL"] = result_url
-    
-    if success_url:
-        params["SuccessURL"] = success_url
-    
-    if fail_url:
-        params["FailURL"] = fail_url
-    
-    # Добавляем дополнительные параметры
-    params.update(kwargs)
-    
-    # Формируем URL
+
+    params.update(_filter_payment_url_kwargs(kwargs))
+
     query_string = urlencode(params)
     return f"{base_url}?{query_string}"
 
