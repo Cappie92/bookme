@@ -773,6 +773,7 @@ async def robokassa_result(
 
 @router.get("/public-status", response_model=PaymentPublicStatusOut)
 async def get_payment_public_status(
+    request: Request,
     payment: str = Query(..., description="Публичный идентификатор платежа"),
     db: Session = Depends(get_db),
 ):
@@ -780,14 +781,48 @@ async def get_payment_public_status(
     Публичная проверка статуса оплаты по Payment.public_id (без авторизации).
     Возвращает только безопасный минимум для return URL после оплаты в системном браузере.
     """
+    logger.info("payment_success_enter query=%s", dict(request.query_params))
+
+    qp = request.query_params
+    invoice_id = (qp.get("InvId") or qp.get("inv_id") or "").strip()
+    out_sum = (qp.get("OutSum") or qp.get("out_summ") or "").strip()
+    signature = (qp.get("SignatureValue") or qp.get("crc") or "").strip()
     public_id = (payment or "").strip()
+
+    logger.info(
+        "payment_success_params invoice_id=%s public_id=%s out_sum=%s signature=%s",
+        invoice_id or None,
+        public_id or None,
+        out_sum or None,
+        bool(signature),
+    )
+
+    payment_row = None
     if not public_id:
+        logger.info(
+            "payment_success_exit reason=%s payment_id=%s status=%s",
+            "missing_public_id",
+            None,
+            None,
+        )
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payment not found")
 
     payment_row = db.query(Payment).filter(Payment.public_id == public_id).first()
     if not payment_row:
+        logger.info(
+            "payment_success_exit reason=%s payment_id=%s status=%s",
+            "not_found",
+            None,
+            None,
+        )
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payment not found")
 
+    logger.info(
+        "payment_success_exit reason=%s payment_id=%s status=%s",
+        "ok",
+        payment_row.id,
+        payment_row.status,
+    )
     return PaymentPublicStatusOut(
         status=payment_row.status,
         subscription_apply_status=payment_row.subscription_apply_status,
