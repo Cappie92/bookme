@@ -56,17 +56,25 @@ def run_audit_checks(row: Dict[str, Any]) -> Dict[str, bool]:
     charged_not_over_total = charged_total <= expected_chargeable + 0.01
 
     if expected_chargeable <= 0:
-        zero_rate_valid = daily_rate is not None and abs(float(daily_rate)) <= RATE_TOLERANCE
-        zero_rate_valid = zero_rate_valid and charged_total <= 0.01
+        zero_rate_valid = (
+            daily_rate is not None
+            and abs(float(daily_rate)) <= RATE_TOLERANCE
+            and charged_total <= 0.01
+        )
     else:
-        if daily_rate is None or period_days <= 0:
-            zero_rate_valid = False
-        else:
-            expected_rate = compute_subscription_daily_rate_float(
-                expected_chargeable,
-                duration_days=period_days,
-            )
-            zero_rate_valid = abs(float(daily_rate) - expected_rate) <= RATE_TOLERANCE
+        zero_rate_valid = True
+
+    daily_rate_matches_expected = False
+    if daily_rate is None or period_days <= 0:
+        daily_rate_matches_expected = expected_chargeable <= 0
+    elif expected_chargeable <= 0:
+        daily_rate_matches_expected = abs(float(daily_rate)) <= RATE_TOLERANCE
+    else:
+        expected_rate = compute_subscription_daily_rate_float(
+            expected_chargeable,
+            duration_days=period_days,
+        )
+        daily_rate_matches_expected = abs(float(daily_rate) - expected_rate) <= RATE_TOLERANCE
 
     period_valid = False
     if period_start is not None and period_end_exclusive is not None:
@@ -85,6 +93,7 @@ def run_audit_checks(row: Dict[str, Any]) -> Dict[str, bool]:
         "subscription_price_equals_chargeable": subscription_price_equals_chargeable,
         "charged_not_over_total": charged_not_over_total,
         "zero_rate_valid": zero_rate_valid,
+        "daily_rate_matches_expected": daily_rate_matches_expected,
         "period_valid": period_valid,
     }
 
@@ -165,6 +174,13 @@ def build_audit_row_from_billing(
 
     remaining = max(0.0, expected_chargeable - float(charged_total_so_far or 0))
 
+    expected_daily_rate = None
+    if period_days > 0:
+        expected_daily_rate = compute_subscription_daily_rate_float(
+            expected_chargeable,
+            duration_days=period_days,
+        )
+
     status = payment_status
     if subscription_apply_status:
         status = f"{payment_status}/{subscription_apply_status}"
@@ -180,6 +196,7 @@ def build_audit_row_from_billing(
         "subscription_id": subscription_id,
         "subscription_price": subscription_price,
         "daily_rate": daily_rate,
+        "expected_daily_rate": expected_daily_rate,
         "period_days": period_days,
         "expected_chargeable_total": expected_chargeable,
         "charged_total_so_far": float(charged_total_so_far),

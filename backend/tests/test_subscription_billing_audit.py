@@ -47,7 +47,64 @@ def test_normal_cash_payment_passes():
     assert checks["subscription_price_equals_chargeable"]
     assert checks["charged_not_over_total"]
     assert checks["zero_rate_valid"]
+    assert checks["daily_rate_matches_expected"]
     assert checks["period_valid"]
+
+
+def test_normal_payment_1160_30_legacy_daily_rate_does_not_fail_zero_rate_valid():
+    start = datetime(2026, 9, 1, 10, 0, 0)
+    end = start + timedelta(days=30)
+    row = build_audit_row_from_billing(
+        payment_id=22,
+        user_id=20,
+        amount_paid=1160.0,
+        points_spent=0,
+        package_value=1160.0,
+        duration_months=1,
+        monthly_price=1160.0,
+        subscription_id=200,
+        subscription_price=1160.0,
+        daily_rate=39.0,
+        period_start=start,
+        period_end_exclusive=end,
+        charged_total_so_far=0.0,
+        payment_status="paid",
+        subscription_apply_status="applied",
+    )
+    checks = run_audit_checks(row)
+    assert row["expected_chargeable_total"] == 1160.0
+    assert row["period_days"] == 30
+    assert abs(row["expected_daily_rate"] - (1160.0 / 30.0)) < 1e-9
+    assert checks["zero_rate_valid"] is True
+    assert checks["daily_rate_matches_expected"] is False
+    assert not audit_passed(checks)
+
+
+def test_normal_payment_1160_30_exact_daily_rate_passes():
+    start = datetime(2026, 9, 1, 10, 0, 0)
+    end = start + timedelta(days=30)
+    exact_rate = 1160.0 / 30.0
+    row = build_audit_row_from_billing(
+        payment_id=23,
+        user_id=21,
+        amount_paid=1160.0,
+        points_spent=0,
+        package_value=1160.0,
+        duration_months=1,
+        monthly_price=1160.0,
+        subscription_id=201,
+        subscription_price=1160.0,
+        daily_rate=exact_rate,
+        period_start=start,
+        period_end_exclusive=end,
+        charged_total_so_far=0.0,
+        payment_status="paid",
+        subscription_apply_status="applied",
+    )
+    checks = run_audit_checks(row)
+    assert checks["zero_rate_valid"] is True
+    assert checks["daily_rate_matches_expected"] is True
+    assert audit_passed(checks)
 
 
 def test_partial_points_payment_passes():
@@ -99,6 +156,32 @@ def test_zero_rate_full_points_passes():
     checks = run_audit_checks(row)
     assert audit_passed(checks)
     assert checks["zero_rate_valid"]
+    assert checks["daily_rate_matches_expected"]
+
+
+def test_zero_charge_nonzero_daily_rate_fails():
+    start = datetime(2026, 8, 1, 12, 0, 0)
+    end = start + timedelta(days=30)
+    row = build_audit_row_from_billing(
+        payment_id=5,
+        user_id=14,
+        amount_paid=0.0,
+        points_spent=400,
+        package_value=400.0,
+        duration_months=1,
+        monthly_price=400.0,
+        subscription_id=104,
+        subscription_price=0.0,
+        daily_rate=34.0,
+        period_start=start,
+        period_end_exclusive=end,
+        charged_total_so_far=0.0,
+        payment_status="paid",
+        subscription_apply_status="applied",
+    )
+    checks = run_audit_checks(row)
+    assert not checks["zero_rate_valid"]
+    assert not checks["daily_rate_matches_expected"]
 
 
 def test_overcharge_detection_fails():
