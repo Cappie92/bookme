@@ -34,6 +34,8 @@ from constants import duration_months_to_days
 from utils.robokassa import (
     generate_payment_url,
     generate_result_signature,
+    parse_robokassa_result_callback,
+    payment_amount_matches_out_sum,
     verify_result_notification,
     get_robokassa_config
 )
@@ -375,23 +377,27 @@ async def robokassa_result(
     """
     # Получаем данные из POST запроса
     form_data = await request.form()
-    
-    # Извлекаем параметры
-    amount = float(form_data.get("OutSum", 0))
-    invoice_id = form_data.get("InvId", "")
-    signature = form_data.get("SignatureValue", "")
-    
+
+    fields = parse_robokassa_result_callback(form_data)
+    out_sum_raw = fields["out_sum_raw"]
+    invoice_id = fields["inv_id_raw"]
+    signature = fields["signature"]
+
     if not invoice_id:
         return "ERROR: Missing InvId"
-    
+
+    if not out_sum_raw:
+        return "ERROR: Missing OutSum"
+
     # Получаем конфигурацию
     config = get_robokassa_config()
-    
-    # Проверяем подпись (в тестовом режиме Robokassa — тестовый пароль #2)
-    if not verify_result_notification(amount, invoice_id, signature, config["password_2"]):
+
+    # Проверяем подпись по исходной строке OutSum (Robokassa может прислать "1160", не "1160.00")
+    if not verify_result_notification(out_sum_raw, invoice_id, signature, config["password_2"]):
         logger.warning(
-            "robokassa_result invalid_signature invoice_id=%s credential_branch=%s",
+            "robokassa_result invalid_signature invoice_id=%s out_sum_raw=%r credential_branch=%s",
             invoice_id,
+            out_sum_raw,
             config.get("credential_branch", ""),
         )
         return "ERROR: Invalid signature"
@@ -412,10 +418,12 @@ async def robokassa_result(
     if not payment:
         return f"ERROR: Payment not found for invoice {invoice_id}"
     
-    # Проверяем сумму
-    if abs(payment.amount - amount) > 0.01:  # Допускаем небольшую погрешность
+    # Проверяем сумму (Decimal, не float)
+    if not payment_amount_matches_out_sum(payment.amount, out_sum_raw):
         payment.status = 'failed'
-        payment.error_message = f"Несоответствие суммы: ожидалось {payment.amount}, получено {amount}"
+        payment.error_message = (
+            f"Несоответствие суммы: ожидалось {payment.amount}, получено {out_sum_raw}"
+        )
         db.commit()
         return f"ERROR: Amount mismatch for invoice {invoice_id}"
 

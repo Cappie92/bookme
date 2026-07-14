@@ -98,24 +98,47 @@ def generate_signature(merchant_login: str, amount: float, invoice_id: str, pass
 
 def verify_signature(amount: float, invoice_id: str, signature: str, password: str) -> bool:
     """
-    Проверка подписи от Robokassa
-    
-    Формат для ResultURL: OutSum:InvId:Password#2
-    Формат для SuccessURL/FailURL: OutSum:InvId:Password#1
-    
-    Args:
-        amount: Сумма платежа
-        invoice_id: Номер счета
-        signature: Подпись от Robokassa
-        password: Пароль #2 (для ResultURL) или #1 (для SuccessURL/FailURL)
-        
-    Returns:
-        True если подпись верна, False иначе
+    Проверка подписи SuccessURL/FailURL (legacy: сумма форматируется как OutSum с .2f).
+
+    ResultURL используйте verify_result_notification() с исходной строкой OutSum.
     """
     amount_str = f"{amount:.2f}"
     signature_string = f"{amount_str}:{invoice_id}:{password}"
-    expected_signature = hashlib.md5(signature_string.encode('utf-8')).hexdigest()
-    return signature.lower() == expected_signature.lower()
+    expected_signature = hashlib.md5(signature_string.encode("utf-8")).hexdigest()
+    return (signature or "").strip().lower() == expected_signature.lower()
+
+
+def _first_form_value(form_data: Any, *keys: str) -> str:
+    for key in keys:
+        val = form_data.get(key)
+        if val is not None and str(val).strip() != "":
+            return str(val).strip()
+    return ""
+
+
+def parse_robokassa_result_callback(form_data: Any) -> Dict[str, str]:
+    """Извлечь поля ResultURL callback с fallback-именами Robokassa."""
+    return {
+        "out_sum_raw": _first_form_value(form_data, "OutSum", "out_summ"),
+        "inv_id_raw": _first_form_value(form_data, "InvId", "inv_id"),
+        "signature": _first_form_value(form_data, "SignatureValue", "crc"),
+    }
+
+
+def compute_result_signature(out_sum_raw: str, invoice_id: str, password_2: str) -> str:
+    """MD5(OutSum:InvId:Password#2) — OutSum без преобразования/форматирования."""
+    signature_string = f"{out_sum_raw}:{invoice_id}:{password_2}"
+    return hashlib.md5(signature_string.encode("utf-8")).hexdigest()
+
+
+def payment_amount_matches_out_sum(payment_amount: Any, out_sum_raw: str) -> bool:
+    """Сравнение суммы callback с payment.amount через Decimal (не float)."""
+    from decimal import Decimal, InvalidOperation
+
+    try:
+        return Decimal(out_sum_raw.strip()) == Decimal(str(payment_amount))
+    except (InvalidOperation, AttributeError):
+        return False
 
 
 def _is_localhost_host(url: str) -> bool:
@@ -293,33 +316,23 @@ def generate_payment_url(
 
 
 def generate_result_signature(amount: float, invoice_id: str, password_2: str) -> str:
-    """Генерация подписи для ResultURL (для stub-режима)."""
-    amount_str = f"{amount:.2f}"
-    signature_string = f"{amount_str}:{invoice_id}:{password_2}"
-    return hashlib.md5(signature_string.encode("utf-8")).hexdigest()
+    """Генерация подписи для ResultURL (stub/тесты с OutSum вида 1160.00)."""
+    return compute_result_signature(f"{amount:.2f}", invoice_id, password_2)
 
 
 def verify_result_notification(
-    amount: float,
+    out_sum_raw: str,
     invoice_id: str,
     signature: str,
-    password_2: str
+    password_2: str,
 ) -> bool:
     """
-    Проверка подписи уведомления от Robokassa на ResultURL
-    
-    Формат: OutSum:InvId:Password#2
-    
-    Args:
-        amount: Сумма платежа
-        invoice_id: Номер счета
-        signature: Подпись от Robokassa
-        password_2: Пароль #2
-        
-    Returns:
-        True если подпись верна, False иначе
+    Проверка подписи уведомления от Robokassa на ResultURL.
+
+    Формат: MD5(f"{OutSum}:{InvId}:{Password#2}") — OutSum как прислан Robokassa.
     """
-    return verify_signature(amount, invoice_id, signature, password_2)
+    expected = compute_result_signature(out_sum_raw, invoice_id, password_2)
+    return (signature or "").strip().lower() == expected.lower()
 
 
 def verify_success_notification(
