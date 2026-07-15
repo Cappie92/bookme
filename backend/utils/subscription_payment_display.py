@@ -189,18 +189,106 @@ def _plan_package_total_dec(plan: SubscriptionPlan, duration_months: int) -> Dec
 def _resolve_purchase_duration_months(
     payment: Optional[Payment],
     snapshot: Optional[SubscriptionPriceSnapshot],
+    subscription: Optional[Subscription] = None,
 ) -> Optional[int]:
-    """Срок пакета только из данных момента покупки (metadata / snapshot)."""
+    """Срок пакета из данных момента покупки: metadata → snapshot → даты subscription."""
     from_meta = _duration_from_payment_metadata(payment)
     if from_meta in (1, 3, 6, 12):
         return from_meta
     if snapshot and snapshot.duration_months in (1, 3, 6, 12):
         return int(snapshot.duration_months)
+    from_subscription = infer_duration_months_from_subscription(subscription)
+    if from_subscription in (1, 3, 6, 12):
+        return int(from_subscription)
     return None
 
 
 def _package_matches_plan_total(plan_total: Decimal, value: Decimal) -> bool:
     return plan_total > 0 and abs(value - plan_total) <= Decimal("1")
+
+
+def _package_value_close(left: Decimal, right: Decimal) -> bool:
+    return left > 0 and right > 0 and abs(left - right) <= Decimal("1")
+
+
+def _resolve_plan_for_package(
+    db,
+    payment: Optional[Payment],
+) -> Optional[SubscriptionPlan]:
+    if payment is None or not payment.plan_id:
+        return None
+    plan = payment.plan
+    if plan is None:
+        plan = (
+            db.query(SubscriptionPlan)
+            .filter(SubscriptionPlan.id == payment.plan_id)
+            .first()
+        )
+    return plan
+
+
+def _collect_snapshot_package_candidates(
+    snapshot: Optional[SubscriptionPriceSnapshot],
+    *,
+    points_spent: int = 0,
+) -> List[Decimal]:
+    if snapshot is None:
+        return []
+
+    candidates: List[Decimal] = []
+    seen: set[str] = set()
+
+    def _add(value: Any) -> None:
+        dec = _decimal(value)
+        if dec <= 0:
+            return
+        key = str(dec)
+        if key in seen:
+            return
+        seen.add(key)
+        candidates.append(dec)
+
+    pbp = getattr(snapshot, "price_before_points", None)
+    if pbp is not None:
+        _add(pbp)
+
+    snapshot_points = int(getattr(snapshot, "subscription_points_used", 0) or 0)
+    total = _decimal(getattr(snapshot, "total_price", None))
+    if snapshot_points > 0 and total > 0:
+        _add(total + _decimal(snapshot_points))
+    elif points_spent > 0 and total > 0:
+        _add(total + _decimal(points_spent))
+    if total > 0:
+        _add(total)
+
+    return candidates
+
+
+def _snapshot_agrees_with_reliable(
+    candidate: Decimal,
+    *,
+    purchase_duration_months: Optional[int],
+    paid_plus_points: Decimal,
+    subscription_price: Decimal,
+    plan_total: Decimal,
+) -> bool:
+    months = int(purchase_duration_months or 0)
+    if months > 1:
+        if _package_value_close(candidate, paid_plus_points):
+            return True
+        if _package_value_close(candidate, subscription_price):
+            return True
+        if _package_value_close(candidate, plan_total):
+            return True
+        return False
+
+    if _package_value_close(candidate, paid_plus_points):
+        return True
+    if _package_value_close(candidate, subscription_price):
+        return True
+    if _package_value_close(candidate, plan_total):
+        return True
+    return months == 1 and candidate > 0
 
 
 def _resolve_package_value_dec(
@@ -215,72 +303,57 @@ def _resolve_package_value_dec(
     """
     Полная стоимость пакета до списания баллов.
 
-    Приоритет:
-    1. snapshot.price_before_points
-    2. snapshot.total_price + points (если total уже после баллов)
-    3. total пакета из тарифа для duration_months
-    4. subscription.price — только если совпадает с plan total
-    5. payment.amount + points_spent (legacy)
+    Legacy snapshot с price_1month (1160) для 3-месячного пакета не принимается,
+    если не согласуется с payment+points, subscription.price или plan total.
+    points_earned не участвуют в расчёте.
     """
     points_dec = _decimal(points_spent)
 
-    if snapshot is not None:
-        pbp = getattr(snapshot, "price_before_points", None)
-        if pbp is not None:
-            return _decimal(pbp)
-
-        snapshot_points = int(getattr(snapshot, "subscription_points_used", 0) or 0)
-        total = _decimal(getattr(snapshot, "total_price", None))
-        if snapshot_points > 0:
-            return total + _decimal(snapshot_points)
-        if points_spent > 0 and total > 0:
-            candidate = total + points_dec
-            if purchase_duration_months in (1, 3, 6, 12) and payment is not None and payment.plan_id:
-                plan = payment.plan or db.query(SubscriptionPlan).filter(
-                    SubscriptionPlan.id == payment.plan_id
-                ).first()
-                if plan is not None:
-                    plan_total = _plan_package_total_dec(plan, int(purchase_duration_months))
-                    if _package_matches_plan_total(plan_total, candidate):
-                        return plan_total
-            return candidate
-        if total > 0:
-            return total
-
-    if purchase_duration_months in (1, 3, 6, 12) and payment is not None and payment.plan_id:
-        plan = payment.plan
-        if plan is None:
-            plan = (
-                db.query(SubscriptionPlan)
-                .filter(SubscriptionPlan.id == payment.plan_id)
-                .first()
-            )
-        if plan is not None:
-            plan_total = _plan_package_total_dec(plan, int(purchase_duration_months))
-            if plan_total > 0:
-                if subscription is not None:
-                    sub_price = _decimal(subscription.price)
-                    if _package_matches_plan_total(plan_total, sub_price):
-                        return sub_price
-                return plan_total
-
-    if subscription is not None:
-        sub_price = _decimal(subscription.price)
-        if purchase_duration_months in (1, 3, 6, 12) and payment is not None and payment.plan_id:
-            plan = payment.plan or db.query(SubscriptionPlan).filter(
-                SubscriptionPlan.id == payment.plan_id
-            ).first()
-            if plan is not None:
-                plan_total = _plan_package_total_dec(plan, int(purchase_duration_months))
-                if _package_matches_plan_total(plan_total, sub_price):
-                    return sub_price
-        if purchase_duration_months == 1 or purchase_duration_months is None:
-            return sub_price
-
+    paid_plus_points = Decimal("0")
     if payment is not None:
-        paid = _decimal(payment.amount)
-        if paid > 0 or points_spent > 0:
-            return paid + points_dec
+        paid_plus_points = _decimal(payment.amount) + points_dec
+        if paid_plus_points < 0:
+            paid_plus_points = Decimal("0")
+
+    subscription_price = (
+        _decimal(subscription.price) if subscription is not None else Decimal("0")
+    )
+
+    plan = _resolve_plan_for_package(db, payment)
+    plan_total = Decimal("0")
+    if purchase_duration_months in (1, 3, 6, 12) and plan is not None:
+        plan_total = _plan_package_total_dec(plan, int(purchase_duration_months))
+
+    if paid_plus_points > 0:
+        if _package_value_close(paid_plus_points, plan_total) or _package_value_close(
+            paid_plus_points, subscription_price
+        ):
+            return paid_plus_points
+
+    if subscription_price > 0 and _package_value_close(subscription_price, plan_total):
+        return subscription_price
+
+    if plan_total > 0:
+        return plan_total
+
+    for candidate in _collect_snapshot_package_candidates(snapshot, points_spent=points_spent):
+        if _snapshot_agrees_with_reliable(
+            candidate,
+            purchase_duration_months=purchase_duration_months,
+            paid_plus_points=paid_plus_points,
+            subscription_price=subscription_price,
+            plan_total=plan_total,
+        ):
+            return candidate
+
+    if subscription_price > 0 and (
+        purchase_duration_months == 1 or purchase_duration_months is None
+    ):
+        return subscription_price
+
+    if paid_plus_points > 0:
+        return paid_plus_points
+
     return Decimal("0")
 
 
@@ -534,7 +607,7 @@ def resolve_subscription_payment_billing(
     if subscription is None and payment is not None and payment.subscription_id:
         subscription = payment.subscription
 
-    purchase_duration_months = _resolve_purchase_duration_months(payment, snapshot)
+    purchase_duration_months = _resolve_purchase_duration_months(payment, snapshot, subscription)
 
     master_id = _resolve_master_id(db, payment)
     points_spent, points_earned = _resolve_points_movements(

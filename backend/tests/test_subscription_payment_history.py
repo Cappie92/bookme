@@ -1042,3 +1042,239 @@ def test_my_subscription_active_without_payment_does_not_use_pending_payment(cli
     assert data["amount_paid"] is None
     assert data["points_used"] is None
     assert data["points_spent"] is None
+
+
+def test_package_value_legacy_snapshot_monthly_1160_rejected_for_3_months(db):
+    """A: snapshot.price_before_points=1160 не перехватывает 3-месячный пакет 3210."""
+    user = _create_master_user(db, phone="+79001119997", email="legacy-snap-a@test.com")
+    plan = _create_plan(db)
+    snapshot = _create_snapshot(
+        db,
+        user.id,
+        plan.id,
+        duration_months=3,
+        total_price=3210.0,
+        final_price=3210.0,
+        price_before_points=1160.0,
+    )
+    sub = _create_subscription(db, user.id, plan.id, price=3210.0, duration_days=90)
+    payment = _create_payment(
+        db,
+        user.id,
+        plan.id,
+        snapshot,
+        sub,
+        amount=3210.0,
+        metadata={"selected_duration": 3, "calculation_id": snapshot.id},
+    )
+
+    billing = resolve_subscription_payment_billing(db, payment=payment)
+
+    assert billing["duration_months"] == 3
+    assert billing["package_value"] == 3210.0
+    assert billing["monthly_price"] == 1070.0
+
+
+def test_package_value_partial_points_without_snapshot(db):
+    """B: 2729 + 481 баллов → package_value=3210."""
+    user = _create_master_user(db, phone="+79001119996", email="legacy-snap-b@test.com")
+    master = db.query(Master).filter(Master.user_id == user.id).first()
+    plan = _create_plan(db)
+    sub = _create_subscription(db, user.id, plan.id, price=3210.0, duration_days=90)
+    payment = _create_payment(
+        db,
+        user.id,
+        plan.id,
+        None,
+        sub,
+        amount=2729.0,
+        metadata={"selected_duration": 3},
+    )
+    db.add(
+        SubscriptionPointsLedger(
+            master_id=master.id,
+            amount=481,
+            remaining_amount=0,
+            direction=SubscriptionPointsDirection.DEBIT,
+            source_type=SubscriptionPointsSourceType.SUBSCRIPTION_PAYMENT,
+            source_id=payment.id,
+            status=SubscriptionPointsStatus.ACTIVE,
+        )
+    )
+    db.commit()
+
+    billing = resolve_subscription_payment_billing(db, payment=payment)
+
+    assert billing["duration_months"] == 3
+    assert billing["package_value"] == 3210.0
+    assert billing["monthly_price"] == 1070.0
+    assert billing["amount_paid"] == 2729.0
+    assert billing["points_spent"] == 481
+
+
+def test_package_value_correct_snapshot_3210(db):
+    """C: корректный snapshot.price_before_points=3210."""
+    user = _create_master_user(db, phone="+79001119995", email="legacy-snap-c@test.com")
+    plan = _create_plan(db)
+    snapshot = _create_snapshot(
+        db,
+        user.id,
+        plan.id,
+        duration_months=3,
+        total_price=3210.0,
+        final_price=3210.0,
+        price_before_points=3210.0,
+    )
+    sub = _create_subscription(db, user.id, plan.id, price=3210.0)
+    payment = _create_payment(db, user.id, plan.id, snapshot, sub, amount=3210.0)
+
+    billing = resolve_subscription_payment_billing(db, payment=payment)
+
+    assert billing["package_value"] == 3210.0
+    assert billing["monthly_price"] == 1070.0
+
+
+def test_package_value_one_month_1160(db):
+    """D: 1 месяц → 1160 ₽/мес."""
+    user = _create_master_user(db, phone="+79001119994", email="legacy-snap-d@test.com")
+    plan = _create_plan(db)
+    snapshot = _create_snapshot(
+        db,
+        user.id,
+        plan.id,
+        duration_months=1,
+        total_price=1160.0,
+        final_price=1160.0,
+        price_before_points=1160.0,
+    )
+    sub = _create_subscription(db, user.id, plan.id, price=1160.0, duration_days=30)
+    payment = _create_payment(
+        db,
+        user.id,
+        plan.id,
+        snapshot,
+        sub,
+        amount=1160.0,
+        metadata={"selected_duration": 1},
+    )
+
+    billing = resolve_subscription_payment_billing(db, payment=payment)
+
+    assert billing["duration_months"] == 1
+    assert billing["package_value"] == 1160.0
+    assert billing["monthly_price"] == 1160.0
+
+
+def test_package_value_ignores_points_earned(db):
+    """E: points_earned не увеличивает package_value."""
+    user = _create_master_user(db, phone="+79001119993", email="legacy-snap-e@test.com")
+    master = db.query(Master).filter(Master.user_id == user.id).first()
+    plan = _create_plan(db)
+    sub = _create_subscription(db, user.id, plan.id, price=3210.0, duration_days=90)
+    payment = _create_payment(
+        db,
+        user.id,
+        plan.id,
+        None,
+        sub,
+        amount=3210.0,
+        metadata={"selected_duration": 3},
+    )
+    redemption = _create_minimal_redemption(db, master, code_suffix="EARN")
+    _attach_promo_grant_with_ledger(db, master, payment, redemption, points=481)
+
+    billing = resolve_subscription_payment_billing(db, payment=payment)
+
+    assert billing["package_value"] == 3210.0
+    assert billing["monthly_price"] == 1070.0
+    assert billing["points_earned"] == 481
+    assert billing["points_spent"] == 0
+
+
+def test_history_and_my_api_legacy_snapshot_payment_id_4_style(client, db):
+    """payment_id=4 prod: legacy snapshot 1160 + payment 3210 → оба API отдают 1070/3210."""
+    user = _create_master_user(db, phone="+79001119992", email="legacy-api-4@test.com")
+    plan = _create_plan(db)
+    snapshot = _create_snapshot(
+        db,
+        user.id,
+        plan.id,
+        duration_months=3,
+        total_price=3210.0,
+        final_price=3210.0,
+        price_before_points=1160.0,
+    )
+    sub = _create_subscription(db, user.id, plan.id, price=3210.0, duration_days=90)
+    payment = _create_payment(
+        db,
+        user.id,
+        plan.id,
+        snapshot,
+        sub,
+        amount=3210.0,
+        metadata={"selected_duration": 3, "calculation_id": snapshot.id},
+    )
+    sub_id = sub.id
+    payment_id = payment.id
+    headers = _auth(client, user)
+
+    history = client.get("/api/payments/subscription/history", headers=headers).json()
+    row = next(r for r in history if r["payment_id"] == payment_id)
+    assert row["duration_months"] == 3
+    assert row["package_value"] == 3210.0
+    assert row["monthly_price"] == 1070.0
+
+    my = client.get("/api/subscriptions/my", headers=headers).json()
+    assert my["id"] == sub_id
+    assert my["duration_months"] == 3
+    assert my["package_value"] == 3210.0
+    assert my["monthly_price"] == 1070.0
+    assert my["amount_paid"] == 3210.0
+
+
+def test_history_and_my_api_partial_points_payment_id_5_style(client, db):
+    """payment_id=5 prod: без snapshot, 2729+481 → оба API отдают 1070/3210."""
+    user = _create_master_user(db, phone="+79001119991", email="legacy-api-5@test.com")
+    master = db.query(Master).filter(Master.user_id == user.id).first()
+    plan = _create_plan(db)
+    sub = _create_subscription(db, user.id, plan.id, price=3210.0, duration_days=90)
+    payment = _create_payment(
+        db,
+        user.id,
+        plan.id,
+        None,
+        sub,
+        amount=2729.0,
+        metadata={"selected_duration": 3},
+    )
+    db.add(
+        SubscriptionPointsLedger(
+            master_id=master.id,
+            amount=481,
+            remaining_amount=0,
+            direction=SubscriptionPointsDirection.DEBIT,
+            source_type=SubscriptionPointsSourceType.SUBSCRIPTION_PAYMENT,
+            source_id=payment.id,
+            status=SubscriptionPointsStatus.ACTIVE,
+        )
+    )
+    db.commit()
+    sub_id = sub.id
+    payment_id = payment.id
+    headers = _auth(client, user)
+
+    history = client.get("/api/payments/subscription/history", headers=headers).json()
+    row = next(r for r in history if r["payment_id"] == payment_id)
+    assert row["duration_months"] == 3
+    assert row["package_value"] == 3210.0
+    assert row["monthly_price"] == 1070.0
+    assert row["amount_paid"] == 2729.0
+    assert row["points_spent"] == 481
+
+    my = client.get("/api/subscriptions/my", headers=headers).json()
+    assert my["id"] == sub_id
+    assert my["duration_months"] == 3
+    assert my["package_value"] == 3210.0
+    assert my["monthly_price"] == 1070.0
+    assert my["amount_paid"] == 2729.0
+    assert my["points_used"] == 481
