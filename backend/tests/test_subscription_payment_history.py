@@ -898,3 +898,147 @@ def test_my_subscription_one_month_package(client, db):
     assert data["package_value"] == 1160.0
     assert data["monthly_price"] == 1160.0
     assert data["amount_paid"] == 1160.0
+
+
+def _create_pending_subscription(db, user_id, plan_id, *, sub_id_hint=None, price=1160.0):
+    """PENDING подписка с будущим start_date (after_expiry / не применена)."""
+    now = datetime.utcnow()
+    sub = Subscription(
+        user_id=user_id,
+        subscription_type=SubscriptionType.MASTER,
+        status=SubscriptionStatus.PENDING,
+        start_date=now + timedelta(days=95),
+        end_date=now + timedelta(days=125),
+        price=price,
+        daily_rate=39.0,
+        is_active=False,
+        auto_renewal=False,
+        plan_id=plan_id,
+    )
+    db.add(sub)
+    db.commit()
+    db.refresh(sub)
+    return sub
+
+
+def test_my_subscription_active_not_mixed_with_newer_pending_subscriptions(client, db):
+    """
+    ACTIVE №20 (3 мес) + три PENDING №21–23 (1 мес, 1160) с paid/applied payment.
+    Billing только от подписки №20 и payment №5.
+    """
+    user = _create_master_user(db, phone="+79001118877", email="my-mixed@test.com")
+    master = db.query(Master).filter(Master.user_id == user.id).first()
+    plan = _create_plan(db)
+    now = datetime.utcnow()
+
+    active_sub = Subscription(
+        user_id=user.id,
+        subscription_type=SubscriptionType.MASTER,
+        status=SubscriptionStatus.ACTIVE,
+        start_date=now - timedelta(days=5),
+        end_date=now + timedelta(days=85),
+        price=3210.0,
+        daily_rate=36.0,
+        is_active=True,
+        auto_renewal=False,
+        plan_id=plan.id,
+    )
+    db.add(active_sub)
+    db.flush()
+
+    active_payment = _create_payment(
+        db,
+        user.id,
+        plan.id,
+        None,
+        active_sub,
+        amount=2729.0,
+        metadata={"selected_duration": 3, "plan_display_name": "Premium"},
+    )
+    db.add(
+        SubscriptionPointsLedger(
+            master_id=master.id,
+            amount=481,
+            remaining_amount=0,
+            direction=SubscriptionPointsDirection.DEBIT,
+            source_type=SubscriptionPointsSourceType.SUBSCRIPTION_PAYMENT,
+            source_id=active_payment.id,
+            status=SubscriptionPointsStatus.ACTIVE,
+        )
+    )
+
+    for _ in range(3):
+        pending_sub = _create_pending_subscription(db, user.id, plan.id, price=1160.0)
+        _create_payment(
+            db,
+            user.id,
+            plan.id,
+            None,
+            pending_sub,
+            amount=1160.0,
+            metadata={"selected_duration": 1},
+        )
+
+    db.commit()
+    active_sub_id = active_sub.id
+
+    headers = _auth(client, user)
+    response = client.get("/api/subscriptions/my", headers=headers)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["id"] == active_sub_id
+    assert data["duration_months"] == 3
+    assert data["package_value"] == 3210.0
+    assert data["monthly_price"] == 1070.0
+    assert data["amount_paid"] == 2729.0
+    assert data["points_used"] == 481
+    assert data["points_spent"] == 481
+
+
+def test_my_subscription_active_without_payment_does_not_use_pending_payment(client, db):
+    """ACTIVE без linked payment — billing null, даже если у PENDING есть paid/applied payment."""
+    user = _create_master_user(db, phone="+79001118876", email="my-no-pay@test.com")
+    plan = _create_plan(db)
+    now = datetime.utcnow()
+
+    active_sub = Subscription(
+        user_id=user.id,
+        subscription_type=SubscriptionType.MASTER,
+        status=SubscriptionStatus.ACTIVE,
+        start_date=now - timedelta(days=5),
+        end_date=now + timedelta(days=25),
+        price=3210.0,
+        daily_rate=36.0,
+        is_active=True,
+        auto_renewal=False,
+        plan_id=plan.id,
+    )
+    db.add(active_sub)
+    db.flush()
+
+    pending_sub = _create_pending_subscription(db, user.id, plan.id, price=1160.0)
+    _create_payment(
+        db,
+        user.id,
+        plan.id,
+        None,
+        pending_sub,
+        amount=1160.0,
+        metadata={"selected_duration": 1},
+    )
+    db.commit()
+    active_sub_id = active_sub.id
+
+    headers = _auth(client, user)
+    response = client.get("/api/subscriptions/my", headers=headers)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["id"] == active_sub_id
+    assert data["duration_months"] is None
+    assert data["package_value"] is None
+    assert data["monthly_price"] is None
+    assert data["amount_paid"] is None
+    assert data["points_used"] is None
+    assert data["points_spent"] is None

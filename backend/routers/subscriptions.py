@@ -204,32 +204,9 @@ async def get_my_subscription(
         "points_spent": None,
     }
     if plan_name and plan_name != "Free":
-        from utils.subscription_payment_display import (
-            resolve_applied_subscription_payment,
-            resolve_subscription_payment_billing,
-        )
+        from utils.subscription_payment_display import resolve_subscription_my_billing
 
-        paid_payment = resolve_applied_subscription_payment(
-            db,
-            user_id=current_user.id,
-            subscription_id=subscription.id,
-        )
-        if paid_payment is not None:
-            plan_obj = plan if subscription.plan_id else None
-            billing = resolve_subscription_payment_billing(
-                db,
-                payment=paid_payment,
-                subscription=subscription,
-                plan=plan_obj,
-            )
-            billing_fields = {
-                "duration_months": billing["duration_months"],
-                "package_value": billing["package_value"],
-                "monthly_price": billing["monthly_price"],
-                "amount_paid": billing["amount_paid"],
-                "points_used": billing["points_used"],
-                "points_spent": billing["points_spent"],
-            }
+        billing_fields = resolve_subscription_my_billing(db, subscription)
 
     # Преобразуем объект Subscription в формат SubscriptionOut
     return {

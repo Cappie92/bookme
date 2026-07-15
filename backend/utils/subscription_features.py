@@ -55,11 +55,12 @@ def get_active_subscription_readonly(
                 Subscription.user_id == user_id,
                 Subscription.subscription_type == subscription_type,
                 Subscription.status == SubscriptionStatus.ACTIVE,
-                Subscription.end_date > now,
                 Subscription.is_active == True,
+                Subscription.start_date <= now,
+                Subscription.end_date > now,
             )
         )
-        .order_by(Subscription.end_date.desc())
+        .order_by(Subscription.end_date.desc(), Subscription.id.desc())
         .first()
     )
 
@@ -86,8 +87,9 @@ def get_user_subscription_with_plan(
                 Subscription.user_id == user_id,
                 Subscription.subscription_type == subscription_type,
                 Subscription.status == SubscriptionStatus.ACTIVE,
-                Subscription.end_date > now,
                 Subscription.is_active == True,
+                Subscription.start_date <= now,
+                Subscription.end_date > now,
             )
         )
         .count()

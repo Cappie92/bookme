@@ -461,6 +461,58 @@ def resolve_applied_subscription_payment(
     )
 
 
+def resolve_subscription_my_billing(
+    db,
+    subscription: Subscription,
+) -> Dict[str, Any]:
+    """
+    Billing для GET /api/subscriptions/my — атомарно из одной subscription и её payment.
+
+    Без linked paid/applied payment все поля null (не подмешиваются другие подписки).
+    """
+    empty = {
+        "duration_months": None,
+        "package_value": None,
+        "monthly_price": None,
+        "amount_paid": None,
+        "points_used": None,
+        "points_spent": None,
+    }
+    if subscription is None:
+        return empty
+
+    payment = resolve_applied_subscription_payment(
+        db,
+        user_id=int(subscription.user_id),
+        subscription_id=int(subscription.id),
+    )
+    if payment is None or int(payment.subscription_id or 0) != int(subscription.id):
+        return empty
+
+    plan = subscription.plan
+    if plan is None and subscription.plan_id:
+        plan = (
+            db.query(SubscriptionPlan)
+            .filter(SubscriptionPlan.id == subscription.plan_id)
+            .first()
+        )
+
+    billing = resolve_subscription_payment_billing(
+        db,
+        payment=payment,
+        subscription=subscription,
+        plan=plan,
+    )
+    return {
+        "duration_months": billing["duration_months"],
+        "package_value": billing["package_value"],
+        "monthly_price": billing["monthly_price"],
+        "amount_paid": billing["amount_paid"],
+        "points_used": billing["points_used"],
+        "points_spent": billing["points_spent"],
+    }
+
+
 def resolve_subscription_payment_billing(
     db,
     *,
