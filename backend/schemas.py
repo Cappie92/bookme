@@ -1233,6 +1233,7 @@ class SubscriptionOut(BaseModel):
     monthly_price: Optional[float] = None
     amount_paid: Optional[float] = None
     points_used: Optional[int] = None
+    points_spent: Optional[int] = None
 
     class Config:
         from_attributes = True

@@ -201,36 +201,35 @@ async def get_my_subscription(
         "monthly_price": None,
         "amount_paid": None,
         "points_used": None,
+        "points_spent": None,
     }
     if plan_name and plan_name != "Free":
-        from models import Payment as PaymentModel
-        from utils.subscription_payment_display import resolve_subscription_payment_billing
+        from utils.subscription_payment_display import (
+            resolve_applied_subscription_payment,
+            resolve_subscription_payment_billing,
+        )
 
-        paid_payment = (
-            db.query(PaymentModel)
-            .filter(
-                PaymentModel.user_id == current_user.id,
-                PaymentModel.payment_type == "subscription",
-                PaymentModel.subscription_id == subscription.id,
-                PaymentModel.status == "paid",
-            )
-            .order_by(PaymentModel.paid_at.desc().nullslast(), PaymentModel.id.desc())
-            .first()
-        )
-        plan_obj = plan if subscription.plan_id else None
-        billing = resolve_subscription_payment_billing(
+        paid_payment = resolve_applied_subscription_payment(
             db,
-            payment=paid_payment,
-            subscription=subscription,
-            plan=plan_obj,
+            user_id=current_user.id,
+            subscription_id=subscription.id,
         )
-        billing_fields = {
-            "duration_months": billing["duration_months"],
-            "package_value": billing["package_value"],
-            "monthly_price": billing["monthly_price"],
-            "amount_paid": billing["amount_paid"],
-            "points_used": billing["points_used"],
-        }
+        if paid_payment is not None:
+            plan_obj = plan if subscription.plan_id else None
+            billing = resolve_subscription_payment_billing(
+                db,
+                payment=paid_payment,
+                subscription=subscription,
+                plan=plan_obj,
+            )
+            billing_fields = {
+                "duration_months": billing["duration_months"],
+                "package_value": billing["package_value"],
+                "monthly_price": billing["monthly_price"],
+                "amount_paid": billing["amount_paid"],
+                "points_used": billing["points_used"],
+                "points_spent": billing["points_spent"],
+            }
 
     # Преобразуем объект Subscription в формат SubscriptionOut
     return {

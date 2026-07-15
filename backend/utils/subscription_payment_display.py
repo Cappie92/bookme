@@ -438,6 +438,29 @@ def reconstruct_sequential_subscription_periods(items: List[Dict[str, Any]]) -> 
     return result
 
 
+def resolve_applied_subscription_payment(
+    db,
+    *,
+    user_id: int,
+    subscription_id: int,
+) -> Optional[Payment]:
+    """
+    Последний успешный платёж, применивший подписку (paid + applied).
+    """
+    return (
+        db.query(Payment)
+        .filter(
+            Payment.user_id == user_id,
+            Payment.payment_type == "subscription",
+            Payment.subscription_id == subscription_id,
+            Payment.status == "paid",
+            Payment.subscription_apply_status == "applied",
+        )
+        .order_by(Payment.paid_at.desc().nullslast(), Payment.id.desc())
+        .first()
+    )
+
+
 def resolve_subscription_payment_billing(
     db,
     *,

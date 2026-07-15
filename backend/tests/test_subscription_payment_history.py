@@ -832,3 +832,69 @@ def test_history_api_includes_points_and_period_fields(client, db):
     assert rows[0]["points_earned"] == 321
     assert rows[0]["subscription_start_date"] is not None
     assert rows[0]["subscription_end_date"] is not None
+
+
+def test_my_subscription_legacy_without_snapshot_partial_points(client, db):
+    """payment_id=5 prod case: no snapshot, 2729+481, subscription.price=3210."""
+    user = _create_master_user(db, phone="+79001119999", email="my-legacy@test.com")
+    master = db.query(Master).filter(Master.user_id == user.id).first()
+    plan = _create_plan(db)
+    sub = _create_subscription(db, user.id, plan.id, price=3210.0, duration_days=90)
+    payment = _create_payment(
+        db,
+        user.id,
+        plan.id,
+        None,
+        sub,
+        amount=2729.0,
+        metadata={"selected_duration": 3, "plan_display_name": "Premium"},
+    )
+    db.add(
+        SubscriptionPointsLedger(
+            master_id=master.id,
+            amount=481,
+            remaining_amount=0,
+            direction=SubscriptionPointsDirection.DEBIT,
+            source_type=SubscriptionPointsSourceType.SUBSCRIPTION_PAYMENT,
+            source_id=payment.id,
+            status=SubscriptionPointsStatus.ACTIVE,
+        )
+    )
+    db.commit()
+
+    headers = _auth(client, user)
+    response = client.get("/api/subscriptions/my", headers=headers)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["duration_months"] == 3
+    assert data["package_value"] == 3210.0
+    assert data["monthly_price"] == 1070.0
+    assert data["amount_paid"] == 2729.0
+    assert data["points_used"] == 481
+    assert data["points_spent"] == 481
+
+
+def test_my_subscription_one_month_package(client, db):
+    user = _create_master_user(db, phone="+79001119998", email="my-1m@test.com")
+    plan = _create_plan(db)
+    sub = _create_subscription(db, user.id, plan.id, price=1160.0, duration_days=30)
+    _create_payment(
+        db,
+        user.id,
+        plan.id,
+        None,
+        sub,
+        amount=1160.0,
+        metadata={"selected_duration": 1},
+    )
+
+    headers = _auth(client, user)
+    response = client.get("/api/subscriptions/my", headers=headers)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["duration_months"] == 1
+    assert data["package_value"] == 1160.0
+    assert data["monthly_price"] == 1160.0
+    assert data["amount_paid"] == 1160.0

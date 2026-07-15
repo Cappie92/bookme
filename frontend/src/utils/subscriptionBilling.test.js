@@ -13,6 +13,17 @@ import {
 } from './subscriptionBilling'
 
 describe('subscriptionBilling', () => {
+  it('does not derive monthly price from subscription.price when billing fields are missing', () => {
+    const display = resolveSubscriptionCostDisplay({
+      price: 1160,
+      duration_months: 3,
+      monthly_price: null,
+      package_value: null,
+    })
+    expect(display.monthlyLabel).toBe('—')
+    expect(display.packageSummary).toBeNull()
+  })
+
   it('computes 3210 for 3 months as 1070 ₽/мес', () => {
     const display = resolveSubscriptionCostDisplay({
       duration_months: 3,

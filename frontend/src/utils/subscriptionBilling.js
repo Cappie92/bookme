@@ -143,29 +143,23 @@ export function formatPaymentBreakdown(amountPaid, pointsUsed) {
 }
 
 /**
- * @param {{ monthly_price?: number|null, package_value?: number|null, duration_months?: number|null, amount_paid?: number|null, points_used?: number|null, price?: number|null }} subscription
+ * @param {{ monthly_price?: number|null, package_value?: number|null, duration_months?: number|null, amount_paid?: number|null, points_used?: number|null }} subscription
  */
 export function resolveSubscriptionCostDisplay(subscription) {
   if (!subscription) {
     return { monthlyLabel: '—', packageSummary: null, paymentBreakdown: null }
   }
 
-  const monthlyPrice =
-    subscription.monthly_price != null
-      ? subscription.monthly_price
-      : subscription.package_value != null && subscription.duration_months
-        ? computeMonthlyPrice(subscription.package_value, subscription.duration_months)
-        : subscription.price != null && subscription.duration_months
-          ? computeMonthlyPrice(subscription.price, subscription.duration_months)
-          : null
-
-  const packageValue =
-    subscription.package_value != null ? subscription.package_value : subscription.price
-
   return {
-    monthlyLabel: formatPricePerMonth(monthlyPrice),
-    packageSummary: formatPackageSummary(subscription.duration_months, packageValue),
-    paymentBreakdown: formatPaymentBreakdown(subscription.amount_paid, subscription.points_used),
+    monthlyLabel: formatPricePerMonth(subscription.monthly_price),
+    packageSummary: formatPackageSummary(
+      subscription.duration_months,
+      subscription.package_value
+    ),
+    paymentBreakdown: formatPaymentBreakdown(
+      subscription.amount_paid,
+      subscription.points_used ?? subscription.points_spent
+    ),
   }
 }
 
