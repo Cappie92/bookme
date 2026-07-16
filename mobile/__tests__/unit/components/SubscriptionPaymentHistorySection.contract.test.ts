@@ -1,7 +1,5 @@
 /**
- * Component-level behaviour via pure section model + retry contract.
- * Full RN render lives behind broken jest-expo/shared import scope in this repo;
- * UI wiring is covered here without mounting native views.
+ * Component-level behaviour via pure section model + modal contracts.
  */
 import { buildPaymentHistorySectionModel } from '@src/utils/paymentHistorySectionModel';
 import type { SubscriptionPaymentHistoryItem } from '@src/utils/subscriptionBilling';
@@ -37,15 +35,26 @@ describe('SubscriptionPaymentHistorySection contract', () => {
     expect(model.showEmpty).toBe(false);
   });
 
-  it('refresh replaces previous empty with successful card data', () => {
+  it('refresh replaces previous empty with compact row data', () => {
     expect(buildPaymentHistorySectionModel([]).showEmpty).toBe(true);
     const after = buildPaymentHistorySectionModel([item]);
-    expect(after.successful[0].amountLabel).toMatch(/2[\u00A0 ]729 ₽/);
-    expect(after.successful[0].pointsParts.map((p) => p.text)).toEqual([
-      '-481 балл',
-      '+321 балл',
-    ]);
-    expect(after.successful[0].monthlyLabel).toMatch(/1[\u00A0 ]070 ₽\/мес/);
-    expect(after.successful[0].periodLabel).toBe('12.07.26–09.10.26');
+    expect(after.preview[0].amountLabel).toMatch(/2[\u00A0 ]729 ₽/);
+    expect(after.preview[0].pointsCompactLine).toMatch(/−481 \/ \+321 балл/);
+    expect(after.preview[0].monthlyLabel).toMatch(/1[\u00A0 ]070 ₽\/мес/);
+    expect(after.preview[0].periodLabel).toBe('12.07.26–09.10.26');
+    expect(after.showAllButton).toBe(false);
+  });
+
+  it('>3 items expose show-all label for modal entry', () => {
+    const items = [1, 2, 3, 4].map((n) => ({
+      ...item,
+      payment_id: n,
+      public_id: `pay-${n}`,
+      paid_at: `2026-07-${10 + n}T10:00:00`,
+    }));
+    const model = buildPaymentHistorySectionModel(items);
+    expect(model.showAllButton).toBe(true);
+    expect(model.showAllButtonLabel).toBe('Показать всю историю (4)');
+    expect(model.modalListItems.filter((i) => i.type === 'row')).toHaveLength(4);
   });
 });

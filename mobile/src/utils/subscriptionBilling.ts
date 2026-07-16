@@ -72,6 +72,13 @@ export function formatDurationMonthsLabel(durationMonths: number | null | undefi
   return `${months} ${word}`;
 }
 
+/** Компактный срок для строки истории: «3 мес.» */
+export function formatDurationMonthsCompact(durationMonths: number | null | undefined): string {
+  const months = Number(durationMonths);
+  if (!Number.isFinite(months) || months <= 0) return '—';
+  return `${months} мес.`;
+}
+
 export function formatPackageSummary(
   durationMonths: number | null | undefined,
   packageValue: number | null | undefined
@@ -104,6 +111,15 @@ export function formatPeriodRange(
   const end = formatShort(endDate);
   if (!start || !end) return '—';
   return `${start}–${end}`;
+}
+
+/** Период или null, если дат нет (не показывать «Период —»). */
+export function formatPeriodRangeOrNull(
+  startDate: string | null | undefined,
+  endDate: string | null | undefined
+): string | null {
+  const value = formatPeriodRange(startDate, endDate);
+  return value === '—' ? null : value;
 }
 
 export function formatPointsWord(points: number | null | undefined): string {
@@ -236,6 +252,58 @@ export function formatHistoryDate(dateString: string | null | undefined): string
     year: 'numeric',
     month: 'long',
     day: 'numeric',
+  });
+}
+
+/** Компактная дата строки истории: «16 июл. 2026». */
+export function formatHistoryDateCompact(dateString: string | null | undefined): string {
+  if (!dateString) return '—';
+  const date = new Date(dateString);
+  if (Number.isNaN(date.getTime())) return '—';
+  return date.toLocaleDateString('ru-RU', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  });
+}
+
+/**
+ * Компактная строка баллов: «−481 / +321 балл».
+ * Цвета применяются в UI по tone частей formatPaidAmountWithPoints.
+ */
+export function formatCompactPointsLine(
+  pointsSpent: number | null | undefined,
+  pointsEarned: number | null | undefined
+): string | null {
+  const spent = Math.round(Number(pointsSpent ?? 0));
+  const earned = Math.round(Number(pointsEarned ?? 0));
+  const chunks: string[] = [];
+  if (spent > 0) chunks.push(`−${spent.toLocaleString('ru-RU')}`);
+  if (earned > 0) chunks.push(`+${earned.toLocaleString('ru-RU')}`);
+  if (!chunks.length) return null;
+  const word = formatPointsWord(earned > 0 ? earned : spent);
+  return `${chunks.join(' / ')} ${word}`;
+}
+
+export function getPaymentHistorySortTime(item: {
+  paid_at?: string | null;
+  payment_id?: number;
+}): number {
+  if (item.paid_at) {
+    const ms = new Date(item.paid_at).getTime();
+    if (Number.isFinite(ms)) return ms;
+  }
+  return Number(item.payment_id) || 0;
+}
+
+export function sortPaymentHistoryByDateDesc<T extends {
+  paid_at?: string | null;
+  payment_id?: number;
+}>(items: T[] = []): T[] {
+  return [...items].sort((a, b) => {
+    const diff = getPaymentHistorySortTime(b) - getPaymentHistorySortTime(a);
+    if (diff !== 0) return diff;
+    return (Number(b.payment_id) || 0) - (Number(a.payment_id) || 0);
   });
 }
 

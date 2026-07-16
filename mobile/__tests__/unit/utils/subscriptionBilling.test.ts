@@ -1,14 +1,18 @@
 import {
   computeMonthlyPrice,
+  formatCompactPointsLine,
+  formatDurationMonthsCompact,
   formatDurationMonthsLabel,
   formatPaidAmountWithPoints,
   formatPaymentBreakdown,
   formatPeriodRange,
+  formatPeriodRangeOrNull,
   formatPointsWord,
   formatPricePerMonth,
   isSuccessfulSubscriptionPayment,
   resolvePointsSpent,
   resolveSubscriptionCostDisplay,
+  sortPaymentHistoryByDateDesc,
   splitPaymentHistory,
 } from '@src/utils/subscriptionBilling';
 
@@ -126,5 +130,25 @@ describe('subscriptionBilling', () => {
     expect(display.monthlyLabel).toMatch(/1070 ₽\/мес|1[\u00A0 ]070 ₽\/мес/);
     expect(display.packageSummary).toMatch(/3210|3[\u00A0 ]210/);
     // earned is not an input to resolveSubscriptionCostDisplay
+  });
+
+  it('formatPeriodRangeOrNull hides missing period', () => {
+    expect(formatPeriodRangeOrNull(null, null)).toBeNull();
+    expect(formatPeriodRangeOrNull('2026-07-12T10:00:00', '2026-10-09T10:00:00')).toBe(
+      '12.07.26–09.10.26'
+    );
+  });
+
+  it('formatCompactPointsLine and duration compact', () => {
+    expect(formatCompactPointsLine(481, 321)).toBe('−481 / +321 балл');
+    expect(formatDurationMonthsCompact(3)).toBe('3 мес.');
+  });
+
+  it('sortPaymentHistoryByDateDesc orders newest first', () => {
+    const items = [
+      { payment_id: 1, paid_at: '2026-07-10T10:00:00' },
+      { payment_id: 2, paid_at: '2026-07-16T10:00:00' },
+    ];
+    expect(sortPaymentHistoryByDateDesc(items).map((i) => i.payment_id)).toEqual([2, 1]);
   });
 });

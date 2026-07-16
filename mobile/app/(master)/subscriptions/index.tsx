@@ -72,6 +72,8 @@ import {
 
 const SCROLL_EXTRA_BOTTOM = 24;
 const KEYBOARD_SCROLL_EXTRA_BOTTOM = 48;
+/** Единый вертикальный gap между основными секциями экрана «Подписки». */
+const SECTION_GAP = 16;
 type PromoApplyMessageTone = 'success' | 'neutral';
 
 /** Доступные средства (без резерва под подписку). */
@@ -390,7 +392,7 @@ export default function SubscriptionsScreen() {
     );
 
     return (
-      <Card style={styles.subscriptionCard}>
+      <Card style={[styles.subscriptionCard, styles.sectionSpacing]}>
         <View style={styles.subscriptionHeader}>
           <View style={styles.subscriptionHeaderLeft}>
             <Text style={styles.planName}>
@@ -491,7 +493,7 @@ export default function SubscriptionsScreen() {
   const renderTariffControls = () => {
     if (!subscriptionType) return null;
     return (
-      <Card style={styles.controlsCard}>
+      <Card style={[styles.controlsCard, styles.sectionSpacing]}>
         <Text style={styles.controlsTitle}>Тарифный план</Text>
         <Text style={styles.controlsText}>
           Управляйте тарифом и периодом. Автопродление по карте будет добавлено позже.
@@ -515,7 +517,7 @@ export default function SubscriptionsScreen() {
 
     return (
       <>
-        <Card style={styles.promoCard}>
+        <Card style={[styles.promoCard, styles.sectionSpacing]}>
           <View style={styles.promoCardHeader}>
             <View style={styles.promoCardHeaderText}>
               <Text style={styles.promoCardTitle}>Ваш промокод</Text>
@@ -545,7 +547,7 @@ export default function SubscriptionsScreen() {
           {promoLoadError ? <Text style={styles.promoWarningText}>{promoLoadError}</Text> : null}
         </Card>
 
-        <Card style={styles.promoCard}>
+        <Card style={[styles.promoCard, styles.sectionSpacing]}>
           <Text style={styles.promoCardTitle}>Введите промокод</Text>
           <Text style={styles.promoCardDescription}>
             Бонусные баллы начислятся после первой успешной оплаты подписки.
@@ -603,7 +605,7 @@ export default function SubscriptionsScreen() {
           {promoApplyError ? <Text testID="promo-apply-error" style={styles.promoErrorText}>{promoApplyError}</Text> : null}
         </Card>
 
-        <Card style={styles.promoCard}>
+        <Card style={[styles.promoCard, styles.sectionSpacing]}>
           <View style={styles.pointsHeader}>
             <View style={styles.pointsHeaderText}>
               <Text style={styles.promoCardTitle}>Бонусные баллы</Text>
@@ -653,13 +655,15 @@ export default function SubscriptionsScreen() {
         loading={paymentHistoryLoading}
         error={paymentHistoryError}
         onRetry={loadPaymentHistory}
+        onRefresh={loadPaymentHistory}
+        style={styles.sectionSpacing}
       />
     );
   };
 
   const renderInactiveSubscription = () => (
     <>
-      <Card style={styles.inactiveCard}>
+      <Card style={[styles.inactiveCard, styles.sectionSpacing]}>
         <Text style={styles.emptyTitle}>Подписка не активна</Text>
         <Text style={styles.emptyText}>
           Вы можете выбрать тариф и активировать подписку с баланса или пополнить баланс.
@@ -675,7 +679,7 @@ export default function SubscriptionsScreen() {
       </Card>
 
       {subscriptionType ? (
-        <Card style={styles.controlsCard}>
+        <Card style={[styles.controlsCard, styles.sectionSpacing]}>
           <PrimaryButton
             title="Выбрать тариф"
             onPress={openPurchaseModal}
@@ -685,7 +689,7 @@ export default function SubscriptionsScreen() {
           </View>
         </Card>
       ) : (
-        <View style={styles.secondaryActionWrap}>
+        <View style={[styles.secondaryActionWrap, styles.sectionSpacing]}>
           <SecondaryButton title="Обновить" onPress={handleRefresh} />
         </View>
       )}
@@ -767,8 +771,8 @@ export default function SubscriptionsScreen() {
           }}
         >
           {renderInactiveSubscription()}
-          {renderPaymentHistory()}
           {renderPromoCards()}
+          {renderPaymentHistory()}
           {renderPurchaseModal()}
         </ScreenContainer>
       </KeyboardAvoidingView>
@@ -795,8 +799,8 @@ export default function SubscriptionsScreen() {
       >
         {renderSubscriptionInfo()}
         {renderTariffControls()}
-        {renderPaymentHistory()}
         {renderPromoCards()}
+        {renderPaymentHistory()}
 
         {renderPurchaseModal()}
       </ScreenContainer>
@@ -844,8 +848,9 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     lineHeight: 20,
   },
-  inactiveCard: {
-    marginBottom: 16,
+  inactiveCard: {},
+  sectionSpacing: {
+    marginBottom: SECTION_GAP,
   },
   balanceRow: {
     flexDirection: 'row',
@@ -868,9 +873,7 @@ const styles = StyleSheet.create({
   secondaryActionWrap: {
     marginTop: 12,
   },
-  subscriptionCard: {
-    marginBottom: 16,
-  },
+  subscriptionCard: {},
   subscriptionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -1009,7 +1012,6 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   controlsCard: {
-    marginTop: 8,
     borderWidth: 1,
     borderColor: '#e0e0e0',
   },
@@ -1025,8 +1027,6 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   promoCard: {
-    marginTop: 8,
-    marginBottom: 8,
     borderWidth: 1,
     borderColor: '#e0e0e0',
   },
