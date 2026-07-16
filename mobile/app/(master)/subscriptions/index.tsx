@@ -36,7 +36,12 @@ import {
   getDisplayDaysRemaining,
 } from '@src/services/api/subscriptions';
 import { getBalance, type Balance } from '@src/services/api/master';
+import {
+  getSubscriptionPaymentHistory,
+  type SubscriptionPaymentHistoryItem,
+} from '@src/services/api/payments';
 import { SubscriptionPurchaseModal } from '@src/components/subscriptions/SubscriptionPurchaseModal';
+import { SubscriptionPaymentHistorySection } from '@src/components/subscriptions/SubscriptionPaymentHistorySection';
 import { formatMoney } from '@src/utils/money';
 import { getPlanTitle } from '@src/utils/planTitle';
 import { refreshMasterFeaturesGlobally } from '@src/utils/masterFeaturesRefresh';
@@ -133,6 +138,9 @@ export default function SubscriptionsScreen() {
   const [promoApplyMessageTone, setPromoApplyMessageTone] = useState<PromoApplyMessageTone>('success');
   const [promoApplyError, setPromoApplyError] = useState<string | null>(null);
   const [promoStateVersion, setPromoStateVersion] = useState(0);
+  const [paymentHistory, setPaymentHistory] = useState<SubscriptionPaymentHistoryItem[]>([]);
+  const [paymentHistoryLoading, setPaymentHistoryLoading] = useState(false);
+  const [paymentHistoryError, setPaymentHistoryError] = useState<string | null>(null);
 
   // Определяем тип подписки на основе роли пользователя
   const subscriptionType = user?.role === 'salon' 
@@ -160,6 +168,21 @@ export default function SubscriptionsScreen() {
     } finally {
       setLoading(false);
       setRefreshing(false);
+    }
+  };
+
+  const loadPaymentHistory = async () => {
+    if (subscriptionType !== SubscriptionType.MASTER) return;
+    setPaymentHistoryLoading(true);
+    setPaymentHistoryError(null);
+    try {
+      const data = await getSubscriptionPaymentHistory();
+      setPaymentHistory(Array.isArray(data) ? data : []);
+    } catch {
+      setPaymentHistory([]);
+      setPaymentHistoryError('Не удалось загрузить историю оплат');
+    } finally {
+      setPaymentHistoryLoading(false);
     }
   };
 
@@ -201,6 +224,7 @@ export default function SubscriptionsScreen() {
       await Promise.all([
         loadSubscription(),
         loadPromoData(),
+        loadPaymentHistory(),
         refreshMasterFeaturesGlobally(user?.id),
       ]);
     } finally {
@@ -211,6 +235,7 @@ export default function SubscriptionsScreen() {
   useEffect(() => {
     loadSubscription();
     loadPromoData();
+    loadPaymentHistory();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -620,6 +645,18 @@ export default function SubscriptionsScreen() {
     );
   };
 
+  const renderPaymentHistory = () => {
+    if (subscriptionType !== SubscriptionType.MASTER) return null;
+    return (
+      <SubscriptionPaymentHistorySection
+        items={paymentHistory}
+        loading={paymentHistoryLoading}
+        error={paymentHistoryError}
+        onRetry={loadPaymentHistory}
+      />
+    );
+  };
+
   const renderInactiveSubscription = () => (
     <>
       <Card style={styles.inactiveCard}>
@@ -730,6 +767,7 @@ export default function SubscriptionsScreen() {
           }}
         >
           {renderInactiveSubscription()}
+          {renderPaymentHistory()}
           {renderPromoCards()}
           {renderPurchaseModal()}
         </ScreenContainer>
@@ -757,6 +795,7 @@ export default function SubscriptionsScreen() {
       >
         {renderSubscriptionInfo()}
         {renderTariffControls()}
+        {renderPaymentHistory()}
         {renderPromoCards()}
 
         {renderPurchaseModal()}

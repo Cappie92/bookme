@@ -5,6 +5,7 @@ module.exports = {
     '^@src/(.*)$': '<rootDir>/src/$1',
     '^@assets/(.*)$': '<rootDir>/assets/$1',
     '^@env$': '<rootDir>/test-utils/mocks/env.mock.ts',
+    '^shared/(.*)$': '<rootDir>/../shared/$1',
     '^react-native-vector-icons/(.*)$': '@expo/vector-icons/$1',
   },
   testMatch: [

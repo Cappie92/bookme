@@ -5,11 +5,12 @@ interface CardProps {
   children: ReactNode;
   style?: ViewStyle;
   padding?: number;
+  testID?: string;
 }
 
-export function Card({ children, style, padding = 16 }: CardProps) {
+export function Card({ children, style, padding = 16, testID }: CardProps) {
   return (
-    <View style={[styles.card, { padding }, style]}>
+    <View style={[styles.card, { padding }, style]} testID={testID}>
       {children}
     </View>
   );

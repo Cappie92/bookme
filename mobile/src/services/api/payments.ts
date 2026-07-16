@@ -1,4 +1,7 @@
 import { apiClient } from './client';
+import type { SubscriptionPaymentHistoryItem } from '@src/utils/subscriptionBilling';
+
+export type { SubscriptionPaymentHistoryItem };
 
 export interface PaymentInitRequest {
   plan_id?: number;
@@ -65,4 +68,15 @@ export async function getPaymentStatus(paymentPublicId: string): Promise<Payment
     throw new Error('Payment not found');
   }
   return row;
+}
+
+/**
+ * История оплат подписки текущего пользователя.
+ * Не кэшируется — вызывающий код обновляет при открытии экрана и после оплаты.
+ */
+export async function getSubscriptionPaymentHistory(): Promise<SubscriptionPaymentHistoryItem[]> {
+  const response = await apiClient.get<SubscriptionPaymentHistoryItem[]>(
+    '/api/payments/subscription/history'
+  );
+  return Array.isArray(response.data) ? response.data : [];
 }
