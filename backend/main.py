@@ -19,6 +19,7 @@ from services.daily_charges import run_daily_charges_task
 from services.recurring_expenses import run_recurring_expenses_task
 from services.bookings_limit_monitor import run_bookings_limit_monitor_task
 from services.temporary_bookings_cleanup import run_temporary_bookings_cleanup_task
+from services.expired_payments_cleanup import run_expired_payments_cleanup_task
 from spa_catchall_route import SpaCatchAllAPIRoute
 from route_diagnostics import log_app_entrypoint_hint, log_route_diagnostics
 
@@ -221,6 +222,8 @@ async def startup_event():
     app.state.bookings_limit_monitor_task = asyncio.create_task(run_bookings_limit_monitor_task())
     # Запускаем фоновую задачу очистки просроченных временных броней
     app.state.temporary_bookings_cleanup_task = asyncio.create_task(run_temporary_bookings_cleanup_task())
+    # Запускаем фоновую задачу TTL cleanup брошенных Robokassa subscription payments
+    app.state.expired_payments_cleanup_task = asyncio.create_task(run_expired_payments_cleanup_task())
 
 
 @app.on_event("shutdown")
@@ -255,6 +258,14 @@ async def shutdown_event():
         temporary_bookings_cleanup_task.cancel()
         try:
             await temporary_bookings_cleanup_task
+        except asyncio.CancelledError:
+            pass
+
+    expired_payments_cleanup_task = getattr(app.state, "expired_payments_cleanup_task", None)
+    if expired_payments_cleanup_task:
+        expired_payments_cleanup_task.cancel()
+        try:
+            await expired_payments_cleanup_task
         except asyncio.CancelledError:
             pass
 
