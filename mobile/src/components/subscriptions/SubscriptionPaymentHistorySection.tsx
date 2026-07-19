@@ -9,6 +9,7 @@ import {
   FlatList,
   Pressable,
   RefreshControl,
+  ScrollView,
   useWindowDimensions,
   type ListRenderItem,
   type StyleProp,
@@ -21,6 +22,7 @@ import { semanticRoles } from '@src/theme/colors';
 import type { SubscriptionPaymentHistoryItem } from '@src/utils/subscriptionBilling';
 import {
   buildPaymentHistorySectionModel,
+  resolvePaymentHistoryBackAction,
   type PaymentHistoryModalListItem,
   type PaymentHistoryRowModel,
 } from '@src/utils/paymentHistorySectionModel';
@@ -35,116 +37,87 @@ export type SubscriptionPaymentHistorySectionProps = {
   style?: StyleProp<ViewStyle>;
 };
 
-function PointsToneText({ parts }: { parts: PaymentHistoryRowModel['pointsParts'] }) {
-  if (!parts.length) return null;
-
-  const numberParts = parts.map((part) => ({
-    tone: part.tone,
-    value: part.text.replace(/\s+\S+$/, '').replace(/^-/, '−'),
-  }));
-  const word = parts[parts.length - 1]?.text.replace(/^[+\-−0-9\u00A0\s]+/, '') || 'баллов';
-
+function StatusBadgeButton({
+  row,
+  onPress,
+  testID,
+}: {
+  row: PaymentHistoryRowModel;
+  onPress: () => void;
+  testID: string;
+}) {
   return (
-    <Text style={styles.metaText}>
-      {numberParts.map((part, index) => (
-        <React.Fragment key={part.tone}>
-          {index > 0 ? <Text style={styles.metaText}>{' / '}</Text> : null}
-          <Text style={part.tone === 'spent' ? styles.pointsSpent : styles.pointsEarned}>
-            {part.value}
-          </Text>
-        </React.Fragment>
-      ))}
-      <Text style={styles.metaText}>{` ${word}`}</Text>
-    </Text>
+    <TouchableOpacity
+      testID={testID}
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={row.statusAccessibilityLabel}
+      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+      style={[
+        styles.statusBadge,
+        row.isSuccessful ? styles.statusBadgeSuccess : styles.statusBadgeMuted,
+      ]}
+    >
+      <Text
+        style={[
+          styles.statusBadgeText,
+          row.isSuccessful ? styles.statusBadgeTextSuccess : styles.statusBadgeTextMuted,
+        ]}
+        numberOfLines={1}
+      >
+        {row.statusLabel}
+      </Text>
+    </TouchableOpacity>
   );
 }
 
+/** Preview / list compact row: plan · duration + amount; status on second line. */
 function CompactPaymentRow({
   row,
   testIdPrefix,
   showDivider,
+  onOpenDetails,
 }: {
   row: PaymentHistoryRowModel;
   testIdPrefix: string;
   showDivider: boolean;
+  onOpenDetails: (row: PaymentHistoryRowModel) => void;
 }) {
-  const secondaryChunks: React.ReactNode[] = [];
-  if (row.hasSecondaryRow) {
-    if (row.monthlyLabel && row.monthlyLabel !== '—') {
-      secondaryChunks.push(
-        <Text key="monthly" style={styles.metaText} testID={`payment-history-monthly-${row.id}`}>
-          {row.monthlyLabel}
-        </Text>
-      );
-    }
-    if (row.periodLabel) {
-      secondaryChunks.push(
-        <Text key="period" style={styles.metaText} testID={`payment-history-period-${row.id}`}>
-          {row.periodLabel}
-        </Text>
-      );
-    }
-    if (row.pointsCompactLine) {
-      secondaryChunks.push(
-        <PointsToneText key="points" parts={row.pointsParts} />
-      );
-    }
-  }
-
   return (
-    <View
+    <Pressable
       style={[styles.rowWrap, showDivider && styles.rowDivider]}
       testID={`${testIdPrefix}-${row.id}`}
-      accessible
-      accessibilityLabel={row.accessibilityLabel}
+      onPress={() => onOpenDetails(row)}
+      accessibilityRole="button"
+      accessibilityLabel={row.previewAccessibilityLabel}
     >
       <View style={styles.primaryRow}>
-        <Text style={styles.dateText} numberOfLines={1}>
-          {row.paidAtLabel}
-        </Text>
         <Text style={styles.planText} numberOfLines={1} ellipsizeMode="tail">
           {row.planDurationLabel}
         </Text>
         <Text style={styles.amountText} numberOfLines={1}>
           {row.amountLabel}
         </Text>
-        {row.showStatusOnPrimaryRow ? (
-          <View style={styles.statusBadge}>
-            <Text style={styles.statusBadgeText} numberOfLines={1}>
-              {row.statusLabel}
-            </Text>
-          </View>
-        ) : (
-          <Ionicons
-            name="checkmark-circle"
-            size={14}
-            color={semanticRoles.statusSuccess}
-            style={styles.statusIcon}
-            accessibilityElementsHidden
-            importantForAccessibility="no"
-          />
-        )}
       </View>
-      {secondaryChunks.length > 0 ? (
-        <View style={styles.secondaryRow} testID={`payment-history-meta-${row.id}`}>
-          {secondaryChunks.map((chunk, index) => (
-            <React.Fragment key={index}>
-              {index > 0 ? <Text style={styles.metaDot}>{' · '}</Text> : null}
-              {chunk}
-            </React.Fragment>
-          ))}
-        </View>
-      ) : null}
-    </View>
+      <View style={styles.statusRow}>
+        <StatusBadgeButton
+          row={row}
+          onPress={() => onOpenDetails(row)}
+          testID={`${testIdPrefix}-status-${row.id}`}
+        />
+      </View>
+    </Pressable>
   );
 }
 
 function PaymentHistoryRows({
   rows,
   testIdPrefix,
+  onOpenDetails,
 }: {
   rows: PaymentHistoryRowModel[];
   testIdPrefix: string;
+  onOpenDetails: (row: PaymentHistoryRowModel) => void;
 }) {
   if (!rows.length) return null;
   return (
@@ -155,15 +128,103 @@ function PaymentHistoryRows({
           row={row}
           testIdPrefix={testIdPrefix}
           showDivider={index < rows.length - 1}
+          onOpenDetails={onOpenDetails}
         />
       ))}
     </View>
   );
 }
 
+function PaymentDetailModal({
+  visible,
+  row,
+  onClose,
+  testID,
+}: {
+  visible: boolean;
+  row: PaymentHistoryRowModel | null;
+  onClose: () => void;
+  testID: string;
+}) {
+  const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
+  const sheetMaxHeight = Math.round(windowHeight * 0.78);
+
+  return (
+    <Modal
+      visible={visible}
+      transparent
+      animationType="slide"
+      onRequestClose={onClose}
+      statusBarTranslucent
+      testID={`${testID}-detail-modal`}
+    >
+      <View style={styles.modalOverlay}>
+        <Pressable
+          style={StyleSheet.absoluteFill}
+          onPress={onClose}
+          accessibilityLabel="Закрыть детали оплаты"
+        />
+        <View
+          style={[
+            styles.detailSheet,
+            {
+              maxHeight: sheetMaxHeight,
+              paddingBottom: Math.max(insets.bottom, 12),
+            },
+          ]}
+        >
+          <View style={styles.modalHandle} />
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Детали оплаты</Text>
+            <TouchableOpacity
+              style={styles.modalCloseBtn}
+              onPress={onClose}
+              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+              accessibilityLabel="Закрыть"
+              testID={`${testID}-detail-close`}
+            >
+              <Ionicons name="close" size={22} color="#657065" />
+            </TouchableOpacity>
+          </View>
+
+          {row ? (
+            <ScrollView
+              style={styles.detailScroll}
+              contentContainerStyle={styles.detailScrollContent}
+              showsVerticalScrollIndicator
+              bounces={false}
+            >
+              {row.detailFields.map((field) => (
+                <View
+                  key={field.key}
+                  style={styles.detailRow}
+                  testID={`${testID}-detail-field-${field.key}`}
+                >
+                  <Text style={styles.detailLabel}>{field.label}</Text>
+                  <Text
+                    style={[
+                      styles.detailValue,
+                      field.tone === 'spent' && styles.pointsSpent,
+                      field.tone === 'earned' && styles.pointsEarned,
+                    ]}
+                  >
+                    {field.value}
+                  </Text>
+                </View>
+              ))}
+            </ScrollView>
+          ) : null}
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
 function PaymentHistoryFullModal({
   visible,
   onClose,
+  onOpenDetails,
   model,
   refreshing,
   onRefresh,
@@ -173,6 +234,7 @@ function PaymentHistoryFullModal({
 }: {
   visible: boolean;
   onClose: () => void;
+  onOpenDetails: (row: PaymentHistoryRowModel) => void;
   model: ReturnType<typeof buildPaymentHistorySectionModel>;
   refreshing: boolean;
   onRefresh?: () => void | Promise<void>;
@@ -184,34 +246,38 @@ function PaymentHistoryFullModal({
   const { height: windowHeight } = useWindowDimensions();
   const sheetHeight = Math.round(windowHeight * 0.82);
 
-  const renderItem: ListRenderItem<PaymentHistoryModalListItem> = useCallback(({ item, index }) => {
-    if (item.type === 'header') {
+  const renderItem: ListRenderItem<PaymentHistoryModalListItem> = useCallback(
+    ({ item, index }) => {
+      if (item.type === 'header') {
+        return (
+          <Text style={styles.modalSectionTitle} testID={`${testID}-other-header`}>
+            {item.title}
+          </Text>
+        );
+      }
+      if (item.type === 'empty-success') {
+        return (
+          <Text style={styles.modalEmptySuccess} testID={`${testID}-modal-empty-success`}>
+            {item.message}
+          </Text>
+        );
+      }
+      const isLast = index === model.modalListItems.length - 1;
+      const next = model.modalListItems[index + 1];
+      const showDivider = !isLast && next?.type === 'row';
       return (
-        <Text style={styles.modalSectionTitle} testID={`${testID}-other-header`}>
-          {item.title}
-        </Text>
+        <CompactPaymentRow
+          row={item.row}
+          testIdPrefix={
+            item.row.isSuccessful ? 'payment-history-row' : 'payment-history-other-row'
+          }
+          showDivider={showDivider}
+          onOpenDetails={onOpenDetails}
+        />
       );
-    }
-    if (item.type === 'empty-success') {
-      return (
-        <Text style={styles.modalEmptySuccess} testID={`${testID}-modal-empty-success`}>
-          {item.message}
-        </Text>
-      );
-    }
-    const isLast = index === model.modalListItems.length - 1;
-    const next = model.modalListItems[index + 1];
-    const showDivider = !isLast && next?.type === 'row';
-    return (
-      <CompactPaymentRow
-        row={item.row}
-        testIdPrefix={
-          item.row.isSuccessful ? 'payment-history-row' : 'payment-history-other-row'
-        }
-        showDivider={showDivider}
-      />
-    );
-  }, [model.modalListItems, testID]);
+    },
+    [model.modalListItems, onOpenDetails, testID]
+  );
 
   return (
     <Modal
@@ -296,7 +362,7 @@ function PaymentHistoryFullModal({
 }
 
 /**
- * Секция «История оплат»: превью 3 последних + bottom sheet с полной историей.
+ * Секция «История оплат»: превью до 3 записей + полный список + детали платежа.
  */
 export function SubscriptionPaymentHistorySection({
   items,
@@ -307,7 +373,9 @@ export function SubscriptionPaymentHistorySection({
   testID = 'subscription-payment-history',
   style,
 }: SubscriptionPaymentHistorySectionProps) {
-  const [modalVisible, setModalVisible] = useState(false);
+  const [listVisible, setListVisible] = useState(false);
+  const [detailVisible, setDetailVisible] = useState(false);
+  const [selectedRowId, setSelectedRowId] = useState<string | null>(null);
   const [modalRefreshing, setModalRefreshing] = useState(false);
 
   const model = useMemo(
@@ -315,13 +383,41 @@ export function SubscriptionPaymentHistorySection({
     [items, loading, error]
   );
 
-  const handleOpenModal = useCallback(() => {
-    setModalVisible(true);
+  const selectedRow = selectedRowId ? model.rowsById[selectedRowId] ?? null : null;
+
+  const handleOpenList = useCallback(() => {
+    setListVisible(true);
   }, []);
 
-  const handleCloseModal = useCallback(() => {
-    setModalVisible(false);
+  const handleCloseList = useCallback(() => {
+    // Nested: if details open, Back should close details first (handled in detail modal).
+    // Closing the list while details are open also closes details.
+    setDetailVisible(false);
+    setSelectedRowId(null);
+    setListVisible(false);
   }, []);
+
+  const handleOpenDetails = useCallback((row: PaymentHistoryRowModel) => {
+    setSelectedRowId(row.id);
+    setDetailVisible(true);
+  }, []);
+
+  const handleCloseDetails = useCallback(() => {
+    setDetailVisible(false);
+    setSelectedRowId(null);
+  }, []);
+
+  const handleListBack = useCallback(() => {
+    const action = resolvePaymentHistoryBackAction({
+      detailVisible,
+      listVisible: true,
+    });
+    if (action === 'close-detail') {
+      handleCloseDetails();
+      return;
+    }
+    handleCloseList();
+  }, [detailVisible, handleCloseDetails, handleCloseList]);
 
   const handleModalRefresh = useCallback(async () => {
     if (!onRefresh && !onRetry) return;
@@ -368,14 +464,18 @@ export function SubscriptionPaymentHistorySection({
         ) : null}
 
         {!model.loading && !model.error && model.preview.length > 0 ? (
-          <PaymentHistoryRows rows={model.preview} testIdPrefix="payment-history-preview" />
+          <PaymentHistoryRows
+            rows={model.preview}
+            testIdPrefix="payment-history-preview"
+            onOpenDetails={handleOpenDetails}
+          />
         ) : null}
 
         {!model.loading && !model.error && model.showAllButton ? (
           <TouchableOpacity
             testID={`${testID}-show-all`}
             style={styles.showAllButton}
-            onPress={handleOpenModal}
+            onPress={handleOpenList}
             accessibilityRole="button"
             accessibilityLabel={model.showAllButtonLabel}
           >
@@ -385,8 +485,9 @@ export function SubscriptionPaymentHistorySection({
       </Card>
 
       <PaymentHistoryFullModal
-        visible={modalVisible}
-        onClose={handleCloseModal}
+        visible={listVisible}
+        onClose={handleListBack}
+        onOpenDetails={handleOpenDetails}
         model={model}
         refreshing={modalRefreshing}
         onRefresh={onRefresh || onRetry ? handleModalRefresh : undefined}
@@ -394,14 +495,19 @@ export function SubscriptionPaymentHistorySection({
         onRetry={onRetry}
         testID={testID}
       />
+
+      <PaymentDetailModal
+        visible={detailVisible}
+        row={selectedRow}
+        onClose={handleCloseDetails}
+        testID={testID}
+      />
     </>
   );
 }
 
 const styles = StyleSheet.create({
-  sectionCard: {
-    // margin задаётся родителем через единый SECTION_GAP
-  },
+  sectionCard: {},
   sectionTitle: {
     fontSize: 18,
     fontWeight: '800',
@@ -451,68 +557,55 @@ const styles = StyleSheet.create({
   primaryRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-  },
-  dateText: {
-    width: 96,
-    flexShrink: 0,
-    fontSize: 12,
-    fontWeight: '600',
-    color: semanticRoles.textMuted,
+    gap: 10,
   },
   planText: {
     flex: 1,
     minWidth: 0,
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: '700',
     color: semanticRoles.textPrimary,
   },
   amountText: {
     flexShrink: 0,
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: '800',
     color: semanticRoles.textPrimary,
   },
-  statusIcon: {
-    marginLeft: 2,
+  statusRow: {
+    marginTop: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   statusBadge: {
-    maxWidth: 88,
     borderRadius: 999,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    alignSelf: 'flex-start',
+  },
+  statusBadgeSuccess: {
+    backgroundColor: '#E8F5E9',
+  },
+  statusBadgeMuted: {
     backgroundColor: '#F3F4F6',
   },
   statusBadgeText: {
-    fontSize: 10,
+    fontSize: 12,
     fontWeight: '700',
+  },
+  statusBadgeTextSuccess: {
+    color: '#1B5E20',
+  },
+  statusBadgeTextMuted: {
     color: '#4B5563',
-  },
-  secondaryRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    alignItems: 'center',
-    marginTop: 4,
-    paddingLeft: 96 + 8,
-  },
-  metaText: {
-    fontSize: 11,
-    color: semanticRoles.textMuted,
-    fontWeight: '500',
-  },
-  metaDot: {
-    fontSize: 11,
-    color: semanticRoles.textMuted,
   },
   pointsSpent: {
     color: semanticRoles.metricNegative,
     fontWeight: '700',
-    fontSize: 11,
   },
   pointsEarned: {
     color: semanticRoles.metricPositive,
     fontWeight: '700',
-    fontSize: 11,
   },
   showAllButton: {
     marginTop: 8,
@@ -530,6 +623,13 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   modalSheet: {
+    backgroundColor: semanticRoles.surfaceCard,
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    paddingHorizontal: 16,
+    paddingTop: 8,
+  },
+  detailSheet: {
     backgroundColor: semanticRoles.surfaceCard,
     borderTopLeftRadius: 16,
     borderTopRightRadius: 16,
@@ -579,5 +679,33 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: semanticRoles.textMuted,
     paddingVertical: 6,
+  },
+  detailScroll: {
+    flexGrow: 0,
+  },
+  detailScrollContent: {
+    paddingBottom: 8,
+  },
+  detailRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: 12,
+    paddingVertical: 8,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: semanticRoles.borderSubtle,
+  },
+  detailLabel: {
+    flexShrink: 0,
+    width: 140,
+    fontSize: 13,
+    color: semanticRoles.textMuted,
+  },
+  detailValue: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: '700',
+    color: semanticRoles.textPrimary,
+    textAlign: 'right',
   },
 });

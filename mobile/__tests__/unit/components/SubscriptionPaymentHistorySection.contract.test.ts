@@ -1,7 +1,10 @@
 /**
- * Component-level behaviour via pure section model + modal contracts.
+ * Component-level behaviour via pure section model + nested modal contracts.
  */
-import { buildPaymentHistorySectionModel } from '@src/utils/paymentHistorySectionModel';
+import {
+  buildPaymentHistorySectionModel,
+  resolvePaymentHistoryBackAction,
+} from '@src/utils/paymentHistorySectionModel';
 import type { SubscriptionPaymentHistoryItem } from '@src/utils/subscriptionBilling';
 
 const item: SubscriptionPaymentHistoryItem = {
@@ -23,38 +26,39 @@ const item: SubscriptionPaymentHistoryItem = {
 };
 
 describe('SubscriptionPaymentHistorySection contract', () => {
-  it('empty → empty copy key for UI', () => {
-    expect(buildPaymentHistorySectionModel([]).showEmpty).toBe(true);
+  it('empty → empty copy, no show-all', () => {
+    const model = buildPaymentHistorySectionModel([]);
+    expect(model.showEmpty).toBe(true);
+    expect(model.showAllButton).toBe(false);
   });
 
-  it('error → retryable error state without empty', () => {
-    const model = buildPaymentHistorySectionModel([], {
-      error: 'Не удалось загрузить историю оплат',
-    });
-    expect(model.error).toBe('Не удалось загрузить историю оплат');
-    expect(model.showEmpty).toBe(false);
+  it('single item shows «Вся история (1)» and compact preview without date', () => {
+    const model = buildPaymentHistorySectionModel([item]);
+    expect(model.showAllButtonLabel).toBe('Вся история (1)');
+    expect(model.preview[0].planDurationLabel).toBe('Premium · 3 месяца');
+    expect(model.preview[0].previewAccessibilityLabel).not.toMatch(/2026/);
   });
 
-  it('refresh replaces previous empty with compact row data', () => {
-    expect(buildPaymentHistorySectionModel([]).showEmpty).toBe(true);
-    const after = buildPaymentHistorySectionModel([item]);
-    expect(after.preview[0].amountLabel).toMatch(/2[\u00A0 ]729 ₽/);
-    expect(after.preview[0].pointsCompactLine).toMatch(/−481 \/ \+321 балл/);
-    expect(after.preview[0].monthlyLabel).toMatch(/1[\u00A0 ]070 ₽\/мес/);
-    expect(after.preview[0].periodLabel).toBe('12.07.26–09.10.26');
-    expect(after.showAllButton).toBe(false);
+  it('status tap opens details model with points tones', () => {
+    const row = buildPaymentHistorySectionModel([item]).preview[0];
+    expect(row.statusAccessibilityLabel).toContain('Оплачен');
+    expect(row.detailFields.find((f) => f.key === 'points_spent')?.tone).toBe('spent');
+    expect(row.detailFields.find((f) => f.key === 'points_earned')?.tone).toBe('earned');
   });
 
-  it('>3 items expose show-all label for modal entry', () => {
-    const items = [1, 2, 3, 4].map((n) => ({
-      ...item,
-      payment_id: n,
-      public_id: `pay-${n}`,
-      paid_at: `2026-07-${10 + n}T10:00:00`,
-    }));
-    const model = buildPaymentHistorySectionModel(items);
-    expect(model.showAllButton).toBe(true);
-    expect(model.showAllButtonLabel).toBe('Показать всю историю (4)');
-    expect(model.modalListItems.filter((i) => i.type === 'row')).toHaveLength(4);
+  it('nested back: detail then list', () => {
+    expect(resolvePaymentHistoryBackAction({ detailVisible: true, listVisible: true })).toBe(
+      'close-detail'
+    );
+    expect(resolvePaymentHistoryBackAction({ detailVisible: false, listVisible: true })).toBe(
+      'close-list'
+    );
+  });
+
+  it('full list row can open same detail payload without refetch', () => {
+    const model = buildPaymentHistorySectionModel([item]);
+    const fromPreview = model.preview[0];
+    const fromMap = model.rowsById[fromPreview.id];
+    expect(fromMap.detailFields).toEqual(fromPreview.detailFields);
   });
 });

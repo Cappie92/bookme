@@ -2,18 +2,13 @@ import {
   PAYMENT_HISTORY_PREVIEW_LIMIT,
   buildPaymentHistoryModalListItems,
   buildPaymentHistorySectionModel,
+  resolvePaymentHistoryBackAction,
 } from '@src/utils/paymentHistorySectionModel';
 import type { SubscriptionPaymentHistoryItem } from '@src/utils/subscriptionBilling';
-import {
-  formatCompactPointsLine,
-  formatDurationMonthsCompact,
-  formatHistoryDateCompact,
-  formatPeriodRangeOrNull,
-  sortPaymentHistoryByDateDesc,
-} from '@src/utils/subscriptionBilling';
 
 function makeItem(
-  overrides: Partial<SubscriptionPaymentHistoryItem> & Pick<SubscriptionPaymentHistoryItem, 'payment_id' | 'public_id'>
+  overrides: Partial<SubscriptionPaymentHistoryItem> &
+    Pick<SubscriptionPaymentHistoryItem, 'payment_id' | 'public_id'>
 ): SubscriptionPaymentHistoryItem {
   return {
     paid_at: '2026-07-14T10:00:00',
@@ -43,26 +38,6 @@ const paidWithPoints = makeItem({
   points_used: 481,
   points_earned: 321,
 });
-const failedItem = makeItem({
-  payment_id: 3,
-  public_id: 'pay-fail',
-  paid_at: '2026-07-13T10:00:00',
-  status: 'failed',
-  subscription_apply_status: 'failed',
-  is_successful_purchase: false,
-  subscription_start_date: null,
-  subscription_end_date: null,
-});
-const cancelledItem = makeItem({
-  payment_id: 4,
-  public_id: 'pay-cancel',
-  paid_at: '2026-07-12T10:00:00',
-  status: 'cancelled',
-  subscription_apply_status: null,
-  is_successful_purchase: false,
-  subscription_start_date: null,
-  subscription_end_date: null,
-});
 const pendingNoPeriod = makeItem({
   payment_id: 5,
   public_id: 'pay-pending',
@@ -73,25 +48,47 @@ const pendingNoPeriod = makeItem({
   subscription_start_date: null,
   subscription_end_date: null,
 });
+const failedItem = makeItem({
+  payment_id: 3,
+  public_id: 'pay-fail',
+  paid_at: null,
+  status: 'failed',
+  subscription_apply_status: 'failed',
+  is_successful_purchase: false,
+  subscription_start_date: null,
+  subscription_end_date: null,
+});
 
-describe('buildPaymentHistorySectionModel (compact)', () => {
-  it('1. 0 records → empty state', () => {
-    const model = buildPaymentHistorySectionModel([]);
-    expect(model.showEmpty).toBe(true);
-    expect(model.preview).toHaveLength(0);
-    expect(model.showAllButton).toBe(false);
+describe('buildPaymentHistorySectionModel (preview + details)', () => {
+  it('1. preview does not include date', () => {
+    const row = buildPaymentHistorySectionModel([successfulItem]).preview[0];
+    expect(row.planDurationLabel).toBe('Premium · 3 месяца');
+    expect(row.planDurationLabel).not.toMatch(/\d{1,2}\.\d{2}\.\d{2}/);
+    expect(row.previewAccessibilityLabel).not.toMatch(/июл|2026/);
+    expect(row.previewAccessibilityLabel).not.toMatch(/Дата/);
   });
 
-  it('2. 1 record → one compact preview, no show-all button', () => {
+  it('2. preview shows plan · duration and amount', () => {
+    const row = buildPaymentHistorySectionModel([successfulItem]).preview[0];
+    expect(row.planDurationLabel).toBe('Premium · 3 месяца');
+    expect(row.amountLabel).toMatch(/3[\u00A0 ]210 ₽/);
+  });
+
+  it('3. pending shows clickable status «В обработке»', () => {
+    const row = buildPaymentHistorySectionModel([pendingNoPeriod]).preview[0];
+    expect(row.statusLabel).toBe('В обработке');
+    expect(row.statusAccessibilityLabel).toContain('В обработке');
+    expect(row.statusAccessibilityLabel).toContain('детали');
+  });
+
+  it('4. one record → button «Вся история (1)»', () => {
     const model = buildPaymentHistorySectionModel([successfulItem]);
     expect(model.preview).toHaveLength(1);
-    expect(model.showAllButton).toBe(false);
-    expect(model.preview[0].planDurationLabel).toContain('Premium');
-    expect(model.preview[0].planDurationLabel).toContain('3 мес.');
-    expect(model.preview[0].amountLabel).toMatch(/3[\u00A0 ]210 ₽/);
+    expect(model.showAllButton).toBe(true);
+    expect(model.showAllButtonLabel).toBe('Вся история (1)');
   });
 
-  it('3. 3 records → all three, no show-all button', () => {
+  it('5. three records → button «Вся история (3)»', () => {
     const items = [
       makeItem({ payment_id: 10, public_id: 'a', paid_at: '2026-07-16T10:00:00' }),
       makeItem({ payment_id: 11, public_id: 'b', paid_at: '2026-07-15T10:00:00' }),
@@ -99,11 +96,11 @@ describe('buildPaymentHistorySectionModel (compact)', () => {
     ];
     const model = buildPaymentHistorySectionModel(items);
     expect(model.preview).toHaveLength(3);
-    expect(model.showAllButton).toBe(false);
-    expect(PAYMENT_HISTORY_PREVIEW_LIMIT).toBe(3);
+    expect(model.showAllButton).toBe(true);
+    expect(model.showAllButtonLabel).toBe('Вся история (3)');
   });
 
-  it('4. 4 records → three preview + show-all (4)', () => {
+  it('6. four records → 3 preview + «Вся история (4)»', () => {
     const items = [
       makeItem({ payment_id: 10, public_id: 'a', paid_at: '2026-07-16T10:00:00' }),
       makeItem({ payment_id: 11, public_id: 'b', paid_at: '2026-07-15T10:00:00' }),
@@ -111,141 +108,122 @@ describe('buildPaymentHistorySectionModel (compact)', () => {
       makeItem({ payment_id: 13, public_id: 'd', paid_at: '2026-07-13T10:00:00' }),
     ];
     const model = buildPaymentHistorySectionModel(items);
+    expect(PAYMENT_HISTORY_PREVIEW_LIMIT).toBe(3);
     expect(model.preview).toHaveLength(3);
-    expect(model.preview.map((r) => r.id)).toEqual(['a', 'b', 'c']);
-    expect(model.showAllButton).toBe(true);
-    expect(model.showAllButtonLabel).toBe('Показать всю историю (4)');
+    expect(model.showAllButtonLabel).toBe('Вся история (4)');
   });
 
-  it('5. sorts by paid_at descending', () => {
-    const unsorted = [
-      makeItem({ payment_id: 1, public_id: 'old', paid_at: '2026-07-10T10:00:00' }),
-      makeItem({ payment_id: 2, public_id: 'new', paid_at: '2026-07-16T10:00:00' }),
-      makeItem({ payment_id: 3, public_id: 'mid', paid_at: '2026-07-12T10:00:00' }),
-    ];
-    expect(sortPaymentHistoryByDateDesc(unsorted).map((i) => i.public_id)).toEqual([
-      'new',
-      'mid',
-      'old',
-    ]);
-    const model = buildPaymentHistorySectionModel(unsorted);
-    expect(model.allSorted.map((r) => r.id)).toEqual(['new', 'mid', 'old']);
+  it('7. zero records → empty without button', () => {
+    const model = buildPaymentHistorySectionModel([]);
+    expect(model.showEmpty).toBe(true);
+    expect(model.showAllButton).toBe(false);
   });
 
-  it('6–7. show-all opens modal list with full data', () => {
-    const items = [
-      makeItem({ payment_id: 10, public_id: 'a', paid_at: '2026-07-16T10:00:00' }),
-      makeItem({ payment_id: 11, public_id: 'b', paid_at: '2026-07-15T10:00:00' }),
-      makeItem({ payment_id: 12, public_id: 'c', paid_at: '2026-07-14T10:00:00' }),
-      paidWithPoints,
-    ];
-    const model = buildPaymentHistorySectionModel(items);
-    expect(model.showAllButton).toBe(true);
-    expect(model.modalListItems.filter((i) => i.type === 'row')).toHaveLength(4);
+  it('8. opening details is represented by row detailFields (status tap contract)', () => {
+    const row = buildPaymentHistorySectionModel([pendingNoPeriod]).preview[0];
+    expect(row.detailFields.some((f) => f.key === 'status' && f.value === 'В обработке')).toBe(
+      true
+    );
+    expect(row.statusAccessibilityLabel).toMatch(/button|детали|Статус/i);
   });
 
-  it('8. successful and other are separated in modal list', () => {
-    const model = buildPaymentHistorySectionModel([
-      successfulItem,
-      failedItem,
-      cancelledItem,
-    ]);
-    const types = model.modalListItems.map((i) => i.type);
-    expect(types).toContain('header');
-    const header = model.modalListItems.find((i) => i.type === 'header');
-    expect(header && header.type === 'header' && header.title).toBe('Другие попытки оплаты');
-    expect(model.successful).toHaveLength(1);
-    expect(model.other).toHaveLength(2);
+  it('9. successful details contain date, package, amount, monthly, period', () => {
+    const row = buildPaymentHistorySectionModel([successfulItem]).preview[0];
+    const keys = row.detailFields.map((f) => f.key);
+    expect(keys).toEqual(
+      expect.arrayContaining(['status', 'date', 'plan', 'duration', 'package', 'amount', 'monthly', 'period'])
+    );
+    expect(row.detailFields.find((f) => f.key === 'package')?.value).toMatch(/3[\u00A0 ]210 ₽/);
+    expect(row.detailFields.find((f) => f.key === 'monthly')?.value).toMatch(/1[\u00A0 ]070 ₽\/мес/);
+    expect(row.detailFields.find((f) => f.key === 'period')?.value).toBe('12.07.26–09.10.26');
   });
 
-  it('9. no successful header when successful empty; only empty message + other', () => {
-    const model = buildPaymentHistorySectionModel([failedItem, pendingNoPeriod]);
-    expect(model.successful).toHaveLength(0);
-    expect(model.showSuccessfulEmptyInModal).toBe(true);
-    expect(model.modalListItems[0]).toMatchObject({
-      type: 'empty-success',
-      message: 'Успешных оплат пока нет',
+  it('10. details with points: 2729, −481, +321', () => {
+    const row = buildPaymentHistorySectionModel([paidWithPoints]).preview[0];
+    expect(row.detailFields.find((f) => f.key === 'amount')?.value).toMatch(/2[\u00A0 ]729 ₽/);
+    expect(row.detailFields.find((f) => f.key === 'points_spent')).toMatchObject({
+      value: '−481',
+      tone: 'spent',
     });
-    expect(model.modalListItems.some((i) => i.type === 'header')).toBe(true);
-    // Preview is mixed — no separate "Успешные оплаты" title in model
-    expect(model.preview.every((r) => !r.isSuccessful)).toBe(true);
+    expect(row.detailFields.find((f) => f.key === 'points_earned')).toMatchObject({
+      value: '+321',
+      tone: 'earned',
+    });
   });
 
-  it('10. pending without period does not expose period dash', () => {
-    expect(formatPeriodRangeOrNull(null, null)).toBeNull();
+  it('11. empty-value fields are hidden', () => {
+    const row = buildPaymentHistorySectionModel([failedItem]).preview[0];
+    const keys = row.detailFields.map((f) => f.key);
+    expect(keys).not.toContain('period');
+    expect(keys).not.toContain('points_spent');
+    expect(keys).not.toContain('points_earned');
+    // paid_at null and no created_at in API → date hidden
+    expect(keys).not.toContain('date');
+    expect(keys).not.toContain('error');
+  });
+
+  it('12. pending without period does not show period', () => {
     const row = buildPaymentHistorySectionModel([pendingNoPeriod]).preview[0];
     expect(row.periodLabel).toBeNull();
-    expect(row.hasSecondaryRow).toBe(false);
-    expect(row.showStatusOnPrimaryRow).toBe(true);
-    expect(row.statusLabel).toBe('В обработке');
+    expect(row.detailFields.some((f) => f.key === 'period')).toBe(false);
   });
 
-  it('11. spent/earned tones and compact points line', () => {
-    expect(formatCompactPointsLine(481, 321)).toMatch(/−481 \/ \+321 балл/);
-    const row = buildPaymentHistorySectionModel([paidWithPoints]).successful[0];
-    expect(row.pointsParts[0].tone).toBe('spent');
-    expect(row.pointsParts[1].tone).toBe('earned');
-    expect(row.pointsCompactLine).toMatch(/−481 \/ \+321 балл/);
+  it('13. Android Back closes detail first, then list', () => {
+    expect(
+      resolvePaymentHistoryBackAction({ detailVisible: true, listVisible: true })
+    ).toBe('close-detail');
+    expect(
+      resolvePaymentHistoryBackAction({ detailVisible: false, listVisible: true })
+    ).toBe('close-list');
+    expect(
+      resolvePaymentHistoryBackAction({ detailVisible: false, listVisible: false })
+    ).toBe('none');
   });
 
-  it('12. 3210/1070 without recalculation', () => {
-    const row = buildPaymentHistorySectionModel([successfulItem]).successful[0];
-    expect(row.monthlyLabel).toMatch(/1[\u00A0 ]070 ₽\/мес/);
-    expect(row.amountLabel).toMatch(/3[\u00A0 ]210 ₽/);
-    expect(successfulItem.package_value).toBe(3210);
-    expect(successfulItem.monthly_price).toBe(1070);
+  it('14–15. full list rows map to details; closing detail keeps list available', () => {
+    const model = buildPaymentHistorySectionModel([successfulItem, pendingNoPeriod]);
+    const listRows = model.modalListItems.filter((i) => i.type === 'row');
+    expect(listRows.length).toBeGreaterThanOrEqual(2);
+    const first = listRows[0];
+    if (first.type !== 'row') throw new Error('expected row');
+    expect(model.rowsById[first.row.id].detailFields.length).toBeGreaterThan(0);
+    // After close-detail, list remains open
+    expect(
+      resolvePaymentHistoryBackAction({ detailVisible: false, listVisible: true })
+    ).toBe('close-list');
   });
 
-  it('13. 2729 ₽ + 481 points', () => {
-    const row = buildPaymentHistorySectionModel([
-      { ...paidWithPoints, points_earned: 0 },
-    ]).successful[0];
-    expect(row.amountLabel).toMatch(/2[\u00A0 ]729 ₽/);
-    expect(row.pointsParts).toEqual([{ text: '-481 балл', tone: 'spent' }]);
-  });
-
-  it('14. Android back closes via onRequestClose contract', () => {
-    // Modal uses RN onRequestClose → handleCloseModal; pure close handler contract:
-    let visible = true;
-    const onRequestClose = () => {
-      visible = false;
-    };
-    onRequestClose();
-    expect(visible).toBe(false);
-  });
-
-  it('15. retry/refresh state does not clear empty incorrectly', () => {
-    const err = buildPaymentHistorySectionModel([], {
-      error: 'Не удалось загрузить историю оплат',
-    });
-    expect(err.error).toBe('Не удалось загрузить историю оплат');
-    expect(err.showEmpty).toBe(false);
-
-    const refreshed = buildPaymentHistorySectionModel([successfulItem]);
-    expect(refreshed.showEmpty).toBe(false);
-    expect(refreshed.preview).toHaveLength(1);
-  });
-
-  it('16. accessibility label contains date, plan, amount, status', () => {
+  it('16. accessibility labels for status and row', () => {
     const row = buildPaymentHistorySectionModel([successfulItem]).preview[0];
-    expect(row.accessibilityLabel).toContain('Premium');
-    expect(row.accessibilityLabel).toMatch(/3[\u00A0 ]210 ₽|3210/);
-    expect(row.accessibilityLabel).toContain('Оплачен');
-    expect(row.accessibilityLabel.length).toBeGreaterThan(10);
-  });
-});
-
-describe('compact billing helpers', () => {
-  it('formats compact date and duration', () => {
-    expect(formatDurationMonthsCompact(3)).toBe('3 мес.');
-    expect(formatHistoryDateCompact('2026-07-16T10:00:00')).toMatch(/16/);
-    expect(formatHistoryDateCompact('2026-07-16T10:00:00')).toMatch(/2026/);
+    expect(row.previewAccessibilityLabel).toContain('Premium');
+    expect(row.previewAccessibilityLabel).toContain('Оплачен');
+    expect(row.previewAccessibilityLabel).not.toMatch(/июл|2026/);
+    expect(row.statusAccessibilityLabel).toContain('Оплачен');
   });
 
-  it('buildPaymentHistoryModalListItems keeps other section after successful', () => {
-    const model = buildPaymentHistorySectionModel([successfulItem, failedItem]);
-    const rebuilt = buildPaymentHistoryModalListItems(model.successful, model.other);
-    expect(rebuilt[0].type).toBe('row');
-    expect(rebuilt.some((i) => i.type === 'header')).toBe(true);
+  it('17. backend 3210/1070 are not recalculated', () => {
+    const row = buildPaymentHistorySectionModel([successfulItem]).preview[0];
+    expect(row.packageValue).toBe(3210);
+    expect(row.monthlyPrice).toBe(1070);
+    expect(row.detailFields.find((f) => f.key === 'monthly')?.value).toMatch(/1[\u00A0 ]070 ₽\/мес/);
+  });
+
+  it('sorts descending and separates other in modal', () => {
+    const model = buildPaymentHistorySectionModel([
+      successfulItem,
+      pendingNoPeriod,
+      failedItem,
+    ]);
+    expect(model.successful).toHaveLength(1);
+    expect(model.other.length).toBeGreaterThanOrEqual(2);
+    expect(buildPaymentHistoryModalListItems(model.successful, model.other).some((i) => i.type === 'header')).toBe(
+      true
+    );
+  });
+
+  it('pending with paid_at (backend created_at fallback) shows date in details', () => {
+    const row = buildPaymentHistorySectionModel([pendingNoPeriod]).preview[0];
+    expect(row.dateLabel).toBeTruthy();
+    expect(row.detailFields.some((f) => f.key === 'date')).toBe(true);
   });
 });

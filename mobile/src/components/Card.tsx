@@ -1,9 +1,14 @@
-import { ReactNode } from 'react';
-import { View, StyleSheet, ViewStyle } from 'react-native';
+import type { ReactNode } from 'react';
+import {
+  View,
+  StyleSheet,
+  type StyleProp,
+  type ViewStyle,
+} from 'react-native';
 
 interface CardProps {
   children: ReactNode;
-  style?: ViewStyle;
+  style?: StyleProp<ViewStyle>;
   padding?: number;
   testID?: string;
 }

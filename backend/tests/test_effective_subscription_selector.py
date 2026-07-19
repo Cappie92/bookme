@@ -55,6 +55,34 @@ def _create_sub(
     return sub
 
 
+def test_future_start_date_active_not_selected_even_with_later_end_date(db: Session, test_master):
+    """start_date > now исключает подписку, даже если status=ACTIVE и end_date дальше."""
+    now = datetime.utcnow()
+    plan = _create_plan(db, "Pro")
+    current = _create_sub(
+        db,
+        test_master.id,
+        status=SubscriptionStatus.ACTIVE,
+        plan_id=plan.id,
+        start=now - timedelta(days=5),
+        end=now + timedelta(days=20),
+        is_active=True,
+    )
+    _create_sub(
+        db,
+        test_master.id,
+        status=SubscriptionStatus.ACTIVE,
+        plan_id=plan.id,
+        start=now + timedelta(days=25),
+        end=now + timedelta(days=60),
+        is_active=True,
+    )
+
+    chosen = get_effective_subscription(db, test_master.id, SubscriptionType.MASTER, now_utc=now)
+    assert chosen is not None
+    assert chosen.id == current.id
+
+
 def test_active_vs_pending_prefers_active(db: Session, test_master):
     now = datetime.utcnow()
     plan = _create_plan(db, "Pro")
