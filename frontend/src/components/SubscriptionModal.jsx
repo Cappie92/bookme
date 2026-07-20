@@ -5,6 +5,7 @@ import { getPromoPreviewMessage, getSubscriptionPoints } from '../utils/promoEng
 import { getPlanFeatures } from '../utils/subscriptionFeatures'
 import { getPlanDisplayName } from '../utils/subscriptionPlanNames'
 import { useModal } from '../hooks/useModal'
+import { useToast } from '../contexts/ToastContext'
 import {
   buildSubscriptionPointsCalculatePayload,
   computePeriodPriceBreakdown,
@@ -14,6 +15,10 @@ import {
   resolveSubscriptionPointsBalance,
   shouldShowSubscriptionPointsBlock,
 } from '../utils/subscriptionModalPoints'
+import {
+  formatSubscriptionPaymentUserError,
+  resolveSubscriptionPaymentApplyMode,
+} from '../utils/subscriptionPaymentApply'
 
 function useDebouncedValue(value, delayMs) {
   const [debounced, setDebounced] = useState(value)
@@ -41,10 +46,30 @@ export default function SubscriptionModal({ isOpen, onClose, isFreePlan, current
   const [subscriptionPointsToUse, setSubscriptionPointsToUse] = useState(0)
   const [loadedPointsBalance, setLoadedPointsBalance] = useState(null)
   const [loadingPointsBalance, setLoadingPointsBalance] = useState(false)
+  const [paymentNotice, setPaymentNotice] = useState(null) // { type: 'error'|'info', text }
   const calculationRequestIdRef = useRef(0)
   const calculationIdRef = useRef(null)
+  const { showToast } = useToast()
 
   const debouncedPointsToUse = useDebouncedValue(subscriptionPointsToUse, 350)
+
+  const showPaymentError = useCallback(
+    (text) => {
+      const msg = text || 'Не удалось выполнить оплату. Попробуйте позже.'
+      setPaymentNotice({ type: 'error', text: msg })
+      showToast(msg, 'error')
+    },
+    [showToast]
+  )
+
+  const finishPaymentSuccess = useCallback(
+    (text) => {
+      setPaymentNotice(null)
+      showToast(text, 'success')
+      onClose()
+    },
+    [onClose, showToast]
+  )
 
   useEffect(() => {
     calculationIdRef.current = calculationId
@@ -101,6 +126,7 @@ export default function SubscriptionModal({ isOpen, onClose, isFreePlan, current
       setSubscriptionPointsToUse(0)
       setLoadedPointsBalance(null)
       setLoadingPayment(false)
+      setPaymentNotice(null)
     }
   }, [isOpen, loadSubscriptionPointsBalance])
 
@@ -194,6 +220,7 @@ export default function SubscriptionModal({ isOpen, onClose, isFreePlan, current
 
     setCalculation(null)
     setCalculationMeta(null)
+    setPaymentNotice(null)
     setLoadingCalculation(true)
 
     const payloadPoints = buildSubscriptionPointsCalculatePayload({
@@ -355,16 +382,17 @@ export default function SubscriptionModal({ isOpen, onClose, isFreePlan, current
     if (!selectedPlan || !selectedDuration || !hasCurrentCalculation()) {
       return
     }
+    setPaymentNotice(null)
     const token = localStorage.getItem('access_token')
-    const payFromBalance =
-      Number(calculation.final_price) > 0 &&
-      (calculation.can_pay_from_balance === true ||
-        (typeof calculation.card_portion === 'number' && Number(calculation.card_portion) <= 0.001))
+    const applyMode = resolveSubscriptionPaymentApplyMode({
+      finalPrice: calculation.final_price,
+      cardPortion: calculation.card_portion,
+      balancePortion: calculation.balance_portion,
+    })
 
-    if (Number(calculation.final_price) <= 0) {
-      const ok = window.confirm('Доплата не требуется. Применить тариф сейчас?')
-      if (!ok) return
+    if (applyMode === 'free') {
       try {
+        setLoadingPayment(true)
         const resp = await fetch(`${API_BASE_URL}/api/subscriptions/apply-upgrade-free`, {
           method: 'POST',
           headers: {
@@ -375,19 +403,19 @@ export default function SubscriptionModal({ isOpen, onClose, isFreePlan, current
         })
         if (!resp.ok) {
           const err = await resp.json().catch(() => ({}))
-          alert(err?.detail || 'Не удалось применить тариф')
+          showPaymentError(formatSubscriptionPaymentUserError(err, 'Не удалось применить тариф'))
           return
         }
-        alert('Тариф применён. Обновите страницу, если изменения не появились сразу.')
-        onClose()
-        return
+        finishPaymentSuccess('Тариф применён')
       } catch {
-        alert('Не удалось применить тариф. Попробуйте позже.')
-        return
+        showPaymentError('Не удалось применить тариф. Попробуйте позже.')
+      } finally {
+        setLoadingPayment(false)
       }
+      return
     }
 
-    if (payFromBalance) {
+    if (applyMode === 'balance') {
       setLoadingPayment(true)
       try {
         const resp = await fetch(`${API_BASE_URL}/api/subscriptions/apply-upgrade-balance`, {
@@ -403,23 +431,17 @@ export default function SubscriptionModal({ isOpen, onClose, isFreePlan, current
         })
         if (!resp.ok) {
           const err = await resp.json().catch(() => ({}))
-          const detail = err?.detail
-          const text =
-            typeof detail === 'object' && detail?.message
-              ? detail.message
-              : detail || 'Не удалось оплатить с баланса'
-          alert(text)
+          showPaymentError(formatSubscriptionPaymentUserError(err, 'Не удалось оплатить с баланса'))
           return
         }
         const data = await resp.json().catch(() => ({}))
-        alert(
+        finishPaymentSuccess(
           data?.already_applied
             ? 'Тариф уже был применён ранее'
             : 'Тариф активирован. Средства списаны с баланса.'
         )
-        onClose()
       } catch {
-        alert('Не удалось оплатить с баланса. Попробуйте позже.')
+        showPaymentError('Не удалось оплатить с баланса. Попробуйте позже.')
       } finally {
         setLoadingPayment(false)
       }
@@ -457,16 +479,15 @@ export default function SubscriptionModal({ isOpen, onClose, isFreePlan, current
         const data = await response.json()
 
         if (data?.requires_payment === false) {
-          // Backend: free или полное покрытие балансом
-          const useBalance =
-            Number(data?.card_portion) <= 0.001 && Number(data?.balance_portion) > 0.001
+          const modeAfterInit = resolveSubscriptionPaymentApplyMode({
+            finalPrice: calculation.final_price ?? data.final_price,
+            cardPortion: data.card_portion ?? calculation.card_portion,
+            balancePortion: data.balance_portion ?? calculation.balance_portion,
+          })
+          const useBalance = modeAfterInit === 'balance'
           const applyPath = useBalance
             ? '/api/subscriptions/apply-upgrade-balance'
             : '/api/subscriptions/apply-upgrade-free'
-          const ok = window.confirm(
-            (data?.message || 'Доплата картой не требуется') + '\n\nПрименить тариф сейчас?'
-          )
-          if (!ok) return
           const resp = await fetch(`${API_BASE_URL}${applyPath}`, {
             method: 'POST',
             headers: {
@@ -481,27 +502,35 @@ export default function SubscriptionModal({ isOpen, onClose, isFreePlan, current
           })
           if (!resp.ok) {
             const err = await resp.json().catch(() => ({}))
-            alert(err?.detail || 'Не удалось применить тариф')
+            showPaymentError(formatSubscriptionPaymentUserError(err, 'Не удалось применить тариф'))
             return
           }
-          alert('Тариф применён. Обновите страницу, если изменения не появились сразу.')
-          onClose()
+          finishPaymentSuccess(
+            useBalance
+              ? 'Тариф активирован. Средства списаны с баланса.'
+              : 'Тариф применён'
+          )
           return
         }
         if (!data?.payment || !data?.payment_url) {
-          alert('Ошибка инициализации платежа: не получены данные оплаты')
+          showPaymentError('Не удалось получить ссылку на оплату. Попробуйте позже.')
           return
         }
 
         localStorage.setItem(`payment_state_${data.payment}`, JSON.stringify(paymentState))
         window.location.href = data.payment_url
       } else {
-        const errorData = await response.json()
-        alert(`Ошибка инициализации платежа: ${errorData.detail || 'Неизвестная ошибка'}`)
+        const errorData = await response.json().catch(() => ({}))
+        showPaymentError(
+          formatSubscriptionPaymentUserError(
+            errorData,
+            'Не удалось инициализировать оплату. Попробуйте позже.'
+          )
+        )
       }
     } catch (error) {
       console.error('Ошибка инициализации платежа:', error)
-      alert('Произошла ошибка при инициализации платежа. Попробуйте позже.')
+      showPaymentError('Не удалось инициализировать оплату. Попробуйте позже.')
     } finally {
       setLoadingPayment(false)
     }
@@ -888,7 +917,20 @@ export default function SubscriptionModal({ isOpen, onClose, isFreePlan, current
                 </label>
               </div>
 
-              <div className="border-t p-4 bg-white">
+              <div className="border-t p-4 bg-white space-y-3">
+                {paymentNotice ? (
+                  <div
+                    role="status"
+                    data-testid="tariff-payment-notice"
+                    className={
+                      paymentNotice.type === 'error'
+                        ? 'rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800'
+                        : 'rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-800'
+                    }
+                  >
+                    {paymentNotice.text}
+                  </div>
+                ) : null}
                 <button
                   type="button"
                   onClick={handlePaymentInit}

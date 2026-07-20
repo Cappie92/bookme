@@ -229,7 +229,7 @@ async def init_subscription_payment(
         if payment_split.card_portion <= MONEY_TOLERANCE:
             return PaymentInitResponse(
                 requires_payment=False,
-                message="Оплата полностью с внутреннего баланса. Используйте /api/subscriptions/apply-upgrade-balance.",
+                message="Оплата полностью с внутреннего баланса.",
                 balance_portion=payment_split.balance_portion,
                 card_portion=0.0,
                 points_portion=payment_split.points_portion,
