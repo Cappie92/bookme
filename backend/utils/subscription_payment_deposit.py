@@ -1,4 +1,4 @@
-"""Расчёт внутреннего DEPOSIT для subscription payment (Robokassa phase1)."""
+"""Deposit amount для subscription Payment: legacy vs scheme_version=2 (mixed)."""
 from __future__ import annotations
 
 from typing import Optional, Tuple
@@ -6,8 +6,10 @@ from typing import Optional, Tuple
 from sqlalchemy.orm import Session
 
 from models import Payment, SubscriptionPriceSnapshot
-
-MONEY_TOLERANCE = 0.01
+from utils.subscription_payment_split import (
+    MONEY_TOLERANCE,
+    is_v2_payment_metadata,
+)
 
 
 class SubscriptionDepositValidationError(ValueError):
@@ -26,13 +28,14 @@ def resolve_subscription_deposit_amount(
     payment: Payment,
 ) -> Tuple[float, int, Optional[SubscriptionPriceSnapshot]]:
     """
-    Сумма внутреннего DEPOSIT для subscription payment.
+    Сумма внутреннего DEPOSIT для subscription payment (фаза 1 Robokassa).
 
-    С snapshot (через доверенный calculation_id в metadata):
-      deposit_amount = snapshot.final_price (= package_value - points_spent)
+    Legacy (без scheme_version=2):
+      deposit_amount = snapshot.final_price (= package − points), payment.amount должен совпадать.
 
-    Legacy без calculation_id:
-      deposit_amount = payment.amount
+    scheme_version=2 (mixed):
+      deposit_amount = card_portion (== payment.amount);
+      balance_portion уже в soft-hold и будет финализирован при apply.
     """
     amount_paid = float(payment.amount or 0)
     meta = payment.payment_metadata or {}
@@ -56,17 +59,42 @@ def resolve_subscription_deposit_amount(
     if payment.plan_id is not None and int(snapshot.plan_id) != int(payment.plan_id):
         raise SubscriptionDepositValidationError("snapshot plan_id mismatch vs payment.plan_id")
 
-    final_price = float(getattr(snapshot, "final_price", 0) or 0)
-    if abs(final_price - amount_paid) > MONEY_TOLERANCE:
-        raise SubscriptionDepositValidationError(
-            f"snapshot.final_price ({final_price}) mismatch vs payment.amount ({amount_paid})"
-        )
-
     points_used = int(getattr(snapshot, "subscription_points_used", 0) or 0)
     if points_used < 0:
         raise SubscriptionDepositValidationError("subscription_points_used must be >= 0")
 
     price_before = _snapshot_price_before_points(snapshot)
+    final_price = float(getattr(snapshot, "final_price", 0) or 0)
+
+    if is_v2_payment_metadata(meta):
+        card_portion = float(meta.get("card_portion") if meta.get("card_portion") is not None else amount_paid)
+        balance_portion = float(meta.get("balance_portion") or 0.0)
+        meta_points = int(meta.get("points_used") if meta.get("points_used") is not None else points_used)
+        if abs(card_portion - amount_paid) > MONEY_TOLERANCE:
+            raise SubscriptionDepositValidationError(
+                f"v2 card_portion ({card_portion}) mismatch vs payment.amount ({amount_paid})"
+            )
+        if card_portion < -MONEY_TOLERANCE:
+            raise SubscriptionDepositValidationError("card_portion must be >= 0")
+        expected_after_points = price_before - meta_points
+        if abs(expected_after_points - (balance_portion + card_portion)) > MONEY_TOLERANCE:
+            raise SubscriptionDepositValidationError(
+                f"v2 split mismatch: price_before ({price_before}) - points ({meta_points}) "
+                f"!= balance ({balance_portion}) + card ({card_portion})"
+            )
+        if abs(final_price - expected_after_points) > MONEY_TOLERANCE:
+            raise SubscriptionDepositValidationError(
+                f"v2 snapshot.final_price ({final_price}) != after_points ({expected_after_points})"
+            )
+        # Депозит только карточной части (баланс уже в hold).
+        return max(0.0, card_portion), meta_points, snapshot
+
+    # --- Legacy ---
+    if abs(final_price - amount_paid) > MONEY_TOLERANCE:
+        raise SubscriptionDepositValidationError(
+            f"snapshot.final_price ({final_price}) mismatch vs payment.amount ({amount_paid})"
+        )
+
     if price_before + MONEY_TOLERANCE < amount_paid:
         raise SubscriptionDepositValidationError(
             f"price_before_points ({price_before}) < payment.amount ({amount_paid})"

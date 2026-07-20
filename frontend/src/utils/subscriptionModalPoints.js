@@ -12,9 +12,8 @@ export function resolveSubscriptionPointsBalance(loadedBalance, calculationAvail
   return 0
 }
 
-export function shouldShowSubscriptionPointsBlock({ pointsBalance, upgradeType, selectedPlan }) {
+export function shouldShowSubscriptionPointsBlock({ pointsBalance, selectedPlan }) {
   if (!selectedPlan) return false
-  if (upgradeType !== 'immediate') return false
   return resolveSubscriptionPointsBalance(pointsBalance, null) > 0
 }
 

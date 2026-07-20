@@ -63,6 +63,9 @@ def expire_stale_pending_subscription_payments(
         expired_count = 0
         for payment in stale_payments:
             payment.status = "expired"
+            from utils.balance_utils import release_payment_balance_hold
+
+            release_payment_balance_hold(db, payment, do_commit=False)
             expired_count += 1
 
         if expired_count:

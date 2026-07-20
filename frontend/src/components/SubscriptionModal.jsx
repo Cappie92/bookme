@@ -264,10 +264,6 @@ export default function SubscriptionModal({ isOpen, onClose, isFreePlan, current
 
   const handleUpgradeTypeChange = (newType) => {
     setUpgradeType(newType)
-    if (newType !== 'immediate') {
-      setUseSubscriptionPoints(false)
-      setSubscriptionPointsToUse(0)
-    }
   }
 
   const pointsBalance = useMemo(
@@ -317,7 +313,6 @@ export default function SubscriptionModal({ isOpen, onClose, isFreePlan, current
 
   const showPointsBlock = shouldShowSubscriptionPointsBlock({
     pointsBalance,
-    upgradeType,
     selectedPlan,
   })
 
@@ -360,11 +355,16 @@ export default function SubscriptionModal({ isOpen, onClose, isFreePlan, current
     if (!selectedPlan || !selectedDuration || !hasCurrentCalculation()) {
       return
     }
+    const token = localStorage.getItem('access_token')
+    const payFromBalance =
+      Number(calculation.final_price) > 0 &&
+      (calculation.can_pay_from_balance === true ||
+        (typeof calculation.card_portion === 'number' && Number(calculation.card_portion) <= 0.001))
+
     if (Number(calculation.final_price) <= 0) {
       const ok = window.confirm('Доплата не требуется. Применить тариф сейчас?')
       if (!ok) return
       try {
-        const token = localStorage.getItem('access_token')
         const resp = await fetch(`${API_BASE_URL}/api/subscriptions/apply-upgrade-free`, {
           method: 'POST',
           headers: {
@@ -387,9 +387,47 @@ export default function SubscriptionModal({ isOpen, onClose, isFreePlan, current
       }
     }
 
+    if (payFromBalance) {
+      setLoadingPayment(true)
+      try {
+        const resp = await fetch(`${API_BASE_URL}/api/subscriptions/apply-upgrade-balance`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            calculation_id: calculationId,
+            enable_auto_renewal: enableAutoRenewal,
+          }),
+        })
+        if (!resp.ok) {
+          const err = await resp.json().catch(() => ({}))
+          const detail = err?.detail
+          const text =
+            typeof detail === 'object' && detail?.message
+              ? detail.message
+              : detail || 'Не удалось оплатить с баланса'
+          alert(text)
+          return
+        }
+        const data = await resp.json().catch(() => ({}))
+        alert(
+          data?.already_applied
+            ? 'Тариф уже был применён ранее'
+            : 'Тариф активирован. Средства списаны с баланса.'
+        )
+        onClose()
+      } catch {
+        alert('Не удалось оплатить с баланса. Попробуйте позже.')
+      } finally {
+        setLoadingPayment(false)
+      }
+      return
+    }
+
     setLoadingPayment(true)
     try {
-      const token = localStorage.getItem('access_token')
       const paymentState = {
         planId: selectedPlan.id,
         durationMonths: selectedDuration,
@@ -411,6 +449,7 @@ export default function SubscriptionModal({ isOpen, onClose, isFreePlan, current
           upgrade_type: upgradeType,
           calculation_id: calculationId,
           enable_auto_renewal: enableAutoRenewal,
+          payment_source: 'web',
         }),
       })
 
@@ -418,17 +457,27 @@ export default function SubscriptionModal({ isOpen, onClose, isFreePlan, current
         const data = await response.json()
 
         if (data?.requires_payment === false) {
+          // Backend: free или полное покрытие балансом
+          const useBalance =
+            Number(data?.card_portion) <= 0.001 && Number(data?.balance_portion) > 0.001
+          const applyPath = useBalance
+            ? '/api/subscriptions/apply-upgrade-balance'
+            : '/api/subscriptions/apply-upgrade-free'
           const ok = window.confirm(
-            (data?.message || 'Доплата не требуется') + '\n\nПрименить тариф сейчас?'
+            (data?.message || 'Доплата картой не требуется') + '\n\nПрименить тариф сейчас?'
           )
           if (!ok) return
-          const resp = await fetch(`${API_BASE_URL}/api/subscriptions/apply-upgrade-free`, {
+          const resp = await fetch(`${API_BASE_URL}${applyPath}`, {
             method: 'POST',
             headers: {
               Authorization: `Bearer ${token}`,
               'Content-Type': 'application/json',
             },
-            body: JSON.stringify({ calculation_id: calculationId }),
+            body: JSON.stringify(
+              useBalance
+                ? { calculation_id: calculationId, enable_auto_renewal: enableAutoRenewal }
+                : { calculation_id: calculationId }
+            ),
           })
           if (!resp.ok) {
             const err = await resp.json().catch(() => ({}))
@@ -740,17 +789,32 @@ export default function SubscriptionModal({ isOpen, onClose, isFreePlan, current
 
                       {pointsUsed > 0 ? (
                         <div className="flex justify-between gap-4">
-                          <span className="text-gray-600">Бонусные баллы</span>
+                          <span className="text-gray-600">Промобаллами</span>
                           <span className="font-semibold text-green-700" data-testid="tariff-points-used">
-                            −{formatPrice(pointsUsed)} ₽
+                            {formatPrice(pointsUsed)} ₽
+                          </span>
+                        </div>
+                      ) : null}
+
+                      {typeof currentCalculation.balance_portion === 'number' &&
+                      Number(currentCalculation.balance_portion) > 0.001 ? (
+                        <div className="flex justify-between gap-4">
+                          <span className="text-gray-600">Со счета</span>
+                          <span className="font-semibold text-gray-900" data-testid="tariff-balance-portion">
+                            {formatPrice(currentCalculation.balance_portion)} ₽
                           </span>
                         </div>
                       ) : null}
 
                       <div className="flex justify-between gap-4 pt-1 border-t">
-                        <span className="text-gray-600 font-medium">К оплате</span>
+                        <span className="text-gray-600 font-medium">К оплате картой</span>
                         <span className="font-semibold text-gray-900" data-testid="tariff-final-price">
-                          {formatPrice(currentCalculation.final_price)} ₽
+                          {formatPrice(
+                            typeof currentCalculation.card_portion === 'number'
+                              ? currentCalculation.card_portion
+                              : currentCalculation.final_price
+                          )}{' '}
+                          ₽
                         </span>
                       </div>
 
@@ -832,13 +896,21 @@ export default function SubscriptionModal({ isOpen, onClose, isFreePlan, current
                   disabled={!currentCalculation || loadingCalculation || loadingPayment}
                   className="w-full px-4 py-3 rounded-lg bg-[#4CAF50] text-white font-semibold hover:bg-[#45A049] disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  {Number(currentCalculation?.final_price) <= 0
-                    ? loadingPayment
-                      ? 'Применяем…'
-                      : 'Применить тариф'
-                    : loadingPayment
-                    ? 'Переход…'
-                    : 'Перейти к оплате'}
+                  {(() => {
+                    if (loadingPayment) {
+                      return Number(currentCalculation?.final_price) <= 0 ? 'Применяем…' : 'Оплата…'
+                    }
+                    if (Number(currentCalculation?.final_price) <= 0) return 'Применить тариф'
+                    const card =
+                      typeof currentCalculation?.card_portion === 'number'
+                        ? Number(currentCalculation.card_portion)
+                        : Number(currentCalculation?.final_price || 0)
+                    const fromBalance =
+                      currentCalculation?.can_pay_from_balance === true || card <= 0.001
+                    if (fromBalance) return 'Оплатить'
+                    if (card > 0.001) return `Оплатить ${formatPrice(card)} ₽`
+                    return 'Оплатить'
+                  })()}
                 </button>
               </div>
             </div>

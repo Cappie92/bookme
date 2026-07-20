@@ -11,11 +11,19 @@ import {
 } from './subscriptionModalPoints'
 
 describe('subscriptionModalPoints', () => {
-  it('shows points block when balance=481 and immediate upgrade', () => {
+  it('shows points block when balance=481', () => {
     expect(
       shouldShowSubscriptionPointsBlock({
         pointsBalance: 481,
-        upgradeType: 'immediate',
+        selectedPlan: { id: 1 },
+      })
+    ).toBe(true)
+  })
+
+  it('shows points block for after_expiry when balance > 0', () => {
+    expect(
+      shouldShowSubscriptionPointsBlock({
+        pointsBalance: 100,
         selectedPlan: { id: 1 },
       })
     ).toBe(true)
@@ -25,7 +33,6 @@ describe('subscriptionModalPoints', () => {
     expect(
       shouldShowSubscriptionPointsBlock({
         pointsBalance: 0,
-        upgradeType: 'immediate',
         selectedPlan: { id: 1 },
       })
     ).toBe(false)

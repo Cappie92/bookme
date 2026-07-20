@@ -1057,7 +1057,8 @@ async def calculate_subscription_cost(
     subscription_points_available = 0
     subscription_points_used = 0
 
-    if subscription_type == SubscriptionType.MASTER and effective_upgrade_type == "immediate":
+    # Баллы доступны мастеру независимо от upgrade_type (способ оплаты ≠ порядок применения).
+    if subscription_type == SubscriptionType.MASTER:
         master_profile = db.query(Master).filter(Master.user_id == current_user.id).first()
         if master_profile:
             subscription_points_available = get_subscription_points_balance(db, master_profile.id)
@@ -1070,7 +1071,7 @@ async def calculate_subscription_cost(
     elif requested_subscription_points > 0:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Subscription points можно использовать только мастером при немедленном применении тарифа",
+            detail="Subscription points можно использовать только мастером",
         )
 
     requires_immediate_payment = final_price > 0
@@ -1080,35 +1081,23 @@ async def calculate_subscription_cost(
     current_plan_accrued = None
 
     available_balance = float(get_user_available_balance(db, current_user.id, do_commit=False))
-    can_pay_from_balance = (
-        effective_upgrade_type == "immediate"
-        and final_price > 0
-        and available_balance + 0.001 >= final_price
+    from utils.subscription_payment_split import (
+        build_split_breakdown_text,
+        compute_subscription_payment_split,
     )
-    if effective_upgrade_type == "after_expiry":
-        breakdown_text = "Тариф применится после окончания текущей подписки. Оплата — картой или с баланса при достаточном остатке."
-    elif can_pay_from_balance:
-        breakdown_text = (
-            f"На балансе достаточно средств ({math.ceil(available_balance)} ₽) — можно оплатить без карты."
-        )
-    elif final_price > 0:
-        breakdown_text = (
-            f"К оплате {math.ceil(final_price)} ₽. На балансе {math.ceil(available_balance)} ₽"
-            + (" — недостаточно, нужна оплата картой." if available_balance < final_price else ".")
-        )
-        if subscription_points_used > 0:
-            breakdown_text = (
-                f"Списано {subscription_points_used} баллов (−{subscription_points_used} ₽). "
-                f"К оплате {math.ceil(final_price)} ₽."
-            )
-    else:
-        if subscription_points_used > 0:
-            breakdown_text = (
-                f"Оплата полностью баллами ({subscription_points_used} баллов). "
-                "Можно применить тариф без оплаты картой."
-            )
-        else:
-            breakdown_text = "Доплата не требуется — можно применить тариф без оплаты."
+
+    payment_split = compute_subscription_payment_split(
+        price_before_points=price_before_points,
+        points_used=subscription_points_used,
+        available_balance=available_balance,
+    )
+    # can_pay_from_balance: полное покрытие остатка после баллов балансом (без Robokassa).
+    # upgrade_type больше не ограничивает способ оплаты.
+    can_pay_from_balance = bool(payment_split.can_pay_fully_from_internal)
+    breakdown_text = build_split_breakdown_text(
+        payment_split,
+        upgrade_type=effective_upgrade_type,
+    )
 
     promo_preview = None
     if subscription_type == SubscriptionType.MASTER and current_user.role.value in ["master", "indie"]:
@@ -1224,6 +1213,10 @@ async def calculate_subscription_cost(
         subscription_points_available=subscription_points_available,
         subscription_points_used=subscription_points_used,
         requires_payment=requires_immediate_payment,
+        points_portion=payment_split.points_portion,
+        balance_portion=payment_split.balance_portion,
+        card_portion=payment_split.card_portion,
+        requires_robokassa=payment_split.requires_robokassa,
     )
 
 
@@ -1404,8 +1397,8 @@ async def apply_upgrade_balance(
     db: Session = Depends(get_db),
 ):
     """
-    Оплатить immediate upgrade с баланса (final_price > 0, достаточно available_balance).
-    Без Robokassa. Логика применения подписки совпадает с robokassa result phase 2.
+    Оплатить upgrade с баланса (final_price > 0, достаточно available_balance).
+    Без Robokassa. Работает для immediate и after_expiry (даты — по upgrade_type).
     """
     calculation_id = payload.get("calculation_id")
     if not calculation_id:
@@ -1443,14 +1436,8 @@ async def apply_upgrade_balance(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Для нулевой суммы используйте /api/subscriptions/apply-upgrade-free",
                 )
-            if (snapshot.upgrade_type or "") != "immediate":
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Оплата с баланса доступна только для немедленного применения тарифа",
-                )
-            if bool(getattr(snapshot, "is_downgrade", False)) or (
-                getattr(snapshot, "forced_upgrade_type", None) == "after_expiry"
-            ):
+            # Оплата с баланса больше не ограничена upgrade_type (immediate / after_expiry).
+            if bool(getattr(snapshot, "is_downgrade", False)) and (snapshot.upgrade_type or "") == "immediate":
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Downgrade нельзя применить немедленно",
@@ -1607,6 +1594,18 @@ async def apply_upgrade_balance(
                         "upgrade_type": snapshot.upgrade_type,
                         "selected_duration": snapshot.duration_months,
                         "source": "balance_apply",
+                        "scheme_version": 2,
+                        "balance_portion": final_price,
+                        "card_portion": 0.0,
+                        "points_portion": float(
+                            getattr(snapshot, "subscription_points_used", 0) or 0
+                        ),
+                        "points_used": int(
+                            getattr(snapshot, "subscription_points_used", 0) or 0
+                        ),
+                        "balance_hold_active": False,
+                        "balance_hold_finalized": True,
+                        "balance_hold_released": False,
                     },
                     paid_at=now,
                 )

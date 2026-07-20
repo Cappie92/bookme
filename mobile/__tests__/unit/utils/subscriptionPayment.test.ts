@@ -1,5 +1,6 @@
 import {
   isLocalhostPaymentUrl,
+  resolveCardPortion,
   sanitizePaymentRedirectUrl,
   shouldPaySubscriptionFromBalance,
 } from '@src/utils/subscriptionPayment';
@@ -11,18 +12,30 @@ describe('shouldPaySubscriptionFromBalance', () => {
         finalPrice: 3210,
         availableBalance: 4762,
         canPayFromBalance: true,
-        upgradeType: 'immediate',
       })
     ).toBe(true);
   });
 
-  it('returns false for after_expiry', () => {
+  it('allows after_expiry when fully covered by balance (card_portion=0)', () => {
     expect(
       shouldPaySubscriptionFromBalance({
         finalPrice: 100,
         availableBalance: 5000,
         canPayFromBalance: true,
-        upgradeType: 'after_expiry',
+        cardPortion: 0,
+        balancePortion: 100,
+      })
+    ).toBe(true);
+  });
+
+  it('returns false when card_portion > 0 even if balance helps', () => {
+    expect(
+      shouldPaySubscriptionFromBalance({
+        finalPrice: 1000,
+        availableBalance: 300,
+        canPayFromBalance: false,
+        cardPortion: 700,
+        balancePortion: 300,
       })
     ).toBe(false);
   });
@@ -32,9 +45,18 @@ describe('shouldPaySubscriptionFromBalance', () => {
       shouldPaySubscriptionFromBalance({
         finalPrice: 100,
         availableBalance: 99,
-        upgradeType: 'immediate',
       })
     ).toBe(false);
+  });
+});
+
+describe('resolveCardPortion', () => {
+  it('uses card_portion from backend', () => {
+    expect(resolveCardPortion({ finalPrice: 1000, cardPortion: 600 })).toBe(600);
+  });
+
+  it('returns 0 when paying from balance', () => {
+    expect(resolveCardPortion({ finalPrice: 1000, cardPortion: 600, payFromBalance: true })).toBe(0);
   });
 });
 

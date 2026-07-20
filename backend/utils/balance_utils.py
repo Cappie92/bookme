@@ -18,7 +18,9 @@ from models import (
     AdminOperation,
     SubscriptionPlan,
     SubscriptionFreeze,
+    Payment,
 )
+from utils.subscription_payment_split import get_active_hold_amount_from_metadata
 from constants import DURATION_DAYS
 from utils.subscription_billing_calc import (
     compute_daily_charge_amount,
@@ -112,11 +114,82 @@ def get_user_reserved_total(db: Session, user_id: int) -> float:
     return sum(r.reserved_amount for r in reservations)
 
 
+def get_user_payment_holds_total(db: Session, user_id: int) -> float:
+    """Сумма активных soft-hold по pending/paid subscription Payment (scheme_version=2).
+
+    Учитываются платежи, где hold ещё не released и не finalized.
+    paid + not applied тоже удерживает hold (особый сценарий ТЗ).
+    """
+    payments = (
+        db.query(Payment)
+        .filter(
+            Payment.user_id == user_id,
+            Payment.payment_type == "subscription",
+            Payment.status.in_(("pending", "paid")),
+        )
+        .all()
+    )
+    total = 0.0
+    for payment in payments:
+        total += get_active_hold_amount_from_metadata(payment.payment_metadata)
+    return total
+
+
 def get_user_available_balance(db: Session, user_id: int, do_commit: bool = True) -> float:
-    """Доступный баланс = общий баланс - резерв (в рублях)"""
+    """Доступный баланс = общий баланс - резервы подписок - soft-hold платежей (в рублях)"""
     user_balance = get_or_create_user_balance(db, user_id, do_commit=do_commit)
     reserved_total = get_user_reserved_total(db, user_id)
-    return max(0.0, user_balance.balance - reserved_total)
+    payment_holds = get_user_payment_holds_total(db, user_id)
+    return max(0.0, user_balance.balance - reserved_total - payment_holds)
+
+
+def release_payment_balance_hold(db: Session, payment: Payment, *, do_commit: bool = False) -> bool:
+    """Освободить soft-hold платежа (failed/expired/cancelled). Идемпотентно."""
+    meta = dict(payment.payment_metadata or {})
+    from utils.subscription_payment_split import is_v2_payment_metadata
+    from sqlalchemy.orm.attributes import flag_modified
+
+    if not is_v2_payment_metadata(meta):
+        return False
+    if meta.get("balance_hold_released") or meta.get("balance_hold_finalized"):
+        return False
+    if not meta.get("balance_hold_active") and float(meta.get("balance_hold_amount") or 0) <= 0:
+        return False
+    meta["balance_hold_active"] = False
+    meta["balance_hold_released"] = True
+    meta["balance_hold_amount"] = 0.0
+    payment.payment_metadata = meta
+    flag_modified(payment, "payment_metadata")
+    if do_commit:
+        db.commit()
+    else:
+        db.flush()
+    return True
+
+
+def finalize_payment_balance_hold(db: Session, payment: Payment, *, do_commit: bool = False) -> bool:
+    """Пометить hold как финализированный после paid+applied (до/после move_available_to_reserve).
+
+    Идемпотентно. Не меняет UserBalance — списание в резерв подписки делает caller.
+    """
+    meta = dict(payment.payment_metadata or {})
+    from utils.subscription_payment_split import is_v2_payment_metadata
+    from sqlalchemy.orm.attributes import flag_modified
+
+    if not is_v2_payment_metadata(meta):
+        return False
+    if meta.get("balance_hold_finalized"):
+        return False
+    meta["balance_hold_active"] = False
+    meta["balance_hold_finalized"] = True
+    # amount оставляем для аудита; на available больше не влияет
+    payment.payment_metadata = meta
+    flag_modified(payment, "payment_metadata")
+    if do_commit:
+        db.commit()
+    else:
+        db.flush()
+    return True
 
 
 def move_available_to_reserve(db: Session, subscription: Subscription, amount: float, do_commit: bool = True) -> bool:

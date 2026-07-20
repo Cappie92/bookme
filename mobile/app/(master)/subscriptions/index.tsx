@@ -69,6 +69,11 @@ import {
   getMasterTariffComparisonRows,
   splitTariffComparisonColumns,
 } from 'shared/subscriptionPlanFeatures';
+import {
+  analytics,
+  AnalyticsEvent,
+  verifyPendingSubscriptionPayment,
+} from '@src/services/analytics';
 
 const SCROLL_EXTRA_BOTTOM = 24;
 const KEYBOARD_SCROLL_EXTRA_BOTTOM = 48;
@@ -235,9 +240,11 @@ export default function SubscriptionsScreen() {
   };
 
   useEffect(() => {
+    analytics.track(AnalyticsEvent.SubscriptionScreenOpened, { screen: 'subscriptions' });
     loadSubscription();
     loadPromoData();
     loadPaymentHistory();
+    void verifyPendingSubscriptionPayment({ source: 'subscriptions_mount' });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -250,11 +257,14 @@ export default function SubscriptionsScreen() {
     };
   }, []);
 
-  // После возврата из внешней оплаты (Linking/WebBrowser) приложение становится active — форс-обновляем подписку
+  // После возврата из внешней оплаты — проверить backend status, затем обновить UI
   useEffect(() => {
     const sub = AppState.addEventListener('change', (state: AppStateStatus) => {
       if (state === 'active') {
-        refreshAll();
+        void (async () => {
+          await verifyPendingSubscriptionPayment({ source: 'app_state_active' });
+          await refreshAll();
+        })();
       }
     });
     return () => sub.remove();
@@ -314,13 +324,26 @@ export default function SubscriptionsScreen() {
     setPromoApplyError(null);
     setPromoApplyMessage(null);
     setPromoApplyMessageTone('success');
+    analytics.track(AnalyticsEvent.PromoCodeApplyStarted, {
+      hasPromo: true,
+      screen: 'subscriptions',
+    });
     try {
       await applyMasterPromoCode(code);
       setPromoCodeInput('');
       setPromoApplyMessage('Промокод применён. Бонус будет начислен после первой оплаты подписки.');
       setPromoApplyMessageTone('success');
+      analytics.track(AnalyticsEvent.PromoCodeApplied, {
+        hasPromo: true,
+        screen: 'subscriptions',
+      });
       await loadPromoData();
     } catch (err: unknown) {
+      analytics.track(AnalyticsEvent.PromoCodeFailed, {
+        hasPromo: true,
+        screen: 'subscriptions',
+        errorType: isPromoAlreadyAppliedError(err) ? 'already_applied' : 'apply_failed',
+      });
       if (isPromoAlreadyAppliedError(err)) {
         try {
           const refreshedCurrentPromo = await getCurrentMasterPromoCode();

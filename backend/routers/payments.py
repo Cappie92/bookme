@@ -44,9 +44,6 @@ from utils.robokassa import (
     get_robokassa_config
 )
 from utils.balance_utils import (
-    get_or_create_user_balance,
-    reserve_full_subscription_price,
-    get_user_available_balance,
     add_balance_transaction_no_commit,
 )
 from utils.subscription_payment_deposit import (
@@ -99,7 +96,22 @@ async def init_subscription_payment(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Инициализация платежа для подписки. Создаёт запись Payment и возвращает URL для оплаты (Robokassa) или requires_payment=false при нулевой сумме."""
+    """Инициализация платежа для подписки.
+
+    При calculation_id (современный путь, scheme_version=2):
+      - сервер пересчитывает split: points → balance → card;
+      - card_portion == 0 → requires_payment=false (клиент вызывает apply-upgrade-balance);
+      - card_portion > 0 → Payment.amount = card, soft-hold на balance_portion, URL Robokassa.
+
+    Без calculation_id (legacy): amount = полная цена, без hold (старое поведение).
+    """
+    from utils.balance_utils import get_user_available_balance
+    from utils.subscription_payment_split import (
+        MONEY_TOLERANCE,
+        build_payment_split_metadata,
+        compute_subscription_payment_split,
+    )
+
     # Определяем тип подписки
     subscription_type = None
     if current_user.role.value in ['salon']:
@@ -125,9 +137,23 @@ async def init_subscription_payment(
             detail="План подписки не найден"
         )
     
-    # Если передан snapshot расчета — используем его итоговую сумму к оплате (final_price)
+    snapshot = None
+    payment_split = None
+    # Если передан snapshot расчета — используем его и пересчитываем split на сервере
     total_price = None
     if payment_request.calculation_id:
+        # Лочим баланс до расчёта available (параллельные pending)
+        ub_lock = (
+            db.query(UserBalance)
+            .filter(UserBalance.user_id == current_user.id)
+            .with_for_update()
+            .first()
+        )
+        if not ub_lock:
+            ub_lock = UserBalance(user_id=current_user.id, balance=0, currency="RUB")
+            db.add(ub_lock)
+            db.flush()
+
         snapshot = db.query(SubscriptionPriceSnapshot).filter(
             SubscriptionPriceSnapshot.id == payment_request.calculation_id,
             SubscriptionPriceSnapshot.user_id == current_user.id
@@ -153,7 +179,25 @@ async def init_subscription_payment(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Snapshot не соответствует типу применения тарифа — пересчитайте стоимость"
             )
-        total_price = float(snapshot.final_price)
+        price_before = float(
+            getattr(snapshot, "price_before_points", None)
+            if getattr(snapshot, "price_before_points", None) is not None
+            else getattr(snapshot, "total_price", 0) or 0
+        )
+        points_used = int(getattr(snapshot, "subscription_points_used", 0) or 0)
+        available = float(get_user_available_balance(db, current_user.id, do_commit=False))
+        payment_split = compute_subscription_payment_split(
+            price_before_points=price_before,
+            points_used=points_used,
+            available_balance=available,
+        )
+        # Согласованность со snapshot.final_price (after points)
+        if abs(payment_split.after_points - float(snapshot.final_price or 0)) > MONEY_TOLERANCE:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Пересчитайте стоимость: final_price snapshot не совпадает с текущим split",
+            )
+        total_price = float(payment_split.card_portion)
     else:
         # Фолбэк (на случай старых клиентов без snapshot)
         if payment_request.duration_months == 12:
@@ -171,26 +215,57 @@ async def init_subscription_payment(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Не удалось определить сумму к оплате"
         )
-    if total_price <= 0:
-        # UI не должен вызывать init при final_price<=0, но backend устойчив:
-        # не создаем Payment/Robokassa invoice, возвращаем requires_payment=false.
-        # Применение должно быть явным (отдельный endpoint apply-upgrade-free по snapshot_id).
+
+    # Нулевая доплата / полное покрытие балансом → Robokassa не нужна
+    if payment_split is not None:
+        if payment_split.after_points <= MONEY_TOLERANCE:
+            return PaymentInitResponse(
+                requires_payment=False,
+                message="Сумма к оплате равна 0 — оплата не требуется. Для применения используйте /api/subscriptions/apply-upgrade-free с calculation_id (TTL 30 минут).",
+                balance_portion=0.0,
+                card_portion=0.0,
+                points_portion=payment_split.points_portion,
+            )
+        if payment_split.card_portion <= MONEY_TOLERANCE:
+            return PaymentInitResponse(
+                requires_payment=False,
+                message="Оплата полностью с внутреннего баланса. Используйте /api/subscriptions/apply-upgrade-balance.",
+                balance_portion=payment_split.balance_portion,
+                card_portion=0.0,
+                points_portion=payment_split.points_portion,
+            )
+    elif total_price <= 0:
         return PaymentInitResponse(
             requires_payment=False,
             message="Сумма к оплате равна 0 — оплата не требуется. Для применения используйте /api/subscriptions/apply-upgrade-free с calculation_id (TTL 30 минут).",
         )
     
-    # Единый строгий селектор — чтобы /init и /features согласованно понимали "текущую подписку"
-    from utils.subscription_features import get_effective_subscription
-    current_subscription = get_effective_subscription(db, current_user.id, subscription_type, now_utc=datetime.utcnow())
-    
-    # Важно: расчет доплаты/кредита должен приходить через calculation_id (snapshot)
-    
     # Создаём Payment; числовой Robokassa InvId = str(payment.id) после flush (persist_new_robokassa_payment)
     payment_source = payment_request.payment_source or "web"
+    if payment_split is not None:
+        meta = build_payment_split_metadata(
+            payment_split,
+            calculation_id=payment_request.calculation_id,
+            upgrade_type=payment_request.upgrade_type,
+            selected_duration=payment_request.duration_months,
+            plan_name=plan.name,
+            plan_display_name=plan.display_name,
+            balance_hold_active=payment_split.balance_portion > MONEY_TOLERANCE,
+        )
+        robokassa_amount = float(payment_split.card_portion)
+    else:
+        meta = {
+            "calculation_id": payment_request.calculation_id,
+            "upgrade_type": payment_request.upgrade_type,
+            "selected_duration": payment_request.duration_months,
+            "plan_name": plan.name,
+            "plan_display_name": plan.display_name,
+        }
+        robokassa_amount = float(total_price)
+
     payment = Payment(
         user_id=current_user.id,
-        amount=total_price,
+        amount=robokassa_amount,
         status='pending',
         payment_type='subscription',
         robokassa_invoice_id="tmp-pending",
@@ -199,13 +274,7 @@ async def init_subscription_payment(
         is_recurring=payment_request.enable_auto_renewal,
         subscription_apply_status='pending',
         payment_source=payment_source,
-        payment_metadata={
-            "calculation_id": payment_request.calculation_id,
-            "upgrade_type": payment_request.upgrade_type,
-            "selected_duration": payment_request.duration_months,
-            "plan_name": plan.name,
-            "plan_display_name": plan.display_name
-        }
+        payment_metadata=meta,
     )
 
     from utils.payment_public_id import persist_new_robokassa_payment
@@ -230,7 +299,7 @@ async def init_subscription_payment(
     else:
         payment_url = generate_payment_url(
         merchant_login=config["merchant_login"],
-        amount=total_price,
+        amount=robokassa_amount,
         invoice_id=invoice_id,
         description=description,
         password_1=config["password_1"],
@@ -242,12 +311,14 @@ async def init_subscription_payment(
 
     logger.info(
         "payment_subscription_init payment_id=%s invoice_id=%s robokassa_is_test=%s "
-        "credential_branch=%s stub=%s",
+        "credential_branch=%s stub=%s card=%s balance_hold=%s",
         payment.id,
         invoice_id,
         bool(config.get("is_test")),
         config.get("credential_branch", ""),
         robokassa_stub,
+        robokassa_amount,
+        (payment_split.balance_portion if payment_split else 0),
     )
 
     def _domain_path(u: str) -> str:
@@ -283,7 +354,7 @@ async def init_subscription_payment(
                     payment_id=payment.id,
                     payment_public_id=payment.public_id,
                     merchant_login=config.get("merchant_login") or "",
-                    amount=float(total_price),
+                    amount=float(robokassa_amount),
                     inv_id=str(invoice_id),
                     is_test=bool(config.get("is_test")),
                     credential_branch=str(config.get("credential_branch") or ""),
@@ -299,7 +370,10 @@ async def init_subscription_payment(
     return PaymentInitResponse(
         payment=payment.public_id,
         payment_url=payment_url,
-        invoice_id=invoice_id
+        invoice_id=invoice_id,
+        balance_portion=payment_split.balance_portion if payment_split else None,
+        card_portion=payment_split.card_portion if payment_split else None,
+        points_portion=payment_split.points_portion if payment_split else None,
     )
 
 
@@ -428,6 +502,9 @@ async def robokassa_result(
         payment.error_message = (
             f"Несоответствие суммы: ожидалось {payment.amount}, получено {out_sum_raw}"
         )
+        from utils.balance_utils import release_payment_balance_hold
+
+        release_payment_balance_hold(db, payment, do_commit=False)
         db.commit()
         return f"ERROR: Amount mismatch for invoice {invoice_id}"
 
@@ -588,7 +665,18 @@ async def robokassa_result(
             raise RuntimeError("Snapshot not found")
         if snapshot.expires_at <= now:
             raise RuntimeError("Snapshot expired")
-        if abs(float(snapshot.final_price) - float(payment.amount)) > 0.01:
+        from utils.subscription_payment_split import is_v2_payment_metadata, MONEY_TOLERANCE as _SPLIT_TOL
+
+        meta_for_amount = payment.payment_metadata or {}
+        if is_v2_payment_metadata(meta_for_amount):
+            card_expected = float(meta_for_amount.get("card_portion") or 0.0)
+            if abs(card_expected - float(payment.amount)) > _SPLIT_TOL:
+                raise RuntimeError("Amount mismatch vs v2 card_portion")
+            after_points = float(snapshot.final_price or 0)
+            bal = float(meta_for_amount.get("balance_portion") or 0.0)
+            if abs(after_points - (bal + card_expected)) > _SPLIT_TOL:
+                raise RuntimeError("v2 split mismatch vs snapshot.final_price")
+        elif abs(float(snapshot.final_price) - float(payment.amount)) > 0.01:
             raise RuntimeError("Amount mismatch vs snapshot.final_price")
 
         master_id = get_master_id_for_user(db, payment.user_id)
@@ -692,14 +780,38 @@ async def robokassa_result(
         db.add(new_subscription)
         db.flush()
 
-        # MVP: резерв не используем. Остаток = UserBalance.balance. Таблицу оставляем, запись с 0.
-        new_res = SubscriptionReservation(
-            user_id=payment.user_id,
-            subscription_id=new_subscription.id,
-            reserved_amount=0.0
+        from utils.balance_utils import (
+            finalize_payment_balance_hold,
+            move_available_to_reserve,
         )
-        db.add(new_res)
-        db.flush()
+        from utils.subscription_payment_split import is_v2_payment_metadata as _is_v2
+
+        apply_meta = dict(payment.payment_metadata or {})
+        if _is_v2(apply_meta):
+            # Снять soft-hold, затем зарезервировать chargeable под подписку (баланс+карта уже на UserBalance).
+            finalize_payment_balance_hold(db, payment, do_commit=False)
+            if not move_available_to_reserve(
+                db, new_subscription, chargeable_value, do_commit=False
+            ):
+                raise RuntimeError(
+                    f"Insufficient available balance to reserve chargeable={chargeable_value}"
+                )
+            new_res = (
+                db.query(SubscriptionReservation)
+                .filter(SubscriptionReservation.subscription_id == new_subscription.id)
+                .first()
+            )
+            if not new_res:
+                raise RuntimeError("SubscriptionReservation missing after move_available_to_reserve")
+        else:
+            # Legacy MVP: резерв не используем. Остаток = UserBalance.balance.
+            new_res = SubscriptionReservation(
+                user_id=payment.user_id,
+                subscription_id=new_subscription.id,
+                reserved_amount=0.0
+            )
+            db.add(new_res)
+            db.flush()
 
         # Деактивируем текущую подписку только при немедленном старте новой (immediate upgrade)
         if (

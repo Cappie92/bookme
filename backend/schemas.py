@@ -1329,6 +1329,12 @@ class SubscriptionCalculationResponse(BaseModel):
     subscription_points_used: Optional[int] = None
     requires_payment: Optional[bool] = None
 
+    # Mixed payment split (scheme_version=2): points → balance → card
+    points_portion: Optional[float] = None
+    balance_portion: Optional[float] = None
+    card_portion: Optional[float] = None
+    requires_robokassa: Optional[bool] = None
+
 
 class PromoApplyRequest(BaseModel):
     code: str
@@ -2966,6 +2972,13 @@ class PaymentInitResponse(BaseModel):
     payment: Optional[str] = None
     payment_url: Optional[str] = None
     invoice_id: Optional[str] = None
+    # Mixed payment (v2) — для UI/analytics; legacy init может не заполнять
+    balance_portion: Optional[float] = None
+    card_portion: Optional[float] = None
+    points_portion: Optional[float] = None
+    paid_from_balance: Optional[float] = None
+    subscription_id: Optional[int] = None
+    already_applied: Optional[bool] = None
 
 
 class PaymentOut(BaseModel):

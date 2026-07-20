@@ -114,6 +114,11 @@ export interface SubscriptionCalculationResponse {
   subscription_points_available?: number | null;
   subscription_points_used?: number | null;
   requires_payment?: boolean | null;
+  /** Mixed payment split (backend scheme_version=2) */
+  points_portion?: number | null;
+  balance_portion?: number | null;
+  card_portion?: number | null;
+  requires_robokassa?: boolean | null;
 }
 
 function pickPromoPreview(raw: Record<string, any>, calculation: Record<string, any>): PromoPreview | null {

@@ -104,9 +104,24 @@ def retry_subscription_apply(
             if not snapshot:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Snapshot не найден")
 
-            # TTL в retry НЕ блокирует (оплата уже получена); но сумма обязана совпадать
-            if abs(float(snapshot.final_price) - float(payment.amount)) > 0.01:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Сумма платежа не совпадает со snapshot.final_price")
+            # TTL в retry НЕ блокирует (оплата уже получена); сумма: legacy vs v2 card_portion
+            from utils.subscription_payment_split import (
+                MONEY_TOLERANCE as _SPLIT_TOL,
+                is_v2_payment_metadata,
+            )
+
+            if is_v2_payment_metadata(meta):
+                card_expected = float(meta.get("card_portion") or 0.0)
+                if abs(card_expected - float(payment.amount or 0)) > _SPLIT_TOL:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Сумма платежа не совпадает с v2 card_portion",
+                    )
+            elif abs(float(snapshot.final_price) - float(payment.amount)) > 0.01:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Сумма платежа не совпадает со snapshot.final_price",
+                )
 
             user = db.query(User).filter(User.id == payment.user_id).first()
             if not user:
@@ -169,8 +184,16 @@ def retry_subscription_apply(
             new_is_active = True if will_start_now else False
 
             import math
-            total_price_full = float(snapshot.total_price)
-            daily_rate = int(math.ceil(total_price_full / total_days)) if total_days else 0
+            from utils.subscription_billing_calc import resolve_subscription_apply_billing
+            from utils.balance_utils import finalize_payment_balance_hold
+
+            apply_billing = resolve_subscription_apply_billing(snapshot, duration_days=total_days)
+            chargeable_value = float(apply_billing["chargeable_value"])
+            daily_rate = float(apply_billing["daily_rate"])
+            if daily_rate <= 0:
+                total_price_full = float(snapshot.total_price)
+                daily_rate = int(math.ceil(total_price_full / total_days)) if total_days else 0
+                chargeable_value = float(snapshot.final_price or total_price_full)
 
             new_subscription = Subscription(
                 user_id=payment.user_id,
@@ -178,7 +201,7 @@ def retry_subscription_apply(
                 status=new_status,
                 start_date=start_date,
                 end_date=end_date,
-                price=total_price_full,
+                price=chargeable_value,
                 daily_rate=daily_rate,
                 payment_period=payment.subscription_period,
                 is_active=new_is_active,
@@ -188,43 +211,76 @@ def retry_subscription_apply(
             db.add(new_subscription)
             db.flush()
 
-            new_res = SubscriptionReservation(
-                user_id=payment.user_id,
-                subscription_id=new_subscription.id,
-                reserved_amount=0.0,
-            )
-            db.add(new_res)
-            db.flush()
-
             old_reserved = 0.0
-            if effective_upgrade_type == "immediate" and current_subscription:
-                old_res = db.query(SubscriptionReservation).filter(
-                    SubscriptionReservation.subscription_id == current_subscription.id
-                ).with_for_update().first()
-                old_reserved = float(old_res.reserved_amount) if old_res else 0.0
-                if old_res:
-                    old_res.reserved_amount = 0.0
-                new_res.reserved_amount += old_reserved
-
-            needed = max(0.0, total_price_full - float(new_res.reserved_amount or 0.0))
-            if needed > 0:
-                # best-effort lock reserves for stable reserved_total
-                try:
-                    db.query(SubscriptionReservation).filter(SubscriptionReservation.user_id == payment.user_id).with_for_update().all()
-                except Exception:
-                    pass
-                ok = move_available_to_reserve(db, new_subscription, needed, do_commit=False)
+            if is_v2_payment_metadata(meta):
+                # v2: снять soft-hold, затем зарезервировать chargeable (как ResultURL phase2)
+                finalize_payment_balance_hold(db, payment, do_commit=False)
+                ok = move_available_to_reserve(db, new_subscription, chargeable_value, do_commit=False)
                 if not ok:
                     payment.subscription_apply_status = "failed"
-                    payment.error_message = "Insufficient available balance to reserve full subscription price"
+                    payment.error_message = "Insufficient available balance to reserve chargeable (v2)"
                     logger.error(
-                        "subscription/retry_apply_failed payment_id=%s user_id=%s invoice_id=%s calculation_id=%s",
+                        "subscription/retry_apply_failed_v2 payment_id=%s user_id=%s invoice_id=%s calculation_id=%s",
                         payment.id,
                         payment.user_id,
                         payment.robokassa_invoice_id,
                         calculation_id,
                     )
-                    raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Недостаточно средств для резерва полной стоимости")
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail="Недостаточно средств для резерва стоимости подписки",
+                    )
+                new_res = (
+                    db.query(SubscriptionReservation)
+                    .filter(SubscriptionReservation.subscription_id == new_subscription.id)
+                    .first()
+                )
+                if not new_res:
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail="Reservation missing after v2 retry reserve",
+                    )
+            else:
+                new_res = SubscriptionReservation(
+                    user_id=payment.user_id,
+                    subscription_id=new_subscription.id,
+                    reserved_amount=0.0,
+                )
+                db.add(new_res)
+                db.flush()
+
+                if effective_upgrade_type == "immediate" and current_subscription:
+                    old_res = db.query(SubscriptionReservation).filter(
+                        SubscriptionReservation.subscription_id == current_subscription.id
+                    ).with_for_update().first()
+                    old_reserved = float(old_res.reserved_amount) if old_res else 0.0
+                    if old_res:
+                        old_res.reserved_amount = 0.0
+                    new_res.reserved_amount += old_reserved
+
+                needed = max(0.0, float(snapshot.total_price) - float(new_res.reserved_amount or 0.0))
+                if needed > 0:
+                    try:
+                        db.query(SubscriptionReservation).filter(
+                            SubscriptionReservation.user_id == payment.user_id
+                        ).with_for_update().all()
+                    except Exception:
+                        pass
+                    ok = move_available_to_reserve(db, new_subscription, needed, do_commit=False)
+                    if not ok:
+                        payment.subscription_apply_status = "failed"
+                        payment.error_message = "Insufficient available balance to reserve full subscription price"
+                        logger.error(
+                            "subscription/retry_apply_failed payment_id=%s user_id=%s invoice_id=%s calculation_id=%s",
+                            payment.id,
+                            payment.user_id,
+                            payment.robokassa_invoice_id,
+                            calculation_id,
+                        )
+                        raise HTTPException(
+                            status_code=status.HTTP_409_CONFLICT,
+                            detail="Недостаточно средств для резерва полной стоимости",
+                        )
 
             if effective_upgrade_type == "immediate" and current_subscription:
                 current_subscription.status = SubscriptionStatus.EXPIRED

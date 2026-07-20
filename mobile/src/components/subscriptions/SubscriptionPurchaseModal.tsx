@@ -30,6 +30,12 @@ import {
   applyUpgradeBalance,
 } from '@src/services/api/subscriptions';
 import { initSubscriptionPayment } from '@src/services/api/payments';
+import {
+  analytics,
+  AnalyticsEvent,
+  savePendingSubscriptionPayment,
+  verifyPendingSubscriptionPayment,
+} from '@src/services/analytics';
 import { getPlanTitle } from '@src/utils/planTitle';
 import {
   getPlanPeriodSavings,
@@ -39,6 +45,7 @@ import { env } from '@src/config/env';
 import {
   sanitizePaymentRedirectUrl,
   shouldPaySubscriptionFromBalance,
+  resolveCardPortion,
 } from '@src/utils/subscriptionPayment';
 import {
   getPeriodStepSubscriptionPurchasePromoPreviewDisplay,
@@ -235,11 +242,10 @@ function SubscriptionPointsControls({
   onToggleUsePoints: (enabled: boolean) => void;
   onChangePointsToUse: (value: number) => void;
 }) {
-  if (
-    !calculation ||
-    calculation.upgrade_type !== 'immediate' ||
-    typeof calculation.subscription_points_available !== 'number'
-  ) {
+  if (!calculation || typeof calculation.subscription_points_available !== 'number') {
+    return null;
+  }
+  if (Number(calculation.subscription_points_available) <= 0) {
     return null;
   }
 
@@ -496,6 +502,23 @@ function StepCheckout({
   onPaid: () => void;
   payFromBalance: boolean;
 }) {
+  const pointsPortion =
+    typeof calculation?.points_portion === 'number'
+      ? calculation.points_portion
+      : Number(calculation?.subscription_points_used ?? 0) || 0;
+  const balancePortion =
+    typeof calculation?.balance_portion === 'number'
+      ? calculation.balance_portion
+      : payFromBalance
+        ? Number(calculation?.final_price ?? 0)
+        : 0;
+  const cardPortion =
+    typeof calculation?.card_portion === 'number'
+      ? calculation.card_portion
+      : payFromBalance
+        ? 0
+        : Number(calculation?.final_price ?? 0);
+
   return (
     <View>
       <Text style={styles.sectionLabel}>Расчет</Text>
@@ -505,30 +528,45 @@ function StepCheckout({
       ) : calculation ? (
         <View>
           <View style={styles.table}>
+            <View style={styles.tableRow}>
+              <Text style={styles.tableKey}>Стоимость тарифа</Text>
+              <Text style={styles.tableVal} numberOfLines={1}>
+                {formatMoney(calculation.total_price)}
+              </Text>
+            </View>
+            {pointsPortion > 0 ? (
+              <View style={styles.tableRow}>
+                <Text style={styles.tableKey}>Промобаллами</Text>
+                <Text style={styles.tableVal} numberOfLines={1}>
+                  {formatMoney(pointsPortion)}
+                </Text>
+              </View>
+            ) : null}
+            {balancePortion > 0.001 ? (
+              <View style={styles.tableRow}>
+                <Text style={styles.tableKey}>Со счета</Text>
+                <Text style={styles.tableVal} numberOfLines={1}>
+                  {formatMoney(balancePortion)}
+                </Text>
+              </View>
+            ) : null}
+            <View style={styles.tableRow}>
+              <Text style={[styles.tableKey, styles.tableKeyStrong]}>К оплате картой</Text>
+              <Text style={[styles.tableVal, styles.tableValStrong]} numberOfLines={1}>
+                {formatMoney(cardPortion)}
+              </Text>
+            </View>
             {typeof calculation.available_balance === 'number' ? (
               <View style={styles.tableRow}>
-                <Text style={styles.tableKey}>Баланс</Text>
+                <Text style={styles.tableKey}>Доступный баланс</Text>
                 <Text style={styles.tableVal} numberOfLines={1}>
                   {formatMoney(calculation.available_balance)}
                 </Text>
               </View>
             ) : null}
-            <SubscriptionPointsBreakdown calculation={calculation} />
-            <View style={styles.tableRow}>
-              <Text style={[styles.tableKey, styles.tableKeyStrong]}>К оплате</Text>
-              <Text style={[styles.tableVal, styles.tableValStrong]} numberOfLines={1}>
-                {formatMoney(calculation.final_price)}
-              </Text>
-            </View>
-            {payFromBalance ? (
-              <Text style={styles.balanceHintOk}>Оплата с баланса, без перехода на карту</Text>
+            {payFromBalance || cardPortion <= 0.001 ? (
+              <Text style={styles.balanceHintOk}>Оплата без перехода на карту</Text>
             ) : null}
-            <View style={styles.tableRow}>
-              <Text style={styles.tableKey}>Стоимость</Text>
-              <Text style={styles.tableVal} numberOfLines={1}>
-                {formatMoney(calculation.total_price)}
-              </Text>
-            </View>
             {calculation.savings_percent ? (
               <View style={styles.tableRow}>
                 <Text style={styles.tableKey}>Экономия</Text>
@@ -555,8 +593,8 @@ function StepCheckout({
             </View>
           </View>
 
-          {'breakdown_text' in calculation && (calculation as any).breakdown_text ? (
-            <Text style={styles.breakdownHint}>{(calculation as any).breakdown_text}</Text>
+          {calculation.breakdown_text ? (
+            <Text style={styles.breakdownHint}>{calculation.breakdown_text}</Text>
           ) : null}
 
           {showPaidButton ? (
@@ -697,6 +735,10 @@ export function SubscriptionPurchaseModal({
       setSelectedDuration(null);
     }
     setSelectedPlan(plan);
+    analytics.track(AnalyticsEvent.SubscriptionPlanSelected, {
+      planMonths: selectedDuration ?? undefined,
+      screen: 'subscription_purchase',
+    });
 
     // Авто-логика upgradeType как в web
     if (isFreePlan) {
@@ -716,6 +758,10 @@ export function SubscriptionPurchaseModal({
 
   const handleDurationSelect = (months: 1 | 3 | 6 | 12) => {
     setSelectedDuration(months);
+    analytics.track(AnalyticsEvent.SubscriptionPlanSelected, {
+      planMonths: months,
+      screen: 'subscription_purchase',
+    });
   };
 
   const calculateSelectedSubscription = React.useCallback(async () => {
@@ -787,9 +833,11 @@ export function SubscriptionPurchaseModal({
       finalPrice: calculation.final_price,
       availableBalance: calculation.available_balance,
       canPayFromBalance: calculation.can_pay_from_balance,
-      upgradeType: calculation.upgrade_type || upgradeType,
+      cardPortion: calculation.card_portion,
+      balancePortion: calculation.balance_portion,
+      requiresRobokassa: calculation.requires_robokassa,
     });
-  }, [calculation, upgradeType]);
+  }, [calculation]);
 
   const handlePayment = async () => {
     if (!selectedPlan || !selectedDuration || !calculation) return;
@@ -847,10 +895,22 @@ export function SubscriptionPurchaseModal({
         payment_source: 'mobile_app',
       });
 
-      if (payment && (payment as any).requires_payment === false) {
+      if (payment && payment.requires_payment === false) {
+        const cardFromInit = Number(payment.card_portion);
+        const balanceFromInit = Number(payment.balance_portion);
+        const useBalance =
+          (Number.isFinite(balanceFromInit) && balanceFromInit > 0.001 &&
+            (!Number.isFinite(cardFromInit) || cardFromInit <= 0.001)) ||
+          (Number(calculation.final_price) > 0 &&
+            Number.isFinite(cardFromInit) &&
+            cardFromInit <= 0.001 &&
+            Number.isFinite(balanceFromInit) &&
+            balanceFromInit > 0.001);
+
         Alert.alert(
-          'Оплата не требуется',
-          (payment as any).message || 'Доплата не требуется',
+          useBalance ? 'Оплата с баланса' : 'Оплата не требуется',
+          payment.message ||
+            (useBalance ? 'Можно оплатить с внутреннего баланса' : 'Доплата не требуется'),
           [
             {
               text: 'Отмена',
@@ -864,9 +924,24 @@ export function SubscriptionPurchaseModal({
               onPress: async () => {
                 try {
                   if (!calculation?.calculation_id) return;
-                  await applyUpgradeFree(calculation.calculation_id);
-                  await onRefreshAfterPayment?.();
-                  await handleClose();
+                  if (useBalance) {
+                    const result = await applyUpgradeBalance(
+                      calculation.calculation_id,
+                      enableAutoRenewal
+                    );
+                    await onRefreshAfterPayment?.();
+                    await handleClose();
+                    Alert.alert(
+                      'Готово',
+                      result.already_applied
+                        ? 'Тариф уже был применён ранее'
+                        : `Тариф активирован. Списано ${formatMoney(result.paid_from_balance ?? calculation.final_price)} с баланса.`
+                    );
+                  } else {
+                    await applyUpgradeFree(calculation.calculation_id);
+                    await onRefreshAfterPayment?.();
+                    await handleClose();
+                  }
                 } catch (e: any) {
                   Alert.alert('Ошибка', e?.response?.data?.detail || 'Не удалось применить тариф');
                 }
@@ -890,7 +965,7 @@ export function SubscriptionPurchaseModal({
       }
       if (__DEV__) {
         try {
-          const u = new URL(payment.payment_url);
+          const u = new URL(paymentUrl);
           const domain = `${u.protocol}//${u.host}${u.pathname}`;
           console.log('🧾 [PAYMENT] Opening payment_url', { domain, origin: u.origin });
         } catch (e) {
@@ -899,6 +974,34 @@ export function SubscriptionPurchaseModal({
       }
       await Linking.openURL(paymentUrl);
       setPaymentOpened(true);
+      const publicId = typeof payment?.payment === 'string' ? payment.payment : '';
+      const cash = resolveCardPortion({
+        finalPrice: Number(calculation.final_price) || 0,
+        cardPortion: calculation.card_portion,
+        payFromBalance: false,
+      });
+      const full = Number(calculation.price_before_points ?? calculation.total_price ?? calculation.final_price) || cash;
+      const pointsUsed = Number(calculation.subscription_points_used ?? calculation.points_portion ?? 0) || 0;
+      if (publicId) {
+        await savePendingSubscriptionPayment({
+          publicId,
+          planMonths: selectedDuration,
+          planFullAmount: full,
+          cashPaidAmount: cash,
+          pointsUsed,
+          currency: 'RUB',
+          startedAt: new Date().toISOString(),
+          hasPromo: Boolean(calculation.promo_preview),
+        });
+      }
+      analytics.track(AnalyticsEvent.SubscriptionPaymentStarted, {
+        paymentId: publicId || undefined,
+        planMonths: selectedDuration,
+        paymentStatus: 'pending',
+        usedPoints: pointsUsed > 0,
+        hasPromo: Boolean(calculation.promo_preview),
+        platform: 'mobile',
+      });
     } catch (e: any) {
       Alert.alert('Ошибка', e?.response?.data?.detail || 'Не удалось инициализировать платеж');
     } finally {
@@ -921,10 +1024,16 @@ export function SubscriptionPurchaseModal({
 
   const paymentCtaLabel = React.useMemo(() => {
     if (loadingPayment) return 'Подождите…';
-    if (!calculation) return 'Перейти к оплате';
+    if (!calculation) return 'Оплатить';
     if (calculation.final_price <= 0) return 'Применить тариф';
-    if (payFromBalance) return 'Оплатить с баланса';
-    return 'Перейти к оплате';
+    if (payFromBalance) return 'Оплатить';
+    const card = resolveCardPortion({
+      finalPrice: calculation.final_price,
+      cardPortion: calculation.card_portion,
+      payFromBalance: false,
+    });
+    if (card > 0.001) return `Оплатить ${formatMoney(card)}`;
+    return 'Оплатить';
   }, [loadingPayment, calculation, payFromBalance]);
 
   const sheetMaxHeight = Math.round(Dimensions.get('window').height * 0.88);
@@ -1005,6 +1114,7 @@ export function SubscriptionPurchaseModal({
         payFromBalance={payFromBalance}
         onPaid={async () => {
           try {
+            await verifyPendingSubscriptionPayment({ source: 'paid_button' });
             await onRefreshAfterPayment?.();
           } finally {
             await handleClose();
