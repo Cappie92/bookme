@@ -1,85 +1,130 @@
 /**
  * Яндекс.Метрика: загрузка tag.js, init, page hit (SPA), reachGoal.
- * Счётчик ID задан в коде счётчика.
+ * ID счётчика: VITE_YANDEX_METRIKA_ID или дефолт 108773879.
+ * Важно: tag.js грузится БЕЗ ?id= — иначе отдаётся auto-init бандл без window.ym API.
  */
 
-const COUNTER_ID = 108773879
-const TAG_URL = 'https://mc.yandex.ru/metrika/tag.js'
+const DEFAULT_COUNTER_ID = 108773879
+export const METRIKA_TAG_URL = 'https://mc.yandex.ru/metrika/tag.js'
 
 let initPromise = null
 
-function loadYm() {
-  if (typeof window === 'undefined') {
+/**
+ * @param {ImportMetaEnv | Record<string, string | undefined>} [env]
+ * @returns {number | null}
+ */
+export function resolveMetrikaCounterId(env = import.meta.env) {
+  const raw = env?.VITE_YANDEX_METRIKA_ID
+  if (raw === '' || raw === '0' || raw === 'false') {
+    return null
+  }
+  if (raw != null && String(raw).trim() !== '') {
+    const n = Number(String(raw).trim())
+    return Number.isFinite(n) && n > 0 ? Math.trunc(n) : null
+  }
+  return DEFAULT_COUNTER_ID
+}
+
+/**
+ * Очередь вызовов до загрузки tag.js (официальный паттерн Яндекса).
+ * @param {Window & { ym?: (...args: unknown[]) => void }} win
+ */
+export function ensureYmStub(win = window) {
+  if (typeof win === 'undefined' || typeof win.ym === 'function') {
+    return
+  }
+  const stub = function ymStub(...args) {
+    ;(stub.a = stub.a || []).push(args)
+  }
+  stub.l = Date.now()
+  win.ym = stub
+}
+
+function scriptSrcMatchesTagUrl(src) {
+  if (!src) return false
+  return src === METRIKA_TAG_URL || src.startsWith(`${METRIKA_TAG_URL}?`)
+}
+
+function loadTagScript() {
+  if (typeof window === 'undefined' || typeof document === 'undefined') {
     return Promise.resolve()
   }
-  if (window.ym) {
-    return Promise.resolve()
-  }
+
+  ensureYmStub(window)
+
   for (let j = 0; j < document.scripts.length; j += 1) {
-    if (document.scripts[j].src === TAG_URL) {
-      return new Promise((resolve) => {
-        const t = setInterval(() => {
-          if (window.ym) {
-            clearInterval(t)
-            resolve()
-          }
-        }, 30)
-        setTimeout(() => {
-          clearInterval(t)
-          resolve()
-        }, 8000)
-      })
+    if (scriptSrcMatchesTagUrl(document.scripts[j].src)) {
+      return Promise.resolve()
     }
   }
+
   return new Promise((resolve, reject) => {
     const s = document.createElement('script')
     s.async = true
-    s.src = `${TAG_URL}?id=${COUNTER_ID}`
+    s.src = METRIKA_TAG_URL
     s.onload = () => resolve()
     s.onerror = () => reject(new Error('metrika tag.js load error'))
     document.head.appendChild(s)
   })
 }
 
+function getCounterId() {
+  return resolveMetrikaCounterId()
+}
+
 /**
- * Один раз: загрузка + ym(init). Далее page hit вызывается вручную на смене роута.
+ * Один раз: stub + tag.js + ym(init). Page hit — в MetrikaRouteListener.
  */
 export function metrikaInitOnce() {
   if (initPromise) {
     return initPromise
   }
+
   initPromise = (async () => {
     if (typeof window === 'undefined') {
       return
     }
-    await loadYm()
+
+    const counterId = getCounterId()
+    if (!counterId) {
+      return
+    }
+
+    ensureYmStub(window)
+    const ref = document.referrer || undefined
+    window.ym(counterId, 'init', {
+      ssr: true,
+      webvisor: true,
+      clickmap: true,
+      ecommerce: 'dataLayer',
+      accurateTrackBounce: true,
+      trackLinks: true,
+      referer: ref,
+      defer: true,
+    })
+
+    await loadTagScript()
     if (typeof window.ym !== 'function') {
       return
     }
-    const ref = document.referrer || undefined
-    window.ym(
-      COUNTER_ID,
-      'init',
-      {
-        ssr: true,
-        webvisor: true,
-        clickmap: true,
-        ecommerce: 'dataLayer',
-        accurateTrackBounce: true,
-        trackLinks: true,
-        referer: ref,
-        // Виртуальные pageview при смене роута — в MetrikaRouteListener
-        defer: true,
-      }
-    )
   })()
+
   return initPromise
 }
 
 export function metrikaPageView() {
-  if (typeof window === 'undefined' || typeof window.ym !== 'function') {
+  if (typeof window === 'undefined') {
     return
   }
+  const counterId = getCounterId()
+  if (!counterId) {
+    return
+  }
+  ensureYmStub(window)
+  if (typeof window.ym !== 'function') {
+    return
+  }
+
   const url = `${window.location.pathname}${window.location.search || ''}${window.location.hash || ''}`
   const opts = { title: document.title }
   if (document.referrer) {
@@ -90,22 +135,33 @@ export function metrikaPageView() {
       // ignore
     }
   }
-  window.ym(COUNTER_ID, 'hit', url, opts)
+  window.ym(counterId, 'hit', url, opts)
 }
 
 /**
  * @param {string} name — короткое имя goal (см. metrikaEvents.js)
- * @param {Record<string, unknown>} [params] — params для отчёта
+ * @param {Record<string, unknown>} [params]
  */
 export function metrikaGoal(name, params) {
   if (typeof window === 'undefined' || !name) {
     return
   }
-  if (typeof window.ym === 'function') {
-    if (params && Object.keys(params).length > 0) {
-      window.ym(COUNTER_ID, 'reachGoal', name, params)
-    } else {
-      window.ym(COUNTER_ID, 'reachGoal', name)
-    }
+  const counterId = getCounterId()
+  if (!counterId) {
+    return
   }
+  ensureYmStub(window)
+  if (typeof window.ym !== 'function') {
+    return
+  }
+  if (params && Object.keys(params).length > 0) {
+    window.ym(counterId, 'reachGoal', name, params)
+  } else {
+    window.ym(counterId, 'reachGoal', name)
+  }
+}
+
+/** @internal */
+export function __resetMetrikaForTests() {
+  initPromise = null
 }
