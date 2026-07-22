@@ -35,7 +35,11 @@ describe('ensureYmStub', () => {
     ensureYmStub(win)
     expect(typeof win.ym).toBe('function')
     win.ym(108773879, 'init', { defer: true })
-    expect(win.ym.a).toEqual([[108773879, 'init', { defer: true }]])
+    expect(win.ym.a).toHaveLength(1)
+    expect(Array.isArray(win.ym.a[0])).toBe(false)
+    expect(win.ym.a[0][0]).toBe(108773879)
+    expect(win.ym.a[0][1]).toBe('init')
+    expect(win.ym.a[0][2]).toEqual({ defer: true })
   })
 
   it('does not replace existing ym function', () => {
@@ -57,11 +61,11 @@ describe('metrikaInitOnce', () => {
     vi.stubEnv('VITE_YANDEX_METRIKA_ID', '0')
 
     const appendChild = vi.fn()
-    global.window = {
+    globalThis.window = {
       ym: undefined,
       location: { href: 'https://dedato.ru/' },
     }
-    global.document = {
+    globalThis.document = {
       referrer: '',
       scripts: [],
       head: { appendChild },
@@ -71,7 +75,7 @@ describe('metrikaInitOnce', () => {
     await metrikaInitOnce()
 
     expect(appendChild).not.toHaveBeenCalled()
-    expect(typeof global.window.ym).toBe('undefined')
+    expect(typeof globalThis.window.ym).toBe('undefined')
   })
 
   it('loads standard tag.js without ?id= and queues init via ym stub', async () => {
@@ -83,10 +87,10 @@ describe('metrikaInitOnce', () => {
       node.onload?.()
     })
 
-    global.window = {
+    globalThis.window = {
       location: { href: 'https://dedato.ru/', pathname: '/', search: '', hash: '' },
     }
-    global.document = {
+    globalThis.document = {
       referrer: 'https://google.com/',
       scripts: [],
       createElement: (tag) => ({ tag, async: false, src: '', onload: null, onerror: null }),
@@ -96,20 +100,22 @@ describe('metrikaInitOnce', () => {
 
     await metrikaInitOnce()
 
-    expect(typeof global.window.ym).toBe('function')
-    expect(global.window.ym.a?.[0]?.[0]).toBe(108773879)
-    expect(global.window.ym.a?.[0]?.[1]).toBe('init')
-    expect(global.window.ym.a?.[0]?.[2]).toMatchObject({
+    expect(typeof globalThis.window.ym).toBe('function')
+    expect(globalThis.window.ym.a?.[0]?.[0]).toBe(108773879)
+    expect(globalThis.window.ym.a?.[0]?.[1]).toBe('init')
+    expect(globalThis.window.ym.a?.[0]?.[2]).toMatchObject({
       defer: true,
       clickmap: true,
       webvisor: true,
     })
+    expect(globalThis.window.ym.a?.[0]?.[2]).not.toHaveProperty('ssr')
+    expect(globalThis.window.ym.a?.[0]?.[2]).not.toHaveProperty('referer')
     expect(appendChild).toHaveBeenCalledTimes(1)
   })
 
   it('reuses existing tag.js script tag', async () => {
-    global.window = { location: { href: 'https://dedato.ru/' } }
-    global.document = {
+    globalThis.window = { location: { href: 'https://dedato.ru/' } }
+    globalThis.document = {
       referrer: '',
       scripts: [{ src: METRIKA_TAG_URL }],
       head: { appendChild: vi.fn() },
@@ -118,8 +124,8 @@ describe('metrikaInitOnce', () => {
 
     await metrikaInitOnce()
 
-    expect(global.document.head.appendChild).not.toHaveBeenCalled()
-    expect(typeof global.window.ym).toBe('function')
+    expect(globalThis.document.head.appendChild).not.toHaveBeenCalled()
+    expect(typeof globalThis.window.ym).toBe('function')
   })
 })
 
@@ -133,11 +139,11 @@ describe('metrikaGoal and metrikaPageView', () => {
     vi.stubEnv('VITE_YANDEX_METRIKA_ID', '')
 
     const ym = vi.fn()
-    global.window = {
+    globalThis.window = {
       ym,
       location: { pathname: '/', search: '', hash: '' },
     }
-    global.document = { referrer: '', title: 'DeDato' }
+    globalThis.document = { referrer: '', title: 'DeDato' }
 
     metrikaGoal('landing_hero_register')
     metrikaPageView()
@@ -149,11 +155,11 @@ describe('metrikaGoal and metrikaPageView', () => {
     vi.stubEnv('VITE_YANDEX_METRIKA_ID', '108773879')
 
     const ym = vi.fn()
-    global.window = {
+    globalThis.window = {
       ym,
       location: { pathname: '/pricing', search: '?x=1', hash: '' },
     }
-    global.document = { referrer: '', title: 'Pricing' }
+    globalThis.document = { referrer: '', title: 'Pricing' }
 
     metrikaGoal('pricing_cta_register', { audience: 'master' })
     metrikaPageView()
@@ -167,16 +173,18 @@ describe('metrikaGoal and metrikaPageView', () => {
   it('queues early pageview via ym stub before tag.js is ready', () => {
     vi.stubEnv('VITE_YANDEX_METRIKA_ID', '108773879')
 
-    global.window = {
+    globalThis.window = {
       location: { pathname: '/pricing', search: '?x=1', hash: '' },
     }
-    global.document = { referrer: '', title: 'Pricing' }
+    globalThis.document = { referrer: '', title: 'Pricing' }
 
     metrikaPageView()
 
-    expect(typeof global.window.ym).toBe('function')
-    expect(global.window.ym.a).toEqual([
-      [108773879, 'hit', '/pricing?x=1', { title: 'Pricing' }],
-    ])
+    expect(typeof globalThis.window.ym).toBe('function')
+    expect(globalThis.window.ym.a).toHaveLength(1)
+    expect(globalThis.window.ym.a[0][0]).toBe(108773879)
+    expect(globalThis.window.ym.a[0][1]).toBe('hit')
+    expect(globalThis.window.ym.a[0][2]).toBe('/pricing?x=1')
+    expect(globalThis.window.ym.a[0][3]).toEqual({ title: 'Pricing' })
   })
 })

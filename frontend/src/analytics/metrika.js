@@ -27,16 +27,17 @@ export function resolveMetrikaCounterId(env = import.meta.env) {
 
 /**
  * Очередь вызовов до загрузки tag.js (официальный паттерн Яндекса).
+ * Важно: push(arguments), не rest-array — как в snippet Метрики.
  * @param {Window & { ym?: (...args: unknown[]) => void }} win
  */
 export function ensureYmStub(win = window) {
   if (typeof win === 'undefined' || typeof win.ym === 'function') {
     return
   }
-  const stub = function ymStub(...args) {
-    ;(stub.a = stub.a || []).push(args)
+  const stub = function ymStub() {
+    ;(stub.a = stub.a || []).push(arguments)
   }
-  stub.l = Date.now()
+  stub.l = 1 * new Date()
   win.ym = stub
 }
 
@@ -91,16 +92,15 @@ export function metrikaInitOnce() {
     }
 
     ensureYmStub(window)
-    const ref = document.referrer || undefined
+    // SPA init: defer + manual hit. Не передавать ssr:true —
+    // явный ssr:true ломает создание yaCounter / watch (проверено на tag.js).
     window.ym(counterId, 'init', {
-      ssr: true,
-      webvisor: true,
-      clickmap: true,
-      ecommerce: 'dataLayer',
-      accurateTrackBounce: true,
-      trackLinks: true,
-      referer: ref,
       defer: true,
+      clickmap: true,
+      trackLinks: true,
+      accurateTrackBounce: true,
+      webvisor: true,
+      ecommerce: 'dataLayer',
     })
 
     await loadTagScript()
