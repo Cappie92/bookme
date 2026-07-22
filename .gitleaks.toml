@@ -1,6 +1,8 @@
 # Secret scanning — см. docs/internal/POST_INCIDENT_REPO_HARDENING.md
 # Запуск локально: gitleaks detect --source . --no-git  (только рабочее дерево)
 # Полная история: gitleaks detect --source .  (может находить старые коммиты)
+# CI (как в .github/workflows/gitleaks.yml):
+#   gitleaks detect --source . --config .gitleaks.toml --log-opts="<base>...<head>" --verbose
 
 [extend]
 useDefault = true
@@ -13,4 +15,20 @@ paths = [
   '''^\.env\.''',
   # CocoaPods — бинарные/сгенерированные артефакты; не секреты приложения
   '''mobile/ios/Pods/''',
+]
+
+# False positive: CocoaPods CHECKSUMS для AppMetricaKeychain в Podfile.lock
+# (generic-api-key на hex checksum). Не исключаем весь Podfile.lock и не глушим
+# generic-api-key глобально — только path AND line regex.
+[[rules]]
+id = "generic-api-key"
+[rules.allowlist]
+description = "CocoaPods AppMetricaKeychain checksum in mobile/ios/Podfile.lock"
+condition = "AND"
+paths = [
+  '''(^|/)mobile/ios/Podfile\.lock$''',
+]
+regexTarget = "line"
+regexes = [
+  '''AppMetricaKeychain:\s*[0-9a-f]{40}''',
 ]
