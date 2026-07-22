@@ -83,4 +83,24 @@ jest.mock('@react-native-async-storage/async-storage', () => ({
   multiRemove: jest.fn(() => Promise.resolve()),
 }));
 
+jest.mock('expo-constants', () => ({
+  __esModule: true,
+  default: {
+    expoConfig: { version: '1.0.0', ios: { buildNumber: '1' }, android: { versionCode: 1 } },
+    nativeAppVersion: '1.0.0',
+    nativeBuildVersion: '1',
+  },
+}));
+
+jest.mock('@appmetrica/react-native-analytics', () => ({
+  __esModule: true,
+  default: {
+    activate: jest.fn(),
+    reportEvent: jest.fn(),
+    setUserProfileID: jest.fn(),
+    reportRevenue: jest.fn(),
+    reportError: jest.fn(),
+  },
+}));
+
 

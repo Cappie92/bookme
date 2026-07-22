@@ -17,10 +17,12 @@
         "WEB_URL": "https://dedato.ru",
         "APP_UNIVERSAL_LINK_HOSTS": "dedato.ru,www.dedato.ru",
         "PUBLIC_APP_LINK_ORIGIN": "https://www.dedato.ru",
-        "YANDEX_MOBILE_AUTH_VISIBLE": "0"
+        "YANDEX_MOBILE_AUTH_VISIBLE": "0",
+        "EXPO_PUBLIC_APPMETRICA_TEST_EVENT_ENABLED": "false"
       }
     },
     "production": {
+      "environment": "production",
       "android": {
         "buildType": "app-bundle"
       },
@@ -32,7 +34,8 @@
         "WEB_URL": "https://dedato.ru",
         "APP_UNIVERSAL_LINK_HOSTS": "dedato.ru,www.dedato.ru",
         "PUBLIC_APP_LINK_ORIGIN": "https://www.dedato.ru",
-        "YANDEX_MOBILE_AUTH_VISIBLE": "0"
+        "YANDEX_MOBILE_AUTH_VISIBLE": "0",
+        "EXPO_PUBLIC_APPMETRICA_TEST_EVENT_ENABLED": "false"
       }
     }
   },

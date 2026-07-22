@@ -43,6 +43,11 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     process.env.EXPO_PUBLIC_YANDEX_MOBILE_AUTH_VISIBLE ||
     ''
   ).trim();
+  const appMetricaApiKey = (
+    process.env.EXPO_PUBLIC_APPMETRICA_API_KEY ||
+    process.env.APPMETRICA_API_KEY ||
+    ''
+  ).trim();
 
   const httpsIntentData = linkHosts.map((host) => ({
     scheme: 'https' as const,
@@ -138,6 +143,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       ...(apiUrl ? { API_URL: apiUrl } : {}),
       ...(webUrl ? { WEB_URL: webUrl } : {}),
       ...(yandexMobileAuthVisible ? { YANDEX_MOBILE_AUTH_VISIBLE: yandexMobileAuthVisible } : {}),
+      ...(appMetricaApiKey ? { EXPO_PUBLIC_APPMETRICA_API_KEY: appMetricaApiKey } : {}),
     },
   };
 };

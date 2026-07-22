@@ -20,6 +20,12 @@ export interface PaymentInitResponse {
   payment?: string;
   payment_url?: string | null;
   invoice_id?: string | null;
+  balance_portion?: number | null;
+  card_portion?: number | null;
+  points_portion?: number | null;
+  paid_from_balance?: number | null;
+  subscription_id?: number | null;
+  already_applied?: boolean | null;
 }
 
 export interface PaymentStatusResponse {
@@ -56,7 +62,7 @@ export async function initDepositPayment(
 }
 
 /**
- * Получить статус платежа по публичному идентификатору
+ * Получить статус платежа по публичному идентификатору (auth).
  */
 export async function getPaymentStatus(paymentPublicId: string): Promise<PaymentStatusResponse> {
   const response = await apiClient.get<PaymentStatusResponse[]>(
@@ -68,6 +74,50 @@ export async function getPaymentStatus(paymentPublicId: string): Promise<Payment
     throw new Error('Payment not found');
   }
   return row;
+}
+
+export type PaymentPublicStatusResponse = {
+  status: string;
+  subscription_apply_status?: string | null;
+  payment_source?: 'web' | 'mobile_app' | string;
+};
+
+/**
+ * Публичная проверка статуса оплаты (без auth) — канон подтверждения success.
+ */
+export async function getPaymentPublicStatus(lookup: {
+  paymentPublicId?: string | null;
+  invoiceId?: string | null;
+}): Promise<
+  | { kind: 'ok'; data: PaymentPublicStatusResponse }
+  | { kind: 'not_found' }
+  | { kind: 'error' }
+> {
+  const paymentPublicId = (lookup.paymentPublicId || '').trim();
+  const invoiceId = (lookup.invoiceId || '').trim();
+  if (!paymentPublicId && !invoiceId) {
+    return { kind: 'not_found' };
+  }
+  try {
+    const response = await apiClient.get<PaymentPublicStatusResponse>(
+      '/api/payments/public-status',
+      {
+        params: paymentPublicId
+          ? { payment: paymentPublicId }
+          : { invoice_id: invoiceId },
+        // public endpoint — не требовать auth header
+        headers: {},
+      }
+    );
+    return { kind: 'ok', data: response.data };
+  } catch (error: unknown) {
+    const status =
+      error && typeof error === 'object' && 'response' in error
+        ? (error as { response?: { status?: number } }).response?.status
+        : undefined;
+    if (status === 404) return { kind: 'not_found' };
+    return { kind: 'error' };
+  }
 }
 
 /**

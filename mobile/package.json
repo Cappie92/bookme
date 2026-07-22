@@ -18,6 +18,7 @@
     "test:e2e:android": "maestro test .maestro/flows/ --env APP_ID=com.yourcompany.dedato"
   },
   "dependencies": {
+    "@appmetrica/react-native-analytics": "^4.1.0",
     "@react-native-async-storage/async-storage": "^2.2.0",
     "@react-native-community/datetimepicker": "8.4.4",
     "axios": "^1.13.2",

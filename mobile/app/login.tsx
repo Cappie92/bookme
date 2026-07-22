@@ -12,6 +12,7 @@ import { ScreenContainer } from '@src/components/ScreenContainer';
 import { PasswordInput } from '@src/components/ui/PasswordInput';
 import { cities, getTimezoneByCity } from '@src/data/cities';
 import { mapLoginRequestError } from '@src/utils/apiNetworkError';
+import { CONNECTIVITY_ERROR_MESSAGE } from '@src/utils/apiNetworkError';
 import { openYandexMobileAuthUrl } from '@src/utils/yandexMobileAuthLink';
 import {
   getYandexMobileAuthPresentation,
@@ -26,12 +27,14 @@ import {
   type RegistrationFieldKey,
   shouldShowRegistrationPromoField,
 } from '@src/utils/registrationPromo';
+import { analytics, AnalyticsEvent } from '@src/services/analytics';
 
 type TabType = 'login' | 'register';
 const yandexLogo = require('../assets/YaLogo.webp');
 
 async function openYandexOAuthInBrowser() {
   try {
+    analytics.track(AnalyticsEvent.AuthYandexStarted, { authMethod: 'yandex' });
     await openYandexMobileAuthUrl(Linking.openURL);
   } catch (error) {
     logger.error('❌ [YANDEX_AUTH] Не удалось открыть OAuth URL:', error);
@@ -321,6 +324,7 @@ export default function LoginScreen() {
 
     setLoginLoading(true);
     setLoginErrors((e) => ({ ...e, general: undefined }));
+    analytics.track(AnalyticsEvent.AuthPhoneStarted, { authMethod: 'phone' });
     try {
       const loggedInUser = await login({ phone, password });
       logger.debug('auth', '✅ [LOGIN] Успешный вход!');
@@ -337,6 +341,12 @@ export default function LoginScreen() {
 
       setLoginErrors((e) => ({ ...e, general: errorMessage }));
       Alert.alert('Ошибка входа', errorMessage);
+      if (errorMessage === CONNECTIVITY_ERROR_MESSAGE || errorMessage.includes('Не удалось подключиться')) {
+        analytics.track(AnalyticsEvent.NetworkErrorShown, {
+          screen: 'login',
+          errorType: 'connectivity',
+        });
+      }
     } finally {
       setLoginLoading(false);
     }

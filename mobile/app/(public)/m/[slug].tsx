@@ -38,6 +38,7 @@ import {
   type CreatePublicBookingResponse,
   type PublicEligibility,
 } from '@src/services/api/publicMasters';
+import { analytics, AnalyticsEvent } from '@src/services/analytics';
 import {
   savePublicBookingDraft,
   getPublicBookingDraft,
@@ -489,6 +490,12 @@ export default function MasterPublicBookingScreen() {
     setSelectedDate(null);
     setSelectedSlot(null);
     setUseLoyaltyPoints(false);
+    analytics.track(AnalyticsEvent.BookingStarted, {
+      serviceId: s.id,
+      masterId: profile?.master_id,
+      bookingSource: 'public_page',
+      screen: 'public_booking',
+    });
   };
 
   const handleSelectDate = (dateStr: string) => {
@@ -656,6 +663,13 @@ export default function MasterPublicBookingScreen() {
           start_time: draft.start_time,
           end_time: draft.end_time,
           use_loyalty_points: false,
+        });
+        analytics.track(AnalyticsEvent.BookingCreated, {
+          bookingId: res.id,
+          serviceId: draft.service_id,
+          masterId: profile.master_id,
+          bookingSource: 'public_page',
+          screen: 'public_booking',
         });
         await updatePublicBookingDraftStatus({
           status: 'done',

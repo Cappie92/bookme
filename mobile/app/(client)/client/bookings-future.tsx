@@ -14,6 +14,7 @@ import {
   fetchCalendarIcs,
   sendCalendarEmail,
 } from '@src/services/api/bookings'
+import { analytics, AnalyticsEvent } from '@src/services/analytics'
 import { getBookingTypeAndId, getFavoriteKeyFromBooking } from '@src/utils/clientDashboard'
 import { writeIcsToCacheAndGetUri, getShareErrorAlert } from '@src/utils/calendarIcsPath'
 
@@ -102,6 +103,11 @@ export default function FutureBookingsScreen() {
           onPress: async () => {
             try {
               await cancelBooking(bookingId)
+              analytics.track(AnalyticsEvent.BookingCancelled, {
+                bookingId,
+                bookingSource: 'client',
+                screen: 'bookings_future',
+              })
               Alert.alert('Готово', 'Бронирование отменено')
               await loadData()
             } catch (err: unknown) {

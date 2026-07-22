@@ -26,6 +26,7 @@ import {
   type PaymentHistoryModalListItem,
   type PaymentHistoryRowModel,
 } from '@src/utils/paymentHistorySectionModel';
+import { analytics, AnalyticsEvent } from '@src/services/analytics';
 
 export type SubscriptionPaymentHistorySectionProps = {
   items: SubscriptionPaymentHistoryItem[];
@@ -387,6 +388,7 @@ export function SubscriptionPaymentHistorySection({
 
   const handleOpenList = useCallback(() => {
     setListVisible(true);
+    analytics.track(AnalyticsEvent.PaymentHistoryOpened, { screen: 'subscriptions' });
   }, []);
 
   const handleCloseList = useCallback(() => {

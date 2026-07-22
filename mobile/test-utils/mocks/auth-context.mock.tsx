@@ -1,5 +1,5 @@
 import React from 'react';
-import { AuthContextType, User } from '@src/auth/AuthContext';
+import { AuthContext, type AuthContextType, type User } from '@src/auth/AuthContext';
 
 export const mockUser: User = {
   id: 1,
@@ -7,6 +7,10 @@ export const mockUser: User = {
   phone: '+79999999999',
   full_name: 'Test User',
   role: 'client',
+  is_active: true,
+  is_verified: true,
+  created_at: '2020-01-01T00:00:00Z',
+  updated_at: '2020-01-01T00:00:00Z',
 };
 
 export const mockAuthContext: AuthContextType = {
@@ -22,11 +26,12 @@ export const mockAuthContext: AuthContextType = {
   ensureNoTokenOnLogin: jest.fn().mockResolvedValue(undefined),
 };
 
-export const MockAuthProvider = ({ children, value = mockAuthContext }: any) => {
-  const AuthContext = require('@src/auth/AuthContext').AuthContext;
-  return (
-    <AuthContext.Provider value={value}>
-      {children}
-    </AuthContext.Provider>
-  );
+export const MockAuthProvider = ({
+  children,
+  value = mockAuthContext,
+}: {
+  children: React.ReactNode;
+  value?: AuthContextType;
+}) => {
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };
