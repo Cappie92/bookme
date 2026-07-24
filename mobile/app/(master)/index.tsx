@@ -26,6 +26,7 @@ import { BookingCardCompact } from '@src/components/bookings/BookingCardCompact'
 import { stripIndiePrefix } from '@src/utils/stripIndiePrefix';
 import { getPlanTitle } from '@src/utils/planTitle';
 import { logger } from '@src/utils/logger';
+import { analytics, AnalyticsEvent } from '@src/services/analytics';
 import { Ionicons } from '@expo/vector-icons';
 import { QuickActionsCard } from '@src/components/master/home/QuickActionsCard';
 import { CopyLinkToast } from '@src/components/master/home/CopyLinkToast';
@@ -385,6 +386,11 @@ export default function HomeScreen() {
   const handleConfirmPostVisit = async (bookingId: number) => {
     try {
       await confirmBooking(bookingId);
+      analytics.track(AnalyticsEvent.BookingCompleted, {
+        bookingId,
+        bookingSource: 'master',
+        screen: 'master_dashboard',
+      });
       await loadData();
     } catch (err: any) {
       Alert.alert('Ошибка', err?.response?.data?.detail || err?.message || 'Не удалось подтвердить запись');
@@ -394,6 +400,11 @@ export default function HomeScreen() {
   const handleCancelWithReason = async (bookingId: number, reason: string) => {
     try {
       await cancelBookingConfirmation(bookingId, reason as any);
+      analytics.track(AnalyticsEvent.BookingCancelled, {
+        bookingId,
+        bookingSource: 'master',
+        screen: 'master_dashboard',
+      });
       await loadData();
     } catch (err: any) {
       Alert.alert('Ошибка', err?.response?.data?.detail || err?.message || 'Не удалось отменить запись');

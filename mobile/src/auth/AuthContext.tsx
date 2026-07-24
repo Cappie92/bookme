@@ -31,6 +31,7 @@ import {
 } from '@src/auth/tokenStorage';
 import { logAuthDiag } from '@src/debug/authDiag';
 import { registerInvalidSessionHandler } from '@src/auth/authSessionBridge';
+import { analytics, AnalyticsEvent } from '@src/services/analytics';
 
 const GET_USER_TIMEOUT_MS = 8000;
 
@@ -54,7 +55,10 @@ interface AuthContextType {
   ensureNoTokenOnLogin: () => Promise<void>;
 }
 
+export type { AuthContextType, User };
+
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
+export { AuthContext };
 
 const TOKEN_KEY = AUTH_TOKEN_KEY;
 const USER_KEY = AUTH_USER_KEY;
@@ -212,6 +216,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setToken(null);
         setUser(null);
         delete apiClient.defaults.headers.common['Authorization'];
+        try {
+          if (reason === 'logout') {
+            analytics.track(AnalyticsEvent.Logout);
+          }
+          analytics.clearUser();
+        } catch {
+          /* analytics never breaks auth */
+        }
         logAuthDiag('clearAuth done', { reason, clearedUserId: userId });
         if (__DEV__ && env.DEBUG_AUTH) await logAuthStorageSnapshot('after logout');
         void authTraceStorageSnapshot('clearAuth_done');
@@ -334,6 +346,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             setUser(userData);
             await AsyncStorage.setItem(USER_KEY, JSON.stringify(userData));
             await invalidateSubscriptionCaches(userData.id);
+            analytics.setUser({ id: userData.id, role: userData.role });
             logAuthDiag('/me OK (bootstrap)', {
               restoredToken: true,
               me: userDiagFields(userData),
@@ -361,6 +374,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               if (cached) {
                 meUser = cached;
                 setUser(cached);
+                analytics.setUser({ id: cached.id, role: cached.role });
                 logAuthDiag('/me transient → cached user (token kept)', {
                   restoredToken: true,
                   cachedUser: userDiagFields(cached),
@@ -468,6 +482,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         await AsyncStorage.setItem(USER_KEY, JSON.stringify(userData));
         await invalidateSubscriptionCaches(userData.id);
         await clearLogoutMarker();
+        analytics.setUser({ id: userData.id, role: userData.role });
+        analytics.track(AnalyticsEvent.AuthPhoneSuccess, { authMethod: 'phone' });
         void authTraceStorageSnapshot('after_login_success');
         logAuthDiag('login success', { restoredToken: true, me: userDiagFields(userData) });
         logger.debug('auth', '🔑 [Auth] Login success', { userId: userData.id, phone: userData.phone, role: userData.role });
@@ -475,7 +491,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } catch (error) {
         logger.error('Ошибка загрузки данных пользователя:', error);
         const userData = response.user ? (response.user as User) : null;
-        if (userData) setUser(userData);
+        if (userData) {
+          setUser(userData);
+          analytics.setUser({ id: userData.id, role: userData.role });
+          analytics.track(AnalyticsEvent.AuthPhoneSuccess, { authMethod: 'phone' });
+        }
         await clearLogoutMarker();
         void authTraceStorageSnapshot('after_login_partial_user');
         return userData;
@@ -496,12 +516,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         await AsyncStorage.setItem(USER_KEY, JSON.stringify(userData));
         await invalidateSubscriptionCaches(userData.id);
         await clearLogoutMarker();
+        analytics.setUser({ id: userData.id, role: userData.role });
+        analytics.track(AnalyticsEvent.RegistrationCompleted, { authMethod: 'phone' });
+        if (userData.role) {
+          analytics.track(AnalyticsEvent.RoleSelected, { role: userData.role });
+        }
         void authTraceStorageSnapshot('after_register_success');
         logger.debug('auth', '🔑 [Auth] Register success', { userId: userData.id, phone: userData.phone, role: userData.role });
       } catch (error) {
         logger.error('Ошибка загрузки данных пользователя:', error);
         if (response.user) {
-          setUser(response.user as User);
+          const u = response.user as User;
+          setUser(u);
+          analytics.setUser({ id: u.id, role: u.role });
+          analytics.track(AnalyticsEvent.RegistrationCompleted, { authMethod: 'phone' });
         }
         await clearLogoutMarker();
       }

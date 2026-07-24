@@ -1,4 +1,118 @@
 PODS:
+  - appmetrica-react-native-analytics (4.1.0):
+    - AppMetricaAnalytics (< 6.0, >= 5.16.0)
+    - hermes-engine
+    - RCTRequired
+    - RCTTypeSafety
+    - React-Core
+    - React-Core-prebuilt
+    - React-debug
+    - React-Fabric
+    - React-featureflags
+    - React-graphics
+    - React-ImageManager
+    - React-jsi
+    - React-NativeModulesApple
+    - React-RCTFabric
+    - React-renderercss
+    - React-rendererdebug
+    - React-utils
+    - ReactCodegen
+    - ReactCommon/turbomodule/bridging
+    - ReactCommon/turbomodule/core
+    - ReactNativeDependencies
+    - Yoga
+  - AppMetricaAdSupport (5.16.1):
+    - AppMetricaCore (= 5.16.1)
+    - AppMetricaCoreExtension (= 5.16.1)
+  - AppMetricaAnalytics (5.16.1):
+    - AppMetricaAdSupport (= 5.16.1)
+    - AppMetricaCore (= 5.16.1)
+    - AppMetricaCrashes (= 5.16.1)
+    - AppMetricaIDSync (= 5.16.1)
+    - AppMetricaScreenshot (= 5.16.1)
+    - AppMetricaWebKit (= 5.16.1)
+  - AppMetricaCore (5.16.1):
+    - AppMetricaCoreUtils (= 5.16.1)
+    - AppMetricaEncodingUtils (= 5.16.1)
+    - AppMetricaFMDB (= 5.16.1)
+    - AppMetricaHostState (= 5.16.1)
+    - AppMetricaIdentifiers (= 5.16.1)
+    - AppMetricaKeychain (= 5.16.1)
+    - AppMetricaLog (= 5.16.1)
+    - AppMetricaNetwork (= 5.16.1)
+    - AppMetricaPlatform (= 5.16.1)
+    - AppMetricaProtobuf (= 5.16.1)
+    - AppMetricaProtobufUtils (= 5.16.1)
+    - AppMetricaStorageUtils (= 5.16.1)
+  - AppMetricaCoreExtension (5.16.1):
+    - AppMetricaCore (= 5.16.1)
+    - AppMetricaStorageUtils (= 5.16.1)
+  - AppMetricaCoreUtils (5.16.1):
+    - AppMetricaLog (= 5.16.1)
+  - AppMetricaCrashes (5.16.1):
+    - AppMetricaCore (= 5.16.1)
+    - AppMetricaCoreExtension (= 5.16.1)
+    - AppMetricaCoreUtils (= 5.16.1)
+    - AppMetricaEncodingUtils (= 5.16.1)
+    - AppMetricaHostState (= 5.16.1)
+    - AppMetricaLog (= 5.16.1)
+    - AppMetricaPlatform (= 5.16.1)
+    - AppMetricaProtobufUtils (= 5.16.1)
+    - AppMetricaStorageUtils (= 5.16.1)
+    - KSCrash/Recording (< 2.2.0, >= 2.1.0)
+  - AppMetricaEncodingUtils (5.16.1):
+    - AppMetricaCoreUtils (= 5.16.1)
+    - AppMetricaLog (= 5.16.1)
+    - AppMetricaPlatform (= 5.16.1)
+  - AppMetricaFMDB (5.16.1)
+  - AppMetricaHostState (5.16.1):
+    - AppMetricaCoreUtils (= 5.16.1)
+    - AppMetricaLog (= 5.16.1)
+  - AppMetricaIdentifiers (5.16.1):
+    - AppMetricaKeychain (= 5.16.1)
+    - AppMetricaLogSwift (= 5.16.1)
+    - AppMetricaPlatform (= 5.16.1)
+    - AppMetricaStorageUtils (= 5.16.1)
+    - AppMetricaSynchronization (= 5.16.1)
+  - AppMetricaIDSync (5.16.1):
+    - AppMetricaCore (= 5.16.1)
+    - AppMetricaCoreExtension (= 5.16.1)
+    - AppMetricaCoreUtils (= 5.16.1)
+    - AppMetricaLog (= 5.16.1)
+    - AppMetricaNetwork (= 5.16.1)
+    - AppMetricaPlatform (= 5.16.1)
+    - AppMetricaStorageUtils (= 5.16.1)
+  - AppMetricaKeychain (5.16.1):
+    - AppMetricaCoreUtils (= 5.16.1)
+    - AppMetricaLog (= 5.16.1)
+    - AppMetricaStorageUtils (= 5.16.1)
+  - AppMetricaLog (5.16.1)
+  - AppMetricaLogSwift (5.16.1):
+    - AppMetricaLog (= 5.16.1)
+  - AppMetricaNetwork (5.16.1):
+    - AppMetricaCoreUtils (= 5.16.1)
+    - AppMetricaLog (= 5.16.1)
+    - AppMetricaPlatform (= 5.16.1)
+  - AppMetricaPlatform (5.16.1):
+    - AppMetricaCoreUtils (= 5.16.1)
+    - AppMetricaLog (= 5.16.1)
+  - AppMetricaProtobuf (5.16.1)
+  - AppMetricaProtobufUtils (5.16.1):
+    - AppMetricaProtobuf (= 5.16.1)
+  - AppMetricaScreenshot (5.16.1):
+    - AppMetricaCore (= 5.16.1)
+    - AppMetricaCoreExtension (= 5.16.1)
+    - AppMetricaStorageUtils (= 5.16.1)
+  - AppMetricaStorageUtils (5.16.1):
+    - AppMetricaCoreUtils (= 5.16.1)
+    - AppMetricaLog (= 5.16.1)
+  - AppMetricaSynchronization (5.16.1):
+    - AppMetricaLogSwift (= 5.16.1)
+  - AppMetricaWebKit (5.16.1):
+    - AppMetricaCore (= 5.16.1)
+    - AppMetricaCoreUtils (= 5.16.1)
+    - AppMetricaLog (= 5.16.1)
   - EXConstants (18.0.13):
     - ExpoModulesCore
   - EXImageLoader (6.0.0):
@@ -91,6 +205,11 @@ PODS:
   - hermes-engine (0.81.5):
     - hermes-engine/Pre-built (= 0.81.5)
   - hermes-engine/Pre-built (0.81.5)
+  - KSCrash/Core (2.1.2)
+  - KSCrash/Recording (2.1.2):
+    - KSCrash/RecordingCore
+  - KSCrash/RecordingCore (2.1.2):
+    - KSCrash/Core
   - libavif/core (1.0.0)
   - libavif/libdav1d (1.0.0):
     - libavif/core
@@ -2000,6 +2119,7 @@ PODS:
   - Yoga (0.0.0)
 
 DEPENDENCIES:
+  - "appmetrica-react-native-analytics (from `../node_modules/@appmetrica/react-native-analytics`)"
   - EXConstants (from `../node_modules/expo-constants/ios`)
   - EXImageLoader (from `../node_modules/expo-image-loader/ios`)
   - Expo (from `../node_modules/expo`)
@@ -2095,6 +2215,29 @@ DEPENDENCIES:
 
 SPEC REPOS:
   trunk:
+    - AppMetricaAdSupport
+    - AppMetricaAnalytics
+    - AppMetricaCore
+    - AppMetricaCoreExtension
+    - AppMetricaCoreUtils
+    - AppMetricaCrashes
+    - AppMetricaEncodingUtils
+    - AppMetricaFMDB
+    - AppMetricaHostState
+    - AppMetricaIdentifiers
+    - AppMetricaIDSync
+    - AppMetricaKeychain
+    - AppMetricaLog
+    - AppMetricaLogSwift
+    - AppMetricaNetwork
+    - AppMetricaPlatform
+    - AppMetricaProtobuf
+    - AppMetricaProtobufUtils
+    - AppMetricaScreenshot
+    - AppMetricaStorageUtils
+    - AppMetricaSynchronization
+    - AppMetricaWebKit
+    - KSCrash
     - libavif
     - libdav1d
     - libwebp
@@ -2104,6 +2247,8 @@ SPEC REPOS:
     - SDWebImageWebPCoder
 
 EXTERNAL SOURCES:
+  appmetrica-react-native-analytics:
+    :path: "../node_modules/@appmetrica/react-native-analytics"
   EXConstants:
     :path: "../node_modules/expo-constants/ios"
   EXImageLoader:
@@ -2289,6 +2434,29 @@ EXTERNAL SOURCES:
     :path: "../node_modules/react-native/ReactCommon/yoga"
 
 SPEC CHECKSUMS:
+  appmetrica-react-native-analytics: e8b045aa6acb4a9850ca2dad000eb59098ce3ba6
+  AppMetricaAdSupport: de54aa3376d4ebcfa540861623f84e843c7dce12
+  AppMetricaAnalytics: b53239bddc143828f4fe5c63aa670eec09984f99
+  AppMetricaCore: 711814df28f1b75f2232ecd798a60fb0fdc826db
+  AppMetricaCoreExtension: 6b5ada2b539ad31349de6d5ac15e808b17fd836c
+  AppMetricaCoreUtils: 5a922f36177a944d58f8a84207efd6d6cf673e83
+  AppMetricaCrashes: 786301661b91df021946a6e648e6d2f11ba22604
+  AppMetricaEncodingUtils: 1fc6d2e91e9048f83df7c2724b58d2e9d5cef054
+  AppMetricaFMDB: 005ff44f17f5b534e3c54cc7ffefbe480f37c254
+  AppMetricaHostState: f7f3d6647364c8681601f27e881bf05808445eae
+  AppMetricaIdentifiers: 2bde45276896ffd749017f23d8e76b0ccb14c790
+  AppMetricaIDSync: 954722f814e1bc78cde9bc1cbabb5b7bdb54786f
+  AppMetricaKeychain: 0c76fbc8239f8a383418416bbc0ea52f8b25f84f
+  AppMetricaLog: 1416c93d803f89a615c6b523a6d97981acd757f6
+  AppMetricaLogSwift: 1f94dba530a8119cee8458501980f7cdaf1b50d8
+  AppMetricaNetwork: d0a11751b42870ad89e6cb72ad93f39390a2b969
+  AppMetricaPlatform: fd1aa3684ef55817e0303327cae6201e65770ee3
+  AppMetricaProtobuf: ed13c8fbc7e17a0f8385f8f676b7736322fc776a
+  AppMetricaProtobufUtils: ff838fedd01329be068074e877a5e0db207d74ee
+  AppMetricaScreenshot: 34696107baca6dc13b3a2641af3bd1f194c7d31e
+  AppMetricaStorageUtils: 11812b909635f3c301018433a563af86e1e9f6cb
+  AppMetricaSynchronization: 4519548e7cc60ea726dd7413afad5ebf3978c71d
+  AppMetricaWebKit: b02cb4a84cc492d1867d7306da4ef5d814b6e8bc
   EXConstants: fce59a631a06c4151602843667f7cfe35f81e271
   EXImageLoader: 189e3476581efe3ad4d1d3fb4735b7179eb26f05
   Expo: 38ef0f0082a53f9604a48cbab2ab55289c658eaf
@@ -2308,6 +2476,7 @@ SPEC CHECKSUMS:
   ExpoSharing: 0d983394ed4a80334bab5a0d5384f75710feb7e8
   FBLazyVector: e95a291ad2dadb88e42b06e0c5fb8262de53ec12
   hermes-engine: 9f4dfe93326146a1c99eb535b1cb0b857a3cd172
+  KSCrash: bd950ede6c40a50bfc9f246c38a7f3408705fa3c
   libavif: 5f8e715bea24debec477006f21ef9e95432e254d
   libdav1d: 23581a4d8ec811ff171ed5e2e05cd27bad64c39f
   libwebp: 02b23773aedb6ff1fd38cec7a77b81414c6842a8

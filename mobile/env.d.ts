@@ -19,5 +19,10 @@ declare module '@env' {
   export const DEBUG_AUTH_TRACE: string | undefined;
   /** Feature flag: 1 = show Yandex login button (web OAuth in browser). Default/off in production. */
   export const YANDEX_MOBILE_AUTH_VISIBLE: string | undefined;
+  /** Yandex AppMetrica API key (не логировать). */
+  export const EXPO_PUBLIC_APPMETRICA_API_KEY: string | undefined;
+  export const APPMETRICA_API_KEY: string | undefined;
+  /** Opt-in smoke event appmetrica_integration_test (default off). */
+  export const EXPO_PUBLIC_APPMETRICA_TEST_EVENT_ENABLED: string | undefined;
 }
 

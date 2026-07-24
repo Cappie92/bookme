@@ -10,3 +10,6 @@ export const DEBUG_LOGS = '0';
 export const DEBUG_MOBILE_ERRORS = '0';
 export const DEBUG_AUTH_TRACE = '0';
 export const YANDEX_MOBILE_AUTH_VISIBLE = '0';
+export const EXPO_PUBLIC_APPMETRICA_API_KEY = '';
+export const APPMETRICA_API_KEY = '';
+export const EXPO_PUBLIC_APPMETRICA_TEST_EVENT_ENABLED = 'false';

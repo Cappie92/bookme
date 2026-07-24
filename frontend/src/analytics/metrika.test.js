@@ -35,7 +35,11 @@ describe('ensureYmStub', () => {
     ensureYmStub(win)
     expect(typeof win.ym).toBe('function')
     win.ym(108773879, 'init', { defer: true })
-    expect(win.ym.a).toEqual([[108773879, 'init', { defer: true }]])
+    expect(win.ym.a).toHaveLength(1)
+    expect(Array.isArray(win.ym.a[0])).toBe(false)
+    expect(win.ym.a[0][0]).toBe(108773879)
+    expect(win.ym.a[0][1]).toBe('init')
+    expect(win.ym.a[0][2]).toEqual({ defer: true })
   })
 
   it('does not replace existing ym function', () => {
@@ -104,6 +108,8 @@ describe('metrikaInitOnce', () => {
       clickmap: true,
       webvisor: true,
     })
+    expect(global.window.ym.a?.[0]?.[2]).not.toHaveProperty('ssr')
+    expect(global.window.ym.a?.[0]?.[2]).not.toHaveProperty('referer')
     expect(appendChild).toHaveBeenCalledTimes(1)
   })
 
@@ -175,8 +181,10 @@ describe('metrikaGoal and metrikaPageView', () => {
     metrikaPageView()
 
     expect(typeof global.window.ym).toBe('function')
-    expect(global.window.ym.a).toEqual([
-      [108773879, 'hit', '/pricing?x=1', { title: 'Pricing' }],
-    ])
+    expect(global.window.ym.a).toHaveLength(1)
+    expect(global.window.ym.a[0][0]).toBe(108773879)
+    expect(global.window.ym.a[0][1]).toBe('hit')
+    expect(global.window.ym.a[0][2]).toBe('/pricing?x=1')
+    expect(global.window.ym.a[0][3]).toEqual({ title: 'Pricing' })
   })
 })

@@ -29,6 +29,7 @@ import {
 import { installMobileErrorDebugHandlers } from '@src/debug/mobileErrorDebugBootstrap';
 import { MobileErrorDebugPanel } from '@src/debug/MobileErrorDebugPanel';
 import { authTrace } from '@src/debug/authRuntimeTrace';
+import { analytics, AcquisitionService, isAppMetricaTestEventEnabled } from '@src/services/analytics';
 
 const FAILSAFE_MS = 8000;
 const DRAFT_TIMEOUT_MS = 2000;
@@ -159,8 +160,9 @@ function AuthGate({ children, rootInstanceId }: { children: React.ReactNode; roo
         const internalRoute = parseAppInternalRouteFromUrl(url);
         if (internalRoute) {
           setPendingMasterRoute(appInternalRouteToPath(internalRoute) as '/subscriptions');
-          initialUrlResult = { isPublic: false, slug: null, url, source: 'initial' };
+          initialUrlResult = { isPublic: false, slug: null, url: url ?? undefined, source: 'initial' };
           setInitialUrlIsPublic(false);
+          void AcquisitionService.recordTouchFromUrl(url);
           if (__DEV__ && (env.DEBUG_AUTH || env.DEBUG_LOGS)) {
             logger.debug('auth', '[DEEPLINK] initialUrl internalRoute=', internalRoute, 'url=', url);
           }
@@ -168,9 +170,10 @@ function AuthGate({ children, rootInstanceId }: { children: React.ReactNode; roo
         }
         const parsedSlug = parsePublicMasterSlugFromUrl(url);
         if (parsedSlug) {
-          initialUrlResult = { isPublic: true, slug: parsedSlug, url, source: 'initial' };
+          initialUrlResult = { isPublic: true, slug: parsedSlug, url: url ?? undefined, source: 'initial' };
           setInitialUrlIsPublic(true);
           initialUrlSlugRef.current = parsedSlug;
+          void AcquisitionService.recordTouchFromUrl(url);
           if (__DEV__ && (env.DEBUG_AUTH || env.DEBUG_LOGS)) {
             logger.debug('auth', '[DEEPLINK] initialUrl=', url, 'parsedSlug=', parsedSlug);
           }
@@ -220,6 +223,7 @@ function AuthGate({ children, rootInstanceId }: { children: React.ReactNode; roo
   // Warm deeplink: приоритет над initial; синхронизируем initialUrlResult чтобы не откатиться на старый slug.
   useEffect(() => {
     const handler = ({ url }: { url: string }) => {
+      void AcquisitionService.recordTouchFromUrl(url);
       const internalRoute = parseAppInternalRouteFromUrl(url);
       if (internalRoute) {
         setPendingMasterRoute(appInternalRouteToPath(internalRoute) as '/subscriptions');
@@ -437,10 +441,25 @@ function AuthGate({ children, rootInstanceId }: { children: React.ReactNode; roo
   return <>{children}</>;
 }
 
+let didSendAppMetricaTestEvent = false;
+
 export default function RootLayout() {
   const rootInstanceIdRef = useRef(Math.random().toString(16).slice(2, 10));
   useEffect(() => {
     installMobileErrorDebugHandlers();
+  }, []);
+  useEffect(() => {
+    void (async () => {
+      try {
+        await analytics.init();
+        if (isAppMetricaTestEventEnabled() && !didSendAppMetricaTestEvent) {
+          didSendAppMetricaTestEvent = true;
+          analytics.trackIntegrationTest();
+        }
+      } catch {
+        /* analytics must never break bootstrap */
+      }
+    })();
   }, []);
   useEffect(() => {
     if (__DEV__ && (env.DEBUG_AUTH || env.DEBUG_LOGS)) logger.debug('auth', '[ROOT_LAYOUT] mount', { rootInstanceId: rootInstanceIdRef.current });

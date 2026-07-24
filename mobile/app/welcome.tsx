@@ -12,6 +12,7 @@ import type { WelcomePeriodMonths } from '@src/utils/welcomePricing';
 import { useWelcomePricingCatalog } from '@src/hooks/useWelcomePricingCatalog';
 import { ensureWelcomeSelectedPlanId } from '@src/utils/welcomePricingMapper';
 import { SubscriptionType } from '@src/services/api/subscriptions';
+import { analytics, AnalyticsEvent } from '@src/services/analytics';
 
 export default function WelcomeScreen() {
   const [role, setRole] = useState<WelcomeRole>('master');
@@ -35,6 +36,11 @@ export default function WelcomeScreen() {
 
   const handleRoleChange = useCallback((nextRole: WelcomeRole) => {
     setRole(nextRole);
+    analytics.track(AnalyticsEvent.RoleSelected, { role: nextRole, screen: 'welcome' });
+  }, []);
+
+  useEffect(() => {
+    analytics.track(AnalyticsEvent.OnboardingCompleted, { screen: 'welcome' });
   }, []);
 
   return (
