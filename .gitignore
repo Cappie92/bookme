@@ -131,3 +131,9 @@ mobile/node_modules/
 
 # Generated docs site
 site/
+.cursor/
+YaLogo.webp
+dedato logo/
+frontend/public/diagnostics/
+mobile/*.apk
+mobile/builds/
