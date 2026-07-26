@@ -2,6 +2,7 @@ import { useState } from 'react'
 import './HomeFeatureShowreel.css'
 import {
   DesktopAnalytics,
+  DesktopBooking,
   DesktopLoyalty,
   DesktopMaster,
   DesktopSchedule,
@@ -26,7 +27,7 @@ const SLIDES = [
     title: 'Запись к мастеру',
     desc: 'Клиент выбирает услугу, дату и свободный слот и подтверждает запись без звонков.',
     caption: 'Услуга, дата и слот — запись за минуту, без звонков.',
-    Desktop: DesktopMaster,
+    Desktop: DesktopBooking,
     Mobile: MobileBooking,
   },
   {

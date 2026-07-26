@@ -138,8 +138,8 @@ export default function Home() {
             </ul>
           </div>
 
-          {/* Schedule mock — визуальный мотив */}
-          <div className="relative lg:col-span-7 min-w-0">
+          {/* Schedule mock — визуальный мотив (только desktop; на mobile дублирует showreel) */}
+          <div className="relative lg:col-span-7 min-w-0 hidden lg:block">
             <div className="rounded-2xl border border-[#E7E2DF] bg-white/70 backdrop-blur p-3 md:p-4 shadow-[0_24px_60px_-20px_rgba(45,45,45,0.20)] lg:[perspective:1800px]">
               <div className="rounded-2xl border border-[#E7E2DF] bg-white p-4 md:p-5 lg:[transform:rotateY(-6deg)_rotateX(2deg)]">
                 <div className="flex items-start justify-between gap-4">

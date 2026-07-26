@@ -1,34 +1,100 @@
 import { Fragment } from 'react'
 
+const MASTER_PHOTO = '/showreel/master-anna.jpg'
+
+function MasterAvatar({ className = 'm-book-avatar' }) {
+  return <img className={className} src={MASTER_PHOTO} alt="" draggable={false} />
+}
+
 export function DesktopMaster() {
   return (
     <Fragment>
       <div className="mock-main master-preview">
         <div className="master-layout">
           <div className="master-side">
-            <MasterAvatar className="avatar" />
+            <MasterAvatar className="avatar avatar--hero" />
             <div className="v1">Анна Смирнова</div>
-            <div className="v2">Мастер принимает по записи</div>
+            <div className="v2">Парикмахер · стилист · запись онлайн</div>
+            <div className="master-meta-row">
+              <span className="master-pill">★ 4.9</span>
+              <span className="master-pill master-pill--soft">8 лет стажа</span>
+            </div>
             <div className="label">Телефон</div>
             <div className="v1" style={{ color: '#3aa047' }}>
               +7 999 000 00 08
             </div>
             <div className="label">Адрес</div>
-            <div className="v1">Москва</div>
+            <div className="v1">Москва · м. Сокол</div>
             <div className="v2">Салон рядом с метро, вход со двора</div>
             <div className="map-btn">Открыть в Яндекс Картах</div>
-            <div className="label">Местное время</div>
-            <div className="v2">Москва (UTC+3)</div>
           </div>
           <div className="master-main">
             <div className="banner">Скидка на первый визит — 10%</div>
+            <div className="label" style={{ margin: '0 0 6px' }}>
+              Услуги
+            </div>
+            <div className="master-service">
+              <div>
+                <b>Стрижка женская</b>
+                <span>60 мин</span>
+              </div>
+              <em>1 500 ₽</em>
+            </div>
+            <div className="master-service">
+              <div>
+                <b>Окрашивание</b>
+                <span>120 мин</span>
+              </div>
+              <em>4 200 ₽</em>
+            </div>
+            <div className="master-review">
+              <div className="master-review-top">
+                <span>Мария С. · отзыв</span>
+                <span>★ 5.0</span>
+              </div>
+              <p>«Подобрала форму идеально. Записалась снова через ссылку.»</p>
+            </div>
+            <div className="master-cta">Записаться онлайн</div>
+          </div>
+        </div>
+      </div>
+      <div className="float-card" style={{ top: 38, right: 0, width: 210, padding: '16px 18px' }}>
+        <div style={{ fontSize: 12, color: '#7b857c', fontWeight: 700 }}>Рейтинг мастера</div>
+        <div style={{ marginTop: 8, fontSize: 18, fontWeight: 800, letterSpacing: '-.03em' }}>★ 4.9</div>
+        <div style={{ marginTop: 6, fontSize: 12, color: '#617061' }}>128 отзывов · онлайн-запись</div>
+      </div>
+    </Fragment>
+  )
+}
+
+export function DesktopBooking() {
+  return (
+    <Fragment>
+      <div className="mock-main master-preview">
+        <div className="master-layout">
+          <div className="master-side master-side--compact">
+            <div className="master-book-head">
+              <MasterAvatar className="avatar avatar--sm" />
+              <div>
+                <div className="v1">Анна Смирнова</div>
+                <div className="v2">Москва · м. Сокол</div>
+              </div>
+            </div>
+            <div className="master-book-badge">−10% первый визит</div>
+            <div className="label">Адрес</div>
+            <div className="v1">Москва</div>
+            <div className="v2">Салон у метро, вход со двора</div>
+            <div className="map-btn">Открыть в Яндекс Картах</div>
+          </div>
+          <div className="master-main">
+            <div className="banner">Happy Hours до 12:00 — скидка 13%</div>
             <div className="step">
               <div className="label" style={{ margin: '0 0 6px' }}>
                 1. Услуга
               </div>
               <div className="field">
-                <span>Стрижка мужская — 1000 ₽, 30 мин</span>
-                <span style={{ color: '#c38717', fontWeight: 800 }}>−9%</span>
+                <span>Стрижка женская — 1 500 ₽, 60 мин</span>
+                <span style={{ color: '#c38717', fontWeight: 800 }}>−13%</span>
               </div>
             </div>
             <div className="step">
@@ -36,8 +102,8 @@ export function DesktopMaster() {
                 2. Дата
               </div>
               <div className="field">
-                <span>Выбрано: Завтра</span>
-                <span style={{ color: '#4caf50', fontWeight: 700 }}>Изменить дату</span>
+                <span>Выбрано: 22 июля</span>
+                <span style={{ color: '#4caf50', fontWeight: 700 }}>Изменить</span>
               </div>
             </div>
             <div className="step">
@@ -53,22 +119,12 @@ export function DesktopMaster() {
                 </div>
                 <div className="slot">11:30</div>
                 <div className="slot">12:00</div>
-                <div className="slot">12:30</div>
-                <div className="slot">13:00</div>
-                <div className="slot">13:30</div>
-                <div className="slot">14:00</div>
               </div>
             </div>
             <div className="summary">
-              <b>Услуга:</b> Стрижка мужская — 1000 ₽, 30 мин
+              <b>Итого:</b> 22 июля · 11:00
               <br />
-              <b>Дата:</b> Завтра
-              <br />
-              <b>Время:</b> 11:00
-              <br />
-              <b>Скидка:</b> −130 ₽ (13%)
-              <br />
-              <b>К оплате:</b> 870 ₽
+              <b>Скидка:</b> −195 ₽ (13%) · <b>К оплате:</b> 1 305 ₽
             </div>
           </div>
         </div>
@@ -76,7 +132,7 @@ export function DesktopMaster() {
       <div className="float-card" style={{ top: 38, right: 0, width: 210, padding: '16px 18px' }}>
         <div style={{ fontSize: 12, color: '#7b857c', fontWeight: 700 }}>Ближайшая запись</div>
         <div style={{ marginTop: 8, fontSize: 18, fontWeight: 800, letterSpacing: '-.03em' }}>11:00</div>
-        <div style={{ marginTop: 6, fontSize: 12, color: '#617061' }}>Стрижка мужская</div>
+        <div style={{ marginTop: 6, fontSize: 12, color: '#617061' }}>Стрижка · −13%</div>
       </div>
     </Fragment>
   )
@@ -93,7 +149,7 @@ export function DesktopSchedule() {
                 <div className="ui-title" style={{ fontSize: 18 }}>
                   Моё расписание
                 </div>
-                <div className="ui-sub">Пн, 21 апреля · 5 записей</div>
+                <div className="ui-sub">Вт, 22 июля · Анна Смирнова · 5 записей</div>
               </div>
               <div className="sched-nav">
                 <button type="button">‹</button>
@@ -103,8 +159,8 @@ export function DesktopSchedule() {
             <div className="week">
               {[
                 ['Вс', '20'],
-                ['Пн', '21', true],
-                ['Вт', '22'],
+                ['Пн', '21'],
+                ['Вт', '22', true],
                 ['Ср', '23'],
                 ['Чт', '24'],
                 ['Пт', '25'],
@@ -137,7 +193,7 @@ export function DesktopSchedule() {
               <div className="dotline" />
               <div>
                 <div>— свободно —</div>
-                <div>Слот можно открыть для записи</div>
+                <div>Открыть запись · 60 мин</div>
               </div>
             </div>
             <div className="appt">
@@ -168,7 +224,7 @@ export function DesktopSchedule() {
             ↗
           </div>
           <div>
-            <div style={{ fontSize: 12, color: '#7a857a', fontWeight: 700 }}>Выручка · апрель</div>
+            <div style={{ fontSize: 12, color: '#7a857a', fontWeight: 700 }}>Выручка · июль</div>
             <div className="big">+ 92 400 ₽</div>
           </div>
         </div>
@@ -196,6 +252,7 @@ const chartSvg = (
       strokeWidth="4"
       strokeLinecap="round"
     />
+    <circle cx="174" cy="8" r="4" fill="#53ba5c" />
     <path d="M6 62 H174" stroke="#e3e8df" strokeWidth="2" />
   </svg>
 )
@@ -205,36 +262,50 @@ export function DesktopAnalytics() {
     <Fragment>
       <div className="mock-main">
         <div className="analytics">
-          <div className="kpi">
+          <div className="kpi kpi--accent">
             <div className="k1">Выручка за месяц</div>
             <div className="k2">92 400 ₽</div>
-            <div className="k3">+14% к прошлому месяцу</div>
+            <div className="k3">
+              <span className="kpi-chip">↗ +14%</span> к прошлому месяцу
+            </div>
           </div>
           <div className="kpi">
             <div className="k1">Повторные визиты</div>
             <div className="k2">38%</div>
-            <div className="k3">+6 п.п. к марту</div>
+            <div className="k3">
+              <span className="kpi-chip">↗ +6 п.п.</span> к марту
+            </div>
           </div>
           <div className="kpi">
             <div className="k1">Средний чек</div>
-            <div className="k2">1 860 ₽</div>
-            <div className="k3">рост за счёт комплексных услуг</div>
+            <div className="k2">2 180 ₽</div>
+            <div className="k3">
+              <span className="kpi-chip">↗ +5%</span> за счёт комплексов
+            </div>
           </div>
           <div className="chart-card">
-            <div className="ui-title">Динамика выручки</div>
-            <div className="ui-sub">Последние 6 недель</div>
+            <div className="chart-card-head">
+              <div>
+                <div className="ui-title">Динамика выручки</div>
+                <div className="ui-sub">Последние 6 недель · Анна Смирнова</div>
+              </div>
+              <span className="kpi-chip">План 78%</span>
+            </div>
             <div className="bars">
-              <div className="bar" style={{ height: 72 }} />
+              <div className="bar" style={{ height: 52 }} />
               <div className="bar b2" />
               <div className="bar b3" />
-              <div className="bar b4" />
+              <div className="bar b4 is-peak" />
               <div className="bar b5" />
-              <div className="bar b6" />
+              <div className="bar b6 is-now" />
+            </div>
+            <div className="analytics-progress" aria-hidden>
+              <span style={{ width: '78%' }} />
             </div>
             <div className="mini-stack">
               <div className="tiny-kpi">
                 <div className="k1">Записей за месяц</div>
-                <div className="k2">146</div>
+                <div className="k2">128</div>
                 <div className="k3">Плотная запись в середине недели</div>
               </div>
               <div className="tiny-kpi">
@@ -250,12 +321,12 @@ export function DesktopAnalytics() {
             <div className="line">{chartSvg}</div>
             <div className="table-mini">
               {[
-                ['Пн', '68%'],
-                ['Вт', '74%'],
-                ['Ср', '71%'],
-                ['Чт', '89%'],
-              ].map(([a, b]) => (
-                <div key={a} className="row">
+                ['Пн', '68%', false],
+                ['Вт', '74%', false],
+                ['Ср', '71%', false],
+                ['Чт', '89%', true],
+              ].map(([a, b, hot]) => (
+                <div key={a} className={`row${hot ? ' row--hot' : ''}`}>
                   <span>{a}</span>
                   <b>{b}</b>
                 </div>
@@ -281,13 +352,20 @@ export function DesktopLoyalty() {
         <div className="loyal-grid">
           <div className="wallet">
             <div>
-              <div className="w1">Программа лояльности</div>
+              <div className="wallet-top">
+                <div className="w1">Баллы клиентов</div>
+                <span className="wallet-level">Уровень Gold</span>
+              </div>
               <div className="w2">12 480</div>
-              <div className="w3">активных баллов у клиентов</div>
+              <div className="w3">готовы к списанию</div>
+              <div className="wallet-meter" aria-hidden>
+                <span style={{ width: '64%' }} />
+              </div>
+              <div className="wallet-meter-meta">до следующего уровня — 1 520 баллов</div>
             </div>
             <div className="wallet-meta">
               <div className="wallet-stat">+18% к прошлому месяцу</div>
-              <div className="wallet-stat">72% клиентов используют бонусы повторно</div>
+              <div className="wallet-stat">+120 баллов после каждого визита</div>
             </div>
           </div>
           <div className="stat-stack">
@@ -296,8 +374,8 @@ export function DesktopLoyalty() {
               <div className="ui-sub">Екатерина Л. · 740 баллов доступны к списанию</div>
               <div className="benefits-list">
                 <div className="benefit">
-                  <b>Персональная скидка</b>
-                  <span>Для новых клиентов — 10%</span>
+                  <b>Бонус за визит</b>
+                  <span>+120 баллов после оплаты</span>
                 </div>
                 <div className="coupon loyalty-coupon-compact">
                   <span>Скидка</span>
@@ -306,15 +384,19 @@ export function DesktopLoyalty() {
               </div>
             </div>
             <div className="mini-panel">
-              <div className="ui-title">Сценарии удержания</div>
-              <div className="benefits-list">
-                <div className="benefit">
-                  <b>Баллы после визита</b>
-                  <span>Начисляются автоматически после завершения записи</span>
+              <div className="ui-title">История начислений</div>
+              <div className="loyal-history">
+                <div>
+                  <span>Стрижка · 22 июля</span>
+                  <b>+120</b>
                 </div>
-                <div className="benefit">
-                  <b>Мягкий возврат клиента</b>
-                  <span>Скидка и бонусы подталкивают к повторной записи</span>
+                <div>
+                  <span>Окрашивание · 14 июля</span>
+                  <b>+240</b>
+                </div>
+                <div>
+                  <span>Укладка · 3 июля</span>
+                  <b>+80</b>
                 </div>
               </div>
             </div>
@@ -325,7 +407,7 @@ export function DesktopLoyalty() {
         <div style={{ fontSize: 11, color: '#7b857c', fontWeight: 700 }}>Лояльный клиент</div>
         <div style={{ fontSize: 16, fontWeight: 800, marginTop: 4, letterSpacing: '-.02em' }}>Екатерина Л.</div>
         <div style={{ marginTop: 4, fontSize: 12, color: '#5f6e5f', lineHeight: 1.35 }}>
-          740 баллов доступны к списанию
+          740 баллов · уровень Gold
         </div>
       </div>
     </Fragment>
@@ -342,7 +424,7 @@ export function DesktopSocial() {
               <div className="calendar-month">
                 <div className="calendar-month-head">
                   <div className="ui-title social-showreel-card-title">Свободные часы</div>
-                  <div className="ui-sub">вторник, 12 мая 2026 г.</div>
+                  <div className="ui-sub">вторник, 23 июля</div>
                 </div>
                 <div className="m-chip m-chip--social-tight">для публикации</div>
               </div>
@@ -354,12 +436,12 @@ export function DesktopSocial() {
               </div>
               <div className="calendar-grid">
                 {[
-                  ['11:00', 'стрижка мужская', true],
-                  ['12:00', 'стрижка женская'],
-                  ['13:00', 'окрашивание корней'],
-                  ['14:00', 'укладка'],
-                  ['15:00', 'маникюр'],
-                  ['16:00', 'стрижка мужская'],
+                  ['11:00', 'стрижка женская', true],
+                  ['12:30', 'укладка'],
+                  ['15:00', 'окрашивание'],
+                  ['16:00', 'стрижка женская'],
+                  ['17:00', 'маникюр'],
+                  ['18:00', 'укладка'],
                 ].map(([t, s, active]) => (
                   <div key={t} className={`slot-card${active ? ' active' : ''}`}>
                     <b>{t}</b>
@@ -381,7 +463,7 @@ export function DesktopSocial() {
                   color: '#6a756a',
                 }}
               >
-                <span>Запись: dedato.ru/m/master</span>
+                <span>Запись: dedato.ru/m/anna</span>
                 <span style={{ fontWeight: 800, color: '#38a144' }}>dedato</span>
               </div>
             </div>
@@ -390,36 +472,36 @@ export function DesktopSocial() {
             <div className="post-sheet">
               <div className="post-headline">
                 <b className="social-showreel-card-title">Пост со свободными слотами</b>
-                <span>Готовая публикация для своей лояльной аудитории на выбранный день</span>
+                <span>Готовая публикация для аудитории Анны</span>
               </div>
               <div className="generated-post">
-                <div className="post-hero">
-                  <div>
-                    <h5 className="social-showreel-card-title">Свободные окна на 12 мая</h5>
-                    <div style={{ marginTop: 8, fontSize: 13, lineHeight: 1.5, color: '#55705a' }}>
-                      Откройте запись по ссылке и выберите удобное время.
-                    </div>
-                  </div>
-                  <div className="slots-preview-grid">
-                    <div className="slot-mini">
-                      11:00<span>стрижка мужская</span>
-                    </div>
-                    <div className="slot-mini">
-                      13:00<span>окрашивание корней</span>
-                    </div>
-                    <div className="slot-mini">
-                      15:00<span>маникюр</span>
-                    </div>
-                    <div className="slot-mini">
-                      16:00<span>стрижка мужская</span>
+                <div className="post-hero post-hero--photo">
+                  <MasterAvatar className="post-hero-photo" />
+                  <div className="post-hero-veil">
+                    <h5 className="social-showreel-card-title">Свободные окна на 23 июля</h5>
+                    <div style={{ marginTop: 6, fontSize: 12, lineHeight: 1.45, color: 'rgba(255,255,255,.92)' }}>
+                      Есть время для записи — выберите удобный слот.
                     </div>
                   </div>
                 </div>
+                <div className="slots-preview-grid" style={{ marginTop: 12 }}>
+                  <div className="slot-mini">
+                    11:00<span>стрижка женская</span>
+                  </div>
+                  <div className="slot-mini">
+                    12:30<span>укладка</span>
+                  </div>
+                  <div className="slot-mini">
+                    15:00<span>окрашивание</span>
+                  </div>
+                  <div className="slot-mini">
+                    17:00<span>маникюр</span>
+                  </div>
+                </div>
                 <div className="post-cap">
-                  <b>Мастер</b>
+                  <b>Анна Смирнова</b>
                   <br />
-                  Система собирает пост по свободным слотам на выбранный день, а мастеру остаётся только проверить и
-                  опубликовать.
+                  Запись онлайн · dedato.ru — осталось нажать «Опубликовать».
                 </div>
                 <div className="actions">
                   <div className="a">Опубликовать</div>
@@ -438,12 +520,6 @@ export function DesktopSocial() {
       </div>
     </Fragment>
   )
-}
-
-const MASTER_PHOTO = '/showreel/master-anna.jpg'
-
-function MasterAvatar({ className = 'm-book-avatar' }) {
-  return <img className={className} src={MASTER_PHOTO} alt="" draggable={false} />
 }
 
 export function MobileBooking() {
