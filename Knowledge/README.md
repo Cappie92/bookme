@@ -31,3 +31,5 @@
 Первый домен:
 
 - [Domain/subscriptions-billing](Domain/subscriptions-billing/README.md) — SaaS-оплата подписки мастера (Subscriptions → Payments → Balance)
+- [Domain/product-roles-business-model.md](Domain/product-roles-business-model.md) — роли и бизнес-модель DeDato
+- [Domain/domain-map.md](Domain/domain-map.md) — карта бизнес-доменов DeDato
