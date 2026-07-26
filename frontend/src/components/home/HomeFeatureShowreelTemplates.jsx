@@ -6,8 +6,8 @@ export function DesktopMaster() {
       <div className="mock-main master-preview">
         <div className="master-layout">
           <div className="master-side">
-            <div className="avatar" />
-            <div className="v1">Мастер Premium 8</div>
+            <MasterAvatar className="avatar" />
+            <div className="v1">Анна Смирнова</div>
             <div className="v2">Мастер принимает по записи</div>
             <div className="label">Телефон</div>
             <div className="v1" style={{ color: '#3aa047' }}>
@@ -347,19 +347,9 @@ export function DesktopSocial() {
                 <div className="m-chip m-chip--social-tight">для публикации</div>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 18 }}>
-                <div className="social-avatar-placeholder" aria-hidden="true">
-                  <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <circle cx="24" cy="17" r="9" fill="#c8d2c8" />
-                    <path
-                      d="M10 39.5c0-7.732 6.268-14 14-14s14 6.268 14 14"
-                      stroke="#9aaa9a"
-                      strokeWidth="2.25"
-                      strokeLinecap="round"
-                    />
-                  </svg>
-                </div>
+                <MasterAvatar className="social-avatar-placeholder" />
                 <div style={{ fontSize: 22, fontWeight: 800, letterSpacing: '-.03em', lineHeight: 1.1 }}>
-                  Мастер
+                  Анна Смирнова
                 </div>
               </div>
               <div className="calendar-grid">
@@ -450,99 +440,201 @@ export function DesktopSocial() {
   )
 }
 
-export function MobileMaster() {
+const MASTER_PHOTO = '/showreel/master-anna.jpg'
+
+function MasterAvatar({ className = 'm-book-avatar' }) {
+  return <img className={className} src={MASTER_PHOTO} alt="" draggable={false} />
+}
+
+export function MobileBooking() {
   return (
-    <div className="m-master">
-      <div className="m-head">Запись к мастеру</div>
-      <div className="m-pad">
-        <div className="m-chip">скидка 10%</div>
-        <div style={{ marginTop: 10, fontSize: 18, fontWeight: 800 }}>Мастер Premium 8</div>
-        <div
-          style={{
-            marginTop: 10,
-            height: 44,
-            border: '1px solid #dfe6dc',
-            borderRadius: 14,
-            padding: '12px 14px',
-            fontSize: 12,
-          }}
-        >
-          Стрижка мужская — 1000 ₽
-        </div>
-        <div
-          style={{
-            marginTop: 8,
-            height: 44,
-            border: '1px solid #dfe6dc',
-            borderRadius: 14,
-            padding: '12px 14px',
-            fontSize: 12,
-          }}
-        >
-          Завтра
-        </div>
-        <div style={{ marginTop: 10, display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 8 }}>
-          <div className="slot">
-            10:30<small>−13%</small>
+    <div className="m-app m-app--booking">
+      <div className="m-app-nav">
+        <span className="m-app-nav-back" aria-hidden>
+          ‹
+        </span>
+        <span className="m-app-nav-title">Запись</span>
+        <span className="m-app-nav-spacer" />
+      </div>
+      <div className="m-app-scroll">
+        <div className="m-book-master">
+          <MasterAvatar className="m-book-avatar" />
+          <div className="m-book-master-copy">
+            <div className="m-book-name">Анна Смирнова</div>
+            <div className="m-book-meta">Москва · м. Сокол</div>
           </div>
-          <div className="slot active">
-            11:00<small>−13%</small>
-          </div>
-          <div className="slot">11:30</div>
-          <div className="slot">12:00</div>
+          <div className="m-book-badge">−10%</div>
         </div>
-        <div
-          style={{
-            marginTop: 12,
-            padding: 12,
-            borderRadius: 16,
-            background: '#eef9ef',
-            border: '1px solid #d7efd8',
-            fontSize: 11,
-            lineHeight: 1.5,
-          }}
-        >
-          К оплате: <b>870 ₽</b>
-          <br />
-          Запись подтверждается после выбора слота
+
+        <div className="m-book-section">
+          <div className="m-book-label">1. Услуга</div>
+          <div className="m-book-row m-book-row--active">
+            <div>
+              <div className="m-book-row-title">Стрижка женская</div>
+              <div className="m-book-row-sub">1 500 ₽ · 60 мин</div>
+            </div>
+            <span className="m-book-check" aria-hidden>
+              ✓
+            </span>
+          </div>
+        </div>
+
+        <div className="m-book-section">
+          <div className="m-book-label">2. Дата</div>
+          <div className="m-book-dates">
+            {[
+              ['Пн', '21'],
+              ['Вт', '22', true],
+              ['Ср', '23'],
+              ['Чт', '24'],
+              ['Пт', '25'],
+            ].map(([w, d, active]) => (
+              <div key={d} className={`m-book-date${active ? ' is-active' : ''}`}>
+                <span>{w}</span>
+                <b>{d}</b>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="m-book-section">
+          <div className="m-book-label">3. Время</div>
+          <div className="m-book-slots">
+            <div className="m-book-slot">
+              10:30<small>−13%</small>
+            </div>
+            <div className="m-book-slot is-active">
+              11:00<small>−13%</small>
+            </div>
+            <div className="m-book-slot">11:30</div>
+            <div className="m-book-slot">12:00</div>
+            <div className="m-book-slot">12:30</div>
+            <div className="m-book-slot">14:00</div>
+          </div>
+        </div>
+
+        <div className="m-book-summary">
+          <div>Стрижка · 22 июля · 11:00</div>
+          <b>К оплате 1 305 ₽</b>
         </div>
       </div>
+      <div className="m-app-cta">Записаться</div>
+    </div>
+  )
+}
+
+export function MobileMaster() {
+  return (
+    <div className="m-app m-app--master">
+      <div className="m-app-nav">
+        <span className="m-app-nav-back" aria-hidden>
+          ‹
+        </span>
+        <span className="m-app-nav-title">Мастер</span>
+        <span className="m-app-nav-spacer" />
+      </div>
+      <div className="m-app-scroll">
+        <div className="m-pub-hero">
+          <MasterAvatar className="m-pub-avatar" />
+          <div className="m-pub-name">Анна Смирнова</div>
+          <div className="m-pub-role">Парикмахер · стилист</div>
+          <div className="m-pub-addr">Москва · салон у м. Сокол</div>
+          <div className="m-pub-actions">
+            <span>Карта</span>
+            <span>Позвонить</span>
+          </div>
+        </div>
+        <div className="m-pub-banner">Скидка на первый визит — 10%</div>
+        <div className="m-book-label">Услуги</div>
+        <div className="m-pub-service">
+          <div>
+            <div className="m-book-row-title">Стрижка женская</div>
+            <div className="m-book-row-sub">60 мин</div>
+          </div>
+          <b>1 500 ₽</b>
+        </div>
+        <div className="m-pub-service">
+          <div>
+            <div className="m-book-row-title">Окрашивание</div>
+            <div className="m-book-row-sub">120 мин</div>
+          </div>
+          <b>4 200 ₽</b>
+        </div>
+        <div className="m-pub-service">
+          <div>
+            <div className="m-book-row-title">Укладка</div>
+            <div className="m-book-row-sub">40 мин</div>
+          </div>
+          <b>900 ₽</b>
+        </div>
+      </div>
+      <div className="m-app-cta">Записаться онлайн</div>
     </div>
   )
 }
 
 export function MobileSchedule() {
   return (
-    <div className="m-sched">
-      <div className="m-head">Моё расписание</div>
-      <div className="m-pad">
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 8 }}>
-          {[
-            ['Пн', '21'],
-            ['Вт', '22', true],
-            ['Ср', '23'],
-            ['Чт', '24'],
-          ].map(([w, d, active]) => (
-            <div key={d} className={`day${active ? ' active' : ''}`}>
-              <div className="d1">{w}</div>
-              <div className="d2">{d}</div>
-            </div>
-          ))}
+    <div className="m-app m-app--sched">
+      <div className="m-app-nav m-app-nav--plain">
+        <span className="m-app-nav-title">Моё расписание</span>
+      </div>
+      <div className="m-app-scroll">
+        <div className="m-sched-toolbar">
+          <span>‹</span>
+          <b>Сегодня</b>
+          <span>›</span>
         </div>
-        <div style={{ marginTop: 12 }} className="appt">
-          <div style={{ fontSize: 14 }}>10:00</div>
-          <div className="dotline" />
+        <div className="m-sched-date">Вторник, 22 июля</div>
+        <div className="m-sched-kpi">
           <div>
-            <div style={{ fontSize: 14, fontWeight: 800 }}>Стрижка</div>
-            <div style={{ fontSize: 11, color: '#5f6c5f' }}>1 500 ₽</div>
+            <span>Свободно</span>
+            <b>3.5 ч</b>
+          </div>
+          <div>
+            <span>Занято</span>
+            <b>4 ч</b>
+          </div>
+          <div>
+            <span>Записей</span>
+            <b>5</b>
           </div>
         </div>
-        <div className="appt yellow">
-          <div style={{ fontSize: 14 }}>11:30</div>
-          <div className="dotline" />
-          <div>
-            <div style={{ fontSize: 14, fontWeight: 800 }}>Окрашивание</div>
-            <div style={{ fontSize: 11, color: '#766a55' }}>4 200 ₽</div>
+        <div className="m-sched-timeline">
+          <div className="m-sched-row m-sched-row--busy">
+            <span>10:00</span>
+            <div>
+              <b>Стрижка</b>
+              <small>Анна К. · 1 500 ₽</small>
+            </div>
+          </div>
+          <div className="m-sched-row m-sched-row--free">
+            <span>11:00</span>
+            <div>
+              <b>Свободно</b>
+              <small>Открыть запись</small>
+            </div>
+          </div>
+          <div className="m-sched-row m-sched-row--busy m-sched-row--accent">
+            <span>11:30</span>
+            <div>
+              <b>Окрашивание</b>
+              <small>Мария С. · 4 200 ₽</small>
+            </div>
+          </div>
+          <div className="m-sched-row m-sched-row--free">
+            <span>14:00</span>
+            <div>
+              <b>Свободно</b>
+              <small>Окно 60 мин</small>
+            </div>
+          </div>
+          <div className="m-sched-row m-sched-row--busy">
+            <span>15:00</span>
+            <div>
+              <b>Укладка</b>
+              <small>Катя Л. · 900 ₽</small>
+            </div>
           </div>
         </div>
       </div>
@@ -552,19 +644,66 @@ export function MobileSchedule() {
 
 export function MobileAnalytics() {
   return (
-    <div className="m-analytics">
-      <div className="m-head">Аналитика</div>
-      <div className="m-pad">
-        <div className="kpi">
-          <div className="k1">Выручка</div>
-          <div className="k2" style={{ fontSize: 22 }}>
-            92 400 ₽
-          </div>
-          <div className="k3">+14%</div>
+    <div className="m-app m-app--stats">
+      <div className="m-app-nav m-app-nav--plain">
+        <span className="m-app-nav-title">Статистика</span>
+      </div>
+      <div className="m-app-scroll">
+        <div className="m-stats-period">
+          <span>Неделя</span>
+          <span className="is-active">Месяц</span>
+          <span>Год</span>
         </div>
-        <div style={{ marginTop: 12 }} className="small-chart">
-          <div className="ui-title">Загрузка</div>
-          <div className="line">{chartSvg}</div>
+        <div className="m-stats-hero">
+          <div className="m-stats-hero-top">
+            <span>Выручка за июль</span>
+            <em className="m-stats-chip">↗ +14%</em>
+          </div>
+          <b className="m-stats-hero-value">92 400 ₽</b>
+          <div className="m-stats-hero-sub">на 11 400 ₽ больше июня</div>
+          <div className="m-stats-progress" aria-hidden>
+            <span style={{ width: '78%' }} />
+          </div>
+          <div className="m-stats-progress-meta">
+            <span>План 118 000 ₽</span>
+            <b>78%</b>
+          </div>
+        </div>
+        <div className="m-stats-kpis m-stats-kpis--compact">
+          <div className="m-stats-kpi">
+            <span>Записи</span>
+            <b>128</b>
+            <em>+9%</em>
+          </div>
+          <div className="m-stats-kpi">
+            <span>Средний чек</span>
+            <b>2 180 ₽</b>
+            <em>+5%</em>
+          </div>
+        </div>
+        <div className="m-stats-chart">
+          <div className="m-stats-chart-head">
+            <b>Динамика</b>
+            <span>по неделям</span>
+          </div>
+          <div className="m-stats-bars m-stats-bars--rich" aria-hidden>
+            <i style={{ height: '38%' }} />
+            <i style={{ height: '52%' }} />
+            <i style={{ height: '44%' }} />
+            <i className="is-peak" style={{ height: '86%' }} />
+            <i style={{ height: '68%' }} />
+            <i style={{ height: '74%' }} />
+            <i className="is-now" style={{ height: '92%' }} />
+          </div>
+          <div className="m-stats-bars-labels" aria-hidden>
+            <span>1</span>
+            <span>2</span>
+            <span>3</span>
+            <span>4</span>
+            <span>5</span>
+            <span>6</span>
+            <span>7</span>
+          </div>
         </div>
       </div>
     </div>
@@ -573,19 +712,51 @@ export function MobileAnalytics() {
 
 export function MobileLoyalty() {
   return (
-    <div className="m-loyal">
-      <div className="m-head">Лояльность</div>
-      <div className="m-pad">
-        <div className="wallet" style={{ minHeight: 180, padding: 16 }}>
-          <div className="w1">Баллы клиентов</div>
-          <div className="w2" style={{ fontSize: 32 }}>
-            12 480
-          </div>
-          <div className="w3">готовы к списанию</div>
+    <div className="m-app m-app--loyal">
+      <div className="m-app-nav m-app-nav--plain">
+        <span className="m-app-nav-title">Лояльность</span>
+      </div>
+      <div className="m-app-scroll">
+        <div className="m-loyal-tabs">
+          <span>Скидки</span>
+          <span className="is-active">Баллы</span>
         </div>
-        <div className="coupon">
-          <span>Скидка на первый визит</span>
-          <b>10%</b>
+        <div className="m-loyal-wallet">
+          <div className="m-loyal-wallet-top">
+            <span>Баллы клиентов</span>
+            <span className="m-loyal-gift" aria-hidden>
+              ✦
+            </span>
+          </div>
+          <b>12 480</b>
+          <em>готовы к списанию</em>
+          <div className="m-loyal-meter" aria-hidden>
+            <span style={{ width: '64%' }} />
+          </div>
+          <div className="m-loyal-meter-meta">до следующего уровня — 1 520 баллов</div>
+        </div>
+        <div className="m-loyal-bonus">
+          <div className="m-loyal-bonus-icon" aria-hidden>
+            ★
+          </div>
+          <div className="m-loyal-bonus-copy">
+            <b>Бонус за визит</b>
+            <span>+120 баллов после оплаты</span>
+          </div>
+        </div>
+        <div className="m-loyal-card m-loyal-card--warm">
+          <div>
+            <div className="m-book-row-title">Первый визит</div>
+            <div className="m-book-row-sub">Для новых клиентов</div>
+          </div>
+          <b className="m-loyal-pct">−10%</b>
+        </div>
+        <div className="m-loyal-card">
+          <div>
+            <div className="m-book-row-title">Happy Hours</div>
+            <div className="m-book-row-sub">Будни до 12:00</div>
+          </div>
+          <b className="m-loyal-pct">−13%</b>
         </div>
       </div>
     </div>
@@ -594,20 +765,51 @@ export function MobileLoyalty() {
 
 export function MobileSocial() {
   return (
-    <div className="m-social">
-      <div className="m-head">Пост для соцсетей</div>
-      <div className="m-pad">
-        <div className="textarea" style={{ height: 120 }}>
-          Сегодня у мастера 5 завершённых записей и несколько свободных окон на завтра. Готовый пост уже собран
-          автоматически.
+    <div className="m-app m-app--social">
+      <div className="m-app-nav m-app-nav--plain">
+        <span className="m-app-nav-title">Свободные окна</span>
+      </div>
+      <div className="m-app-scroll">
+        <div className="m-social-periods">
+          <span>Сегодня</span>
+          <span className="is-active">Завтра</span>
+          <span>Неделя</span>
         </div>
-        <div className="post-img" style={{ marginTop: 12, height: 120, borderRadius: 18 }}>
-          Свободные окна
-        </div>
-        <div className="actions">
-          <div className="a">Опубликовать</div>
+        <div className="m-social-card m-social-card--hero">
+          <div className="m-social-banner">
+            <MasterAvatar className="m-social-avatar m-social-avatar--lg" />
+            <div className="m-social-banner-copy">
+              <b>Анна Смирнова</b>
+              <span>Свободные окна · 23 июля</span>
+            </div>
+          </div>
+          <div className="m-social-preview">
+            <div className="m-social-media" aria-hidden>
+              <MasterAvatar className="m-social-media-photo" />
+              <div className="m-social-media-veil">
+                <span>Свободные окна</span>
+                <b>23 июля</b>
+              </div>
+            </div>
+            <div className="m-social-preview-label">Есть время для записи</div>
+            <div className="m-social-slots">
+              <span>11:00</span>
+              <span>12:30</span>
+              <span>15:00</span>
+              <span>17:30</span>
+            </div>
+          </div>
+          <div className="m-social-brand">
+            <span className="m-social-brand-mark" aria-hidden />
+            <span>Запись онлайн · dedato.ru</span>
+          </div>
+          <div className="m-social-actions">
+            <div className="m-social-btn m-social-btn--primary">Опубликовать</div>
+            <div className="m-social-btn">Сохранить</div>
+          </div>
         </div>
       </div>
     </div>
   )
 }
+
