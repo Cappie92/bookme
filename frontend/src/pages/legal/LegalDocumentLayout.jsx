@@ -7,12 +7,19 @@ import Footer from '../../components/Footer'
 const PAGE_BG = 'bg-[#F9F7F6]'
 
 /**
- * Публичная юридическая страница: как у сайта (фон, шапка/подвал), карточка с текстом.
+ * Публичная юридическая/информационная страница: как у сайта (фон, шапка/подвал), карточка с текстом.
  */
-export default function LegalDocumentLayout({ title, documentTitle, children }) {
+export default function LegalDocumentLayout({
+  title,
+  documentTitle,
+  pageTitle,
+  description,
+  robots = 'noindex, nofollow',
+  children,
+}) {
   const location = useLocation()
   const h1 = documentTitle || title
-  const helmetTitle = title || documentTitle || 'Документ'
+  const helmetTitle = pageTitle || `${title || documentTitle || 'Документ'} — DeDato`
 
   useEffect(() => {
     window.scrollTo(0, 0)
@@ -21,8 +28,9 @@ export default function LegalDocumentLayout({ title, documentTitle, children }) 
   return (
     <div className={`flex flex-col min-h-screen ${PAGE_BG}`}>
       <Helmet>
-        <title>{helmetTitle} — DeDato</title>
-        <meta name="robots" content="noindex, nofollow" />
+        <title>{helmetTitle}</title>
+        {description ? <meta name="description" content={description} /> : null}
+        <meta name="robots" content={robots} />
       </Helmet>
       <Header />
       <main className="flex-1 w-full pt-[88px] sm:pt-[104px] pb-12 sm:pb-16 px-4 sm:px-6">

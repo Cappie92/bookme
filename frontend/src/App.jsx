@@ -26,6 +26,7 @@ const BlogPost = lazy(() => import("./pages/BlogPost"))
 const UserAgreement = lazy(() => import("./pages/UserAgreement"))
 const PersonalDataConsentPage = lazy(() => import("./pages/PersonalDataConsentPage"))
 const MarketingConsent = lazy(() => import("./pages/MarketingConsent"))
+const AccountDeletionPage = lazy(() => import("./pages/AccountDeletionPage"))
 const PublicProfile = lazy(() => import("./pages/PublicProfile"))
 // SubdomainPage снят: legacy /domain/:subdomain удалён (см. AUDIT_AND_HANDOFF.md).
 // Все клиентские переходы идут на современную /m/:slug (MasterPublicBookingPage).
@@ -191,6 +192,7 @@ function App() {
           <Route path="/user-agreement" element={<UserAgreement/>} />
           <Route path="/personal-data-consent" element={<PersonalDataConsentPage />} />
           <Route path="/marketing-consent" element={<MarketingConsent />} />
+          <Route path="/account-deletion" element={<AccountDeletionPage />} />
           <Route path="/payment/success" element={<PaymentSuccess/>} />
           <Route path="/payment/failed" element={<PaymentFailed/>} />
           <Route path="/client" element={<ClientLayout><ClientDashboard/></ClientLayout>} />
