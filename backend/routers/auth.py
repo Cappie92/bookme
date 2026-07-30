@@ -22,6 +22,7 @@ from auth import (
     create_refresh_token,
     get_current_active_user,
     get_password_hash,
+    resolve_user_from_token_sub,
     verify_password,
 )
 from database import get_db
@@ -197,9 +198,7 @@ def _verify_oauth_state(state: str) -> dict:
 
 
 def _issue_tokens_for_user(user: User) -> dict:
-    token_sub = (user.phone or "").strip() or (user.email or "").strip()
-    if not token_sub:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="У пользователя нет идентификатора для токена")
+    token_sub = str(user.id)
     access_token = create_access_token(
         data={"sub": token_sub, "role": user.role.value.upper()},
         expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
@@ -861,7 +860,7 @@ def demo_master_access(db: Session = Depends(get_db)) -> Any:
     if not user:
         raise HTTPException(status_code=500, detail="Не удалось подготовить demo master")
 
-    token_sub = user.phone if user.phone else str(user.id)
+    token_sub = str(user.id)
     access_token = create_access_token(
         data={"sub": token_sub, "role": user.role.value.upper(), "demo": True},
         expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
@@ -1177,8 +1176,8 @@ async def register(user_in: UserCreate, db: Session = Depends(get_db)) -> Any:
     # Звонок для верификации телефона будет отправлен по запросу пользователя
     # через /api/auth/request-phone-verification
 
-    # Генерируем токены для входа (sub как в login: телефон, если email нет)
-    token_sub = (user.email or "").strip() or user.phone
+    # Генерируем токены для входа (sub = user.id)
+    token_sub = str(user.id)
     access_token = create_access_token(
         data={"sub": token_sub, "role": user.role.value.upper()},
         expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
@@ -1221,11 +1220,12 @@ def verify(verify_data: VerifyRequest, db: Session = Depends(get_db)) -> Any:
     db.commit()
 
     # Генерируем токены
+    token_sub = str(user.id)
     access_token = create_access_token(
-        data={"sub": user.email, "role": user.role.value.upper()},
+        data={"sub": token_sub, "role": user.role.value.upper()},
         expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
     )
-    refresh_token = create_refresh_token(data={"sub": user.email, "role": user.role.value.upper()})
+    refresh_token = create_refresh_token(data={"sub": token_sub, "role": user.role.value.upper()})
 
     return {
         "access_token": access_token,
@@ -1257,9 +1257,15 @@ def login(login_data: LoginRequest, db: Session = Depends(get_db)) -> Any:
             detail="Неверный номер телефона или пароль",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    if not user.is_active or getattr(user, "deleted_at", None) is not None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Неверный номер телефона или пароль",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
-    # Используем phone вместо email для sub, так как phone всегда есть, а email может отсутствовать
-    token_sub = user.phone if user.phone else str(user.id)
+    # sub = user.id: безопасно при повторной регистрации на тот же phone после удаления
+    token_sub = str(user.id)
     access_token = create_access_token(
         data={"sub": token_sub, "role": user.role.value.upper()},
         expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
@@ -1299,17 +1305,14 @@ def refresh_token(refresh_data: dict, db: Session = Depends(get_db)) -> Any:
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token"
         )
 
-    # Логин кладёт в sub телефон (user.phone); ищем пользователя по email или по телефону
-    if "@" in sub:
-        user = db.query(User).filter(User.email == sub).first()
-    else:
-        user = db.query(User).filter(User.phone == sub).first()
-    if not user:
+    # Логин кладёт в sub user.id (legacy: phone/email); резолв через resolve_user_from_token_sub
+    user = resolve_user_from_token_sub(db, sub)
+    if not user or not user.is_active or getattr(user, "deleted_at", None) is not None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found"
         )
 
-    token_sub = user.phone if user.phone else str(user.id)
+    token_sub = str(user.id)
     access_token = create_access_token(
         data={"sub": token_sub, "role": user.role.value.upper()},
         expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
@@ -1485,45 +1488,31 @@ async def confirm_delete_account(
 ):
     """
     Подтверждение удаления аккаунта по коду из звонка.
+    MASTER: anonymize/deactivate. CLIENT: anonymize personal account.
     """
     try:
-        # Проверяем код верификации
-        if (current_user.phone_verification_code == code and 
-            current_user.phone_verification_expires and 
+        if (current_user.phone_verification_code == code and
+            current_user.phone_verification_expires and
             current_user.phone_verification_expires > datetime.utcnow()):
-            
-            # Удаляем все бронирования пользователя
-            bookings = db.query(Booking).filter(Booking.client_id == current_user.id).all()
-            for booking in bookings:
-                db.delete(booking)
-            
-            # Удаляем профиль мастера, если есть
-            if current_user.master_profile:
-                db.delete(current_user.master_profile)
-            
-            # Удаляем профиль салона, если есть
-            if current_user.salon_profile:
-                db.delete(current_user.salon_profile)
-            
-            # Удаляем профиль независимого мастера, если есть
-            if current_user.indie_profile:
-                db.delete(current_user.indie_profile)
-            
-            # Очищаем код верификации
+
+            from services.account_deletion import delete_account
+
             current_user.phone_verification_code = None
             current_user.phone_verification_expires = None
-            
-            # Удаляем самого пользователя
-            db.delete(current_user)
-            db.commit()
-            
-            return {"message": "Аккаунт успешно удален"}
+            result = delete_account(db, current_user, commit=True)
+            return {"message": result.message, "success": True, "already_deleted": result.already_deleted}
         else:
             return {
                 "message": "Неверный код или код истек",
                 "success": False
             }
-            
+
+    except ValueError as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
     except Exception as e:
         db.rollback()
         raise HTTPException(

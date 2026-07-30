@@ -1716,7 +1716,7 @@ export default function MasterSettings({
           >
             <div className="mb-3 flex items-start justify-between gap-3">
               <h3 id="master-delete-account-title" className="pr-2 text-lg font-semibold text-red-700">
-                Удаление аккаунта
+                Удалить аккаунт мастера?
               </h3>
               <button
                 type="button"
@@ -1729,8 +1729,14 @@ export default function MasterSettings({
             </div>
             {deleteAccountPhase === 'call' ? (
               <>
-                <p className="mb-4 text-sm leading-snug text-[#2D2D2D]">
-                  Это действие <strong>необратимо</strong>: будут удалены профиль мастера и данные аккаунта. На телефон из профиля можно запросить звонок с кодом подтверждения — тот же сценарий, что использует приложение для удаления аккаунта.
+                <p className="mb-4 text-sm leading-snug text-[#2D2D2D] whitespace-pre-line">
+                  {`Ваши персональные данные будут удалены или обезличены. Публичная страница, услуги, расписание и программы лояльности будут удалены, а будущие записи — отменены.
+
+История завершённых и отменённых записей сохранится в обезличенном виде. Отдельные финансовые и технические сведения могут храниться в случаях, предусмотренных законодательством.
+
+Это действие нельзя отменить.
+
+На телефон из профиля можно запросить звонок с кодом подтверждения.`}
                 </p>
                 <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
                   <button type="button" onClick={closeDeleteAccountModal} className={SV.btnSec}>

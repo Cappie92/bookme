@@ -713,7 +713,8 @@ def delete_user(
 ) -> Any:
     """
     Удаление пользователя.
-    Без загрузки ORM User цели — иначе при autoflush/commit lazy-load salon_profile тянет salons.*.
+    CLIENT/MASTER/INDIE — через единый сервис anonymize/deactivate (без hard delete history).
+    Прочие роли — прежний bulk hard-delete (без ORM salon_profile).
     """
     ut = User.__table__
     target = db.execute(select(ut.c.id, ut.c.role).where(ut.c.id == user_id)).mappings().first()
@@ -741,6 +742,29 @@ def delete_user(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Недостаточно прав для удаления администратора",
         )
+
+    if target_role in (UserRole.CLIENT, UserRole.MASTER, UserRole.INDIE):
+        try:
+            from services.account_deletion import delete_account
+
+            user_obj = db.query(User).options(noload("*")).filter(User.id == uid).first()
+            if not user_obj:
+                raise HTTPException(status_code=404, detail="Пользователь не найден")
+            result = delete_account(db, user_obj, commit=True)
+            return {"message": result.message, "already_deleted": result.already_deleted}
+        except HTTPException:
+            raise
+        except Exception:
+            db.rollback()
+            logger.exception(
+                "DELETE /api/admin/users/%s soft-delete failed (actor user_id=%s)",
+                user_id,
+                getattr(current_user, "id", None),
+            )
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Ошибка при удалении пользователя. Подробности в логах сервера.",
+            ) from None
 
     try:
         with db.no_autoflush:

@@ -118,7 +118,12 @@ def test_admin_delete_client_user_no_salon_orm(client, db, test_admin):
     assert r.status_code == 200, r.text
     assert r.json().get("message")
 
-    assert db.query(User).filter(User.id == uid).first() is None
+    assert db.query(User).filter(User.id == uid).first() is not None
+    u_after = db.query(User).filter(User.id == uid).first()
+    assert u_after.is_active is False
+    assert u_after.deleted_at is not None
+    assert u_after.phone is None
+    assert u_after.email is None
 
 
 def test_admin_delete_user_removes_oauth_accounts(client, db, test_admin):
@@ -143,7 +148,7 @@ def test_admin_delete_user_removes_oauth_accounts(client, db, test_admin):
     r = client.delete(f"/api/admin/users/{uid}", headers=headers)
 
     assert r.status_code == 200, r.text
-    assert db.query(User).filter(User.id == uid).first() is None
+    assert db.query(User).filter(User.id == uid).first() is not None
     assert db.query(UserOAuthAccount).filter(UserOAuthAccount.provider_user_id == "ya-delete-cleanup").first() is None
 
 

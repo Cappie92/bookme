@@ -863,6 +863,8 @@ class BookingFutureShortCanon(BaseModel):
     master_domain: Optional[str] = None
     master_timezone: Optional[str] = None
     indie_master_id: Optional[int] = None
+    master_is_deleted: bool = False
+    cancellation_reason: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -921,6 +923,8 @@ class BookingPastShortCanon(BaseModel):
     master_domain: Optional[str] = None
     master_timezone: Optional[str] = None
     indie_master_id: Optional[int] = None
+    master_is_deleted: bool = False
+    cancellation_reason: Optional[str] = None
 
     class Config:
         from_attributes = True

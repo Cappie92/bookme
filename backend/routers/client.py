@@ -26,6 +26,7 @@ def _parse_optional_client_birth_date(raw: Any) -> Optional[date_type]:
         raise HTTPException(status_code=400, detail="Некорректная дата рождения")
 
 
+from services.account_deletion import MASTER_ACCOUNT_DELETED_REASON, is_master_deleted
 from auth import get_current_active_user, require_client
 from utils.booking_loyalty_reserve import clear_loyalty_points_reserve
 from database import get_db
@@ -168,7 +169,10 @@ def get_future_bookings(
         )
         .filter(
             Booking.client_id == _client_id,
-            Booking.status != BookingStatus.CANCELLED,
+            or_(
+                Booking.status != BookingStatus.CANCELLED,
+                Booking.cancellation_reason == MASTER_ACCOUNT_DELETED_REASON,
+            ),
         )
         .order_by(Booking.start_time.asc())
         .all()
@@ -226,10 +230,17 @@ def get_future_bookings(
             branch_name = None
             branch_address = None
             master_domain = None
-            if b.master and b.master.domain:
-                master_domain = b.master.domain
+            master_is_deleted = False
+            if b.master:
+                master_is_deleted = is_master_deleted(b.master)
+                if not master_is_deleted and b.master.domain:
+                    master_domain = b.master.domain
             elif b.indie_master and b.indie_master.domain:
-                master_domain = b.indie_master.domain
+                linked = getattr(b.indie_master, "master", None)
+                if linked is not None and is_master_deleted(linked):
+                    master_is_deleted = True
+                else:
+                    master_domain = b.indie_master.domain
 
             # Canon: резолв indie→master, orphan: log+skip (или 500 если DEBUG)
             if MASTER_CANON_DEBUG and b.indie_master_id:
@@ -250,6 +261,8 @@ def get_future_bookings(
                 continue
             if MASTER_CANON_DEBUG and b.indie_master_id:
                 n_resolved += 1
+            if master_is_deleted:
+                master_domain = None
             result.append(BookingFutureShortCanon(
                 id=b.id,
                 public_reference=b.public_reference,
@@ -274,6 +287,8 @@ def get_future_bookings(
                 branch_id=None,
                 master_domain=master_domain,
                 master_timezone=master_timezone,
+                master_is_deleted=master_is_deleted,
+                cancellation_reason=getattr(b, "cancellation_reason", None),
             ))
         except Exception as e:
             error_count += 1
@@ -317,7 +332,10 @@ def get_past_bookings(
         )
         .filter(
             Booking.client_id == _client_id,
-            Booking.status != BookingStatus.CANCELLED,
+            or_(
+                Booking.status != BookingStatus.CANCELLED,
+                Booking.cancellation_reason == MASTER_ACCOUNT_DELETED_REASON,
+            ),
         )
         .order_by(Booking.start_time.desc())
         .all()
@@ -376,10 +394,17 @@ def get_past_bookings(
             branch_name = None
             branch_address = None
             master_domain = None
-            if b.master and b.master.domain:
-                master_domain = b.master.domain
+            master_is_deleted = False
+            if b.master:
+                master_is_deleted = is_master_deleted(b.master)
+                if not master_is_deleted and b.master.domain:
+                    master_domain = b.master.domain
             elif b.indie_master and b.indie_master.domain:
-                master_domain = b.indie_master.domain
+                linked = getattr(b.indie_master, "master", None)
+                if linked is not None and is_master_deleted(linked):
+                    master_is_deleted = True
+                else:
+                    master_domain = b.indie_master.domain
 
             # Canon: резолв indie→master, orphan: log+skip (или 500 если DEBUG)
             if MASTER_CANON_DEBUG and b.indie_master_id:
@@ -400,6 +425,8 @@ def get_past_bookings(
                 continue
             if MASTER_CANON_DEBUG and b.indie_master_id:
                 n_resolved += 1
+            if master_is_deleted:
+                master_domain = None
             result.append(BookingPastShortCanon(
                 id=b.id,
                 public_reference=b.public_reference,
@@ -424,6 +451,8 @@ def get_past_bookings(
                 branch_id=None,
                 master_domain=master_domain,
                 master_timezone=master_timezone,
+                master_is_deleted=master_is_deleted,
+                cancellation_reason=getattr(b, "cancellation_reason", None),
             ))
         except Exception as e:
             error_count += 1
@@ -1602,28 +1631,25 @@ def delete_client_account(
     current_user: User = Depends(get_current_active_user)
 ) -> Any:
     """
-    Удаление аккаунта клиента
+    Удаление аккаунта клиента (анонимизация персональных данных, история сохраняется).
     """
     try:
         from auth import verify_password
-        
+        from services.account_deletion import delete_account
+
+        if current_user.role != UserRole.CLIENT:
+            raise HTTPException(status_code=403, detail="Этот endpoint только для клиентов")
+
         password = password_data.get("password")
-        
+
         if not password:
             raise HTTPException(status_code=400, detail="Необходимо указать пароль")
-        
-        # Проверяем пароль
-        if not verify_password(password, current_user.hashed_password):
+
+        if not current_user.hashed_password or not verify_password(password, current_user.hashed_password):
             raise HTTPException(status_code=400, detail="Неверный пароль")
-        
-        # Удаляем все записи клиента
-        db.query(Booking).filter(Booking.client_id == current_user.id).delete()
-        
-        # Удаляем пользователя
-        db.delete(current_user)
-        db.commit()
-        
-        return {"message": "Аккаунт успешно удален"}
+
+        result = delete_account(db, current_user, commit=True)
+        return {"message": result.message, "already_deleted": result.already_deleted}
     except HTTPException:
         raise
     except Exception as e:

@@ -62,7 +62,10 @@ export function BookingRowPast({
   const price = getBookingPrice(booking)
   const priceStr = formatPriceDisplay(price)
   const hasPriceDetail = pts > 0 && payAmt != null
-  const hasActions = !!onRepeat || !!onNotes || !!onDislike
+  const masterDeleted = !!booking.master_is_deleted
+  const canPressMaster = !!onPressMaster && !masterDeleted && !!(booking.master_domain?.trim?.())
+  const canRepeat = !!onRepeat && !masterDeleted
+  const hasActions = canRepeat || !!onNotes || !!onDislike
   const canExpand = hasActions || hasPriceDetail
 
   return (
@@ -74,7 +77,7 @@ export function BookingRowPast({
       >
         <View style={styles.headerRow}>
           <View style={styles.headerLeft}>
-            {favKey && (
+            {favKey && !masterDeleted && (
               <FavoriteButtonControlled
                 isFavorite={isFavorite}
                 onToggle={onToggleFavorite}
@@ -82,7 +85,7 @@ export function BookingRowPast({
                 containerSize={HEART_CONTAINER}
               />
             )}
-            {onPressMaster ? (
+            {canPressMaster ? (
               <TouchableOpacity
                 onPress={() => onPressMaster(booking.master_domain?.trim?.() || null)}
                 activeOpacity={0.7}
@@ -104,6 +107,11 @@ export function BookingRowPast({
             </Text>
           </View>
         </View>
+        {booking.cancellation_reason ? (
+          <Text style={styles.cancelReasonText} numberOfLines={2}>
+            {booking.cancellation_reason}
+          </Text>
+        ) : null}
         <View style={styles.servicePriceRow}>
           <Text style={styles.serviceText} numberOfLines={1} ellipsizeMode="tail">
             {booking.service_name || '-'}
@@ -149,10 +157,10 @@ export function BookingRowPast({
       {expanded && hasActions && (
         <View style={styles.actionsPanel}>
           <View style={styles.actionsRow}>
-            {onRepeat && (
+            {canRepeat && (
               <TouchableOpacity
                 style={styles.actionBtn}
-                onPress={() => onRepeat(booking.id)}
+                onPress={() => onRepeat?.(booking.id)}
                 activeOpacity={0.6}
               >
                 <Ionicons name="refresh" size={16} color="#16a34a" />
@@ -244,6 +252,11 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '600',
     color: '#16a34a',
+  },
+  cancelReasonText: {
+    marginTop: 4,
+    fontSize: 12,
+    color: '#6b7280',
   },
   statusBadge: {
     flexShrink: 0,

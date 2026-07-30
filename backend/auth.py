@@ -51,6 +51,35 @@ def create_refresh_token(data: dict) -> str:
     return encoded_jwt
 
 
+def resolve_user_from_token_sub(db: Session, sub: Optional[str]) -> Optional[User]:
+    """
+    Резолв пользователя из JWT sub.
+    Предпочтительно numeric user.id (безопасно при освобождении phone/email после удаления).
+    Fallback: email или phone (legacy tokens).
+    """
+    if not sub:
+        return None
+    s = str(sub).strip()
+    if s.isdigit():
+        user = db.query(User).filter(User.id == int(s)).first()
+        if user is not None:
+            return user
+    return db.query(User).filter((User.email == s) | (User.phone == s)).first()
+
+
+def _reject_if_deleted_or_inactive(user: Optional[User]) -> User:
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    if user is None:
+        raise credentials_exception
+    if getattr(user, "deleted_at", None) is not None or not user.is_active:
+        raise credentials_exception
+    return user
+
+
 async def get_current_user(
     token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)
 ) -> User:
@@ -67,13 +96,8 @@ async def get_current_user(
     except JWTError:
         raise credentials_exception
 
-    # Ищем пользователя по email или phone
-    user = db.query(User).filter(
-        (User.email == sub) | (User.phone == sub)
-    ).first()
-    if user is None:
-        raise credentials_exception
-    return user
+    user = resolve_user_from_token_sub(db, sub)
+    return _reject_if_deleted_or_inactive(user)
 
 
 async def get_current_user_optional(
@@ -88,10 +112,10 @@ async def get_current_user_optional(
         sub = payload.get("sub")
         if not sub:
             return None
-        user = db.query(User).filter(
-            (User.email == sub) | (User.phone == sub)
-        ).first()
-        return user if user and user.is_active else None
+        user = resolve_user_from_token_sub(db, sub)
+        if user is None or getattr(user, "deleted_at", None) is not None or not user.is_active:
+            return None
+        return user
     except JWTError:
         return None
 
@@ -100,7 +124,7 @@ async def get_current_active_user(
     request: Request,
     current_user: User = Depends(get_current_user),
 ) -> User:
-    if not current_user.is_active:
+    if not current_user.is_active or getattr(current_user, "deleted_at", None) is not None:
         raise HTTPException(status_code=400, detail="Inactive user")
 
     # Demo master: только read-only в кабинете (блокируем write даже при прямых API-вызовах)

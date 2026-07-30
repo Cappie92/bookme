@@ -56,6 +56,7 @@ class User(Base):
     role = Column(Enum(UserRole))
     birth_date = Column(Date, nullable=True)
     is_active = Column(Boolean, default=True)
+    deleted_at = Column(DateTime, nullable=True)  # self-service / soft account deletion
     is_verified = Column(Boolean, default=False)
     is_phone_verified = Column(Boolean, default=False)
     phone_verification_code = Column(String, nullable=True)
@@ -219,6 +220,8 @@ class Master(Base):
     manual_confirm_enabled_at = Column(DateTime, nullable=True)  # Когда включён ручной режим (для post-visit фильтрации)
     pre_visit_confirmations_enabled = Column(Boolean, default=False)  # Включить PRE-visit подтверждения (требует has_extended_stats)
     site_description = Column(Text, nullable=True)  # Описание для страницы записи
+    is_deleted = Column(Boolean, default=False, nullable=False)  # anonymized / deactivated master
+    deleted_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     user = relationship("User", back_populates="master_profile")

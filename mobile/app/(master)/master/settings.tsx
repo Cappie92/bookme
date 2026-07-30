@@ -21,7 +21,7 @@ import { useAuth } from '@src/auth/AuthContext';
 import { router, usePathname } from 'expo-router';
 import { logger } from '@src/utils/logger';
 import { env } from '@src/config/env';
-import { changePassword } from '@src/services/api/profile';
+import { changePassword, requestMasterDeleteAccountCall, confirmMasterDeleteAccount } from '@src/services/api/profile';
 import { PrimaryButton } from '@src/components/PrimaryButton';
 import { SecondaryButton } from '@src/components/SecondaryButton';
 import { PasswordInput } from '@src/components/ui/PasswordInput';
@@ -57,6 +57,12 @@ export default function MasterSettingsScreen() {
   const [changingPassword, setChangingPassword] = useState(false);
   const [copyToastVisible, setCopyToastVisible] = useState(false);
   const copyToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Удаление аккаунта мастера
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deletePhase, setDeletePhase] = useState<'warn' | 'code'>('warn');
+  const [deleteCode, setDeleteCode] = useState('');
+  const [deletingAccount, setDeletingAccount] = useState(false);
 
   const loadSettings = async (mode: 'initial' | 'refresh' = 'initial') => {
     try {
@@ -189,6 +195,61 @@ export default function MasterSettingsScreen() {
         },
       ]
     );
+  };
+
+  const openDeleteAccountModal = () => {
+    setDeletePhase('warn');
+    setDeleteCode('');
+    setShowDeleteModal(true);
+  };
+
+  const closeDeleteAccountModal = () => {
+    if (deletingAccount) return;
+    setShowDeleteModal(false);
+    setDeletePhase('warn');
+    setDeleteCode('');
+  };
+
+  const requestDeleteCall = async () => {
+    setDeletingAccount(true);
+    try {
+      const res = await requestMasterDeleteAccountCall();
+      if (res.success === false) {
+        Alert.alert('Ошибка', res.message || 'Не удалось отправить звонок');
+        return;
+      }
+      setDeletePhase('code');
+      Alert.alert('Звонок отправлен', res.message || 'Введите код из звонка для подтверждения');
+    } catch (error: any) {
+      const msg = error?.response?.data?.detail || error?.message || 'Не удалось отправить запрос';
+      Alert.alert('Ошибка', typeof msg === 'string' ? msg : 'Не удалось отправить запрос');
+    } finally {
+      setDeletingAccount(false);
+    }
+  };
+
+  const confirmDeleteAccount = async () => {
+    const code = deleteCode.trim();
+    if (!code) {
+      Alert.alert('Ошибка', 'Введите код подтверждения');
+      return;
+    }
+    setDeletingAccount(true);
+    try {
+      const res = await confirmMasterDeleteAccount(code);
+      if (res.success === false) {
+        Alert.alert('Ошибка', res.message || 'Неверный код');
+        return;
+      }
+      setShowDeleteModal(false);
+      await logout();
+      router.replace('/login');
+    } catch (error: any) {
+      const msg = error?.response?.data?.detail || error?.message || 'Не удалось удалить аккаунт';
+      Alert.alert('Ошибка', typeof msg === 'string' ? msg : 'Не удалось удалить аккаунт');
+    } finally {
+      setDeletingAccount(false);
+    }
   };
 
   if (loading) {
@@ -410,6 +471,18 @@ export default function MasterSettingsScreen() {
           </TouchableOpacity>
         </View>
 
+        {/* Удаление аккаунта */}
+        <View style={styles.deleteSection}>
+          <TouchableOpacity
+            style={styles.deleteButton}
+            onPress={openDeleteAccountModal}
+            activeOpacity={0.7}
+            testID="master-settings-delete-account"
+          >
+            <Text style={styles.deleteButtonText}>Удалить аккаунт</Text>
+          </TouchableOpacity>
+        </View>
+
         {/* Кнопка выхода */}
         <View style={styles.logoutSection}>
           <TouchableOpacity
@@ -490,6 +563,66 @@ export default function MasterSettingsScreen() {
                 loading={changingPassword}
                 style={styles.modalButton}
               />
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={showDeleteModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={closeDeleteAccountModal}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Удалить аккаунт мастера?</Text>
+            <ScrollView style={styles.modalScrollView}>
+              {deletePhase === 'warn' ? (
+                <Text style={styles.deleteWarningText}>
+                  Ваши персональные данные будут удалены или обезличены. Публичная страница, услуги, расписание и программы лояльности будут удалены, а будущие записи — отменены.{'\n\n'}
+                  История завершённых и отменённых записей сохранится в обезличенном виде. Отдельные финансовые и технические сведения могут храниться в случаях, предусмотренных законодательством.{'\n\n'}
+                  Это действие нельзя отменить.
+                </Text>
+              ) : (
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>Код из звонка</Text>
+                  <TextInput
+                    value={deleteCode}
+                    onChangeText={setDeleteCode}
+                    placeholder="Введите код"
+                    keyboardType="number-pad"
+                    editable={!deletingAccount}
+                    style={styles.deleteCodeInput}
+                    testID="master-delete-account-code"
+                  />
+                </View>
+              )}
+            </ScrollView>
+            <View style={styles.modalButtons}>
+              <SecondaryButton
+                title="Отмена"
+                onPress={closeDeleteAccountModal}
+                disabled={deletingAccount}
+                style={styles.modalButton}
+              />
+              {deletePhase === 'warn' ? (
+                <PrimaryButton
+                  title={deletingAccount ? 'Отправка…' : 'Получить звонок'}
+                  onPress={requestDeleteCall}
+                  disabled={deletingAccount}
+                  loading={deletingAccount}
+                  style={styles.modalButton}
+                />
+              ) : (
+                <PrimaryButton
+                  title={deletingAccount ? 'Удаление…' : 'Подтвердить удаление'}
+                  onPress={confirmDeleteAccount}
+                  disabled={deletingAccount || !deleteCode.trim()}
+                  loading={deletingAccount}
+                  style={styles.modalButton}
+                />
+              )}
             </View>
           </View>
         </View>
@@ -658,6 +791,39 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
+  },
+  deleteSection: {
+    marginBottom: 16,
+  },
+  deleteButton: {
+    backgroundColor: '#fff',
+    borderWidth: 1.5,
+    borderColor: '#F44336',
+    padding: 16,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 56,
+  },
+  deleteButtonText: {
+    color: '#F44336',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  deleteWarningText: {
+    fontSize: 14,
+    lineHeight: 22,
+    color: '#333',
+    marginBottom: 8,
+  },
+  deleteCodeInput: {
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 16,
+    color: '#111',
   },
   logoutSection: {
     marginBottom: 0,

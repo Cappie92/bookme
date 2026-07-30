@@ -795,7 +795,7 @@ export default function ClientProfile() {
           >
             <div className="flex items-start justify-between gap-3 mb-3">
               <h3 id="delete-modal-title" className="text-lg font-semibold text-red-700 pr-2">
-                Удаление аккаунта
+                Удалить аккаунт?
               </h3>
               <button
                 type="button"
@@ -809,8 +809,14 @@ export default function ClientProfile() {
                 ×
               </button>
             </div>
-            <p className="text-sm text-gray-700 mb-4">
-              Это действие <strong>необратимо</strong>: записи, избранное и данные профиля будут удалены. Для подтверждения введите пароль.
+            <p className="text-sm text-gray-700 mb-4 whitespace-pre-line">
+              {`Аккаунт будет необратимо удалён. Ваши персональные данные будут удалены или обезличены, а доступ к аккаунту будет закрыт.
+
+История завершённых и отменённых записей может сохраняться в обезличенном виде, чтобы не нарушать данные других пользователей. Отдельные финансовые и технические сведения могут храниться в случаях, предусмотренных законодательством.
+
+Это действие нельзя отменить.
+
+Для подтверждения введите пароль.`}
             </p>
             <div className="mb-4">
               <label className="block text-sm font-medium text-red-800 mb-2">Пароль</label>

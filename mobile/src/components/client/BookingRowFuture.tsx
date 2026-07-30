@@ -55,11 +55,13 @@ export function BookingRowFuture({
   const dateTime = formatDateTimeRange(booking.start_time, booking.end_time)
   const price = getBookingPrice(booking)
   const priceStr = formatPriceDisplay(price)
-  const hasCalendar = onAddToCalendar && !!booking.master_timezone?.trim?.()
+  const masterDeleted = !!booking.master_is_deleted
+  const canPressMaster = !!onPressMaster && !masterDeleted && !!(booking.master_domain?.trim?.())
+  const hasCalendar = onAddToCalendar && !!booking.master_timezone?.trim?.() && !masterDeleted
   if (__DEV__ && onAddToCalendar && !booking.master_timezone?.trim?.()) {
     console.warn('[BookingRowFuture] Календарь скрыт: master_timezone отсутствует у записи', booking.id)
   }
-  const hasActions = (canEdit && onEdit) || (canCancel && onCancel) || hasCalendar
+  const hasActions = (canEdit && onEdit && !masterDeleted) || (canCancel && onCancel) || hasCalendar
 
   return (
     <View style={styles.card}>
@@ -70,7 +72,7 @@ export function BookingRowFuture({
       >
         <View style={styles.headerRow}>
           <View style={styles.headerLeft}>
-            {favKey && (
+            {favKey && !masterDeleted && (
               <FavoriteButtonControlled
                 isFavorite={isFavorite}
                 onToggle={onToggleFavorite}
@@ -78,7 +80,7 @@ export function BookingRowFuture({
                 containerSize={HEART_CONTAINER}
               />
             )}
-            {onPressMaster ? (
+            {canPressMaster ? (
               <TouchableOpacity
                 onPress={() => onPressMaster(booking.master_domain?.trim?.() || null)}
                 activeOpacity={0.7}
@@ -100,6 +102,11 @@ export function BookingRowFuture({
             </Text>
           </View>
         </View>
+        {booking.cancellation_reason ? (
+          <Text style={styles.cancelReasonText} numberOfLines={2}>
+            {booking.cancellation_reason}
+          </Text>
+        ) : null}
         <View style={styles.servicePriceRow}>
           <Text style={styles.serviceText} numberOfLines={1} ellipsizeMode="tail">
             {booking.service_name || '-'}
@@ -132,7 +139,7 @@ export function BookingRowFuture({
       {expanded && hasActions && (
         <View style={styles.actionsPanel}>
           <View style={styles.actionsRow}>
-            {canEdit && onEdit && (
+            {canEdit && onEdit && !masterDeleted && (
               <TouchableOpacity
                 style={styles.actionBtn}
                 onPress={() => onEdit(booking.id)}
@@ -229,6 +236,11 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '600',
     color: '#16a34a',
+  },
+  cancelReasonText: {
+    marginTop: 4,
+    fontSize: 12,
+    color: '#6b7280',
   },
   statusBadge: {
     paddingHorizontal: 10,

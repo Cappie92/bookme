@@ -62,6 +62,9 @@ export interface Booking {
   duration?: number | null; // Длительность услуги в минутах (альтернативное поле)
   master_domain?: string | null; // Домен мастера для ссылки на профиль
   master_timezone?: string | null; // IANA таймзона мастера (для Add to Calendar)
+  /** Мастер анонимизирован / аккаунт удалён — не кликабелен, без повторной записи */
+  master_is_deleted?: boolean;
+  cancellation_reason?: string | null;
 }
 
 // Параметры для получения списка бронирований
