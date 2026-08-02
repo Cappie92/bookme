@@ -99,6 +99,9 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       versionCode: 1,
       edgeToEdgeEnabled: true,
       predictiveBackGestureEnabled: false,
+      // AppMetrica подтягивает AD_ID через analytics-identifiers / play-services-ads-identifier.
+      // GAID не используем (advIdentifiersTracking=false) — убираем permission из merged manifest.
+      blockedPermissions: ['com.google.android.gms.permission.AD_ID'],
       intentFilters: [
         {
           action: 'VIEW',

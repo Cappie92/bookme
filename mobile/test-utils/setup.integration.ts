@@ -1,6 +1,12 @@
 // Моки для Expo должны быть самыми первыми
+jest.mock('expo', () => ({
+  __esModule: true,
+  default: {},
+}));
+
 jest.mock('expo/src/winter/installGlobal', () => ({
   __esModule: true,
+  default: {},
   getValue: jest.fn(() => ({})),
 }));
 
@@ -15,6 +21,7 @@ import '@testing-library/jest-native/extend-expect';
 jest.mock('@src/config/env', () => ({
   env: {
     API_URL: 'http://localhost:8001',
+    WEB_URL: 'http://localhost:5173',
   },
 }));
 

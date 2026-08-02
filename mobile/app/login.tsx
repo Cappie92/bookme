@@ -28,6 +28,7 @@ import {
   shouldShowRegistrationPromoField,
 } from '@src/utils/registrationPromo';
 import { analytics, AnalyticsEvent } from '@src/services/analytics';
+import { RegistrationAgreementRow } from '@src/components/auth/RegistrationAgreementRow';
 
 type TabType = 'login' | 'register';
 const yandexLogo = require('../assets/YaLogo.webp');
@@ -730,27 +731,16 @@ export default function LoginScreen() {
 
             {/* Чекбоксы согласий */}
             <View style={styles.checkboxGroup}>
-              <TouchableOpacity
-                testID="agreement-checkbox"
-                style={styles.checkboxRow}
-                onPress={() => {
+              <RegistrationAgreementRow
+                checked={agree}
+                disabled={registerLoading}
+                onToggle={() => {
                   setAgree(!agree);
                   if (registerErrors.agree) {
                     setRegisterErrors({ ...registerErrors, agree: undefined });
                   }
                 }}
-                disabled={registerLoading}
-              >
-                <View style={[styles.checkbox, agree && styles.checkboxChecked]}>
-                  {agree && <Ionicons name="checkmark" size={14} color="#fff" />}
-                </View>
-                <Text style={styles.checkboxLabel}>
-                  Нажимая на кнопку Зарегистрироваться, я подтверждаю свое согласие с{' '}
-                  <Text style={styles.checkboxLink}>условиями пользовательского соглашения</Text>
-                  {' '}и даю согласие на обработку персональных данных{' '}
-                  <Text style={styles.required}>*</Text>
-                </Text>
-              </TouchableOpacity>
+              />
               {registerErrors.agree && <Text style={styles.errorText}>{registerErrors.agree}</Text>}
             </View>
 
@@ -1080,10 +1070,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#666',
     lineHeight: 18,
-  },
-  checkboxLink: {
-    color: '#4CAF50',
-    textDecorationLine: 'underline',
   },
   required: {
     color: '#F44336',
