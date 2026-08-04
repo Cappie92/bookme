@@ -14,6 +14,16 @@ Repository-known security/privacy debt. Документ не содержит c
 
 Подобные находки классифицируются как `repository evidence` + `validity: UNKNOWN` + `requires separate remediation` и не блокируют остальные Knowledge packages, если их канонизация не требует раскрытия содержимого.
 
+## Credential-like literal in tracked Compose configuration
+
+- **Evidence class:** repository evidence
+- **Sensitivity:** HIGH
+- **Type:** credential-like literal in application configuration
+- **Validity:** UNKNOWN
+- **Location:** `docker-compose.yml`
+- **Validity evidence:** подтверждение действительности отсутствует; literal нельзя считать ни действующим, ни отозванным.
+- **Required action:** separate security remediation; Knowledge track не копирует и не проверяет значение.
+
 ## Critical: privileged role assignment at registration
 
 - **Severity:** `critical`

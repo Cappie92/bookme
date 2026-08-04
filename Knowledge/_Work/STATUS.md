@@ -9,11 +9,11 @@ non_canonical: true
 
 ## Current package
 
-- **Package 4:** Client CRM, Loyalty, Promo and Finance
+- **Package 5:** Backend and API Architecture
 - **State:** `completed`
 - **Current phase:** verification and package commit
 - **Owner rule retained:** credential-like literal is repository evidence, `validity: UNKNOWN`, `sensitivity: HIGH`; separate remediation required. It does not block unrelated canon and is never copied or externally tested.
-- **Next autonomous step:** verify Package 4 links/sources/tests, commit it independently, then begin Package 5 backend/API architecture.
+- **Next autonomous step:** verify Package 5 links/sources/tests, commit it independently, push the Package 4–5 checkpoint, then begin Package 6 web/mobile architecture.
 
 ## Completed foundations
 
@@ -24,7 +24,8 @@ non_canonical: true
 | Package 1 — Booking and Scheduling | `c89d1fe` | Booking lifecycle, completion side effects, scheduling, API contract, sanitized critical authorization debt |
 | Package 2 — Identity, Authorization and Privacy | `f37db77` | Account/OAuth/session/enforcement/privacy canon and sanitized security/privacy Debt |
 | Package 3 — Feature flags, Entitlements and Background Jobs | `de8af2b` | Configuration precedence, entitlement enforcement, five in-process jobs and confirmed Debt |
-| Package 4 — Client CRM, Loyalty, Promo and Finance | pending commit | CRM ownership, client points, Promo Engine/legacy boundary, dual operational accounting and confirmed Debt |
+| Package 4 — Client CRM, Loyalty, Promo and Finance | `decdd29` | CRM ownership, client points, Promo Engine/legacy boundary, dual operational accounting and confirmed Debt |
+| Package 5 — Backend and API Architecture | pending commit | FastAPI composition, request/session/transaction lifecycle, HTTP conventions and confirmed Debt |
 
 ## Last verification
 
@@ -44,6 +45,12 @@ non_canonical: true
 - Package 4 repository inventory separated client loyalty from subscription points and operational finance from SaaS billing.
 - Package 4 link/source-path, absolute-path and sensitive-pattern checks passed before commit review.
 - Package 4 targeted backend tests: 147 passed (CRM clients/restrictions, loyalty discounts/reserve, Promo Engine/admin and accounting); deprecation/SSL warnings only. Production smoke script was intentionally not run.
+- Package 4 commit `decdd29` created; local `main` is one commit ahead of `origin/main` before Package 5.
+- Additional tracked `docker-compose.yml` credential-like literal classified as repository evidence, `validity: UNKNOWN`, `sensitivity: HIGH`; value is not copied or externally tested.
+- Package 5 repository inventory confirmed manual route composition, request-scoped sync sessions, per-path transaction ownership, heterogeneous HTTP contracts and one custom application exception handler.
+- Package 5 link/source-path, absolute-path and sensitive-pattern checks passed before commit review.
+- Package 5 combined API run: 48 passed, 1 skipped, 5 failed; all five failures cascade from the wall-clock-dependent generic booking fixture crossing its 23:59 schedule boundary. Runtime rejection is consistent with Scheduling canon; no code was changed.
+- Package 5 API/auth/public/admin run excluding the nondeterministic generic booking suite: 46 passed, 1 skipped; deprecation/SSL warnings only.
 
 ## Known cross-package risks
 
@@ -57,5 +64,5 @@ non_canonical: true
 
 - Branch: `main`
 - Remote state at start: synchronized with `origin/main`
-- Remote checkpoint includes Package 3 commit `de8af2b`; Package 4 Knowledge is pending its documentation commit.
+- Remote checkpoint includes Package 3 commit `de8af2b`; local Package 4 commit `decdd29` and Package 5 Knowledge await the next checkpoint push.
 - Push policy: after at least three completed package commits, completion, or Stop Gate, provided fetch shows no divergence.
