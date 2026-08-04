@@ -15,6 +15,15 @@ non_canonical: true
 
 ## Required owner follow-up
 
+### Credential-like repository evidence remediation
+
+- **Evidence class:** repository evidence
+- **Validity:** UNKNOWN
+- **Sensitivity:** HIGH
+- **Sanitized source:** `frontend/src/components/YANDEX_API_SETUP.md`.
+- **Required action:** отдельный security remediation с authorized credential owner; Knowledge track не читает, не копирует и не проверяет значение.
+- **Owner decision 2026-08-04:** не считать literal ни действующим, ни отозванным без доказательств; продолжить независимые Knowledge packages.
+
 ### Separate authorization remediation
 
 - **Статус:** required after завершения или контролируемой остановки Knowledge track; не выполняется в текущей documentation mission.

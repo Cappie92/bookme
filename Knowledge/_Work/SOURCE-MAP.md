@@ -18,8 +18,8 @@ non_canonical: true
 | Subscriptions billing | subscription/payment/balance routers, services, utils and models | billing suites | Existing billing docs | `Domain/subscriptions-billing/`, `Contracts/payments-robokassa.md`, `Debt/subscriptions-billing.md` | 2026-08-04 |
 | Production topology | production Compose, Dockerfiles, frontend Nginx, backend startup/settings | Configuration-adjacent tests where applicable | Production runbooks are supporting only | `Infrastructure/production-topology.md` | 2026-08-04 |
 | Data and migrations | database/settings, models, Alembic env/versions, workflow migration path | Migration/schema tests where present | Migration runbooks are supporting only | `Architecture/data-and-migrations.md` | 2026-08-04 |
-| Identity/privacy | auth/admin/moderator routers, token/OAuth/storage clients, privacy manifests | auth/role/deletion tests | Privacy/store reports | Package 2 | planned |
-| Flags/entitlements/jobs | settings, `GlobalSettings`, subscription feature utils, five service loops | flag/feature/job tests | Feature audits | Package 3 | planned |
+| Identity/privacy | auth/admin/moderator routers, token/OAuth/storage clients, account deletion, privacy manifests | auth/role/deletion tests | Privacy/store reports; credential-like values never copied | Package 2 — `Domain/identity-access.md`, `Domain/privacy-data-handling.md`, `Contracts/identity-api.md`, `Debt/security-and-privacy.md` | 2026-08-04 |
+| Flags/entitlements/jobs | settings, `GlobalSettings`, subscription feature utils, five service loops | flag/feature/job tests | Feature audits | Package 3 | in progress |
 | CRM/loyalty/promo/finance | relevant models, routers, services and utils | domain-specific suites | Existing audits | Package 4 | planned |
 | Backend/API architecture | `backend/main.py`, routers/services/utils/schemas/errors | API and transaction tests | Architecture docs | Package 5 | planned |
 | Web/mobile architecture | client routes, stores, API clients, config/build manifests | frontend/mobile tests | Release and platform docs as supporting evidence | Package 6 | planned |

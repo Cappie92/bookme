@@ -9,10 +9,11 @@ non_canonical: true
 
 ## Current package
 
-- **Package 2:** Identity, Authorization and Privacy
+- **Package 3:** Feature flags, Entitlements and Background Jobs
 - **State:** `in_progress`
 - **Current phase:** inventory
-- **Next autonomous step:** map auth/account/role/OAuth/token storage/deletion/privacy runtime and tests; retain the Package 1 authorization issue as sanitized Debt, not intended policy.
+- **Owner rule retained:** credential-like literal is repository evidence, `validity: UNKNOWN`, `sensitivity: HIGH`; separate remediation required. It does not block unrelated canon and is never copied or externally tested.
+- **Next autonomous step:** map env/DB/client flags, subscription entitlements and repository-known background loops, then separate configuration, contracts, job lifecycle and Debt.
 
 ## Completed foundations
 
@@ -20,7 +21,8 @@ non_canonical: true
 |---------|--------|--------|
 | Living canon governance | `0d5a191` | Knowledge classification, source priority, confidence and security rules |
 | Production topology and data lifecycle | `04795e3` | Repository-known topology plus data/migrations ownership |
-| Package 1 — Booking and Scheduling | pending commit | Booking lifecycle, completion side effects, scheduling, API contract, sanitized critical authorization debt |
+| Package 1 — Booking and Scheduling | `c89d1fe` | Booking lifecycle, completion side effects, scheduling, API contract, sanitized critical authorization debt |
+| Package 2 — Identity, Authorization and Privacy | pending commit | Account/OAuth/session/enforcement/privacy canon and sanitized security/privacy Debt |
 
 ## Last verification
 
@@ -30,6 +32,9 @@ non_canonical: true
 - Mandatory existing Knowledge was read in full before Package 1 inventory.
 - Package 1 link/source-path and sensitive-pattern checks passed.
 - Package 1 targeted tests: 62 passed (`booking_factory`, effective status, confirmation, loyalty reserve/finalize, schedule day, public master/price/loyalty); deprecation warnings only.
+- Package 2 credential-like evidence classified as `validity: UNKNOWN`; no value read/copy, active security test or provider request.
+- Package 2 link/source-path, absolute-path and sensitive-pattern checks passed.
+- Package 2 existing local tests: 60 passed (`auth`, Yandex OAuth, pending contact changes, account deletion); deprecation/SSL warnings only.
 
 ## Known cross-package risks
 
@@ -43,5 +48,5 @@ non_canonical: true
 
 - Branch: `main`
 - Remote state at start: synchronized with `origin/main`
-- Uncommitted work: Package 1 Knowledge package pending its documentation commit.
+- Remote checkpoint includes `c89d1fe` (Package 1). Uncommitted work: Package 2 Knowledge pending its documentation commit.
 - Push policy: after at least three completed package commits, completion, or Stop Gate, provided fetch shows no divergence.

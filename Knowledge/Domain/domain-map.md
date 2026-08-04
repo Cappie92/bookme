@@ -12,6 +12,8 @@ project: DeDato
 Связанные каноны:
 
 - [роли и бизнес-модель](product-roles-business-model.md)
+- [Identity and access](identity-access.md)
+- [Privacy and data handling](privacy-data-handling.md)
 - [Booking](booking/README.md)
 - [Scheduling](scheduling/README.md)
 - [subscriptions-billing](subscriptions-billing/README.md)
@@ -42,6 +44,8 @@ project: DeDato
 
 ### Границы
 Не владеет профилем мастера/салона, бронями, тарифами, лояльностью клиента.
+
+Фактические registration/session/verification/authorization boundaries и подтверждённый critical Debt описаны в [Identity and access](identity-access.md). Privacy lifecycle и third-party data flows принадлежат [Privacy and data handling](privacy-data-handling.md); они не дублируются в Identity.
 
 ---
 
