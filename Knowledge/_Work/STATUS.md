@@ -9,11 +9,11 @@ non_canonical: true
 
 ## Current package
 
-- **Package 3:** Feature flags, Entitlements and Background Jobs
+- **Package 4:** Client CRM, Loyalty, Promo and Finance
 - **State:** `in_progress`
 - **Current phase:** inventory
 - **Owner rule retained:** credential-like literal is repository evidence, `validity: UNKNOWN`, `sensitivity: HIGH`; separate remediation required. It does not block unrelated canon and is never copied or externally tested.
-- **Next autonomous step:** map env/DB/client flags, subscription entitlements and repository-known background loops, then separate configuration, contracts, job lifecycle and Debt.
+- **Next autonomous step:** separate CRM ownership, loyalty ledger, promo rewards and operational finance from Booking outcomes and SaaS subscription billing.
 
 ## Completed foundations
 
@@ -22,7 +22,8 @@ non_canonical: true
 | Living canon governance | `0d5a191` | Knowledge classification, source priority, confidence and security rules |
 | Production topology and data lifecycle | `04795e3` | Repository-known topology plus data/migrations ownership |
 | Package 1 — Booking and Scheduling | `c89d1fe` | Booking lifecycle, completion side effects, scheduling, API contract, sanitized critical authorization debt |
-| Package 2 — Identity, Authorization and Privacy | pending commit | Account/OAuth/session/enforcement/privacy canon and sanitized security/privacy Debt |
+| Package 2 — Identity, Authorization and Privacy | `f37db77` | Account/OAuth/session/enforcement/privacy canon and sanitized security/privacy Debt |
+| Package 3 — Feature flags, Entitlements and Background Jobs | pending commit | Configuration precedence, entitlement enforcement, five in-process jobs and confirmed Debt |
 
 ## Last verification
 
@@ -35,6 +36,9 @@ non_canonical: true
 - Package 2 credential-like evidence classified as `validity: UNKNOWN`; no value read/copy, active security test or provider request.
 - Package 2 link/source-path, absolute-path and sensitive-pattern checks passed.
 - Package 2 existing local tests: 60 passed (`auth`, Yandex OAuth, pending contact changes, account deletion); deprecation/SSL warnings only.
+- Package 3 link/source-path and sensitive-pattern checks passed before commit review.
+- Package 3 backend tests: 52 passed, 2 skipped (features, effective subscription, admin catalog, guards, flags, daily charges, payment cleanup); deprecation/SSL warnings only.
+- Package 3 mobile env unit test unavailable because local JS dependencies are not installed (`jest` executable absent); no dependency installation attempted.
 
 ## Known cross-package risks
 
@@ -48,5 +52,5 @@ non_canonical: true
 
 - Branch: `main`
 - Remote state at start: synchronized with `origin/main`
-- Remote checkpoint includes `c89d1fe` (Package 1). Uncommitted work: Package 2 Knowledge pending its documentation commit.
+- Remote checkpoint includes `c89d1fe` (Package 1). Local `main` includes Package 2 and has Package 3 Knowledge pending its documentation commit.
 - Push policy: after at least three completed package commits, completion, or Stop Gate, provided fetch shows no divergence.

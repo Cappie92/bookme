@@ -15,6 +15,16 @@ non_canonical: true
 
 ## Required owner follow-up
 
+### Entitlement authority remediation
+
+- **Evidence:** paid capability enforcement, aggregate response and catalog activation are not one contract; confirmed gaps are in `Knowledge/Debt/feature-entitlements-and-jobs.md`.
+- **Required action:** product/backend owners define server enforcement for each capability and a stable service-function identity/revocation model in a separate code/test track.
+
+### Background execution ownership
+
+- **Evidence:** five jobs are process-local; recurring expenses lack catch-up/DB idempotency and daily charges lack DB uniqueness.
+- **Required action:** billing/finance/infrastructure owners choose single-run ownership, timezone, durable idempotency and health/alert semantics before multi-process scaling.
+
 ### Credential-like repository evidence remediation
 
 - **Evidence class:** repository evidence

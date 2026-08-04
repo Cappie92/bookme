@@ -7,6 +7,8 @@
 - [money-flows.md](money-flows.md) — сценарии
 - [invariants.md](invariants.md) — инварианты
 - [../../Contracts/payments-robokassa.md](../../Contracts/payments-robokassa.md) — контракт Robokassa
+- [../../Contracts/feature-entitlements.md](../../Contracts/feature-entitlements.md) — effective subscription и capability enforcement
+- [../../Architecture/background-jobs.md](../../Architecture/background-jobs.md) — lifecycle daily charge и cleanup jobs
 - [../../Debt/subscriptions-billing.md](../../Debt/subscriptions-billing.md) — ограничения и долг
 
 ## 1. Назначение
@@ -145,7 +147,7 @@ Source:
 
 ## 9. Effective subscription и entitlements
 
-`check_feature_access(db, user_id, feature_key, …)` читает effective subscription и `SubscriptionPlan.features`.
+`check_feature_access(db, user_id, feature_key, …)` читает effective subscription и `SubscriptionPlan.features`. Полный mapping, fallback и endpoint enforcement принадлежат [feature entitlements contract](../../Contracts/feature-entitlements.md).
 
 На read-path при отсутствии подписки и флаге `User.is_always_free` может **создаться** подписка AlwaysFree (side effect). См. [Debt](../../Debt/subscriptions-billing.md).
 

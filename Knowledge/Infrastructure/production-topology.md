@@ -151,4 +151,6 @@ Shutdown handler отменяет эти tasks. Отдельный scheduler ser
 ## Related documents
 
 - [Data and migrations](../Architecture/data-and-migrations.md) — production database identity, schema lifecycle and Alembic.
+- [Configuration and feature flags](configuration.md) — process/build/DB configuration layers and precedence.
+- [Background jobs](../Architecture/background-jobs.md) — cadence, side effects and reliability of the five in-process tasks.
 - [Debt — subscriptions billing](../Debt/subscriptions-billing.md) — billing-specific failure scenarios and reliability constraints.
