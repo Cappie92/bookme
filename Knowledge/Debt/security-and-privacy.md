@@ -24,6 +24,16 @@ Repository-known security/privacy debt. Документ не содержит c
 - **Validity evidence:** подтверждение действительности отсутствует; literal нельзя считать ни действующим, ни отозванным.
 - **Required action:** separate security remediation; Knowledge track не копирует и не проверяет значение.
 
+## Credential-like literal in tracked mobile analytics configuration
+
+- **Evidence class:** repository evidence
+- **Sensitivity:** HIGH
+- **Type:** credential-like literal in mobile analytics configuration
+- **Validity:** UNKNOWN
+- **Location:** `mobile/src/services/analytics/apiKey.ts`
+- **Validity evidence:** подтверждение действительности отсутствует; literal нельзя считать ни действующим, ни отозванным.
+- **Required action:** separate security remediation; Knowledge track не открывает, не копирует и не проверяет значение.
+
 ## Critical: privileged role assignment at registration
 
 - **Severity:** `critical`

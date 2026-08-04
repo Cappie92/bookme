@@ -9,11 +9,11 @@ non_canonical: true
 
 ## Current package
 
-- **Package 5:** Backend and API Architecture
+- **Package 6:** Mobile and Web Architecture
 - **State:** `completed`
-- **Current phase:** verification and package commit
+- **Current phase:** package commit
 - **Owner rule retained:** credential-like literal is repository evidence, `validity: UNKNOWN`, `sensitivity: HIGH`; separate remediation required. It does not block unrelated canon and is never copied or externally tested.
-- **Next autonomous step:** verify Package 5 links/sources/tests, commit it independently, push the Package 4–5 checkpoint, then begin Package 6 web/mobile architecture.
+- **Next autonomous step:** complete Package 6 verification, commit it independently, then begin Package 7 testing/CI/local-development/onboarding inventory.
 
 ## Completed foundations
 
@@ -25,7 +25,8 @@ non_canonical: true
 | Package 2 — Identity, Authorization and Privacy | `f37db77` | Account/OAuth/session/enforcement/privacy canon and sanitized security/privacy Debt |
 | Package 3 — Feature flags, Entitlements and Background Jobs | `de8af2b` | Configuration precedence, entitlement enforcement, five in-process jobs and confirmed Debt |
 | Package 4 — Client CRM, Loyalty, Promo and Finance | `decdd29` | CRM ownership, client points, Promo Engine/legacy boundary, dual operational accounting and confirmed Debt |
-| Package 5 — Backend and API Architecture | pending commit | FastAPI composition, request/session/transaction lifecycle, HTTP conventions and confirmed Debt |
+| Package 5 — Backend and API Architecture | `6b79e55` | FastAPI composition, request/session/transaction lifecycle, HTTP conventions and confirmed Debt |
+| Package 6 — Mobile and Web Architecture | pending commit | Web/mobile composition, routes, config, shared code, public/deep links, payment return and client-platform Debt |
 
 ## Last verification
 
@@ -51,6 +52,13 @@ non_canonical: true
 - Package 5 link/source-path, absolute-path and sensitive-pattern checks passed before commit review.
 - Package 5 combined API run: 48 passed, 1 skipped, 5 failed; all five failures cascade from the wall-clock-dependent generic booking fixture crossing its 23:59 schedule boundary. Runtime rejection is consistent with Scheduling canon; no code was changed.
 - Package 5 API/auth/public/admin run excluding the nondeterministic generic booking suite: 46 passed, 1 skipped; deprecation/SSL warnings only.
+- Package 4–5 checkpoint was pushed; local `main` and `origin/main` synchronized at `6b79e55` before Package 6 inventory.
+- Package 6 inventory confirmed the web lazy SPA/same-origin proxy model, mobile role-separated Expo route groups, runtime/native deep-link layers, backend-confirmed payment return and narrow repository `shared/` boundary.
+- Additional tracked `mobile/src/services/analytics/apiKey.ts` credential-like literal classified by path-only evidence as repository evidence, `validity: UNKNOWN`, `sensitivity: HIGH`; value was not opened, copied or externally tested.
+- Package 6 Markdown links, source paths, absolute-path and sensitive/long-literal checks passed; `git diff --check` passed.
+- Package 6 backend payment/public-return tests: 21 passed (`payment_public_status`, `payment_source`, `payment_public_id`); deprecation/SSL warnings only.
+- Package 6 pure web payment-query/state/source/application helpers passed direct Node runtime assertions.
+- Frontend Vitest and mobile Jest suites were unavailable because local `node_modules` are absent; no dependency installation was attempted.
 
 ## Known cross-package risks
 
@@ -64,5 +72,5 @@ non_canonical: true
 
 - Branch: `main`
 - Remote state at start: synchronized with `origin/main`
-- Remote checkpoint includes Package 3 commit `de8af2b`; local Package 4 commit `decdd29` and Package 5 Knowledge await the next checkpoint push.
+- Local `main` and `origin/main` were synchronized at Package 5 commit `6b79e55` before Package 6 changes.
 - Push policy: after at least three completed package commits, completion, or Stop Gate, provided fetch shows no divergence.

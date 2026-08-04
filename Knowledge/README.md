@@ -90,15 +90,19 @@
 - [Contracts/identity-api.md](Contracts/identity-api.md) — register/login/verification/OAuth/session contract
 - [Contracts/feature-entitlements.md](Contracts/feature-entitlements.md) — effective subscription, capability mapping и backend enforcement
 - [Contracts/api-conventions.md](Contracts/api-conventions.md) — cross-domain HTTP, validation, auth/error и compatibility contract
+- [Contracts/client-links-and-payment-return.md](Contracts/client-links-and-payment-return.md) — web/mobile public links, deep links и payment return contract
 - [Contracts/payments-robokassa.md](Contracts/payments-robokassa.md) — контракт внешней оплаты подписки
 - [Debt/booking-scheduling.md](Debt/booking-scheduling.md) — подтверждённые ограничения Booking/Scheduling, включая sanitized critical authorization debt
 - [Debt/security-and-privacy.md](Debt/security-and-privacy.md) — sanitized repository-known security/privacy debt
 - [Debt/feature-entitlements-and-jobs.md](Debt/feature-entitlements-and-jobs.md) — flag/entitlement drift и reliability фоновых loops
 - [Debt/client-crm-loyalty-promo-finance.md](Debt/client-crm-loyalty-promo-finance.md) — CRM/Loyalty/Promo/Finance failure boundaries
 - [Debt/backend-api.md](Debt/backend-api.md) — backend composition, transaction и HTTP contract drift
+- [Debt/client-platforms.md](Debt/client-platforms.md) — web/mobile transport, navigation, build/link и diagnostic drift
 - [Debt/subscriptions-billing.md](Debt/subscriptions-billing.md) — подтверждённые ограничения billing-контура
 - [Infrastructure/production-topology.md](Infrastructure/production-topology.md) — repository-known production-топология и внешние границы
 - [Infrastructure/configuration.md](Infrastructure/configuration.md) — env/DB/build configuration layers и precedence
 - [Architecture/data-and-migrations.md](Architecture/data-and-migrations.md) — production database и lifecycle схемы данных
 - [Architecture/background-jobs.md](Architecture/background-jobs.md) — lifecycle, cadence и reliability пяти in-process jobs
 - [Architecture/backend.md](Architecture/backend.md) — FastAPI composition, request/session lifecycle и runtime boundaries
+- [Architecture/web.md](Architecture/web.md) — React SPA composition, routes, data access и delivery boundaries
+- [Architecture/mobile.md](Architecture/mobile.md) — Expo Router composition, API/config, deep links и mobile runtime boundaries

@@ -30,7 +30,7 @@ non_canonical: true
 - **Evidence class:** repository evidence
 - **Validity:** UNKNOWN
 - **Sensitivity:** HIGH
-- **Sanitized sources:** `frontend/src/components/YANDEX_API_SETUP.md`; `docker-compose.yml`.
+- **Sanitized sources:** `frontend/src/components/YANDEX_API_SETUP.md`; `docker-compose.yml`; `mobile/src/services/analytics/apiKey.ts`.
 - **Required action:** отдельный security remediation с authorized credential owner; Knowledge track не читает, не копирует и не проверяет значение.
 - **Owner decision 2026-08-04:** не считать literal ни действующим, ни отозванным без доказательств; продолжить независимые Knowledge packages.
 
