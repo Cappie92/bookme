@@ -77,8 +77,12 @@
 
 - [Domain/product-roles-business-model.md](Domain/product-roles-business-model.md) — роли и бизнес-модель DeDato
 - [Domain/domain-map.md](Domain/domain-map.md) — карта бизнес-доменов DeDato
+- [Domain/booking](Domain/booking/README.md) — жизненный цикл Booking и completion side effects
+- [Domain/scheduling](Domain/scheduling/README.md) — расписание, слоты, timezone и конфликты
 - [Domain/subscriptions-billing](Domain/subscriptions-billing/README.md) — SaaS-оплата подписки мастера
+- [Contracts/booking-api.md](Contracts/booking-api.md) — route families и межклиентский контракт Booking
 - [Contracts/payments-robokassa.md](Contracts/payments-robokassa.md) — контракт внешней оплаты подписки
+- [Debt/booking-scheduling.md](Debt/booking-scheduling.md) — подтверждённые ограничения Booking/Scheduling, включая sanitized critical authorization debt
 - [Debt/subscriptions-billing.md](Debt/subscriptions-billing.md) — подтверждённые ограничения billing-контура
 - [Infrastructure/production-topology.md](Infrastructure/production-topology.md) — repository-known production-топология и внешние границы
 - [Architecture/data-and-migrations.md](Architecture/data-and-migrations.md) — production database и lifecycle схемы данных

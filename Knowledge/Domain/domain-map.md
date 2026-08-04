@@ -12,6 +12,8 @@ project: DeDato
 Связанные каноны:
 
 - [роли и бизнес-модель](product-roles-business-model.md)
+- [Booking](booking/README.md)
+- [Scheduling](scheduling/README.md)
 - [subscriptions-billing](subscriptions-billing/README.md)
 
 Уровни: **CONFIRMED** / **INFERRED** / **UNKNOWN**.
@@ -141,7 +143,7 @@ Profiles; Services (длительность); Booking (занятость пе�
 Кандидаты слотов для Public Profiles / Booking.
 
 ### Границы
-Не создаёт бронь; не владеет исходом визита.
+Не создаёт бронь; не владеет исходом визита. Детальный канон: [Scheduling](scheduling/README.md).
 
 ---
 
@@ -163,18 +165,16 @@ Profiles; Services (длительность); Booking (занятость пе�
 Identity/Profiles (стороны); Services; Scheduling (слот).
 
 ### Что публикует наружу
-Бизнес-факты записи для других доменов:
+Состояние записи и синхронно рассчитанные результаты для других доменов:
 
 - booking created;
 - booking cancelled;
 - booking completed;
 
-а также статус и операционный доход для Client CRM, Notifications, Analytics.
-
-Booking **не использует** Loyalty и не оркестрирует баллы/скидки.
+а также статус и операционный доход для Client CRM, Notifications, Analytics. В текущем runtime create/cancel/completion paths синхронно вызывают discount/loyalty reserve, release, spend и earn logic; publisher/event bus для этой связи не подтверждён.
 
 ### Границы
-Не SaaS-оплата тарифа DeDato; не правила и ledger лояльности.
+Не SaaS-оплата тарифа DeDato; не владеет правилами и ledger лояльности. Детальный канон: [Booking](booking/README.md) и [completion side effects](booking/completion-side-effects.md).
 
 ---
 
@@ -215,7 +215,7 @@ Identity; Profiles; Booking (история визитов как источни
 `LoyaltySettings`, `LoyaltyTransaction`, `LoyaltyDiscount`, personal discounts / applied discounts — CONFIRMED.
 
 ### Основные процессы
-Настройка скидок и баллов; реакция на факты Booking:
+Настройка скидок и баллов; синхронные вызовы из Booking paths:
 
 - при **created** — резерв выбранных баллов (если применимо);
 - при **cancelled** — освобождение резерва;
@@ -224,7 +224,7 @@ Identity; Profiles; Booking (история визитов как источни
 без дублей при повторной обработке того же outcome.
 
 ### Что получает извне
-Profiles (мастер); Identity (client_id, когда есть); **факты Booking** (created / cancelled / completed), без обратной зависимости Booking → Loyalty.
+Profiles (мастер); Identity (client_id, когда есть); Booking context и вызовы create / cancel / completion. Runtime dependency Booking → Loyalty существует на уровне orchestration; lifecycle Booking при этом остаётся во владельце Booking.
 
 ### Что публикует наружу
 Доступные/зарезервированные баллы; применённые скидки к расчёту визита; факт spend/earn.
@@ -428,9 +428,9 @@ Mobile Yandex Auth button может быть **скрыт** релизной к
 | Public Profiles | Profiles, Services, Scheduling |
 | Services | Profiles |
 | Scheduling | Profiles, Services, Booking |
-| Booking | Profiles, Services, Scheduling, Identity (когда сессия есть) |
+| Booking | Profiles, Services, Scheduling, Identity (когда сессия есть), Loyalty APIs/logic для скидки и synchronous side effects |
 | Client CRM | Identity, Profiles, Booking |
-| Loyalty | Profiles, Identity, Booking (факты created / cancelled / completed) |
+| Loyalty | Profiles, Identity, Booking context для reserve/release/spend/earn |
 | Billing | Identity, Profiles; готовые результаты Promo Engine |
 | Promo Engine | Identity |
 | Notifications | Booking, Identity, Profiles |
@@ -452,7 +452,7 @@ Public Profiles
   → Scheduling
   → (Identity — при необходимости auth)
   → Booking
-  → Loyalty          # реагирует на факты created / cancelled / completed
+  → Loyalty          # синхронный расчёт скидки/резерва из create path
   → Notifications    # по событиям записи
   → Analytics        # цели/события (если включены)
 ```
@@ -483,7 +483,7 @@ Identity
 
 ```text
 Booking (outcome / completed)
-  → Loyalty          # реакция на completed: spend резерва + earn
+  → Loyalty          # синхронный spend резерва + earn в finalize transaction path
   → Client CRM       # обновление истории взаимодействия
   → Notifications
 ```
