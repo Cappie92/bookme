@@ -80,3 +80,5 @@
 - [Domain/subscriptions-billing](Domain/subscriptions-billing/README.md) — SaaS-оплата подписки мастера
 - [Contracts/payments-robokassa.md](Contracts/payments-robokassa.md) — контракт внешней оплаты подписки
 - [Debt/subscriptions-billing.md](Debt/subscriptions-billing.md) — подтверждённые ограничения billing-контура
+- [Infrastructure/production-topology.md](Infrastructure/production-topology.md) — repository-known production-топология и внешние границы
+- [Architecture/data-and-migrations.md](Architecture/data-and-migrations.md) — production database и lifecycle схемы данных
