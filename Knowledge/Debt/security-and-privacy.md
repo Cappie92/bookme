@@ -34,6 +34,26 @@ Repository-known security/privacy debt. Документ не содержит c
 - **Validity evidence:** подтверждение действительности отсутствует; literal нельзя считать ни действующим, ни отозванным.
 - **Required action:** separate security remediation; Knowledge track не открывает, не копирует и не проверяет значение.
 
+## Credential-like literal in tracked backend test fixture
+
+- **Evidence class:** repository evidence
+- **Sensitivity:** HIGH
+- **Type:** credential-like literal in test authentication fixture
+- **Validity:** UNKNOWN
+- **Location:** `backend/tests/conftest.py`
+- **Validity evidence:** подтверждение действительности отсутствует; literal нельзя считать ни действующим, ни отозванным, ни безопасным примером.
+- **Required action:** separate security remediation; Knowledge track не повторяет и не проверяет значение.
+
+## Access-named tracked artifacts not inspected
+
+- **Evidence class:** repository evidence by path and file type; contents intentionally not inspected
+- **Sensitivity:** HIGH
+- **Type:** credential-like/access material candidates
+- **Validity:** UNKNOWN
+- **Locations:** `TOKEN_SETTINGS.md`; `backend/test_system_access.csv`; `backend/test_system_access.xlsx`; `users_from_access.csv`; `ДОСТУПЫ!.xlsx`; `ДОСТУПЫ!_upd.csv`.
+- **Validity evidence:** подтверждение наличия или действительности credentials отсутствует; файлы нельзя считать ни безопасными fixtures, ни retired material без отдельной проверки.
+- **Required action:** authorized security/data owner performs separate inventory, containment and remediation without copying values into Knowledge.
+
 ## Critical: privileged role assignment at registration
 
 - **Severity:** `critical`

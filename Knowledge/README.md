@@ -98,6 +98,7 @@
 - [Debt/client-crm-loyalty-promo-finance.md](Debt/client-crm-loyalty-promo-finance.md) — CRM/Loyalty/Promo/Finance failure boundaries
 - [Debt/backend-api.md](Debt/backend-api.md) — backend composition, transaction и HTTP contract drift
 - [Debt/client-platforms.md](Debt/client-platforms.md) — web/mobile transport, navigation, build/link и diagnostic drift
+- [Debt/testing-delivery-onboarding.md](Debt/testing-delivery-onboarding.md) — test discovery, CI/deploy gates и onboarding drift
 - [Debt/subscriptions-billing.md](Debt/subscriptions-billing.md) — подтверждённые ограничения billing-контура
 - [Infrastructure/production-topology.md](Infrastructure/production-topology.md) — repository-known production-топология и внешние границы
 - [Infrastructure/configuration.md](Infrastructure/configuration.md) — env/DB/build configuration layers и precedence
@@ -106,3 +107,7 @@
 - [Architecture/backend.md](Architecture/backend.md) — FastAPI composition, request/session lifecycle и runtime boundaries
 - [Architecture/web.md](Architecture/web.md) — React SPA composition, routes, data access и delivery boundaries
 - [Architecture/mobile.md](Architecture/mobile.md) — Expo Router composition, API/config, deep links и mobile runtime boundaries
+- [Operations/testing-strategy.md](Operations/testing-strategy.md) — исполняемые backend/web/mobile test tiers и границы гарантий
+- [Operations/ci-cd.md](Operations/ci-cd.md) — repository-known GitHub Actions, docs automation и deployment gates
+- [Operations/local-development.md](Operations/local-development.md) — безопасный package-local bootstrap и local-only validation
+- [Onboarding/README.md](Onboarding/README.md) — безопасный маршрут нового участника к канону и проверкам

@@ -9,11 +9,11 @@ non_canonical: true
 
 ## Current package
 
-- **Package 6:** Mobile and Web Architecture
+- **Package 7:** Testing, CI/CD, Local Development and Onboarding
 - **State:** `completed`
-- **Current phase:** package commit
+- **Current phase:** completion checkpoint
 - **Owner rule retained:** credential-like literal is repository evidence, `validity: UNKNOWN`, `sensitivity: HIGH`; separate remediation required. It does not block unrelated canon and is never copied or externally tested.
-- **Next autonomous step:** complete Package 6 verification, commit it independently, then begin Package 7 testing/CI/local-development/onboarding inventory.
+- **Next autonomous step:** run final integrity/divergence review and push the completed Package 6–7 checkpoint; after synchronization this Knowledge roadmap is complete.
 
 ## Completed foundations
 
@@ -26,7 +26,8 @@ non_canonical: true
 | Package 3 — Feature flags, Entitlements and Background Jobs | `de8af2b` | Configuration precedence, entitlement enforcement, five in-process jobs and confirmed Debt |
 | Package 4 — Client CRM, Loyalty, Promo and Finance | `decdd29` | CRM ownership, client points, Promo Engine/legacy boundary, dual operational accounting and confirmed Debt |
 | Package 5 — Backend and API Architecture | `6b79e55` | FastAPI composition, request/session/transaction lifecycle, HTTP conventions and confirmed Debt |
-| Package 6 — Mobile and Web Architecture | pending commit | Web/mobile composition, routes, config, shared code, public/deep links, payment return and client-platform Debt |
+| Package 6 — Mobile and Web Architecture | `b839a62` | Web/mobile composition, routes, config, shared code, public/deep links, payment return and client-platform Debt |
+| Package 7 — Testing, CI/CD, Local Development and Onboarding | current package commit | Executable test tiers, workflow/deploy boundaries, safe local bootstrap, onboarding and confirmed Debt |
 
 ## Last verification
 
@@ -59,6 +60,13 @@ non_canonical: true
 - Package 6 backend payment/public-return tests: 21 passed (`payment_public_status`, `payment_source`, `payment_public_id`); deprecation/SSL warnings only.
 - Package 6 pure web payment-query/state/source/application helpers passed direct Node runtime assertions.
 - Frontend Vitest and mobile Jest suites were unavailable because local `node_modules` are absent; no dependency installation was attempted.
+- Package 6 commit `b839a62` created; working tree was clean before Package 7 inventory.
+- Package 7 inventory confirmed 89 canonical backend test modules/652 collected tests, 29 excluded top-level backend test files, 7 web unit modules, 8 Playwright specs, 48 mobile unit modules and 2 mobile integration modules.
+- Package 7 workflow inventory confirmed Docs/gitleaks-only PR automation, single-job remote deployment validation, no explicit Alembic deploy step and MkDocs exclusion of canonical `Knowledge/`.
+- Additional `backend/tests/conftest.py` credential-like literal and access-named tracked artifacts were classified sanitized as repository evidence, `validity: UNKNOWN`, `sensitivity: HIGH`; no validity/provider checks were performed.
+- Package 7 Markdown links, source paths, absolute-path and sensitive/long-literal checks passed; `git diff --check` passed.
+- Canonical backend collection: 652 tests collected without errors; deprecation/SSL warnings only.
+- Frontend/mobile JS suites and MkDocs build were unavailable because package/docs dependencies are absent. Maestro CLI is available, but native E2E was not run without a separately prepared local device/app/test dataset.
 
 ## Known cross-package risks
 
@@ -72,5 +80,5 @@ non_canonical: true
 
 - Branch: `main`
 - Remote state at start: synchronized with `origin/main`
-- Local `main` and `origin/main` were synchronized at Package 5 commit `6b79e55` before Package 6 changes.
+- Completion checkpoint consists of consecutive Package 6 and Package 7 Knowledge commits; synchronization is allowed only after fetch confirms no remote divergence.
 - Push policy: after at least three completed package commits, completion, or Stop Gate, provided fetch shows no divergence.
