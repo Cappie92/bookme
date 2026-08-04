@@ -79,6 +79,10 @@
 - [Domain/domain-map.md](Domain/domain-map.md) — карта бизнес-доменов DeDato
 - [Domain/identity-access.md](Domain/identity-access.md) — account, authentication и фактические authorization boundaries
 - [Domain/privacy-data-handling.md](Domain/privacy-data-handling.md) — personal-data lifecycle, analytics и third-party boundaries
+- [Domain/client-crm.md](Domain/client-crm.md) — клиентская база мастера, restrictions, notes и favorites
+- [Domain/loyalty.md](Domain/loyalty.md) — скидки, client points ledger и booking reservations
+- [Domain/promo.md](Domain/promo.md) — legacy promo activation и новый Promo Engine
+- [Domain/operational-finance.md](Domain/operational-finance.md) — доходы, расходы, налоги и параллельный legacy accounting
 - [Domain/booking](Domain/booking/README.md) — жизненный цикл Booking и completion side effects
 - [Domain/scheduling](Domain/scheduling/README.md) — расписание, слоты, timezone и конфликты
 - [Domain/subscriptions-billing](Domain/subscriptions-billing/README.md) — SaaS-оплата подписки мастера
@@ -89,6 +93,7 @@
 - [Debt/booking-scheduling.md](Debt/booking-scheduling.md) — подтверждённые ограничения Booking/Scheduling, включая sanitized critical authorization debt
 - [Debt/security-and-privacy.md](Debt/security-and-privacy.md) — sanitized repository-known security/privacy debt
 - [Debt/feature-entitlements-and-jobs.md](Debt/feature-entitlements-and-jobs.md) — flag/entitlement drift и reliability фоновых loops
+- [Debt/client-crm-loyalty-promo-finance.md](Debt/client-crm-loyalty-promo-finance.md) — CRM/Loyalty/Promo/Finance failure boundaries
 - [Debt/subscriptions-billing.md](Debt/subscriptions-billing.md) — подтверждённые ограничения billing-контура
 - [Infrastructure/production-topology.md](Infrastructure/production-topology.md) — repository-known production-топология и внешние границы
 - [Infrastructure/configuration.md](Infrastructure/configuration.md) — env/DB/build configuration layers и precedence

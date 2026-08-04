@@ -10,10 +10,10 @@ non_canonical: true
 ## Current package
 
 - **Package 4:** Client CRM, Loyalty, Promo and Finance
-- **State:** `in_progress`
-- **Current phase:** inventory
+- **State:** `completed`
+- **Current phase:** verification and package commit
 - **Owner rule retained:** credential-like literal is repository evidence, `validity: UNKNOWN`, `sensitivity: HIGH`; separate remediation required. It does not block unrelated canon and is never copied or externally tested.
-- **Next autonomous step:** separate CRM ownership, loyalty ledger, promo rewards and operational finance from Booking outcomes and SaaS subscription billing.
+- **Next autonomous step:** verify Package 4 links/sources/tests, commit it independently, then begin Package 5 backend/API architecture.
 
 ## Completed foundations
 
@@ -23,7 +23,8 @@ non_canonical: true
 | Production topology and data lifecycle | `04795e3` | Repository-known topology plus data/migrations ownership |
 | Package 1 — Booking and Scheduling | `c89d1fe` | Booking lifecycle, completion side effects, scheduling, API contract, sanitized critical authorization debt |
 | Package 2 — Identity, Authorization and Privacy | `f37db77` | Account/OAuth/session/enforcement/privacy canon and sanitized security/privacy Debt |
-| Package 3 — Feature flags, Entitlements and Background Jobs | pending commit | Configuration precedence, entitlement enforcement, five in-process jobs and confirmed Debt |
+| Package 3 — Feature flags, Entitlements and Background Jobs | `de8af2b` | Configuration precedence, entitlement enforcement, five in-process jobs and confirmed Debt |
+| Package 4 — Client CRM, Loyalty, Promo and Finance | pending commit | CRM ownership, client points, Promo Engine/legacy boundary, dual operational accounting and confirmed Debt |
 
 ## Last verification
 
@@ -39,6 +40,10 @@ non_canonical: true
 - Package 3 link/source-path and sensitive-pattern checks passed before commit review.
 - Package 3 backend tests: 52 passed, 2 skipped (features, effective subscription, admin catalog, guards, flags, daily charges, payment cleanup); deprecation/SSL warnings only.
 - Package 3 mobile env unit test unavailable because local JS dependencies are not installed (`jest` executable absent); no dependency installation attempted.
+- Package 3 commit `de8af2b` was pushed; local `main` and `origin/main` were synchronized before Package 4 inventory.
+- Package 4 repository inventory separated client loyalty from subscription points and operational finance from SaaS billing.
+- Package 4 link/source-path, absolute-path and sensitive-pattern checks passed before commit review.
+- Package 4 targeted backend tests: 147 passed (CRM clients/restrictions, loyalty discounts/reserve, Promo Engine/admin and accounting); deprecation/SSL warnings only. Production smoke script was intentionally not run.
 
 ## Known cross-package risks
 
@@ -52,5 +57,5 @@ non_canonical: true
 
 - Branch: `main`
 - Remote state at start: synchronized with `origin/main`
-- Remote checkpoint includes `c89d1fe` (Package 1). Local `main` includes Package 2 and has Package 3 Knowledge pending its documentation commit.
+- Remote checkpoint includes Package 3 commit `de8af2b`; Package 4 Knowledge is pending its documentation commit.
 - Push policy: after at least three completed package commits, completion, or Stop Gate, provided fetch shows no divergence.

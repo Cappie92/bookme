@@ -14,6 +14,10 @@ project: DeDato
 - [роли и бизнес-модель](product-roles-business-model.md)
 - [Identity and access](identity-access.md)
 - [Privacy and data handling](privacy-data-handling.md)
+- [Client CRM](client-crm.md)
+- [Client Loyalty](loyalty.md)
+- [Promo](promo.md)
+- [Operational Finance](operational-finance.md)
 - [Booking](booking/README.md)
 - [Scheduling](scheduling/README.md)
 - [subscriptions-billing](subscriptions-billing/README.md)
@@ -203,7 +207,7 @@ Identity; Profiles; Booking (история визитов как источни
 Контекст клиента для UI мастера и ограничений записи (где применяется).
 
 ### Границы
-Не лояльность (баллы/скидки — отдельный домен); не публичная витрина.
+Не лояльность (баллы/скидки — отдельный домен); не публичная витрина. Детальный канон: [Client CRM](client-crm.md).
 
 ---
 
@@ -234,7 +238,7 @@ Profiles (мастер); Identity (client_id, когда есть); Booking cont
 Доступные/зарезервированные баллы; применённые скидки к расчёту визита; факт spend/earn.
 
 ### Границы
-Не subscription points SaaS; не Robokassa; не CRM-заметки; не владеет жизненным циклом брони.
+Не subscription points SaaS; не Robokassa; не CRM-заметки; не владеет жизненным циклом брони. Детальный канон: [Client Loyalty](loyalty.md).
 
 ---
 
@@ -286,7 +290,29 @@ Identity (кто активирует).
 Результаты промо: grants / subscription points / иные награды в рамках поддерживаемых типов — потребляются Billing как готовые артефакты.
 
 ### Границы
-Не loyalty-скидки мастера клиенту (другой контур); не сам apply подписки и не внутренняя логика split/оплаты.
+Не loyalty-скидки мастера клиенту (другой контур); не сам apply подписки и не внутренняя логика split/оплаты. Детальный канон, включая два mounted promo-контура: [Promo](promo.md).
+
+---
+
+## Operational Finance
+
+### Назначение
+Операционный учёт подтверждённого/ожидаемого дохода, расходов, налогов и упущенной выручки мастера или салона.
+
+### Владелец данных
+Canonical master accounting использует `BookingConfirmation`, `MasterExpense` и `TaxRate`; legacy salon/indie accounting использует отдельные `Expense`, `Income`, `MissedRevenue` и связанные types/templates — CONFIRMED.
+
+### Основные процессы
+Post-visit confirmation; отчёты и export; CRUD расходов; выбор налоговой ставки по дате; legacy salon/indie finance routes; process-local materialization recurring expenses.
+
+### Что получает извне
+Booking completion и payment amount; Services для service-based expenses; Identity/Profile owner context; Loyalty points для real-money interpretation.
+
+### Что публикует наружу
+Operational income/expense views и derived totals для кабинета мастера/салона.
+
+### Границы
+Не SaaS Billing, UserBalance или Robokassa. Два accounting stores не считаются единым ledger без repository reconciliation. Детальный канон: [Operational Finance](operational-finance.md).
 
 ---
 
