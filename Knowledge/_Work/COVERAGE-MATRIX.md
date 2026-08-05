@@ -50,7 +50,7 @@ Coverage measures whether a significant runtime aspect has a clear Knowledge own
 | Mobile analytics and diagnostics | Mobile architecture, Privacy and client Debt | FULL | Analytics providers, pending-payment telemetry and debug modules | Delivery is explicitly best effort |
 | Mobile build/env profiles | `Infrastructure/configuration.md`; `Architecture/mobile.md` | FULL | EAS profiles, dynamic config and env resolver | Actual store build remains unknown |
 | Mobile notification UI/feed | Mobile architecture and client Debt | MENTIONED_ONLY | Hook uses `notificationsMock` | No real feed/delivery/read-state owner exists |
-| Mobile welcome/pricing fallback data | None | NONE | Local pricing data and catalog mapping under `mobile/src/data` and `mobile/src/utils` | No owner for fallback-versus-server pricing truth |
+| Mobile welcome/pricing fallback data | `Architecture/mobile.md` | FULL | Public catalog, local error/display fallback, discarded welcome selection and backend authority boundary | Product/test drift remains open as RC-010 |
 | Docker/Compose topology and persistence | `Infrastructure/production-topology.md`; data canon | FULL | Production Dockerfiles, Nginx and Compose | Host state remains unknown by design |
 | GitHub workflow semantics | `Operations/ci-cd.md`; `Operations/deployment-artifact-inventory.md` | FULL | Four root workflow files; production artifact inventory | None; external run history and required-check state remain unknown by design |
 | Production migration helper | `Architecture/data-and-migrations.md`; `Operations/deployment-artifact-inventory.md` | FULL | `scripts/prod/migrate.sh`; deploy workflow | Host execution and schema readiness remain unknown by design |
@@ -63,10 +63,10 @@ Coverage measures whether a significant runtime aspect has a clear Knowledge own
 
 | Coverage | Count |
 |---|---:|
-| FULL | 33 |
+| FULL | 34 |
 | PARTIAL | 10 |
 | MENTIONED_ONLY | 1 |
-| NONE | 1 |
+| NONE | 0 |
 | MULTIPLE_OWNERS | 1 |
 
 The `NONE` rows are grouped aspects, not a demand for one document per file.

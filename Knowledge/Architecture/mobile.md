@@ -2,7 +2,7 @@
 type: Knowledge
 status: active
 project: DeDato
-last_runtime_check: 2026-08-04
+last_runtime_check: 2026-08-05
 ---
 
 # Mobile architecture
@@ -58,6 +58,16 @@ Native association determines whether OS delivers an HTTPS link; parser trust de
 Subscription checkout initializes payment with `payment_source=mobile_app`, opens the returned browser URL and persists a minimal pending payment record when a public id exists. On subscriptions screen mount, explicit user confirmation and every app return to active state, mobile asks backend public status again. Success/revenue analytics use separate persisted at-most-once-attempt claims; this is best-effort telemetry, not payment or entitlement authority.
 
 **Sources:** `mobile/src/components/subscriptions/SubscriptionPurchaseModal.tsx`; `mobile/app/(master)/subscriptions/index.tsx`; `mobile/src/services/api/payments.ts`; `mobile/src/services/analytics/pendingSubscriptionPayment.ts`; `mobile/src/services/analytics/verifyPendingSubscriptionPayment.ts`.
+
+## Welcome pricing display fallback
+
+Unauthenticated welcome запрашивает публичный backend pricing catalog. Непустой успешный ответ преобразуется в API-mapped display plans; при request error или пустом mapped catalog hook переключается на локальный набор welcome plans. Этот fallback компилируется в приложение и является production error/display behavior, а не mock. UI явно показывает сообщение о fallback-режиме.
+
+Локальный набор независимо хранит display names, package prices, feature/limit text и marketing copy, поэтому может устареть относительно backend catalog. Mobile при ошибке продолжает показывать эти plan cards, тогда как web public Pricing сообщает об ошибке и не показывает cards. Независимый mobile catalog и эта web/mobile divergence являются подтверждённым `P1` client-display drift (`RC-010`), но не финансовой или entitlement authority.
+
+Выбор plan/period на welcome не переносится в authenticated purchase: CTA открывает регистрацию без fallback plan ID, периода или цены. После authentication purchase modal повторно загружает backend plans, а фактическую сумму определяют backend calculation и `SubscriptionPriceSnapshot`; денежный lifecycle принадлежит [Subscriptions billing](../Domain/subscriptions-billing/README.md). Effective access определяется backend subscription/plan и guards, а не welcome feature list; authority описана в [Feature entitlements](../Contracts/feature-entitlements.md).
+
+**Sources:** `mobile/src/data/welcomePricingData.ts` — local plans, notice and default selection; `mobile/src/hooks/useWelcomePricingCatalog.ts` — API/empty/error decision; `mobile/src/utils/welcomePricingMapper.ts` — catalog projection; `mobile/src/components/welcome/WelcomePricingModal.tsx` — registration navigation; `mobile/src/components/subscriptions/SubscriptionPurchaseModal.tsx` — authenticated plan reload and calculate handoff; `backend/routers/subscription_plans_public.py` — pricing catalog; `backend/routers/subscriptions.py` — `calculate_subscription_cost` and price snapshot; [Subscriptions billing](../Domain/subscriptions-billing/README.md); [Feature entitlements](../Contracts/feature-entitlements.md).
 
 ## Shared code
 
