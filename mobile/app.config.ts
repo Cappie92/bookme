@@ -75,6 +75,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       buildNumber: '2',
       associatedDomains,
       infoPlist: {
+        UIViewControllerBasedStatusBarAppearance: true,
         NSAppTransportSecurity: {
           NSAllowsLocalNetworking: true,
         },
