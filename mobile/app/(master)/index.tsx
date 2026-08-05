@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import { View, Text, StyleSheet, ActivityIndicator, ScrollView, TouchableOpacity, Alert, RefreshControl } from 'react-native';
-import { StatusBar } from 'expo-status-bar';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTabBarHeight } from '@src/contexts/TabBarHeightContext';
 import { BOTTOM_NAV_CONTENT_FALLBACK_HEIGHT } from '@src/constants/bottomNavLayout';
@@ -435,7 +434,6 @@ export default function HomeScreen() {
   if (loading) {
     return (
       <SafeAreaView style={styles.safeAreaContainer} edges={['top', 'left', 'right']}>
-        <StatusBar style="auto" />
         <View style={styles.centerContainer}>
           <ActivityIndicator size="large" color="#4CAF50" />
           <Text style={styles.loadingText}>Загрузка...</Text>
@@ -449,7 +447,6 @@ export default function HomeScreen() {
 
   return (
     <SafeAreaView style={styles.safeAreaContainer} edges={['top', 'left', 'right']}>
-      <StatusBar style="auto" />
       {inlineSuccess ? (
         <View style={[styles.inlineToast, { bottom: scrollViewPaddingBottom + 8 }]} pointerEvents="none">
           <Text style={styles.inlineToastText}>{inlineSuccess}</Text>
