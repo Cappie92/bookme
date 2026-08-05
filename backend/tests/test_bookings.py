@@ -216,9 +216,9 @@ def test_create_edit_request(client, auth_headers, test_service, test_master):
     assert data["status"] == "pending"
 
 
-def test_update_edit_request(client, master_headers, test_service, test_master):
+def test_update_edit_request(client, auth_headers, master_headers, test_service, test_master):
     booking_data = _booking_payload(test_service, test_master)
-    response = client.post("/api/bookings/", json=booking_data, headers=master_headers)
+    response = client.post("/api/bookings/", json=booking_data, headers=auth_headers)
     booking_id = response.json()["id"]
 
     edit_request_data = {
@@ -229,7 +229,7 @@ def test_update_edit_request(client, master_headers, test_service, test_master):
     response = client.post(
         f"/api/bookings/{booking_id}/edit-requests",
         json=edit_request_data,
-        headers=master_headers,
+        headers=auth_headers,
     )
     request_id = response.json()["id"]
 

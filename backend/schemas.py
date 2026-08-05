@@ -23,7 +23,7 @@ class UserCreate(BaseModel):
     phone: str = Field(..., pattern=r"^\+?1?\d{9,15}$")
     full_name: Optional[str] = None
     password: str
-    role: UserRole
+    role: Literal[UserRole.CLIENT, UserRole.MASTER, UserRole.SALON]
     birth_date: Optional[date] = None
     city: Optional[str] = None
     timezone: Optional[str] = None

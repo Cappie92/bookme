@@ -56,7 +56,7 @@ from schemas import UserStats, AdminStats
 router = APIRouter(
     prefix="/admin",
     tags=["admin"],
-    dependencies=[Depends(require_admin_or_moderator)],
+    dependencies=[Depends(require_admin_or_moderator())],
 )
 
 
@@ -75,6 +75,10 @@ def retry_subscription_apply(
     """
     now = datetime.utcnow()
     try:
+        # Authentication dependencies perform a read on this shared session and
+        # therefore autobegin a transaction before the endpoint transaction.
+        if db.in_transaction():
+            db.commit()
         with db.begin():
             payment = db.query(Payment).filter(Payment.id == payment_id).with_for_update().first()
             if not payment:

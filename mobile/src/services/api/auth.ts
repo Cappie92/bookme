@@ -33,7 +33,7 @@ export interface RegisterCredentials {
   phone: string;
   password: string;
   full_name: string;
-  role?: 'client' | 'master' | 'salon' | 'admin';
+  role?: 'client' | 'master' | 'salon';
   city?: string;
   timezone?: string;
   promo_code?: string;
@@ -147,4 +147,3 @@ export async function getCurrentUser(): Promise<User> {
   const response = await apiClient.get<User>('/api/auth/users/me');
   return response.data;
 }
-

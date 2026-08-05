@@ -1051,7 +1051,7 @@ async def register(user_in: UserCreate, db: Session = Depends(get_db)) -> Any:
     - **email**: Email пользователя
     - **phone**: Номер телефона
     - **password**: Пароль
-    - **role**: Роль пользователя (client, master, salon, admin)
+    - **role**: Роль пользователя для self-service регистрации (client, master, salon)
     """
     promo_code = (user_in.promo_code or "").strip()
     if promo_code and user_in.role != UserRole.MASTER:
