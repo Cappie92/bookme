@@ -2,6 +2,7 @@
 type: Knowledge
 status: active
 project: DeDato
+last_runtime_check: 2026-08-05
 ---
 
 # DeDato — роли и бизнес-модель
@@ -20,7 +21,7 @@ project: DeDato
 
 **CONFIRMED.** DeDato — сервис онлайн-записи и ведения клиентской работы для индивидуальных мастеров (и, при включённых флагах, салонов): расписание, публичная страница записи, клиентская база, скидки/лояльность, операционный учёт доходов по записям.
 
-Source: `frontend/src/pages/Home.jsx`; `backend/models.py` (`Master`, `Booking`, `LoyaltySettings`, `Income`).
+Source: `frontend/src/pages/Home.jsx`; `backend/models.py` — `Master`, `Booking`, `LoyaltySettings`; [Operational Finance](operational-finance.md).
 
 ### Для кого
 
@@ -28,10 +29,10 @@ Source: `frontend/src/pages/Home.jsx`; `backend/models.py` (`Master`, `Booking`,
 |---------|-----------------|
 | **Мастер** | Основной платящий пользователь SaaS: настраивает услуги, расписание, принимает записи |
 | **Клиент** | Записывается к мастеру (часто через публичную страницу `/m/{slug}`), ведёт свои записи |
-| **Салон** | Модель в системе есть; в текущем MVP master-only салонный контур **не является** основным продуктовым путём |
+| **Салон** | Модель и route families существуют, но текущий default-конфиг не включает salon features как основной поддерживаемый путь |
 | **Админ / модератор** | Операционное управление платформой |
 
-Source: `backend/models.py` — `UserRole`; `docs/MASTER_ONLY_MVP_CHECKLIST.md`; `backend/settings.py` — `SALONS_ENABLED`.
+Source: `backend/models.py` — `UserRole`; `backend/settings.py` — `SALONS_ENABLED`, `LEGACY_INDIE_MODE`; `backend/utils/master_canon.py`; `frontend/src/config/features.js`.
 
 ### Основная ценность
 
@@ -83,17 +84,17 @@ Source: `backend/models.py` — `User.is_always_free`; `backend/utils/subscripti
 | | |
 |--|--|
 | **Цель** | Управление салоном: филиалы, места, мастера, записи в контексте салона |
-| **Факт доступности** | Модели и роуты существуют; включение завязано на `SALONS_ENABLED` / `enableSalonFeatures`. В master-only MVP салон **не** канонический путь |
+| **Факт доступности** | Модели и роуты существуют; включение завязано на `SALONS_ENABLED` / `enableSalonFeatures`. Default-конфигурация не делает salon основным поддерживаемым путём |
 | **Данные** | `Salon`, `SalonBranch`, `SalonPlace`, invitations, bookings с `salon_id`/`branch_id` |
-| **Ограничение** | Не описывать как основной релизный сценарий без явного включения флагов |
+| **Ограничение** | Не описывать как текущий default-сценарий без явного включения соответствующих флагов |
 
 Source: `backend/models.py` — `Salon`, `SalonBranch`; `backend/settings.py` — `salons_enabled_env`; admin key `enableSalonFeatures`.
 
 ### INDIE (`user.role = indie`) + `IndieMaster`
 
-**LEGACY.** Отдельная сущность `IndieMaster` и роль `indie` сохранены в моделях. Текущий канон — **master-only** (`LEGACY_INDIE_MODE` по умолчанию выкл.). Не считать indie отдельной бизнес-ролью первого релиза.
+**LEGACY.** Отдельная сущность `IndieMaster` и роль `indie` сохранены в моделях. Текущий default — master path (`LEGACY_INDIE_MODE=0`); indie остаётся compatibility-контуром, а не основным поддерживаемым professional path.
 
-Source: `backend/models.py` — `UserRole.INDIE`, `IndieMaster`; `docs/MASTER_ONLY_MVP_CHECKLIST.md`; `backend/tests/test_master_canon_flags.py`.
+Source: `backend/models.py` — `UserRole.INDIE`, `IndieMaster`; `backend/settings.py` — `LEGACY_INDIE_MODE`; `backend/utils/master_canon.py`; `backend/tests/test_master_canon_flags.py`.
 
 ### ADMIN (`user.role = admin`)
 
@@ -147,8 +148,8 @@ Source: `backend/models.py`.
 
 - **Салон** — организационный профиль, связанный с `User(role=salon)`.
 - **Филиал / место** — структура салона.
-- **«Сотрудник»** в каноне MVP = мастер, привязанный к салону (через M2M / invitations), а не отдельная роль `employee`.
-- **Статус:** частично / legacy относительно master-only MVP.
+- **«Сотрудник»** = мастер, привязанный к салону через M2M/invitations, а не отдельная login-роль `employee`.
+- **Статус:** feature-gated salon context поверх основного master path.
 
 ### Услуга
 
@@ -159,12 +160,10 @@ Source: `backend/models.py`.
 
 ### Расписание и слот
 
-- **Расписание:** правила/окна доступности мастера (`MasterSchedule`, settings, `AvailabilitySlot`).
-- **Слот:** **вычисляемый** интервал доступности под услугу, а не обязательно отдельная долгоживущая сущность «забронированный слот-объект».
-- **Приоритет:** при наличии `MasterSchedule` на дату он приоритетен над шаблоном availability (**REPORTED** по docs + scheduling service).
-- **Занятость:** интервал считается занятым при наличии пересекающейся брони в статусах, которые scheduling считает блокирующими.
+- **Расписание** хранит правила/окна доступности исполнителя.
+- **Слот** — вычисляемый интервал под длительность услуги; точные precedence, timezone, blocking и overlap semantics принадлежат [Scheduling](scheduling/README.md).
 
-Source: `docs/TEST_DATA_RESEED_READONLY_AUDIT.md`; `docs/adr/0003-booking-status-system.md`; `backend/services/scheduling.py`.
+Source: `backend/models.py` — schedule models; `backend/services/scheduling.py`; [Scheduling](scheduling/README.md).
 
 ### Бронирование (`Booking`)
 
@@ -173,27 +172,13 @@ Source: `docs/TEST_DATA_RESEED_READONLY_AUDIT.md`; `docs/adr/0003-booking-status
   - **клиент** — создаёт запись и выполняет доступные ему действия со своей записью (например отмена / запрос изменения — по правилам продукта);
   - **мастер** — подтверждает (если включено), исполняет визит и фиксирует outcome;
   - **платформа** — хранит запись, статусы, связи с лояльностью и операционным учётом.
-- **Привязка исполнителя:** в master-only каноне — `master_id` (не `indie_master_id`).
+- **Привязка исполнителя:** основной master path использует `master_id`; salon и legacy indie остаются отдельными repository-known owner contexts.
 - **Публичный идентификатор для клиента:** `public_reference` (не sequential id).
 - **Оплата услуги:** поля `payment_method` (`on_visit` / `advance`), `is_paid` — **отдельно** от SaaS `Payment`.
 
-**Жизненный цикл — не одна обязательная линейная цепочка.**
-В модели есть статусы (`created`, `confirmed`, `awaiting_confirmation`, `completed`, ветки отмены, `awaiting_payment`, `payment_expired` и др.). Это **набор возможных состояний**, а не доказательство, что каждый переход допустим или обязателен.
+Lifecycle имеет несколько create/status/cancellation/reschedule route families и не сводится к одной линейной цепочке. Точные raw/effective statuses, mutation actors, cancellation semantics, completion side effects и подтверждённые расхождения принадлежат [Booking](booking/README.md), [Booking completion side effects](booking/completion-side-effects.md) и [Booking API](../Contracts/booking-api.md); этот product overview их не переопределяет.
 
-Допустимые **ветви** (продуктово; точный граф — в booking Domain / runtime):
-
-| Ветвь | Смысл |
-|-------|--------|
-| Pre-visit подтверждение | Авто-confirm или ручное принятие мастером |
-| Ожидание оплаты услуги | Если сценарий предоплаты активен |
-| Истечение оплаты | `payment_expired` / аналог по правилам |
-| Отмена | Клиентом и/или мастером; с фиксацией инициатора/причины |
-| Post-visit outcome | Подтверждение результата визита |
-| Completion | Успешное завершение (`completed`) с последствиями для дохода и лояльности |
-
-**Инвариант документации:** наличие значения в enum **не** означает, что переход из любого статуса в любой другой разрешён.
-
-Source: `backend/models.py` — `Booking`, `BookingStatus`; `docs/adr/0003-booking-status-system.md` (сверять с runtime).
+Source: `backend/models.py` — `Booking`, `BookingStatus`; [Booking](booking/README.md).
 
 ### Клиент (как бизнес-понятие)
 
@@ -202,30 +187,28 @@ Source: `backend/models.py` — `Booking`, `BookingStatus`; `docs/adr/0003-booki
 
 ### Подписка и тариф
 
-- **Тариф** (`SubscriptionPlan`): каталог планов (имя, пакеты 1/3/6/12 мес., `features`/`limits`).
-- **Подписка** (`Subscription`): период доступа пользователя к функциям плана.
-- **Effective access:** `status=active` ∧ `is_active=True` ∧ даты; при нескольких кандидатах — с max `end_date` (строгого unique «одна active» нет).
+- **Тариф** (`SubscriptionPlan`) описывает коммерческое предложение и capability/limit configuration.
+- **Подписка** (`Subscription`) связывает пользователя с периодом доступа.
+- Точные effective-access, reserve, charge и apply semantics принадлежат [Subscriptions Billing](subscriptions-billing/README.md) и [Feature Entitlements](../Contracts/feature-entitlements.md).
 
-Source: `Knowledge/Domain/subscriptions-billing/README.md` §6–7, §9.
+Source: `backend/models.py` — `SubscriptionPlan`, `Subscription`; [Subscriptions Billing](subscriptions-billing/README.md).
 
 ### Платёж (`Payment`)
 
-В каноническом денежном контуре SaaS — платёж **мастера** за тариф (Robokassa / баланс / баллы подписки).
-`payment_type`: `subscription` | `deposit` (deposit API для произвольного пополнения — **410 Gone** в текущем контуре).
+В денежном контуре SaaS `Payment` относится к оплате тарифа DeDato и отделён от оплаты визита клиентом мастеру. Provider, balance/split и apply details принадлежат billing/payment contract.
 
-Source: `Knowledge/Domain/subscriptions-billing/README.md` §2, §6.
+Source: [Subscriptions Billing](subscriptions-billing/README.md); [Robokassa contract](../Contracts/payments-robokassa.md).
 
 ### Промокод / promo-engine
 
 Кампании и коды для наград (в т.ч. баллы подписки) с идемпотентными grants.
-Eligible roles в MVP promo-engine ориентированы на master/indie.
+Current promo-engine eligibility paths ориентированы на master/indie.
 
 Source: `backend/models.py` — Promo*; `backend/routers/admin_promo_engine.py`.
 
 ### Бонусные баллы подписки (`SubscriptionPointsLedger`)
 
-Баллы, которые мастер может направить на оплату **SaaS-тарифа**.
-Правило зачёта (как баллы покрывают сумму расчёта) определяется **billing-контуром** subscriptions → payments → balance; не фиксировать здесь упрощённые формулы.
+Баллы, которые мастер может направить на оплату **SaaS-тарифа**. Их расчёт и списание принадлежат billing-контуру; этот обзор не фиксирует формулу.
 
 **Не путать** с баллами лояльности клиента у мастера.
 
@@ -233,26 +216,9 @@ Source: `Knowledge/Domain/subscriptions-billing/money-flows.md`; `backend/models
 
 ### Программа лояльности (у мастера)
 
-Два связанных механизма:
+Скидки и client-points ledger принадлежат конкретному мастеру и связаны с Booking, но остаются отдельным money-like контуром от SaaS subscription points. Точные evaluation, reserve/release/spend/earn и idempotency semantics принадлежат [Client Loyalty](loyalty.md) и [Booking completion side effects](booking/completion-side-effects.md); этот обзор фиксирует только продуктовую границу.
 
-1. **Скидки** (`LoyaltyDiscount` / personal) — % условия на запись.
-2. **Баллы клиента** (`LoyaltySettings` + `LoyaltyTransaction`) — начисление/списание за визиты у конкретного мастера.
-
-Владелец правил — мастер.
-
-**ЖЦ баллов при записи (CONFIRMED):**
-
-1. При **создании** бронирования выбранные баллы **резервируются** (отражаются на брони; `spent`-транзакции ещё нет).
-2. При **отмене** резерв **освобождается**.
-3. Фактическое **списание** (`spent`) — при **успешном завершении** записи (post-visit finalize).
-4. **Начисление** (`earned`) — после подтверждённого завершения, по настройкам мастера.
-5. Повторная обработка того же outcome **не** должна создавать повторные spend/earn.
-
-Source:
-
-- `backend/utils/booking_loyalty_reserve.py` — `clear_loyalty_points_reserve`
-- `backend/services/booking_visit_finalize.py` — spend/earn + guards `_loyalty_spent_exists` / `_loyalty_earned_exists`
-- `backend/tests/test_loyalty_reserve_cancel_finalize.py`, `test_public_loyalty_disabled_spend.py`
+Source: `backend/models.py` — `LoyaltyDiscount`, `LoyaltySettings`, `LoyaltyTransaction`; [Client Loyalty](loyalty.md).
 
 ### Отзыв
 
@@ -283,16 +249,14 @@ Source:
 1. Клиент открывает публичную страницу (ссылка / App Link).
 2. Выбирает услугу → дату → слот.
 3. При необходимости проходит auth / завершение аккаунта (см. оговорку про `User(role=client)`).
-4. Создаётся `Booking`; при выборе баллов лояльности они **резервируются**.
-5. Дальше — одна из ветвей жизненного цикла (подтверждение, оплата услуги, отмена, post-visit, completion).
-6. При отмене — резерв баллов освобождается.
-7. При успешном завершении — spend зарезервированных баллов и earn по правилам мастера (без дублей при повторе).
+4. Создаётся `Booking`, после чего его дальнейшее состояние определяется конкретным Booking route/lifecycle path.
+5. Scheduling, Loyalty и Operational Finance участвуют через свои repository-known read/synchronous boundaries; точные правила принадлежат их канонам.
+
+Подробно: [Booking](booking/README.md), [Scheduling](scheduling/README.md), [Client Loyalty](loyalty.md), [Operational Finance](operational-finance.md).
 
 ### 4. Оплата тарифа DeDato (мастер)
 
-`calculate` → snapshot → split (points → balance → card) → free | balance | Robokassa → apply Subscription → reserve → daily charges.
-
-Подробно: `Knowledge/Domain/subscriptions-billing/*` (не дублировать здесь).
+Master выбирает тариф и проходит поддерживаемый billing/payment path; успешный apply влияет на effective subscription и entitlements. Подробный lifecycle: [Subscriptions Billing](subscriptions-billing/README.md) и [Robokassa contract](../Contracts/payments-robokassa.md).
 
 ### 5. Повторная запись
 
@@ -306,14 +270,14 @@ Source:
 |--------|----------------|
 | Кто платит DeDato? | **Мастер** (user тарифа), не клиент услуги |
 | За что? | Доступ к функциям тарифного плана на период |
-| Роль подписки | Включает entitlements (`features`/`ServiceFunction`) и billing (daily rate / reserve) |
+| Роль подписки | Связывает период доступа с plan capabilities/limits; точное enforcement — в owner contracts |
 | Длительности пакетов | 1 / 3 / 6 / 12 месяцев (поля цен на плане) |
 | Конкретные рубли | **Не канонизировать** — значения в БД `SubscriptionPlan` |
 | Без активной подписки | Ограниченный набор функций; точный матричный список — через `check_feature_access` / план Free |
 | AlwaysFree / `is_always_free` | Обход обычной монетизации для отмеченных пользователей |
 | Промокоды | Награды (в т.ч. subscription points), идемпотентные grants |
 | Баллы подписки | Участвуют в покрытии цены тарифа по правилам billing-контура |
-| Связь оплаты с доступом | Успешный apply создаёт/продлевает `Subscription`; card-flow: deposit → apply → finalize hold |
+| Связь оплаты с доступом | Успешный billing apply создаёт/продлевает `Subscription`; детали принадлежат billing owner |
 
 **Не входит в монетизацию DeDato:** комиссия с `Booking.payment_amount` клиента (это расчёт визита у мастера).
 
@@ -323,25 +287,14 @@ Source: `Knowledge/Domain/subscriptions-billing/README.md`.
 
 ## Бизнес-инварианты
 
-1. **Участники бронирования:** клиентская сторона (`client_id`) и исполнитель (`master_id` в master-only); салон/branch — дополнительные контексты при salon-режиме. Права разделены: клиент — доступные действия со своей записью; мастер — подтверждение, исполнение, outcome.
-2. **Расписание меняет** владелец профиля исполнителя (мастер / салонный контекст), не клиент.
-3. **Слот занят**, пока есть пересекающаяся бронь в статусах, которые scheduling считает блокирующими.
-4. **Завершённая бронь** — успешный completion (`completed`) после допустимого post-visit пути; enum не задаёт полный граф переходов.
-5. **SaaS-деньги ≠ loyalty-баллы ≠ оплата визита.** Три разных контура.
-6. **Loyalty reserve ≠ spend:** резерв на активной записи уменьшает доступные баллы, но не создаёт `spent`, пока визит не завершён успешно.
-7. **Отмена** освобождает loyalty reserve; слот должен снова быть доступен для новых записей (в рамках scheduling).
-8. **Повторный booking outcome** не создаёт повторные начисления/списания лояльности и не должен дублировать операционный доход по той же записи.
-9. **Идемпотентность SaaS:** snapshot apply once; ResultURL не двойной apply; points debit unique; promo grant unique per redemption+role; soft-hold release/finalize.
-10. **Pending SaaS payment** имеет TTL; expire → release soft-hold.
-11. **Effective subscription** требует и статус, и `is_active`, и окно дат.
-12. **Indie-поля** не использовать как канон при master-only.
-
-Детали денег SaaS: `Knowledge/Domain/subscriptions-billing/invariants.md`.
-Loyalty reserve/finalize: `backend/services/booking_visit_finalize.py`, `backend/utils/booking_loyalty_reserve.py`.
+1. Client, professional и platform roles имеют разные продуктовые поверхности; фактическое authorization enforcement принадлежит [Identity and access](identity-access.md) и scoped Debt.
+2. Основной professional path использует `Master`; salon feature-gated, indie legacy compatibility, а их модели не доказывают default-доступность продукта.
+3. **SaaS-деньги ≠ client loyalty points ≠ оплата визита.** Это разные контуры с разными владельцами.
+4. Product overview не определяет Booking transitions, slot blocking, Loyalty ledger или Finance accounting semantics: их SSOT — [Booking](booking/README.md), [Scheduling](scheduling/README.md), [Client Loyalty](loyalty.md), [Operational Finance](operational-finance.md) и [Subscriptions Billing](subscriptions-billing/README.md).
 
 ---
 
-## Реализовано / частично / планируется
+## Current supported scope
 
 | Область | Статус |
 |---------|--------|
@@ -349,16 +302,16 @@ Loyalty reserve/finalize: `backend/services/booking_visit_finalize.py`, `backend
 | Client cabinet | **Реализовано** |
 | Loyalty discounts + points (reserve / release / spend / earn) | **Реализовано** (CONFIRMED; глубина — отдельный Domain) |
 | SaaS subscriptions + Robokassa + split | **Реализовано** (канон в Knowledge/subscriptions-billing) |
-| Salon / branches / places | **Частично** + feature flags; не master-only канон |
-| Indie master | **Legacy** |
+| Salon / branches / places | **Частично / feature-gated**; не default product path |
+| Indie master | **Legacy compatibility**, выключен default-настройкой |
 | Reviews | **Флаг без доменной модели Review** |
 | Произвольный deposit balance API | **Отключён** (410) |
 | IAP / RevenueCat | **Не используется** |
 | Оплата услуги клиентом через Robokassa end-to-end как основной путь | **UNKNOWN / не канонизировать** без отдельного Domain — поля на Booking есть |
 
-### Текущая релизная конфигурация (не бизнес-инвариант)
+### Mobile Yandex Auth configuration (не бизнес-инвариант)
 
-На момент подготовки mobile-релиза кнопка Yandex Auth в mobile preview/production **скрыта** env-флагом. Это конфигурация поставки, а не правило бизнес-модели «как пользователи входят в систему».
+Tracked mobile preview/production EAS profiles устанавливают `YANDEX_MOBILE_AUTH_VISIBLE=0`, поэтому соответствующая кнопка скрыта в этих repository-defined build profiles. Это build configuration, а не бизнес-правило о допустимых способах входа. Фактическая конфигурация опубликованного store build — `UNKNOWN` без внешней проверки.
 
 Source: `mobile/eas.json` — `YANDEX_MOBILE_AUTH_VISIBLE`.
 
@@ -366,11 +319,10 @@ Source: `mobile/eas.json` — `YANDEX_MOBILE_AUTH_VISIBLE`.
 
 ## Открытые продуктовые вопросы
 
-1. Нужен ли salon-контур в ближайшем публичном релизе mobile/web или остаётся выключенным?
+1. Должен ли salon-контур стать default-supported web/mobile path или оставаться feature-gated?
 2. Канонизировать ли предоплату услуги клиентом (`advance`) как поддерживаемый продукт или оставить `on_visit` основным?
 3. Отзывы: строить домен или убрать/игнорировать флаг `enableReviews`?
 4. Единая матрица «что даёт Free vs платные планы» для продукта (сейчас — данные плана + feature checks)?
-5. Нужен ли отдельный Knowledge по booking lifecycle / loyalty (рекомендуется после approve этого документа)?
 
 ---
 
@@ -380,7 +332,10 @@ Source: `mobile/eas.json` — `YANDEX_MOBILE_AUTH_VISIBLE`.
 - `Knowledge/Domain/subscriptions-billing/README.md`
 - `Knowledge/Domain/subscriptions-billing/money-flows.md`
 - `Knowledge/Domain/subscriptions-billing/invariants.md`
+- `Knowledge/Domain/booking/README.md`
+- `Knowledge/Domain/scheduling/README.md`
+- `Knowledge/Domain/client-crm.md`
+- `Knowledge/Domain/loyalty.md`
+- `Knowledge/Domain/operational-finance.md`
 - `Knowledge/Contracts/payments-robokassa.md`
 - `Knowledge/Debt/subscriptions-billing.md`
-- `docs/MASTER_ONLY_MVP_CHECKLIST.md`
-- `docs/adr/0003-booking-status-system.md` (статусы брони; сверять с runtime)

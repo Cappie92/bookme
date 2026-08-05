@@ -27,14 +27,15 @@ audit_baseline: d3407a57171993e23ad3dd6aed3d98a99e7cd196
 - Validated all relative Markdown links and exact repository source paths; no missing path was found after excluding non-path identifiers.
 - Reviewed credential-like evidence only through already-sanitized/path-level classification; validity remains `UNKNOWN` and no value was copied or externally tested.
 - Final whitespace/conflict-marker checks passed for all four audit artifacts; no absolute developer-machine path or secret-like value pattern was found.
+- Scoped documentation remediation at baseline `ef4dd0a` rechecked only CI/CD, product-role/business-model and domain-map claims against repository workflow/config/runtime sources and their existing canonical owners; no production or external CI state was accessed.
 
 ## Results
 
-- Verdicts: **37 CURRENT, 0 PARTIAL, 2 STALE, 1 CONFLICTING, 0 UNVERIFIABLE**.
+- Verdicts after scoped re-audit: **40 CURRENT, 0 PARTIAL, 0 STALE, 0 CONFLICTING, 0 UNVERIFIABLE**.
 - Coverage: **29 FULL, 12 PARTIAL, 1 MENTIONED_ONLY, 3 NONE, 1 MULTIPLE_OWNERS**.
-- Drift severity: **5 P0, 7 P1, 4 P2**.
-- Stale documents: `Knowledge/Operations/ci-cd.md`, `Knowledge/Domain/product-roles-business-model.md`.
-- Conflicting document: `Knowledge/Domain/domain-map.md`.
+- Open drift severity: **4 P0, 5 P1, 1 P2**.
+- Scoped verdicts: `Knowledge/Operations/ci-cd.md` — CURRENT; `Knowledge/Domain/product-roles-business-model.md` — CURRENT; `Knowledge/Domain/domain-map.md` — CURRENT.
+- Closed documentation drift: RC-003, RC-006, RC-007, RC-013, RC-014, RC-015.
 - Coverage `NONE`: mobile welcome/pricing fallback data; production backup/restore/import/export scripts; root and legacy deployment scripts.
 
 ## Unresolved stop gates and owner decisions
@@ -49,11 +50,10 @@ audit_baseline: d3407a57171993e23ad3dd6aed3d98a99e7cd196
 
 ## Next recommended remediation batch
 
-Start the separately controlled authorization remediation for the confirmed role/object enforcement boundaries, with endpoint inventory and regression tests. Keep credential handling in its own security process. After that, run a bounded documentation/operations correction for the CI/CD migration statement, production data/deploy entrypoints and domain-overview ownership wording.
+Keep authorization and credential handling in their separately authorized processes. The next documentation/operations batch may classify production data/deploy entrypoints and noncanonical operational artifacts without executing them; unresolved product ownership decisions remain queued.
 
 ## Git state
 
-- Intended audit changes are limited to the four noncanonical `_Work` files.
-- No commit or push is authorized or performed.
-- `git diff --check` passed for the tracked change; equivalent trailing-whitespace/conflict-marker checks passed for the three untracked audit files.
-- Local `HEAD` and fetched `origin/main` remain equal to the baseline commit.
+- Intended documentation-only changes are limited to three existing canonical documents and `RUNTIME-CONSISTENCY.md`, `DRIFT-QUEUE.md`, `STATUS.md`.
+- `Knowledge/_Work/COVERAGE-MATRIX.md` and its counts are unchanged because no coverage re-audit was performed.
+- No commit or push is authorized for this changeset; runtime/config/tests remain unchanged.

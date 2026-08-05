@@ -2,41 +2,56 @@
 type: Knowledge
 status: active
 project: DeDato
-last_runtime_check: 2026-08-04
+last_runtime_check: 2026-08-05
 ---
 
 # CI/CD
 
 Repository-known GitHub Actions and delivery boundary. Host state, branch protection, environment approvals and provider settings are `UNKNOWN` without external access.
 
-## Workflows
+## Root GitHub Actions workflows
+
+GitHub Actions discovers the four workflow files under the repository-root `.github/workflows/`:
 
 | Workflow | Trigger | Repository-known action |
 |----------|---------|-------------------------|
-| `gitleaks.yml` | pull request; push to `main`/`master` | downloads gitleaks and scans the commit range for the event |
-| `mkdocs.yml` | push; pull request | prepares/builds MkDocs in strict mode and uploads the artifact |
-| `arch-overview.yml` | daily schedule; manual | regenerates architecture overview and commits changes when generated output differs |
-| `deploy.yml` | push to `main`; manual | opens remote deployment session, runs backend pytest before Compose update, then performs a shallow HTTP health check |
+| `gitleaks.yml` | pull request; push to `main`/`master` | Downloads gitleaks and scans the commit range selected for the event |
+| `mkdocs.yml` | every push; pull request | Prepares and builds MkDocs in strict mode, then uploads the generated site artifact |
+| `arch-overview.yml` | daily schedule; manual `workflow_dispatch` | Regenerates architecture overview and commits selected generated outputs when they differ |
+| `deploy.yml` | push to `main`; manual `workflow_dispatch` | Transfers the checkout, rebuilds/recreates Compose application services, runs the migration helper and performs an external HTTP health check |
 
-**Sources:** `.github/workflows/gitleaks.yml`; `.github/workflows/mkdocs.yml`; `.github/workflows/arch-overview.yml`; `.github/workflows/deploy.yml`; `docs.sh`.
+Only the deploy job declares concurrency: one run per workflow/ref group, with `cancel-in-progress: false`. Branch protection, required-check selection, environment approvals and external CI remain `UNKNOWN`.
+
+**Sources:** `.github/workflows/gitleaks.yml`; `.github/workflows/mkdocs.yml`; `.github/workflows/arch-overview.yml`; `.github/workflows/deploy.yml`.
 
 ## Pull-request gates
 
-Repository workflows do not run backend application tests, frontend Vitest/Playwright, frontend lint/build or mobile Jest/build as independent PR jobs. PR automation is limited to incremental secret scanning and strict MkDocs build.
+Root repository workflows do not run backend pytest/lint, frontend Vitest/Playwright/lint/build or mobile Jest/Maestro/EAS build as PR jobs. Root PR automation is limited to incremental secret scanning and strict MkDocs build. These workflow runs are repository capabilities; whether either is configured as a required branch-protection gate is `UNKNOWN`.
 
 MkDocs uses `docs_dir: docs`; canonical `Knowledge/` is outside that build and therefore is not validated by Docs CI. Package-local Knowledge link/source checks currently depend on the documentation workflow used during this Knowledge track, not a repository action.
 
-**Sources:** workflow job/step inventory; `mkdocs.yml`; `docs.sh`; package manifests.
+`backend/.github/workflows/ci.yml` describes backend pytest-with-coverage plus black/isort/flake8/mypy steps, but its nested location is outside the repository-root workflow discovery directory. It is therefore repository workflow-shaped capability, not an executed GitHub Actions gate for this repository. The actual executable test suites remain catalogued in [Testing strategy](testing-strategy.md).
+
+Mobile EAS build/submit profiles exist in `mobile/eas.json`, but no root workflow invokes EAS. They are build capability, not a root CI or deployment gate.
+
+**Sources:** root workflow job/step inventory; `backend/.github/workflows/ci.yml`; `mkdocs.yml`; `docs.sh`; `frontend/package.json`; `mobile/package.json`; `mobile/eas.json`; [Testing strategy](testing-strategy.md).
 
 ## Deployment
 
-The production workflow has one `deploy` job and no `needs` dependency on a separately isolated validation job. It transfers repository content through a password-authenticated remote session, executes backend pytest on the remote side before updating Compose services, and checks an HTTP health endpoint afterward.
+The production workflow has one `deploy` job and no `needs` dependency on a separately isolated validation job. It does not run backend or client test suites. Its repository-defined order is:
 
-The workflow does not declare frontend/mobile lint/unit/build gates or an explicit Alembic migration step. Deployment builds/updates mutable remote Compose state rather than promoting a pre-built immutable application artifact. The health endpoint proves process HTTP response only; readiness limitations are documented in [Production topology](../Infrastructure/production-topology.md) and [Client platforms Debt](../Debt/client-platforms.md).
+1. transfer the checkout to the configured host;
+2. build backend and frontend images;
+3. remove the existing backend/frontend containers, leaving shared Redis/network/volumes outside a full `down`;
+4. start/update the Compose stack with `up -d --remove-orphans`;
+5. invoke `scripts/prod/migrate.sh`, which runs Alembic against the backend data volume;
+6. after the remote deployment step, wait and call the external HTTP `/health` endpoint.
+
+Alembic is therefore explicit but runs after application services are started. The workflow does not prove migration success on the active host beyond command exit, does not isolate migration as a prerequisite job and does not promote a pre-built immutable application artifact. The final health call proves an HTTP response only; readiness limitations are documented in [Production topology](../Infrastructure/production-topology.md) and [Client platforms Debt](../Debt/client-platforms.md).
 
 No production target, credential reference or remote command sequence is reproduced in Knowledge.
 
-**Sources:** `.github/workflows/deploy.yml`; `docker-compose.prod.yml` by structure only; `backend/main.py` — health endpoint; `frontend/nginx.conf`.
+**Sources:** `.github/workflows/deploy.yml` — `deploy` job, concurrency and step order; `scripts/prod/migrate.sh`; `scripts/prod/compose.sh`; `docker-compose.prod.yml` by structure only; `backend/main.py` — health endpoint; `frontend/nginx.conf`.
 
 ## Documentation automation
 

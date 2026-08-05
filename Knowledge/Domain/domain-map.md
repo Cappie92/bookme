@@ -2,12 +2,15 @@
 type: Knowledge
 status: active
 project: DeDato
+last_runtime_check: 2026-08-05
 ---
 
 # DeDato — карта доменов
 
 Верхнеуровневая карта **бизнес-доменов** существующей системы.
 Не техническая архитектура и не план развития.
+
+Слова «получает» и «предоставляет» ниже обозначают business/data dependency. Они не означают event bus, domain-event publisher или asynchronous consumer. Там, где runtime использует прямой query либо синхронный function/service call, это указывается явно; неподтверждённая event semantics не достраивается.
 
 Связанные каноны:
 
@@ -158,28 +161,22 @@ Profiles; Services (длительность); Booking (занятость пе�
 ## Booking
 
 ### Назначение
-Договорённость о визите: создание, статусы, отмена, подтверждение, post-visit outcome, связь с операционным доходом по записи.
+Договорённость о визите: создание, состояния, отмена, подтверждение и post-visit outcome.
 
 ### Владелец данных
-`Booking` (+ связанные confirmation/income/missed revenue по факту визита) — CONFIRMED.
+`Booking` и связанные mutation/reschedule данные жизненного цикла записи — CONFIRMED. Accounting stores не принадлежат Booking overview.
 
 ### Основные сущности
-`Booking`, `BookingStatus`, `BookingEditRequest`, `BookingConfirmation`, `Income`, `MissedRevenue` — CONFIRMED.
+`Booking`, `BookingStatus`, `BookingEditRequest` — CONFIRMED. `BookingConfirmation`, `MasterExpense`, `Income` и `MissedRevenue` принадлежат [Operational Finance](operational-finance.md), хотя часть записей создаётся синхронно из completion path.
 
 ### Основные процессы
-Создание записи; pre-visit confirm (авто/ручное); ветки отмены; ожидание/истечение оплаты услуги (если сценарий активен); post-visit outcome → completion; фиксация операционного дохода.
+Создание и изменение записи; endpoint-specific pre/post-visit paths; cancellation/reschedule; вызов repository-known completion orchestration. Точная lifecycle semantics принадлежит [Booking](booking/README.md).
 
 ### Что получает извне
 Identity/Profiles (стороны); Services; Scheduling (слот).
 
-### Что публикует наружу
-Состояние записи и синхронно рассчитанные результаты для других доменов:
-
-- booking created;
-- booking cancelled;
-- booking completed;
-
-а также статус и операционный доход для Client CRM, Notifications, Analytics. В текущем runtime create/cancel/completion paths синхронно вызывают discount/loyalty reserve, release, spend и earn logic; publisher/event bus для этой связи не подтверждён.
+### Что предоставляет другим доменам
+Текущее состояние и business facts записи доступны прямым readers (например Client CRM) и caller-side integrations. Create/cancel paths могут синхронно обращаться к Loyalty, а common completion orchestration — к Loyalty и Operational Finance side effects внутри caller transaction. Repository publisher/event bus для этих связей не подтверждён.
 
 ### Границы
 Не SaaS-оплата тарифа DeDato; не владеет правилами и ledger лояльности. Детальный канон: [Booking](booking/README.md) и [completion side effects](booking/completion-side-effects.md).
@@ -223,13 +220,7 @@ Identity; Profiles; Booking (история визитов как источни
 `LoyaltySettings`, `LoyaltyTransaction`, `LoyaltyDiscount`, personal discounts / applied discounts — CONFIRMED.
 
 ### Основные процессы
-Настройка скидок и баллов; синхронные вызовы из Booking paths:
-
-- при **created** — резерв выбранных баллов (если применимо);
-- при **cancelled** — освобождение резерва;
-- при **completed** — фактический spend и earn по правилам мастера;
-
-без дублей при повторной обработке того же outcome.
+Настройка скидок и баллов; repository-known синхронные вызовы из Booking create/cancel/completion paths. Точные reserve/release/spend/earn и idempotency semantics принадлежат [Client Loyalty](loyalty.md), а не этой карте.
 
 ### Что получает извне
 Profiles (мастер); Identity (client_id, когда есть); Booking context и вызовы create / cancel / completion. Runtime dependency Booking → Loyalty существует на уровне orchestration; lifecycle Booking при этом остаётся во владельце Booking.
@@ -255,7 +246,7 @@ SaaS-монетизация: тарифы мастера, оплата/прод�
 `SubscriptionPlan`, `Subscription`, `SubscriptionPriceSnapshot`, `Payment`, `UserBalance`, `BalanceTransaction`, `SubscriptionReservation`, `SubscriptionPointsLedger`, `DailySubscriptionCharge` — CONFIRMED.
 
 ### Основные процессы
-Расчёт → split → free/balance/Robokassa → apply подписки → reserve → daily charges; проверка feature access.
+Оплата/продление и effective feature access. Точные calculate/split/apply/reserve/charge semantics принадлежат [Subscriptions Billing](subscriptions-billing/README.md) и не повторяются в overview.
 
 ### Что получает извне
 Identity (плательщик); Profiles (контекст мастера); **уже созданные результаты промо** (награды / баллы подписки и т.п.), без зависимости от внутренней логики Promo Engine.
@@ -297,7 +288,7 @@ Identity (кто активирует).
 ## Operational Finance
 
 ### Назначение
-Операционный учёт подтверждённого/ожидаемого дохода, расходов, налогов и упущенной выручки мастера или салона.
+Единственный canonical owner операционного учёта подтверждённого/ожидаемого дохода, расходов, налогов и упущенной выручки мастера или салона.
 
 ### Владелец данных
 Canonical master accounting использует `BookingConfirmation`, `MasterExpense` и `TaxRate`; legacy salon/indie accounting использует отдельные `Expense`, `Income`, `MissedRevenue` и связанные types/templates — CONFIRMED.
@@ -306,7 +297,7 @@ Canonical master accounting использует `BookingConfirmation`, `MasterE
 Post-visit confirmation; отчёты и export; CRUD расходов; выбор налоговой ставки по дате; legacy salon/indie finance routes; process-local materialization recurring expenses.
 
 ### Что получает извне
-Booking completion и payment amount; Services для service-based expenses; Identity/Profile owner context; Loyalty points для real-money interpretation.
+Booking context и синхронный completion call; Services для service-based expenses; Identity/Profile owner context; Loyalty points для real-money interpretation.
 
 ### Что публикует наружу
 Operational income/expense views и derived totals для кабинета мастера/салона.
@@ -328,10 +319,10 @@ Operational income/expense views и derived totals для кабинета ма�
 Предпочтения уведомлений клиента (хранилище preferences); триггеры из Booking/Identity — CONFIRMED existence каналов, **не** единая модель Notification.
 
 ### Основные процессы
-Отправка/показ уведомлений по событиям брони и аккаунта; хранение согласий/preferences.
+Endpoint/service-specific отправка или показ сообщений в поддерживаемых сценариях; хранение preferences. Единого notification event consumer не подтверждено.
 
 ### Что получает извне
-События Booking, Identity; иногда Profiles.
+Прямые вызовы и контекст Booking/Identity; иногда Profiles. Наличие business fact не означает опубликованное domain event.
 
 ### Что публикует наружу
 Доставку сообщений пользователю (побочный эффект, не бизнес-факт записи).
@@ -409,7 +400,7 @@ Identity (`role=salon`); Profiles мастеров.
 Контекст филиала/места для Scheduling/Booking в salon-режиме.
 
 ### Границы / статус
-**Частично + feature flags** (`SALONS_ENABLED` / `enableSalonFeatures`). В master-only MVP **не** обязательный домен первого релиза.
+**Частично + feature flags** (`SALONS_ENABLED` / `enableSalonFeatures`). Default-конфигурация не делает Salon основным поддерживаемым path.
 
 ---
 
@@ -444,8 +435,10 @@ CONFIRMED: есть служебный поиск внутри admin/списк�
 ### Границы
 Не бизнес-правила доменов; сбои интеграции не меняют канон «кто платит / кто владеет бронью», но влияют на доставку оплаты/сообщений.
 
-### Feature / release notes
-Mobile Yandex Auth button может быть **скрыт** релизной конфигурацией — это поставка Integrations/Identity UX, не отдельный домен.
+### Configuration note
+Tracked preview/production EAS profiles скрывают Mobile Yandex Auth button. Это build configuration Integrations/Identity UX, не отдельный домен и не бизнес-инвариант; фактический store build остаётся `UNKNOWN`.
+
+**Source:** `mobile/eas.json` — `YANDEX_MOBILE_AUTH_VISIBLE`.
 
 ---
 
@@ -461,6 +454,7 @@ Mobile Yandex Auth button может быть **скрыт** релизной к
 | Booking | Profiles, Services, Scheduling, Identity (когда сессия есть), Loyalty APIs/logic для скидки и synchronous side effects |
 | Client CRM | Identity, Profiles, Booking |
 | Loyalty | Profiles, Identity, Booking context для reserve/release/spend/earn |
+| Operational Finance | Booking context/completion call, Profiles, Services, Loyalty interpretation |
 | Billing | Identity, Profiles; готовые результаты Promo Engine |
 | Promo Engine | Identity |
 | Notifications | Booking, Identity, Profiles |
@@ -472,7 +466,9 @@ Mobile Yandex Auth button может быть **скрыт** релизной к
 
 ---
 
-## Основные бизнес-потоки через домены
+## Основные business flows и synchronous dependencies
+
+Стрелки ниже показывают пользовательскую последовательность или direct runtime dependency. Они не обозначают публикацию domain events.
 
 ### Публичная запись
 
@@ -482,20 +478,19 @@ Public Profiles
   → Scheduling
   → (Identity — при необходимости auth)
   → Booking
-  → Loyalty          # синхронный расчёт скидки/резерва из create path
-  → Notifications    # по событиям записи
-  → Analytics        # цели/события (если включены)
 ```
+
+Booking create paths могут синхронно обратиться к Loyalty для расчёта/сохранения применимого loyalty context. Notifications зависят от конкретного handler/service path, а Analytics отправляется клиентами там, где соответствующая интеграция включена; универсальный downstream pipeline не подтверждён.
 
 ### Оплата подписки мастера
 
 ```text
-Identity
-  → Billing          # calculate / split / pay / apply
-  → Promo Engine     # при применении промо/баллов подписки
-  → Billing          # effective subscription + entitlements
-  → Analytics        # return/success события (если есть)
+Identity → Billing
+Promo Engine grants → Billing
+Billing result → client-side Analytics (если интеграция включена)
 ```
+
+Promo Engine предоставляет готовые grants; он не является обязательным промежуточным шагом каждой оплаты.
 
 ### Настройка мастера к приёму записей
 
@@ -504,41 +499,42 @@ Identity
   → Profiles
   → Services
   → Scheduling
-  → Public Profiles  # публикация slug
-  → (Loyalty)        # опционально правила
-  → Billing          # entitlements на функции
+  → Public Profiles
 ```
+
+Loyalty settings и Billing entitlements — отдельные optional/capability dependencies, а не обязательные шаги одной transaction.
 
 ### Post-visit завершение
 
 ```text
-Booking (outcome / completed)
-  → Loyalty          # синхронный spend резерва + earn в finalize transaction path
-  → Client CRM       # обновление истории взаимодействия
-  → Notifications
+Booking outcome/completion
+  → synchronous Loyalty side effects
+  → synchronous Operational Finance side effects
 ```
+
+Client CRM читает Booking history позднее и не получает подтверждённое событие. Notification delivery не является универсальной частью общего finalize service.
 
 ---
 
-## Домены первого релиза
+## Current supported scope
 
-### Обязательные для master-only MVP (CONFIRMED / INFERRED)
+### Основной repository-supported product path (CONFIRMED / INFERRED)
 
-Identity, Profiles, Public Profiles, Services, Scheduling, Booking, Client CRM, Loyalty, Billing, Promo Engine (как источник SaaS-наград), Notifications (минимально для сопровождения), Administration (операции платформы), Analytics (наблюдаемость), Integrations (Robokassa и необходимые каналы).
+Основной path центрирован на master/client: Identity, Profiles, Public Profiles, Services, Scheduling, Booking, Client CRM, Loyalty, Billing и platform Administration. Promo Engine предоставляет optional SaaS-награды; Notifications, Analytics и Integrations участвуют только в подтверждённых handler/client/provider paths, а не как обязательные доменные стадии каждого сценария.
 
-### Существуют, но выключены / не канон MVP
+### Feature-gated / configuration-shaped
 
 | Домен | Статус |
 |-------|--------|
-| Salon | Feature flags; не основной путь |
+| Salon | Модели/routes существуют; feature flags; не default path |
 | Reviews | Флаг без доменной модели (см. product-roles) |
-| Mobile Yandex Auth UI | Релизная конфигурация off |
+| Mobile Yandex Auth UI | В tracked preview/production EAS profiles скрыт конфигурацией; фактический store build `UNKNOWN` |
 
 ### Legacy
 
 | Домен / контур | Статус |
 |----------------|--------|
-| Indie (`IndieMaster`, role indie) | Legacy при master-only |
+| Indie (`IndieMaster`, role indie) | Legacy compatibility; default `LEGACY_INDIE_MODE=0` |
 | Произвольный deposit balance API | Отключён (410) в billing-каноне |
 
 ### Отсутствует как продуктовый домен
@@ -549,12 +545,11 @@ Search (marketplace-поиск).
 
 ## Открытые вопросы архитектуры продукта
 
-1. Нужен ли Salon в ближайшем публичном релизе или остаётся выключенным контуром?
+1. Должен ли Salon стать default-supported path или оставаться feature-gated контуром?
 2. Канонизировать ли предоплату услуги клиентом как полноценный поток Booking↔Integrations(оплата), или основной путь — `on_visit`?
 3. Нужен ли отдельный продуктовый домен Search / каталог мастеров?
-4. Следует ли выделять «операционный учёт доходов/расходов мастера» в отдельный Domain-документ или держать как выход Booking?
-5. Notifications: достаточно ли текущего «канального» статуса или нужна единая доменная модель?
-6. Reviews: строить домен или исключить из канона продукта?
-7. Где проходит жёсткая граница Services vs Profiles vs Public Profiles при кастомизации страницы записи?
+4. Notifications: достаточно ли текущего «канального» статуса или нужна единая доменная модель?
+5. Reviews: строить домен или исключить из канона продукта?
+6. Где проходит жёсткая граница Services vs Profiles vs Public Profiles при кастомизации страницы записи?
 
 Не предлагать решения в этом документе — только зафиксировать вопросы.

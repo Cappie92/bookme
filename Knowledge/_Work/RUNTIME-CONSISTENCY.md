@@ -10,6 +10,8 @@ audit_baseline: d3407a57171993e23ad3dd6aed3d98a99e7cd196
 
 Audit-only snapshot for baseline `d3407a5`. Verdicts apply to critical runtime claims, not introductory wording. Host-only facts remain `UNKNOWN`; no production access was used. `CURRENT` means the document's scoped critical claims and source anchors agree with this checkout, not that the runtime is defect-free.
 
+Scoped documentation re-audit at baseline `ef4dd0a` rechecked only `Operations/ci-cd.md`, `Domain/product-roles-business-model.md` and `Domain/domain-map.md` against root/nested workflow files, deploy/migration helpers, role/feature configuration and the existing Booking, Scheduling, CRM, Loyalty, Finance and Billing owners. No production or external CI/branch-protection state was inspected.
+
 | Canonical document | Owner aspect | Verdict | Critical claims checked | Drift | Host-only unknowns |
 |---|---|---|---|---|---|
 | `Knowledge/README.md` | Living-canon governance | CURRENT | Source priority, confidence labels, SSOT and security handling | None found | None |
@@ -35,12 +37,12 @@ Audit-only snapshot for baseline `d3407a5`. Verdicts apply to critical runtime c
 | `Knowledge/Domain/booking/README.md` | Booking lifecycle | CURRENT | Status model, effective status, mutation actors, conflict blocking and temporary bookings | None found | Production record distribution |
 | `Knowledge/Domain/booking/completion-side-effects.md` | Visit-finalization transaction and side effects | CURRENT | Confirmation idempotency, loyalty spend/earn, income/expense and failure handling | None found | Reconciliation of existing records |
 | `Knowledge/Domain/client-crm.md` | Client relationship data | CURRENT | Identity keys, notes, favorites, restrictions and booking-derived membership | None found | Production duplication and data quality |
-| `Knowledge/Domain/domain-map.md` | Product-domain overview | CONFLICTING | Domain boundaries, Booking dependencies, finance ownership and event wording | Assigns `Income`/`MissedRevenue` to Booking while Finance canon owns their accounting semantics; diagrams use Notification-style event arrows without a confirmed publisher; finance extraction remains an open question after its canon exists | Actual provider and notification delivery state |
+| `Knowledge/Domain/domain-map.md` | Product-domain overview | CURRENT | Boundary ownership, synchronous dependencies, operational finance owner and current supported scope | None found after scoped re-audit; arrows are explicitly non-event business/runtime dependencies | Actual provider and notification delivery state |
 | `Knowledge/Domain/identity-access.md` | Identity and actual authorization enforcement | CURRENT | Roles, registration persistence, dependency factories, session/token and account lifecycle | None found; documented gaps remain debt, not intended policy | Live provider modes and issued tokens |
 | `Knowledge/Domain/loyalty.md` | Client loyalty lifecycle | CURRENT | Reserve, release, spend, earn, discount scoping and transaction uniqueness | None found | Existing-ledger reconciliation |
 | `Knowledge/Domain/operational-finance.md` | Master/salon operational accounting | CURRENT | Canonical and legacy stores, completion writes, money semantics and ownership | None found | Production record completeness |
 | `Knowledge/Domain/privacy-data-handling.md` | Personal-data lifecycle and external boundaries | CURRENT | Collection/storage, logging, analytics, deletion/retention and provider boundaries | None found | Backups, third-party deletion, retention and consent operations |
-| `Knowledge/Domain/product-roles-business-model.md` | Product roles and business-model overview | STALE | Role surfaces, booking/loyalty/billing invariants and release flags | Open question still asks whether Booking/Loyalty Knowledge is needed although both owner documents exist; overview also repeats owner-level invariants | Actual public release/store configuration |
+| `Knowledge/Domain/product-roles-business-model.md` | Product roles and business-model overview | CURRENT | Current role/feature scope, monetization boundaries, owner links and build-shaped mobile auth setting | None found after scoped re-audit; release wording and resolved owner question removed | Actual deployed/store configuration |
 | `Knowledge/Domain/promo.md` | Promo Engine and legacy promo boundary | CURRENT | Redemption/grant lifecycle, uniqueness, first-payment link and legacy separation | None found | Live campaigns and provider payment outcomes |
 | `Knowledge/Domain/scheduling/README.md` | Availability and conflict rules | CURRENT | Working intervals, timezone, overlap predicate and booking blockers | None found | Host clock/timezone and live schedule data |
 | `Knowledge/Domain/subscriptions-billing/README.md` | Subscription lifecycle | CURRENT | Effective state, reservation/freeze, daily charge and payment application | None found | Live subscriptions and provider state |
@@ -49,7 +51,7 @@ Audit-only snapshot for baseline `d3407a5`. Verdicts apply to critical runtime c
 | `Knowledge/Infrastructure/configuration.md` | Settings and feature-configuration layers | CURRENT | Settings precedence, GlobalSettings, web/mobile local flags and EAS inputs | None found | Runtime values and active build profile |
 | `Knowledge/Infrastructure/production-topology.md` | Repository-known production topology | CURRENT | Compose services/network/volumes, request path, health and process model | None found | Containers, listeners, TLS, volumes and external monitoring |
 | `Knowledge/Onboarding/README.md` | Canon-aware contributor entrypoint | CURRENT | Source priority, package boundaries, safe bootstrap and validation sequence | None found | None |
-| `Knowledge/Operations/ci-cd.md` | CI and deployment workflow semantics | STALE | Workflow triggers, PR gates, deploy ordering, health and migrations | States that deploy has no explicit Alembic step, but `.github/workflows/deploy.yml` invokes `scripts/prod/migrate.sh` after services start | Active workflow revision and remote outcome |
+| `Knowledge/Operations/ci-cd.md` | CI and deployment workflow semantics | CURRENT | Four root workflows, nested backend workflow boundary, PR suites, deploy concurrency/order, Alembic and health | None found after scoped re-audit; capability/workflow/required-gate/UNKNOWN are separated | Branch protection, external CI, active workflow revision and remote outcome |
 | `Knowledge/Operations/local-development.md` | Safe local commands | CURRENT | Backend entrypoint, package-local JS commands, tests, docs and local E2E scope | None found | Developer machine prerequisites |
 | `Knowledge/Operations/testing-strategy.md` | Executable test tiers and guarantees | CURRENT | Pytest discovery, excluded legacy tests, Vitest/Jest/Playwright/Maestro and CI coverage | None found | Latest CI pass state and device availability |
 
@@ -57,10 +59,10 @@ Audit-only snapshot for baseline `d3407a5`. Verdicts apply to critical runtime c
 
 | Verdict | Count |
 |---|---:|
-| CURRENT | 37 |
+| CURRENT | 40 |
 | PARTIAL | 0 |
-| STALE | 2 |
-| CONFLICTING | 1 |
+| STALE | 0 |
+| CONFLICTING | 0 |
 | UNVERIFIABLE | 0 |
 
-All relative Markdown links resolved. Exact repository paths extracted from source-style inline code resolved; four non-path identifiers (`mobile_app` and `backend-run-legacy`) were excluded from path validation. No deleted source path was found. Symbol-level claims were checked for the mandatory critical boundaries; a universal symbol parser was not inferred from prose-only anchors.
+All relative Markdown links resolved. Exact repository paths extracted from source-style inline code resolved; four non-path identifiers (`mobile_app` and `backend-run-legacy`) were excluded from path validation. No deleted source path was found. The scoped re-audit revalidated links and source paths in the three remediated canonical documents and rechecked their critical workflow/config/ownership claims; no host fact was reclassified. A universal symbol parser was not inferred from prose-only anchors.
