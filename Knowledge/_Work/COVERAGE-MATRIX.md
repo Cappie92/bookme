@@ -52,21 +52,21 @@ Coverage measures whether a significant runtime aspect has a clear Knowledge own
 | Mobile notification UI/feed | Mobile architecture and client Debt | MENTIONED_ONLY | Hook uses `notificationsMock` | No real feed/delivery/read-state owner exists |
 | Mobile welcome/pricing fallback data | None | NONE | Local pricing data and catalog mapping under `mobile/src/data` and `mobile/src/utils` | No owner for fallback-versus-server pricing truth |
 | Docker/Compose topology and persistence | `Infrastructure/production-topology.md`; data canon | FULL | Production Dockerfiles, Nginx and Compose | Host state remains unknown by design |
-| GitHub workflow semantics | `Operations/ci-cd.md` | PARTIAL | Four workflow files | Deploy migration statement is stale |
-| Production migration helper | `Architecture/data-and-migrations.md` | PARTIAL | `scripts/prod/migrate.sh`; deploy workflow | Execution is owned, but operational success/readiness procedure is not |
-| Production backup/restore/import/export scripts | None | NONE | Four executable scripts under `scripts/prod/` | Destructive/data-integrity semantics and safe preconditions have no canonical owner |
+| GitHub workflow semantics | `Operations/ci-cd.md`; `Operations/deployment-artifact-inventory.md` | FULL | Four root workflow files; production artifact inventory | None; external run history and required-check state remain unknown by design |
+| Production migration helper | `Architecture/data-and-migrations.md`; `Operations/deployment-artifact-inventory.md` | FULL | `scripts/prod/migrate.sh`; deploy workflow | Host execution and schema readiness remain unknown by design |
+| Production backup/restore/import/export scripts | `Operations/deployment-artifact-inventory.md` | FULL | Four executable scripts under `scripts/prod/` | No approved host runbook; consistency, RPO and RTO remain unknown by design |
 | Test frameworks and discovery | `Operations/testing-strategy.md` | FULL | Pytest, Vitest, Playwright, Jest and Maestro configs | Latest pass state remains external/time-bound |
 | Release/build configuration | Web/mobile architecture, configuration and CI/CD | FULL | Docker, Vite, Expo/EAS and workflow config | Actual release state remains unknown |
-| Root and legacy deployment scripts | None | NONE | Multiple executable `deploy*.sh` and archived deploy instructions | No canonical classification of current, legacy or unsafe paths |
+| Root and legacy deployment scripts | `Operations/deployment-artifact-inventory.md` | FULL | Root/server scripts, generic scripts and archived deploy instructions | Legacy files remain tracked; actual host usage is unknown by design |
 
 ## Coverage counts
 
 | Coverage | Count |
 |---|---:|
-| FULL | 29 |
-| PARTIAL | 12 |
+| FULL | 33 |
+| PARTIAL | 10 |
 | MENTIONED_ONLY | 1 |
-| NONE | 3 |
+| NONE | 1 |
 | MULTIPLE_OWNERS | 1 |
 
 The `NONE` rows are grouped aspects, not a demand for one document per file.

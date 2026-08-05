@@ -28,15 +28,17 @@ audit_baseline: d3407a57171993e23ad3dd6aed3d98a99e7cd196
 - Reviewed credential-like evidence only through already-sanitized/path-level classification; validity remains `UNKNOWN` and no value was copied or externally tested.
 - Final whitespace/conflict-marker checks passed for all four audit artifacts; no absolute developer-machine path or secret-like value pattern was found.
 - Scoped documentation remediation at baseline `ef4dd0a` rechecked only CI/CD, product-role/business-model and domain-map claims against repository workflow/config/runtime sources and their existing canonical owners; no production or external CI state was accessed.
+- Repository-only production artifact remediation at baseline `5a6a91c` inventoried 50 delivery/data/host-oriented artifacts, assigned one Operations owner and classified current, specialized, legacy, historical and host-unknown boundaries without executing scripts or accessing production.
 
 ## Results
 
 - Verdicts after scoped re-audit: **40 CURRENT, 0 PARTIAL, 0 STALE, 0 CONFLICTING, 0 UNVERIFIABLE**.
-- Coverage: **29 FULL, 12 PARTIAL, 1 MENTIONED_ONLY, 3 NONE, 1 MULTIPLE_OWNERS**.
+- Coverage after production-artifact ownership remediation: **33 FULL, 10 PARTIAL, 1 MENTIONED_ONLY, 1 NONE, 1 MULTIPLE_OWNERS**.
 - Open drift severity: **4 P0, 5 P1, 1 P2**.
 - Scoped verdicts: `Knowledge/Operations/ci-cd.md` — CURRENT; `Knowledge/Domain/product-roles-business-model.md` — CURRENT; `Knowledge/Domain/domain-map.md` — CURRENT.
 - Closed documentation drift: RC-003, RC-006, RC-007, RC-013, RC-014, RC-015.
-- Coverage `NONE`: mobile welcome/pricing fallback data; production backup/restore/import/export scripts; root and legacy deployment scripts.
+- Coverage `NONE`: mobile welcome/pricing fallback data.
+- Production migration, backup/restore/import/export and root/legacy deployment artifacts now have canonical ownership and repository-level classification. RC-004 and RC-005 remain open because host-verified procedures, script safety review and legacy quarantine/retirement decisions were not performed.
 
 ## Unresolved stop gates and owner decisions
 
@@ -44,16 +46,16 @@ audit_baseline: d3407a57171993e23ad3dd6aed3d98a99e7cd196
 - A separate authorization remediation requires security/code owner authorization.
 - RC-001 remains **OPEN / P0** in `main`. An unmerged candidate branch `fix/authorization-hardening` exists at candidate HEAD `f2a4a75`; it is not runtime evidence for `main`, and its changes do not belong to the current canon. Any possible merge requires a separate security review and an explicit project-owner decision.
 - Credential-like repository evidence requires a separate controlled security remediation; validity is neither assumed active nor retired.
-- Production data scripts and competing deploy entrypoints require an Operations/Data owner before use or canonicalization.
+- Production data scripts and competing deploy entrypoints are canonically classified, but RC-004 and RC-005 remain **OPEN / P0** pending Operations/Data safety review, host-verified procedures and an explicit legacy-artifact disposition decision.
 - A host audit remains optional and requires explicit production/SSH authorization; repository-only claims stay `UNKNOWN` meanwhile.
 - Product/domain owners must assign detailed ownership for profiles/services/public/admin/integrations and mobile fallback pricing.
 
 ## Next recommended remediation batch
 
-Keep authorization and credential handling in their separately authorized processes. The next documentation/operations batch may classify production data/deploy entrypoints and noncanonical operational artifacts without executing them; unresolved product ownership decisions remain queued.
+Keep authorization and credential handling in their separately authorized processes. Production artifact ownership is now documented; no subsequent remediation batch has been started. Unresolved product ownership and operational owner decisions remain queued.
 
 ## Git state
 
-- Intended documentation-only changes are limited to three existing canonical documents and `RUNTIME-CONSISTENCY.md`, `DRIFT-QUEUE.md`, `STATUS.md`.
-- `Knowledge/_Work/COVERAGE-MATRIX.md` and its counts are unchanged because no coverage re-audit was performed.
+- Intended documentation-only changes are limited to one new Operations canonical document plus `Knowledge/README.md`, `COVERAGE-MATRIX.md`, `DRIFT-QUEUE.md` and `STATUS.md`.
+- Coverage counts are updated only for workflow and production deployment/data artifact ownership reviewed in this package; consistency verdicts for existing canonical documents are unchanged.
 - No commit or push is authorized for this changeset; runtime/config/tests remain unchanged.

@@ -109,5 +109,6 @@
 - [Architecture/mobile.md](Architecture/mobile.md) — Expo Router composition, API/config, deep links и mobile runtime boundaries
 - [Operations/testing-strategy.md](Operations/testing-strategy.md) — исполняемые backend/web/mobile test tiers и границы гарантий
 - [Operations/ci-cd.md](Operations/ci-cd.md) — repository-known GitHub Actions, docs automation и deployment gates
+- [Operations/deployment-artifact-inventory.md](Operations/deployment-artifact-inventory.md) — production entry points, data scripts и legacy/historical deployment boundaries
 - [Operations/local-development.md](Operations/local-development.md) — безопасный package-local bootstrap и local-only validation
 - [Onboarding/README.md](Onboarding/README.md) — безопасный маршрут нового участника к канону и проверкам
