@@ -41,6 +41,7 @@ audit_baseline: d3407a57171993e23ad3dd6aed3d98a99e7cd196
 
 - Stop Gates triggered: **none**. Audit can complete without production, secret disclosure, destructive Git or canonical ownership collapse.
 - A separate authorization remediation requires security/code owner authorization.
+- RC-001 remains **OPEN / P0** in `main`. An unmerged candidate branch `fix/authorization-hardening` exists at candidate HEAD `f2a4a75`; it is not runtime evidence for `main`, and its changes do not belong to the current canon. Any possible merge requires a separate security review and an explicit project-owner decision.
 - Credential-like repository evidence requires a separate controlled security remediation; validity is neither assumed active nor retired.
 - Production data scripts and competing deploy entrypoints require an Operations/Data owner before use or canonicalization.
 - A host audit remains optional and requires explicit production/SSH authorization; repository-only claims stay `UNKNOWN` meanwhile.

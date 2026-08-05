@@ -10,6 +10,8 @@ audit_baseline: d3407a57171993e23ad3dd6aed3d98a99e7cd196
 
 This queue is sanitized. It contains no credential values, personal data, production targets, exploit instructions or executable operational sequences.
 
+RC-001 remains **OPEN / P0** for `main`. An unmerged remediation candidate exists in branch `fix/authorization-hardening` at candidate HEAD `f2a4a75`. The branch is not runtime evidence for `main`, and its changes are not part of the current canon. Any possible merge requires a separate security review and an explicit project-owner decision.
+
 | ID | Severity | Type | Canon owner | Runtime evidence | Required action | Needs owner decision |
 |---|---|---|---|---|---|---|
 | RC-001 | P0 | security-debt | Identity/Authorization plus scoped Debt | Repository confirms privileged role persistence at common registration, ineffective admin root dependency wiring and inconsistent generic booking object authorization | Run a separate authorization remediation with endpoint inventory and regression tests; do not treat current behavior as policy | Yes — authorize and scope the code/security track |
