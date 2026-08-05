@@ -10,11 +10,11 @@
 - **Confidence:** CONFIRMED
 - **Trust boundary:** authenticated identity → mutation of a Booking and its reschedule requests.
 - **Category:** missing/inconsistent object-level authorization enforcement.
-- **Confirmed scope:** mounted generic booking router содержит mutation handlers без role/ownership validation, тогда как соседние handlers выполняют такие проверки.
+- **Original confirmed scope (pre-remediation):** mounted generic booking router содержал mutation handlers без role/ownership validation, тогда как соседние handlers выполняли такие проверки.
 - **Potential impact:** нарушение целостности booking-данных за пределами разрешённого пользователю объекта.
 - **Sources:** `backend/main.py` — booking router composition; `backend/routers/bookings.py` — `delete_booking`, `create_edit_request`, `update_edit_request`, comparison with `update_booking`.
-- **Status:** active repository-known debt. Не является правильной бизнес-логикой.
-- **Required action:** отдельный authorization remediation track с code/test изменениями после завершения или контролируемой остановки Knowledge track.
+- **Status:** `RESOLVED` in commit `e0b8bc7`; retained as historical repository evidence.
+- **Remediation evidence:** generic list/read/update/delete use one role-to-resource scope; create is client-only; edit-request creation and decision are split between owning client and owning professional side; active/demo enforcement and cross-party regression tests are present in `backend/tests/test_authorization_hardening.py`.
 
 Эксплуатационные шаги и углублённый exploitability analysis намеренно не входят в Knowledge.
 

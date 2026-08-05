@@ -60,11 +60,11 @@ Repository-known security/privacy debt. Документ не содержит c
 - **Confidence:** CONFIRMED
 - **Trust boundary:** anonymous registration request → persisted account role and authorization identity.
 - **Category:** missing server-side allowlist for privileged role assignment.
-- **Confirmed scope:** common registration schema accepts the complete role enum and the handler persists the supplied role; OAuth onboarding separately limits new accounts to client/master.
+- **Original confirmed scope (pre-remediation):** common registration schema accepted the complete role enum and the handler persisted the supplied role; OAuth onboarding separately limited new accounts to client/master.
 - **Potential impact:** creation of an identity with privileges not intended for self-service registration.
 - **Sources:** `backend/schemas.py` — `UserCreate`; `backend/routers/auth.py` — `register`, `_create_user_from_oauth_onboarding`.
-- **Status:** active repository-known debt; this is not canonical business policy.
-- **Required action:** separate authorization remediation with code and regression tests.
+- **Status:** `RESOLVED` in commit `e0b8bc7`; retained as historical repository evidence.
+- **Remediation evidence:** common `UserCreate` schema now accepts only client/master/salon; regression coverage rejects admin/moderator/legacy indie and preserves supported self-service roles in `backend/tests/test_authorization_hardening.py`.
 
 ## Critical: admin router root enforcement
 
@@ -72,11 +72,11 @@ Repository-known security/privacy debt. Документ не содержит c
 - **Confidence:** CONFIRMED
 - **Trust boundary:** authenticated identity → administrative mutations and operational data.
 - **Category:** dependency factory wired without instantiating its role checker.
-- **Confirmed scope:** the core admin router registers the factory itself as a root dependency; endpoint-local role/permission dependencies still protect only the handlers that declare them. Other admin/moderator routers use instantiated checkers correctly.
+- **Original confirmed scope (pre-remediation):** the core admin router registered the factory itself as a root dependency; endpoint-local role/permission dependencies protected only handlers that declared them. Other admin/moderator routers used instantiated checkers correctly.
 - **Potential impact:** administrative handlers relying only on the ineffective root dependency may execute without the intended admin/moderator role enforcement.
 - **Sources:** `backend/auth.py` — `require_admin_or_moderator`; `backend/routers/admin.py` — router declaration and endpoint-local dependencies; comparison with `backend/routers/moderator.py`, `backend/routers/admin_promo_engine.py`, `backend/routers/subscription_plans.py`, `backend/routers/service_functions.py`.
-- **Status:** active repository-known debt; frontend route guards do not compensate for backend enforcement.
-- **Required action:** separate authorization remediation with endpoint inventory and regression tests.
+- **Status:** `RESOLVED` in commit `e0b8bc7`; frontend route guards remain UX-only.
+- **Remediation evidence:** core admin router instantiates the admin/moderator checker; tests cover non-platform denial, admin/moderator root access and endpoint-local moderator permission.
 
 ## Critical: legacy reverse-call verification
 

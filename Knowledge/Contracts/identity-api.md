@@ -2,7 +2,7 @@
 type: Knowledge
 status: active
 project: DeDato
-last_runtime_check: 2026-08-04
+last_runtime_check: 2026-08-05
 ---
 
 # Contract: Identity API
@@ -36,7 +36,7 @@ Access and refresh token claim shapes are not distinguished by a token-purpose c
 
 Common body includes phone, password, role, optional email/name/birth date, and master city/timezone/promo context. Success creates an active but initially unverified account and returns tokens. Master registration creates its profile; email-delivery failure is logged but does not undo account creation.
 
-Common request schema has no consent fields. Extra consent-like web fields are not part of the server contract. More importantly, the schema accepts the full role enum and the handler persists it; privileged self-assignment is [critical Debt](../Debt/security-and-privacy.md#critical-privileged-role-assignment-at-registration). Clients must not interpret this defect as authorized role-selection policy.
+Common request schema has no consent fields. Extra consent-like web fields are not part of the server contract. Self-service role допускает client, master и salon; admin, moderator и legacy indie не входят в common registration schema. История устранённого privileged-assignment gap сохранена в [security Debt](../Debt/security-and-privacy.md#critical-privileged-role-assignment-at-registration).
 
 OAuth onboarding is a distinct contract limited to client/master and requires its phone/terms/personal-data checks.
 
@@ -72,11 +72,11 @@ Frontend must clean ticket-bearing callback URLs and must never persist provider
 
 ## 7. Authorization and role contract
 
-Bearer authentication supplies an identity; role and ownership are additional enforcement layers. `require_role` and moderator permission checkers operate on the current DB user. Core admin router root enforcement is currently defective, while several sibling routers and endpoint-local handlers use correct checkers; see [critical Debt](../Debt/security-and-privacy.md#critical-admin-router-root-enforcement).
+Bearer authentication supplies an identity; role and ownership are additional enforcement layers. `require_role` and moderator permission checkers operate on the current DB user. Core admin router root dependency допускает admin/moderator, а endpoint-local permission checker может дополнительно ограничить moderator. История исправленного wiring gap сохранена в [security Debt](../Debt/security-and-privacy.md#critical-admin-router-root-enforcement).
 
 Web/mobile role guards choose UI/navigation only. They are not part of backend authorization. Demo read-only is applied only by `get_current_active_user`, so it is dependency-scoped rather than a universal token capability.
 
-**Source:** `backend/auth.py`; `backend/routers/admin.py`; `backend/routers/moderator.py`; `backend/routers/admin_promo_engine.py`; `frontend/src/App.jsx`; `mobile/app/_layout.tsx`.
+**Source:** `backend/auth.py`; `backend/routers/admin.py`; `backend/routers/moderator.py`; `backend/routers/admin_promo_engine.py`; `backend/tests/test_authorization_hardening.py`; `frontend/src/App.jsx`; `mobile/app/_layout.tsx`. Remediation evidence: commit `e0b8bc7`.
 
 ## 8. Deletion and search
 

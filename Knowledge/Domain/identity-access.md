@@ -2,7 +2,7 @@
 type: Knowledge
 status: active
 project: DeDato
-last_runtime_check: 2026-08-04
+last_runtime_check: 2026-08-05
 ---
 
 # Identity and access
@@ -21,7 +21,7 @@ last_runtime_check: 2026-08-04
 
 Common registration создаёт active account с неподтверждёнными email и phone и сразу выдаёт JWT pair. Для master дополнительно требуются city/timezone и создаётся `Master`; для остальных ролей профиль в этом handler не создаётся.
 
-Фактический common registration принимает role из полного enum и сохраняет её без server-side self-service allowlist. Это `critical` authorization debt, а не политика назначения privileged roles: [privileged role assignment](../Debt/security-and-privacy.md#critical-privileged-role-assignment-at-registration).
+Common self-service registration принимает только client, master и salon. Admin, moderator и legacy indie отклоняются request-schema до создания account. OAuth onboarding остаётся отдельным contract для client/master. Исправленный privileged-role gap сохранён как [resolved security Debt](../Debt/security-and-privacy.md#critical-privileged-role-assignment-at-registration).
 
 Email verification использует одноразовые `EmailVerification` rows с purpose/expiry; password reset использует отдельные одноразовые rows. Phone verification хранит server-side target/code/call/expiry/attempt state. Current code-based flow сравнивает введённые данные с сохранённым state; legacy reverse-call flow нарушает этот invariant и отдельно отмечен как [critical Debt](../Debt/security-and-privacy.md#critical-legacy-reverse-call-verification).
 
@@ -59,11 +59,13 @@ Authorization принадлежит backend endpoint dependencies и object que
 - `require_moderator_permission(...)` пропускает admin либо проверяет конкретный `ModeratorPermissions` flag;
 - object ownership должен отдельно проверяться router/service query.
 
-Router composition неоднородна. Moderator, promo-engine, subscription-plan и service-function admin routers используют instantiated role checker. Core admin router подключает factory некорректно; endpoint-local checkers защищают только handlers, где они объявлены. Это [critical admin enforcement Debt](../Debt/security-and-privacy.md#critical-admin-router-root-enforcement). Booking имеет отдельный [critical object-authorization Debt](../Debt/booking-scheduling.md#critical-generic-booking-mutation-authorization).
+Core admin router, moderator router и специализированные admin routers применяют server-side role dependencies. Для core admin router root boundary допускает только admin/moderator; endpoint-local moderator-permission dependencies продолжают сужать доступ к конкретным операциям. Исправленный root-enforcement gap сохранён как [resolved security Debt](../Debt/security-and-privacy.md#critical-admin-router-root-enforcement).
+
+Generic Booking router применяет active-user/demo restriction и единое object scope. Client видит и изменяет только свои записи; master, legacy indie, salon owner и branch manager — только записи соответствующего professional resource. Generic create доступен client; edit request создаёт owning client, а решение принимает owning professional side. Platform roles и посторонние resource parties не получают доступ через generic Booking endpoints. История исправления: [resolved Booking authorization Debt](../Debt/booking-scheduling.md#critical-generic-booking-mutation-authorization).
 
 Frontend `AdminRoute` и role-based navigation — UX boundary. Они не компенсируют server-side gap и не являются security control.
 
-**Source:** `backend/auth.py`; router declarations under `backend/routers/`; `frontend/src/App.jsx`.
+**Source:** `backend/auth.py`; `backend/routers/admin.py`; `backend/routers/bookings.py`; `backend/tests/test_authorization_hardening.py`; `frontend/src/App.jsx`. Remediation evidence: commit `e0b8bc7`.
 
 ## 6. Demo account
 

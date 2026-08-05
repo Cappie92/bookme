@@ -10,9 +10,16 @@ audit_baseline: d3407a57171993e23ad3dd6aed3d98a99e7cd196
 
 This queue is sanitized. It contains no credential values, personal data, production targets, exploit instructions or executable operational sequences.
 
+## Resolved drift
+
+| ID | Former severity | Canon owner | Resolution evidence |
+|---|---|---|---|
+| RC-001 | P0 | Identity/Authorization plus scoped Debt | `RESOLVED` by `e0b8bc7`: self-service role allowlist, effective core-admin root guard, generic Booking role/resource ownership enforcement and regression coverage |
+
+## Open drift
+
 | ID | Severity | Type | Canon owner | Runtime evidence | Required action | Needs owner decision |
 |---|---|---|---|---|---|---|
-| RC-001 | P0 | security-debt | Identity/Authorization plus scoped Debt | Repository confirms privileged role persistence at common registration, ineffective admin root dependency wiring and inconsistent generic booking object authorization | Run a separate authorization remediation with endpoint inventory and regression tests; do not treat current behavior as policy | Yes — authorize and scope the code/security track |
 | RC-002 | P0 | security-debt | `Debt/security-and-privacy.md` | Sanitized path-level repository evidence contains credential-like literals/access-material candidates; validity is `UNKNOWN`, sensitivity `HIGH` | Separate security remediation, rotation/removal decision and history-aware scan without copying values | Yes — security owner and approved handling process |
 | RC-003 | P0 | contradiction | `Operations/ci-cd.md` | Deploy workflow invokes the production migration helper after services start; canon states no explicit Alembic deploy step | Correct CI/CD canon in a remediation change and add an automated assertion for deploy ordering | No for factual correction; yes for target ordering/readiness |
 | RC-004 | P0 | orphan-runtime | None | Production import/restore scripts stop Compose and overwrite persistent DB/upload state; backup/export siblings produce transportable datasets | Assign an Operations owner, document safe preconditions/verification/recovery and review scripts before any use | Yes — operations/data owner required |
@@ -33,10 +40,10 @@ This queue is sanitized. It contains no credential values, personal data, produc
 
 | Severity | Count |
 |---|---:|
-| P0 | 5 |
+| P0 | 4 |
 | P1 | 7 |
 | P2 | 4 |
 
 ## Recommended first remediation batch
 
-Start the separately controlled authorization remediation for RC-001: enumerate affected server endpoints, define intended role/object policy, change code and add regression tests without operationalizing abuse paths. Credential handling remains a distinct security process. The next documentation/operations batch should then correct the deploy/Alembic contradiction, classify production data/deploy entrypoints and remove false event/duplicate ownership wording from the domain overview.
+Credential handling remains a distinct security process. The next documentation/operations batch should correct the deploy/Alembic contradiction, classify production data/deploy entrypoints and remove false event/duplicate ownership wording from the domain overview.

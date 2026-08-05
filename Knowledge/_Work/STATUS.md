@@ -12,6 +12,7 @@ audit_baseline: d3407a57171993e23ad3dd6aed3d98a99e7cd196
 
 - Branch: `main`
 - Commit: `d3407a57171993e23ad3dd6aed3d98a99e7cd196` (`d3407a5`)
+- Audit artifact commit: `dbbfaab` (`docs(knowledge): add runtime consistency and coverage audit`), pushed to `origin/main`
 - At audit start: clean and synchronized with `origin/main` (`0` ahead, `0` behind)
 - Canonical Markdown documents checked: **40** (all Markdown under `Knowledge/` except `_Work/`)
 - Production/SSH/provider access: **not used**
@@ -32,7 +33,7 @@ audit_baseline: d3407a57171993e23ad3dd6aed3d98a99e7cd196
 
 - Verdicts: **37 CURRENT, 0 PARTIAL, 2 STALE, 1 CONFLICTING, 0 UNVERIFIABLE**.
 - Coverage: **29 FULL, 12 PARTIAL, 1 MENTIONED_ONLY, 3 NONE, 1 MULTIPLE_OWNERS**.
-- Drift severity: **5 P0, 7 P1, 4 P2**.
+- Open drift severity after scoped authorization remediation: **4 P0, 7 P1, 4 P2**; RC-001 is retained as resolved history.
 - Stale documents: `Knowledge/Operations/ci-cd.md`, `Knowledge/Domain/product-roles-business-model.md`.
 - Conflicting document: `Knowledge/Domain/domain-map.md`.
 - Coverage `NONE`: mobile welcome/pricing fallback data; production backup/restore/import/export scripts; root and legacy deployment scripts.
@@ -40,7 +41,7 @@ audit_baseline: d3407a57171993e23ad3dd6aed3d98a99e7cd196
 ## Unresolved stop gates and owner decisions
 
 - Stop Gates triggered: **none**. Audit can complete without production, secret disclosure, destructive Git or canonical ownership collapse.
-- A separate authorization remediation requires security/code owner authorization.
+- RC-001 authorization remediation is complete in branch `fix/authorization-hardening`; no production or credential access was used.
 - Credential-like repository evidence requires a separate controlled security remediation; validity is neither assumed active nor retired.
 - Production data scripts and competing deploy entrypoints require an Operations/Data owner before use or canonicalization.
 - A host audit remains optional and requires explicit production/SSH authorization; repository-only claims stay `UNKNOWN` meanwhile.
@@ -48,11 +49,20 @@ audit_baseline: d3407a57171993e23ad3dd6aed3d98a99e7cd196
 
 ## Next recommended remediation batch
 
-Start the separately controlled authorization remediation for the confirmed role/object enforcement boundaries, with endpoint inventory and regression tests. Keep credential handling in its own security process. After that, run a bounded documentation/operations correction for the CI/CD migration statement, production data/deploy entrypoints and domain-overview ownership wording.
+Keep credential handling in its own security process. Run a bounded documentation/operations correction for the CI/CD migration statement, production data/deploy entrypoints and domain-overview ownership wording.
+
+## Authorization remediation follow-up
+
+- Branch: `fix/authorization-hardening`, based on pushed `origin/main` audit baseline.
+- Code/test evidence: `e0b8bc7` (`fix(auth): enforce authorization boundaries`).
+- Closed drift: RC-001 — common self-service role assignment, core admin root enforcement and generic Booking role/resource ownership.
+- Preserved behavior checked: supported self-service roles, admin/moderator split, endpoint-local moderator permission, resource-party reads/mutations, demo write restriction, JWT subject resolution and account deletion suites.
+- Tests: 14 focused authorization tests passed; 113 selected auth/admin/account/Booking tests passed; 28 directly impacted authorization/Booking/subscription tests passed after final adjustment.
+- Widest backend run before the final admin transaction/test adjustment: 655 passed, 9 skipped, 2 failed. The admin-retry compatibility failure caused by newly active router enforcement was corrected and passed in isolation plus the 28-test impacted set. The remaining seed-loyalty smoke 404 is unrelated to authorization and was not changed.
+- Scoped Identity/Authorization consistency verdict: CURRENT. Other canonical verdicts and coverage counts remain unchanged.
 
 ## Git state
 
-- Intended audit changes are limited to the four noncanonical `_Work` files.
-- No commit or push is authorized or performed.
-- `git diff --check` passed for the tracked change; equivalent trailing-whitespace/conflict-marker checks passed for the three untracked audit files.
-- Local `HEAD` and fetched `origin/main` remain equal to the baseline commit.
+- Audit baseline is committed and pushed on `main`.
+- Remediation code/tests are committed on `fix/authorization-hardening`; this Knowledge synchronization is the only remaining intended changeset before branch push.
+- No merge, deploy, production/SSH access or pull request is part of this track.

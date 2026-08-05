@@ -10,11 +10,13 @@ audit_baseline: d3407a57171993e23ad3dd6aed3d98a99e7cd196
 
 Coverage measures whether a significant runtime aspect has a clear Knowledge owner. It does not require one document per file and does not imply correctness of the implementation.
 
+Scoped authorization follow-up checked commit `e0b8bc7`; unrelated coverage verdicts were not re-opened.
+
 | Runtime area/component | Canonical owner | Coverage | Evidence | Gap |
 |---|---|---|---|---|
 | Backend application composition and route mounting | `Architecture/backend.md` | FULL | `backend/main.py`; router inventory | None |
 | Identity/OAuth/verification models and auth router | `Domain/identity-access.md`; `Contracts/identity-api.md` | FULL | `backend/models.py`; `backend/auth.py`; `backend/routers/auth.py` | None |
-| Actual role/object authorization behavior | `Domain/identity-access.md`; scoped Debt | FULL | Dependencies and mutation-handler checks | Remediation remains separate from documentation |
+| Actual role/object authorization behavior | `Domain/identity-access.md`; scoped Debt | FULL | Dependencies, mutation-handler checks and `backend/tests/test_authorization_hardening.py` | None for RC-001; remaining security Debt is separately scoped |
 | Master/salon/indie profile model and lifecycle | `Domain/product-roles-business-model.md`; `Domain/domain-map.md` | PARTIAL | Models and master/salon/public routers | No detailed owner for profile creation, branch membership and legacy bridges |
 | Service catalog, categories and per-master settings | `Domain/domain-map.md`; `Domain/scheduling/README.md` | PARTIAL | Service/category models and master/salon routers | Price/duration ownership is mentioned but catalog mutation/lifecycle is not owned |
 | Booking, temporary booking and edit-request lifecycle | `Domain/booking/README.md`; `Contracts/booking-api.md` | FULL | Booking models/router/factory/status helpers | None |
@@ -25,7 +27,7 @@ Coverage measures whether a significant runtime aspect has a clear Knowledge own
 | Promo Engine and legacy promo | `Domain/promo.md` | FULL | Promo routers/service/models | None |
 | Operational `Income`/`MissedRevenue` ownership | `Domain/operational-finance.md` and `Domain/domain-map.md` | MULTIPLE_OWNERS | Finance and Booking sections both claim related owner data | Resolve overview ownership wording |
 | Public profile/domain/page modules/blog | `Domain/domain-map.md`; `Infrastructure/configuration.md` | PARTIAL | Domain/blog/public/module routers and models | No single lifecycle/API owner for the composed public surface |
-| Admin/moderator platform operations | `Domain/identity-access.md`; configuration and Debt documents | PARTIAL | Admin, moderator, plan and function routers | Authorization and feature administration are covered; full operational surface is not |
+| Admin/moderator platform operations | `Domain/identity-access.md`; configuration and Debt documents | PARTIAL | Admin, moderator, plan and function routers | Root/permission authorization is covered; full operational surface is not |
 | Account deletion and privacy boundary | `Domain/privacy-data-handling.md`; `Contracts/identity-api.md` | FULL | Account-deletion service and auth endpoints | External retention remains host/provider unknown |
 | Email, telephony, OAuth and geocoder integrations | Identity, privacy, topology and domain overview | PARTIAL | Integration services/routers and settings categories | No unified integration owner for failure/status/retry contracts |
 | Backend business-rule utils | Respective Booking, Scheduling, Loyalty, Billing and Finance owners | FULL | Status, money, loyalty, subscription and statistics helper groups | None for owned domains |
