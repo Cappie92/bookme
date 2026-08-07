@@ -3,7 +3,6 @@ import {
   CalendarDaysIcon,
   ChartBarSquareIcon,
   CurrencyDollarIcon,
-  DevicePhoneMobileIcon,
   NoSymbolIcon,
   RectangleStackIcon,
   UserGroupIcon,
@@ -51,7 +50,7 @@ const FEATURES = [
 
 const AVAILABLE_NOW = [
   'Личная страница мастера',
-  'Автоматические и индивидуальные скидки',
+  'Настраиваемые скидки',
   'Статистика',
   'Финансовый учёт',
   'Списки клиентов',
@@ -363,25 +362,43 @@ export default function Home() {
 
             <div className="hidden sm:block w-px h-10 bg-[#E7E2DF]" />
 
-            {[
-              { name: 'App Store' },
-              { name: 'Google Play' },
-              { name: 'RuStore' },
-            ].map((x) => (
-              <a
-                key={x.name}
-                href="#"
-                onClick={(e) => e.preventDefault()}
-                aria-disabled="true"
-                className="relative inline-flex items-center justify-center gap-2 rounded-2xl bg-neutral-900 text-white px-5 py-3 border border-neutral-800 opacity-55 select-none"
-              >
-                <DevicePhoneMobileIcon className="h-5 w-5" />
-                <span className="font-semibold">{x.name}</span>
-                <span className="absolute -top-2 -right-2 rounded-full border border-[#E7E2DF] bg-[#F4F1EF] px-2 py-0.5 text-[10px] font-semibold text-neutral-500">
-                  Скоро
-                </span>
-              </a>
-            ))}
+            <a
+              href="https://www.rustore.ru/catalog/app/ru.dedato.mobile"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center hover:opacity-90 active:scale-[0.99] transition"
+            >
+              <img
+                src="/badges/rustore.png"
+                alt="Доступно в RuStore"
+                className="h-11 w-auto"
+                draggable={false}
+              />
+            </a>
+
+            <span className="relative inline-flex items-center opacity-55 select-none" aria-disabled="true">
+              <img
+                src="/badges/app-store.png"
+                alt="Загрузите в App Store"
+                className="h-11 w-auto pointer-events-none"
+                draggable={false}
+              />
+              <span className="absolute -top-2 -right-2 rounded-full border border-[#E7E2DF] bg-[#F4F1EF]/80 px-2 py-0.5 text-[10px] font-semibold text-neutral-500 backdrop-blur-[2px]">
+                Скоро
+              </span>
+            </span>
+
+            <span className="relative inline-flex items-center opacity-55 select-none" aria-disabled="true">
+              <img
+                src="/badges/google-play.png"
+                alt="Скачать из Google Play"
+                className="h-11 w-auto pointer-events-none"
+                draggable={false}
+              />
+              <span className="absolute -top-2 -right-2 rounded-full border border-[#E7E2DF] bg-[#F4F1EF]/80 px-2 py-0.5 text-[10px] font-semibold text-neutral-500 backdrop-blur-[2px]">
+                Скоро
+              </span>
+            </span>
           </div>
         </section>
 
