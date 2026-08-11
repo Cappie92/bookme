@@ -9,6 +9,7 @@ const AuthContext = createContext()
 export function AuthProvider({ children }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [user, setUser] = useState(null)
+  const [webSessionOrigin, setWebSessionOrigin] = useState(null)
   const [loading, setLoading] = useState(true)
   const [authModalOpen, setAuthModalOpen] = useState(false)
   const [authModalType, setAuthModalType] = useState('client')
@@ -37,6 +38,7 @@ export function AuthProvider({ children }) {
     if (!token) {
       setIsAuthenticated(false)
       setUser(null)
+      setWebSessionOrigin(null)
       setLoading(false)
       return
     }
@@ -50,6 +52,13 @@ export function AuthProvider({ children }) {
         const userData = await response.json()
         setUser(userData)
         setIsAuthenticated(true)
+        const origin = userData.web_session_origin || null
+        setWebSessionOrigin(origin)
+        if (origin) {
+          sessionStorage.setItem('dedato_web_session_origin', origin)
+        } else {
+          sessionStorage.removeItem('dedato_web_session_origin')
+        }
         if (userData.role) localStorage.setItem('user_role', userData.role)
         if (userData.phone !== '+79990009999') {
           localStorage.removeItem('demo_mode')
@@ -62,10 +71,13 @@ export function AuthProvider({ children }) {
         localStorage.removeItem('access_token')
         setIsAuthenticated(false)
         setUser(null)
+        setWebSessionOrigin(null)
+        sessionStorage.removeItem('dedato_web_session_origin')
       }
     } catch (error) {
       setIsAuthenticated(false)
       setUser(null)
+      setWebSessionOrigin(null)
     } finally {
       setLoading(false)
     }
@@ -78,14 +90,23 @@ export function AuthProvider({ children }) {
     localStorage.removeItem('demo_mode')
     localStorage.removeItem('new_client_setup')
     localStorage.removeItem('existing_client_verification')
+    sessionStorage.removeItem('dedato_web_session_origin')
     setIsAuthenticated(false)
     setUser(null)
+    setWebSessionOrigin(null)
     navigate('/')
   }
 
   const login = (userData) => {
     setUser(userData)
     setIsAuthenticated(true)
+    const origin = userData?.web_session_origin || null
+    setWebSessionOrigin(origin)
+    if (origin) {
+      sessionStorage.setItem('dedato_web_session_origin', origin)
+    } else {
+      sessionStorage.removeItem('dedato_web_session_origin')
+    }
   }
 
   /**
@@ -123,6 +144,8 @@ export function AuthProvider({ children }) {
     const dropAuth = () => {
       setIsAuthenticated(false)
       setUser(null)
+      setWebSessionOrigin(null)
+      sessionStorage.removeItem('dedato_web_session_origin')
     }
 
     const onAuthLogout = () => {
@@ -162,9 +185,13 @@ export function AuthProvider({ children }) {
     wasAuthModalOpen.current = authModalOpen
   }, [authModalOpen, authModalType, authModalInitialTab, authModalFlow])
 
+  const isIosAppWebSession = webSessionOrigin === 'ios_app'
+
   const value = {
     isAuthenticated,
     user,
+    webSessionOrigin,
+    isIosAppWebSession,
     loading,
     getAuthHeaders,
     logout,

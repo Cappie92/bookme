@@ -105,6 +105,12 @@ async def init_subscription_payment(
 
     Без calculation_id (legacy): amount = полная цена, без hold (старое поведение).
     """
+    if getattr(current_user, "web_session_origin", None) == "ios_app":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Subscription purchase via Robokassa is not available in this session",
+        )
+
     from utils.balance_utils import get_user_available_balance
     from utils.subscription_payment_split import (
         MONEY_TOLERANCE,

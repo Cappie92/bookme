@@ -71,6 +71,8 @@ class User(Base):
     pending_phone_expires_at = Column(DateTime, nullable=True)
     pending_email = Column(String, nullable=True)
     is_always_free = Column(Boolean, default=False)  # Всегда бесплатно - все платные функции доступны
+    # Stable opaque id for RevenueCat app_user_id (never email/phone/sequential id)
+    revenuecat_app_user_id = Column(String(36), unique=True, nullable=True, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -758,7 +760,12 @@ class Subscription(Base):
     # Связь с планом подписки
     plan_id = Column(Integer, ForeignKey("subscription_plans.id"), nullable=True)
     plan = relationship("SubscriptionPlan", back_populates="subscriptions")
-    
+    # Billing channel: robokassa (default/legacy) | apple (App Store via RevenueCat)
+    billing_provider = Column(String(32), nullable=False, default="robokassa", server_default="robokassa")
+    apple_original_transaction_id = Column(String(128), nullable=True, unique=True, index=True)
+    apple_transaction_id = Column(String(128), nullable=True)
+    apple_product_id = Column(String(128), nullable=True, index=True)
+    apple_environment = Column(String(32), nullable=True)  # sandbox | production
 
 
 class SubscriptionReservation(Base):

@@ -36,6 +36,8 @@ export interface Subscription {
   plan_display_name?: string | null;
   features?: Record<string, any> | null;
   limits?: Record<string, any> | null;
+  billing_provider?: string | null;
+  is_active?: boolean | null;
 }
 
 // Интерфейс плана подписки (соответствует backend SubscriptionPlanOut)

@@ -58,6 +58,8 @@ class User(UserBase):
     is_always_free: bool = False
     created_at: datetime
     updated_at: datetime
+    # Server-trusted JWT claim (ios_app handoff); not a DB column.
+    web_session_origin: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -1238,6 +1240,8 @@ class SubscriptionOut(BaseModel):
     amount_paid: Optional[float] = None
     points_used: Optional[int] = None
     points_spent: Optional[int] = None
+    billing_provider: Optional[str] = None
+    is_active: Optional[bool] = None
 
     class Config:
         from_attributes = True

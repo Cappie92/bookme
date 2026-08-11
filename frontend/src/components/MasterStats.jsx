@@ -6,6 +6,7 @@ import {
   formatStatsAxisLabel,
   normalizeLegacyPeriodLabel,
 } from 'shared/statsPeriodLabels';
+import { useAuth } from '../contexts/AuthContext'
 import {
   MASTER_STATS_CHANGE_LINE_DOT,
   MASTER_STATS_CHANGE_LINE_STROKE,
@@ -101,6 +102,7 @@ const CustomTooltip = ({ active, payload, label, chartType }) => {
 };
 
 export default function MasterStats({ hasExtendedStats = false, onOpenSubscriptionModal }) {
+  const { isIosAppWebSession } = useAuth()
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -295,7 +297,7 @@ export default function MasterStats({ hasExtendedStats = false, onOpenSubscripti
             <button
               type="button"
               onClick={() => {
-                if (onOpenSubscriptionModal) {
+                if (!isIosAppWebSession && onOpenSubscriptionModal) {
                   onOpenSubscriptionModal();
                 } else {
                   window.location.href = '/master?tab=tariff';
@@ -421,7 +423,7 @@ export default function MasterStats({ hasExtendedStats = false, onOpenSubscripti
             <button
               type="button"
               onClick={() => {
-                if (onOpenSubscriptionModal) {
+                if (!isIosAppWebSession && onOpenSubscriptionModal) {
                   onOpenSubscriptionModal();
                 } else {
                   window.location.href = '/master?tab=tariff';

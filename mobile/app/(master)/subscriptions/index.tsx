@@ -13,6 +13,7 @@ import {
   TouchableOpacity,
   KeyboardAvoidingView,
   Keyboard,
+  Linking,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
@@ -38,8 +39,11 @@ import {
 import { getBalance, type Balance } from '@src/services/api/master';
 import {
   getSubscriptionPaymentHistory,
+  fetchAppleBillingIdentity,
+  syncAppleEntitlement,
   type SubscriptionPaymentHistoryItem,
 } from '@src/services/api/payments';
+import { revenueCatService } from '@src/services/purchases/RevenueCatService';
 import { SubscriptionPurchaseModal } from '@src/components/subscriptions/SubscriptionPurchaseModal';
 import { SubscriptionPaymentHistorySection } from '@src/components/subscriptions/SubscriptionPaymentHistorySection';
 import { formatMoney } from '@src/utils/money';
@@ -148,6 +152,7 @@ export default function SubscriptionsScreen() {
   const [paymentHistory, setPaymentHistory] = useState<SubscriptionPaymentHistoryItem[]>([]);
   const [paymentHistoryLoading, setPaymentHistoryLoading] = useState(false);
   const [paymentHistoryError, setPaymentHistoryError] = useState<string | null>(null);
+  const [restoringPurchases, setRestoringPurchases] = useState(false);
 
   // Определяем тип подписки на основе роли пользователя
   const subscriptionType = user?.role === 'salon' 
@@ -513,6 +518,47 @@ export default function SubscriptionsScreen() {
     );
   };
 
+  const handleRestorePurchases = async () => {
+    try {
+      setRestoringPurchases(true);
+      const identity = await fetchAppleBillingIdentity();
+      await revenueCatService.configureIfNeeded();
+      await revenueCatService.login(identity.revenuecat_app_user_id);
+      await revenueCatService.restore();
+      const syncResult = await syncAppleEntitlement(identity.revenuecat_app_user_id);
+      await loadSubscription();
+      await loadPaymentHistory();
+      await refreshMasterFeaturesGlobally();
+      if (syncResult?.reason === 'blocked_by_active_non_apple_subscription') {
+        const endLabel = syncResult?.blocking_end_date
+          ? new Date(syncResult.blocking_end_date).toLocaleDateString('ru-RU')
+          : '';
+        Alert.alert(
+          'Подписка уже активна',
+          endLabel
+            ? `Текущая подписка действует до ${endLabel}. Покупку через App Store можно активировать после окончания текущего периода.`
+            : 'Текущая подписка уже активна. Покупку через App Store можно активировать после окончания текущего периода.'
+        );
+        return;
+      }
+      Alert.alert('Готово', 'Покупки восстановлены');
+    } catch (e: unknown) {
+      const ax = e as { response?: { data?: { detail?: string } }; message?: string };
+      Alert.alert(
+        'Ошибка',
+        ax?.response?.data?.detail || ax?.message || 'Не удалось восстановить покупки'
+      );
+    } finally {
+      setRestoringPurchases(false);
+    }
+  };
+
+  const handleManageAppleSubscription = () => {
+    Linking.openURL('https://apps.apple.com/account/subscriptions').catch(() => {
+      Alert.alert('Ошибка', 'Не удалось открыть управление подпиской App Store');
+    });
+  };
+
   const renderTariffControls = () => {
     if (!subscriptionType) return null;
     return (
@@ -525,6 +571,24 @@ export default function SubscriptionsScreen() {
           title="Управление тарифом"
           onPress={openPurchaseModal}
         />
+        {Platform.OS === 'ios' ? (
+          <>
+            <SecondaryButton
+              title="Восстановить покупки"
+              onPress={handleRestorePurchases}
+              loading={restoringPurchases}
+              disabled={restoringPurchases}
+              style={styles.iosIapSecondaryButton}
+              testID="restore-apple-purchases-button"
+            />
+            <SecondaryButton
+              title="Управлять подпиской"
+              onPress={handleManageAppleSubscription}
+              style={styles.iosIapSecondaryButton}
+              testID="manage-apple-subscription-button"
+            />
+          </>
+        ) : null}
       </Card>
     );
   };
@@ -1048,6 +1112,9 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#666',
     marginBottom: 12,
+  },
+  iosIapSecondaryButton: {
+    marginTop: 10,
   },
   promoCard: {
     borderWidth: 1,

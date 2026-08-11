@@ -39,6 +39,11 @@ def get_active_subscription_ids_for_date(db: Session, charge_date: date) -> List
                 Subscription.is_active == True,
                 Subscription.start_date < next_day_start,
                 Subscription.end_date > charge_start,
+                # Apple IAP subscriptions renew via StoreKit/RevenueCat — never Robokassa daily debit
+                or_(
+                    Subscription.billing_provider.is_(None),
+                    Subscription.billing_provider != "apple",
+                ),
             )
         )
         .all()
@@ -50,7 +55,16 @@ def _active_subscription_id_rows(db: Session) -> List[Tuple[int, datetime, datet
     """(id, start_date, end_date) для is_active — без колонки status."""
     rows = (
         db.query(Subscription.id, Subscription.start_date, Subscription.end_date)
-        .filter(Subscription.is_active == True)
+        .filter(
+            and_(
+                Subscription.is_active == True,
+                # Apple IAP subscriptions renew via StoreKit/RevenueCat — never Robokassa daily debit
+                or_(
+                    Subscription.billing_provider.is_(None),
+                    Subscription.billing_provider != "apple",
+                ),
+            )
+        )
         .all()
     )
     return [(int(r[0]), r[1], r[2]) for r in rows if r[1] is not None and r[2] is not None]

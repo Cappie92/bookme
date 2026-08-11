@@ -35,6 +35,7 @@ import {
 } from 'shared/statsPeriodLabels';
 import { masterZClass } from '../config/masterOverlayZIndex';
 import { MASTER_STATS_CHANGE_LINE_DOT, MASTER_STATS_CHANGE_LINE_STROKE } from '../utils/masterStatsChartTheme';
+import { useAuth } from '../contexts/AuthContext'
 
 // Используем централизованную утилиту для названий планов
 const getPlanNameInRussian = (planName) => {
@@ -122,6 +123,7 @@ export default function MasterDashboardStats({
   onOpenStoryImage,
   onOpenSettings,
 }) {
+  const { isIosAppWebSession } = useAuth()
   const { showToast } = useToast();
   const DASHBOARD_LAYOUT_DEBUG = false;
   const [stats, setStats] = useState(null);
@@ -1534,7 +1536,9 @@ export default function MasterDashboardStats({
             <div
               className="absolute inset-0 z-20 flex items-center justify-center cursor-pointer bg-gray-800/70 backdrop-blur-[2px] transition hover:[&_p]:no-underline"
               onClick={() => {
-                if (onOpenSubscriptionModal) {
+                if (isIosAppWebSession) {
+                  if (onOpenTariff) onOpenTariff();
+                } else if (onOpenSubscriptionModal) {
                   onOpenSubscriptionModal();
                 } else {
                   window.location.href = '/master?tab=tariff';
@@ -1974,10 +1978,13 @@ export default function MasterDashboardStats({
                 </p>
               )}
             </div>
-            <button
+            {!isIosAppWebSession && (
+<button
               type="button"
               onClick={() => {
-                if (onOpenSubscriptionModal) {
+                if (isIosAppWebSession) {
+                  if (onOpenTariff) onOpenTariff();
+                } else if (onOpenSubscriptionModal) {
                   onOpenSubscriptionModal();
                 } else if (onOpenTariff) {
                   onOpenTariff();
@@ -1987,6 +1994,7 @@ export default function MasterDashboardStats({
             >
               Продлить →
             </button>
+)}
           </div>
         );
       })()}
@@ -2036,7 +2044,9 @@ export default function MasterDashboardStats({
             <div
               className="absolute inset-0 bg-gray-800 bg-opacity-70 rounded-xl lg:rounded-lg z-10 flex items-center justify-center cursor-pointer hover:[&_p]:no-underline"
               onClick={() => {
-                if (onOpenSubscriptionModal) {
+                if (isIosAppWebSession) {
+                  if (onOpenTariff) onOpenTariff();
+                } else if (onOpenSubscriptionModal) {
                   onOpenSubscriptionModal();
                 } else {
                   window.location.href = '/master?tab=tariff';
@@ -2234,7 +2244,8 @@ export default function MasterDashboardStats({
                   )}
                 </div>
 
-                <button
+                {!isIosAppWebSession && (
+<button
                   type="button"
                   onClick={() => {
                     if (onOpenSubscriptionModal) {
@@ -2247,6 +2258,7 @@ export default function MasterDashboardStats({
                 >
                   Продлить / Апгрейд
                 </button>
+)}
               </div>
             );
           })()}

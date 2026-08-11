@@ -10,7 +10,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from database import Base, engine
 from settings import get_settings
 from exceptions import SchemaOutdatedError
-from routers import admin, admin_promo_engine, auth, bookings, client, master, salon, blog, moderator, domain, subscriptions, balance, loyalty, expenses, promo_codes, promo_engine, accounting, tax_rates, subscription_plans, subscription_plans_public, master_page_modules, service_functions, payments, public_master
+from routers import admin, admin_promo_engine, auth, bookings, client, master, salon, blog, moderator, domain, subscriptions, balance, loyalty, expenses, promo_codes, promo_engine, accounting, tax_rates, subscription_plans, subscription_plans_public, master_page_modules, service_functions, payments, apple_iap, public_master
 from routers import master_loyalty, client_loyalty, master_clients
 from routers import dev_testdata, dev_e2e
 from routers.address_extraction import router as address_router
@@ -186,6 +186,7 @@ app.include_router(subscription_plans_public.router)
 app.include_router(master_page_modules.router)
 app.include_router(service_functions.router)
 app.include_router(payments.router, prefix="/api")
+app.include_router(apple_iap.router, prefix="/api")
 app.include_router(address_router, prefix="/api")
 app.include_router(geocoder_router, prefix="/api/geocoder")
 app.include_router(public_master.router)

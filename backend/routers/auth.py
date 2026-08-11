@@ -68,6 +68,13 @@ OAUTH_TICKET_TTL_SECONDS = 120
 OAUTH_ONBOARDING_TICKET_TTL_SECONDS = 10 * 60
 _oauth_ticket_memory_store: dict[str, dict] = {}
 
+WEB_HANDOFF_TTL_SECONDS = 60
+WEB_SESSION_ORIGIN_IOS_APP = "ios_app"
+WEB_SESSION_ORIGIN_ANDROID_APP = "android_app"
+WEB_HANDOFF_ALLOWED_ORIGINS = {WEB_SESSION_ORIGIN_IOS_APP, WEB_SESSION_ORIGIN_ANDROID_APP}
+WEB_HANDOFF_REDIRECT_TO = "/pricing"
+_web_handoff_memory_store: dict[str, dict] = {}
+
 
 class OAuthExchangeRequest(BaseModel):
     ticket: str
@@ -93,6 +100,14 @@ class OAuthOnboardingCompleteRequest(BaseModel):
     accepted_terms: bool = False
     accepted_personal_data: bool = False
     accepted_marketing: bool = False
+
+
+class WebHandoffCreateRequest(BaseModel):
+    origin: Optional[str] = None
+
+
+class WebHandoffExchangeRequest(BaseModel):
+    code: str
 
 
 def _oauth_enabled_or_404():
@@ -197,13 +212,16 @@ def _verify_oauth_state(state: str) -> dict:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Недействительная OAuth-сессия")
 
 
-def _issue_tokens_for_user(user: User) -> dict:
+def _issue_tokens_for_user(user: User, web_session_origin: Optional[str] = None) -> dict:
     token_sub = str(user.id)
+    data = {"sub": token_sub, "role": user.role.value.upper()}
+    if web_session_origin:
+        data["web_session_origin"] = web_session_origin
     access_token = create_access_token(
-        data={"sub": token_sub, "role": user.role.value.upper()},
+        data=data,
         expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
     )
-    refresh_token = create_refresh_token(data={"sub": token_sub, "role": user.role.value.upper()})
+    refresh_token = create_refresh_token(data=dict(data))
     return {"access_token": access_token, "refresh_token": refresh_token, "token_type": "bearer"}
 
 
@@ -318,6 +336,90 @@ def _consume_oauth_ticket(ticket: str) -> dict:
         data.setdefault("purpose", "oauth_login")
         data.setdefault("provider", YANDEX_PROVIDER)
         data.setdefault("status", "success")
+        return data
+
+
+
+def _web_handoff_key(code: str) -> str:
+    return f"web_handoff:{code}"
+
+
+def _cleanup_memory_web_handoff() -> None:
+    now = int(datetime.utcnow().timestamp())
+    for key, value in list(_web_handoff_memory_store.items()):
+        if int(value.get("exp") or 0) < now:
+            _web_handoff_memory_store.pop(key, None)
+
+
+def _store_web_handoff(user_id: int, origin: str) -> str:
+    code = secrets.token_urlsafe(32)
+    payload_dict = {
+        "user_id": int(user_id),
+        "origin": origin,
+        "purpose": "web_handoff",
+    }
+    payload = json.dumps(payload_dict, separators=(",", ":"))
+    settings = get_settings()
+    try:
+        from sms import redis_client
+        redis_client.setex(_web_handoff_key(code), WEB_HANDOFF_TTL_SECONDS, payload)
+        return code
+    except Exception:
+        if settings.is_production:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Web handoff storage unavailable",
+            )
+        _cleanup_memory_web_handoff()
+        _web_handoff_memory_store[code] = {
+            **payload_dict,
+            "exp": int((datetime.utcnow() + timedelta(seconds=WEB_HANDOFF_TTL_SECONDS)).timestamp()),
+        }
+        return code
+
+
+def _consume_web_handoff(code: str) -> dict:
+    normalized = str(code or "").strip()
+    if not normalized:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Недействительный handoff code")
+
+    settings = get_settings()
+    try:
+        from sms import redis_client
+        key = _web_handoff_key(normalized)
+        raw = redis_client.get(key)
+        if not raw:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Недействительный или истекший handoff code",
+            )
+        redis_client.delete(key)
+        data = json.loads(raw)
+        data["user_id"] = int(data["user_id"])
+        data.setdefault("purpose", "web_handoff")
+        return data
+    except HTTPException:
+        raise
+    except Exception:
+        if settings.is_production:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Web handoff storage unavailable",
+            )
+        _cleanup_memory_web_handoff()
+        data = _web_handoff_memory_store.pop(normalized, None)
+        if not data:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Недействительный или истекший handoff code",
+            )
+        if int(data.get("exp") or 0) < int(datetime.utcnow().timestamp()):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Недействительный или истекший handoff code",
+            )
+        data["user_id"] = int(data["user_id"])
+        data.setdefault("purpose", "web_handoff")
         return data
 
 
@@ -1279,6 +1381,80 @@ def login(login_data: LoginRequest, db: Session = Depends(get_db)) -> Any:
     }
 
 
+
+@router.post(
+    "/web-handoff",
+    summary="Создать one-time код для iOS/Android → web handoff",
+    responses={401: {"description": "Требуется авторизация"}},
+)
+def create_web_handoff(
+    body: Optional[WebHandoffCreateRequest] = None,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    """Выдать одноразовый код для открытия web-сессии из мобильного приложения.
+
+    JWT в URL не кладётся — только opaque code.
+    """
+    _ = db  # dependency for consistent auth stack / future audit hooks
+    origin = WEB_SESSION_ORIGIN_IOS_APP
+    if body is not None and body.origin is not None and str(body.origin).strip():
+        origin = str(body.origin).strip()
+    if origin not in WEB_HANDOFF_ALLOWED_ORIGINS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Unsupported handoff origin",
+        )
+    if not current_user.is_active or getattr(current_user, "deleted_at", None) is not None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Inactive user")
+
+    code = _store_web_handoff(current_user.id, origin)
+    frontend = get_settings().FRONTEND_URL.rstrip("/")
+    url = f"{frontend}/auth/mobile-handoff?code={code}"
+    return {
+        "code": code,
+        "url": url,
+        "expires_in": WEB_HANDOFF_TTL_SECONDS,
+    }
+
+
+@router.post(
+    "/web-handoff/exchange",
+    summary="Обменять handoff code на web JWT",
+)
+def exchange_web_handoff(
+    body: WebHandoffExchangeRequest,
+    db: Session = Depends(get_db),
+):
+    """Атомарно потребить code и выдать Bearer JWT для web (localStorage)."""
+    ticket_data = _consume_web_handoff(body.code)
+    if ticket_data.get("purpose") != "web_handoff":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Недействительный handoff code")
+
+    user = db.query(User).filter(User.id == int(ticket_data["user_id"])).first()
+    if not user or not user.is_active or getattr(user, "deleted_at", None) is not None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+
+    origin = str(ticket_data.get("origin") or "").strip()
+    web_session_origin = origin if origin == WEB_SESSION_ORIGIN_IOS_APP else None
+    tokens = _issue_tokens_for_user(user, web_session_origin=web_session_origin)
+    tokens["user"] = {
+        "id": user.id,
+        "email": user.email,
+        "phone": user.phone,
+        "role": user.role,
+        "full_name": user.full_name,
+        "is_verified": user.is_verified,
+        "is_phone_verified": user.is_phone_verified,
+        "phone_required": user.phone_required,
+        "phone_verified": user.phone_verified,
+        "web_session_origin": web_session_origin,
+    }
+    tokens["redirect_to"] = WEB_HANDOFF_REDIRECT_TO
+    tokens["web_session_origin"] = web_session_origin
+    return tokens
+
+
 @router.post(
     "/refresh",
     response_model=Token,
@@ -1313,13 +1489,15 @@ def refresh_token(refresh_data: dict, db: Session = Depends(get_db)) -> Any:
         )
 
     token_sub = str(user.id)
+    data = {"sub": token_sub, "role": user.role.value.upper()}
+    web_session_origin = payload.get("web_session_origin")
+    if web_session_origin:
+        data["web_session_origin"] = web_session_origin
     access_token = create_access_token(
-        data={"sub": token_sub, "role": user.role.value.upper()},
+        data=data,
         expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
     )
-    new_refresh_token = create_refresh_token(
-        data={"sub": token_sub, "role": user.role.value.upper()}
-    )
+    new_refresh_token = create_refresh_token(data=dict(data))
 
     return {
         "access_token": access_token,

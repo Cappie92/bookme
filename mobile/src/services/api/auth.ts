@@ -148,3 +148,20 @@ export async function getCurrentUser(): Promise<User> {
   return response.data;
 }
 
+
+export type WebHandoffOrigin = 'ios_app' | 'android_app';
+
+export interface WebHandoffResponse {
+  code: string;
+  url: string;
+  expires_in: number;
+}
+
+/**
+ * One-time opaque code for opening a web session from the mobile app.
+ * Never put JWT into the URL — backend returns https://…/auth/mobile-handoff?code=…
+ */
+export async function createWebHandoff(origin: WebHandoffOrigin): Promise<WebHandoffResponse> {
+  const response = await apiClient.post<WebHandoffResponse>('/api/auth/web-handoff', { origin });
+  return response.data;
+}

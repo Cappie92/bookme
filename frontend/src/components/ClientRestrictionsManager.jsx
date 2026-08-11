@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react'
+import { useAuth } from '../contexts/AuthContext'
 import { masterZClass } from '../config/masterOverlayZIndex'
 import { lockMasterBodyScroll, unlockMasterBodyScroll } from '../utils/masterBodyScrollLock'
 import { 
@@ -19,6 +20,7 @@ const ClientRestrictionsManager = ({
   hasAccess = true,
   onOpenSubscriptionModal
 }) => {
+  const { isIosAppWebSession } = useAuth()
   const isMaster = apiEndpoint && apiEndpoint.includes('/master/restrictions')
   
   const [restrictions, setRestrictions] = useState({
@@ -519,7 +521,11 @@ const ClientRestrictionsManager = ({
         <div 
           className="absolute inset-0 bg-gray-800 bg-opacity-70 rounded-lg z-10 flex items-center justify-center cursor-pointer hover:[&_p]:no-underline"
           onClick={() => {
-            if (onOpenSubscriptionModal) {
+            if (isIosAppWebSession) {
+              // Tariff info only — parent remaps callback away from purchase modal.
+              if (onOpenSubscriptionModal) onOpenSubscriptionModal()
+              else window.location.href = '/master?tab=tariff'
+            } else if (onOpenSubscriptionModal) {
               onOpenSubscriptionModal();
             } else {
               window.location.href = '/master?tab=tariff';

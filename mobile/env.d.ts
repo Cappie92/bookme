@@ -24,5 +24,7 @@ declare module '@env' {
   export const APPMETRICA_API_KEY: string | undefined;
   /** Opt-in smoke event appmetrica_integration_test (default off). */
   export const EXPO_PUBLIC_APPMETRICA_TEST_EVENT_ENABLED: string | undefined;
+  /** RevenueCat public iOS API key (не логировать). */
+  export const EXPO_PUBLIC_REVENUECAT_IOS_API_KEY: string | undefined;
 }
 

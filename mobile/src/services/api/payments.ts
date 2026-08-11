@@ -130,3 +130,37 @@ export async function getSubscriptionPaymentHistory(): Promise<SubscriptionPayme
   );
   return Array.isArray(response.data) ? response.data : [];
 }
+
+/**
+ * Apple / RevenueCat app user id for the current authenticated master.
+ */
+export async function fetchAppleBillingIdentity(): Promise<{ revenuecat_app_user_id: string }> {
+  const response = await apiClient.get<{ revenuecat_app_user_id: string }>(
+    '/api/payments/apple/billing-identity'
+  );
+  return response.data;
+}
+
+/**
+ * Whether App Store purchase may proceed (no overlapping non-Apple subscription).
+ */
+export async function fetchApplePurchaseEligibility(): Promise<{
+  allowed: boolean;
+  reason?: string;
+  blocking_end_date?: string | null;
+  blocking_subscription_id?: number;
+  blocking_billing_provider?: string;
+}> {
+  const response = await apiClient.get('/api/payments/apple/purchase-eligibility');
+  return response.data;
+}
+
+/**
+ * Sync Apple / RevenueCat entitlement with backend after purchase or restore.
+ */
+export async function syncAppleEntitlement(expectedAppUserId?: string): Promise<any> {
+  const response = await apiClient.post('/api/payments/apple/sync-entitlement', {
+    ...(expectedAppUserId ? { expected_app_user_id: expectedAppUserId } : {}),
+  });
+  return response.data;
+}

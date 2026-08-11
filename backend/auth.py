@@ -67,6 +67,17 @@ def resolve_user_from_token_sub(db: Session, sub: Optional[str]) -> Optional[Use
     return db.query(User).filter((User.email == s) | (User.phone == s)).first()
 
 
+def get_web_session_origin_from_payload(payload: Optional[dict]) -> Optional[str]:
+    """Читает server-trusted claim web_session_origin из decoded JWT payload."""
+    if not payload:
+        return None
+    origin = payload.get("web_session_origin")
+    if origin is None:
+        return None
+    value = str(origin).strip()
+    return value or None
+
+
 def _reject_if_deleted_or_inactive(user: Optional[User]) -> User:
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -97,7 +108,9 @@ async def get_current_user(
         raise credentials_exception
 
     user = resolve_user_from_token_sub(db, sub)
-    return _reject_if_deleted_or_inactive(user)
+    user = _reject_if_deleted_or_inactive(user)
+    user.web_session_origin = get_web_session_origin_from_payload(payload)
+    return user
 
 
 async def get_current_user_optional(
@@ -115,6 +128,7 @@ async def get_current_user_optional(
         user = resolve_user_from_token_sub(db, sub)
         if user is None or getattr(user, "deleted_at", None) is not None or not user.is_active:
             return None
+        user.web_session_origin = get_web_session_origin_from_payload(payload)
         return user
     except JWTError:
         return None

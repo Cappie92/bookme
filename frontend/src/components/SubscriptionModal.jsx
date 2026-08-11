@@ -15,6 +15,7 @@ import {
   resolveSubscriptionPointsBalance,
   shouldShowSubscriptionPointsBlock,
 } from '../utils/subscriptionModalPoints'
+import { useAuth } from '../contexts/AuthContext'
 import {
   formatSubscriptionPaymentUserError,
   resolveSubscriptionPaymentApplyMode,
@@ -30,6 +31,7 @@ function useDebouncedValue(value, delayMs) {
 }
 
 export default function SubscriptionModal({ isOpen, onClose, isFreePlan, currentPlanDisplayOrder }) {
+  const { isIosAppWebSession } = useAuth()
   const [plans, setPlans] = useState([])
   const [loading, setLoading] = useState(false)
   const [serviceFunctions, setServiceFunctions] = useState([])
@@ -379,6 +381,10 @@ export default function SubscriptionModal({ isOpen, onClose, isFreePlan, current
   }
 
   const handlePaymentInit = async () => {
+    if (isIosAppWebSession) {
+      setPaymentNotice('Оплата подписки в этой сессии недоступна')
+      return
+    }
     if (!selectedPlan || !selectedDuration || !hasCurrentCalculation()) {
       return
     }
@@ -563,6 +569,16 @@ export default function SubscriptionModal({ isOpen, onClose, isFreePlan, current
   }, [currentCalculation, selectedPlan, selectedDuration])
 
   if (!isOpen) return null
+  if (isIosAppWebSession) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+        <div className="bg-white rounded-xl p-6 max-w-md w-full space-y-4">
+          <p className="text-sm text-gray-700">Оплата подписки в этой сессии недоступна.</p>
+          <button type="button" className="w-full py-2 px-4 bg-[#4CAF50] text-white rounded-lg" onClick={onClose}>Закрыть</button>
+        </div>
+      </div>
+    )
+  }
 
   const isUpgrade =
     currentPlanDisplayOrder && selectedPlan && selectedPlan.display_order > currentPlanDisplayOrder

@@ -71,7 +71,19 @@ export default defineConfig({
       '/auth': {
         target: process.env.VITE_API_BASE_URL || 'http://localhost:8000',
         changeOrigin: true,
-        secure: false
+        secure: false,
+        // SPA routes under /auth must not be proxied to FastAPI.
+        // API oauth remains under /api/auth/oauth/* via the /api proxy.
+        bypass(req) {
+          const url = req.url || ''
+          const path = url.split('?')[0]
+          if (
+            path === '/auth/mobile-handoff' ||
+            path === '/auth/oauth/callback'
+          ) {
+            return '/index.html'
+          }
+        },
       },
       '/salon': {
         target: process.env.VITE_API_BASE_URL || 'http://localhost:8000',

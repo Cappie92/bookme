@@ -2,6 +2,7 @@ import { Fragment, useEffect, useMemo, useState } from 'react'
 import { Helmet } from 'react-helmet-async'
 import { ArrowRightIcon } from '@heroicons/react/24/solid'
 import { Button } from '../components/ui'
+import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { metrikaGoal } from '../analytics/metrika'
 import { M } from '../analytics/metrikaEvents'
@@ -171,7 +172,8 @@ function PeriodToggle({ value, onChange, discountBadgeLabel }) {
 }
 
 export default function Pricing() {
-  const { openAuthModal } = useAuth()
+  const { openAuthModal, isIosAppWebSession, user } = useAuth()
+  const navigate = useNavigate()
   const salonOn = isSalonFeaturesEnabled()
   const [audience, setAudience] = useState('master')
   const subscriptionType = audience === 'salon' ? 'salon' : 'master'
@@ -221,6 +223,15 @@ export default function Pricing() {
     openAuthModal(audience === 'salon' ? 'salon' : 'master', 'register')
   }
 
+  const goToCabinet = () => {
+    const role = (user?.role || localStorage.getItem('user_role') || '').toString().toLowerCase()
+    if (role === 'master' || role === 'indie') navigate('/master')
+    else if (role === 'salon') navigate('/salon')
+    else if (role === 'admin' || role === 'moderator') navigate('/admin')
+    else navigate('/client')
+  }
+
+
   const visiblePlans = plans
   const hasPlans = visiblePlans.length > 0
   const showSecondarySections = !loading && !error && hasPlans
@@ -252,10 +263,27 @@ export default function Pricing() {
 
   const renderPriceBlock = (plan) => {
     const duration = billingPeriodMonths
+    const freeze = freezeDaysForPackage(plan, duration)
+
+    if (isIosAppWebSession) {
+      return (
+        <div>
+          {freeze > 0 ? (
+            <p className="text-sm max-sm:text-[13px] max-sm:leading-snug text-neutral-600">
+              Дней заморозки в этом пакете: {freeze}
+            </p>
+          ) : (
+            <p className="text-sm max-sm:text-[13px] max-sm:leading-snug text-neutral-500">
+              Подробности тарифа
+            </p>
+          )}
+        </div>
+      )
+    }
+
     const perMonth = pricePerMonthInPackage(plan, duration)
     const total = duration * perMonth
     const savings = duration === 12 ? yearlySavingsPercentFromApi(plan) : null
-    const freeze = freezeDaysForPackage(plan, duration)
 
     return (
       <div>
@@ -316,9 +344,9 @@ export default function Pricing() {
                   <PeriodToggle
                     value={billingPeriodMonths}
                     onChange={onBillingPeriodChange}
-                    discountBadgeLabel={discountBadgeLabel}
+                    discountBadgeLabel={isIosAppWebSession ? null : discountBadgeLabel}
                   />
-                  {discountBadgeLabel ? (
+                  {!isIosAppWebSession && discountBadgeLabel ? (
                     <div className="sm:hidden mt-1.5 flex w-full justify-end pr-0.5">
                       <span className="inline-flex max-w-full min-w-0 items-center rounded-full bg-[#4CAF50] px-2.5 py-1 text-[10px] font-bold leading-none tracking-wide text-white tabular-nums">
                         <span className="truncate">{discountBadgeLabel}</span>
@@ -377,8 +405,14 @@ export default function Pricing() {
               <p className="text-lg font-semibold text-[#1C1917]">Тарифы временно недоступны</p>
               <p className="mt-2 text-sm text-neutral-600">Оставьте заявку или зарегистрируйтесь — мы поможем подобрать вариант.</p>
               <div className="mt-6 flex justify-center gap-3 flex-wrap">
-                <Button type="button" size="lg" variant="primary" className={BTN_PRIMARY} onClick={handleRegister}>
-                  Зарегистрироваться
+                <Button
+                  type="button"
+                  size="lg"
+                  variant="primary"
+                  className={BTN_PRIMARY}
+                  onClick={isIosAppWebSession ? goToCabinet : handleRegister}
+                >
+                  {isIosAppWebSession ? 'В кабинет' : 'Зарегистрироваться'}
                 </Button>
               </div>
             </div>
@@ -417,7 +451,7 @@ export default function Pricing() {
                               Рекомендуем
                             </span>
                           ) : null}
-                          {isBestValue ? (
+                          {!isIosAppWebSession && isBestValue ? (
                             <span className="text-[11px] max-sm:text-[9px] font-bold uppercase tracking-wide text-neutral-700 bg-neutral-100 border border-neutral-200 rounded-full px-2 py-0.5">
                               Выгоднее на год
                             </span>
@@ -454,9 +488,9 @@ export default function Pricing() {
                         size="lg"
                         variant="primary"
                         className={`w-full max-lg:min-h-[44px] max-sm:!py-2.5 ${BTN_PRIMARY}`}
-                        onClick={handleRegister}
+                        onClick={isIosAppWebSession ? goToCabinet : handleRegister}
                       >
-                        Подключить
+                        {isIosAppWebSession ? 'В кабинет' : 'Подключить'}
                         <ArrowRightIcon className="h-4 w-4 ml-2" />
                       </Button>
                     </div>

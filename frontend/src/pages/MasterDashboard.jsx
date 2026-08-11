@@ -36,6 +36,7 @@ import AllIssuesModal from '../components/AllIssuesModal'
 import { isSalonFeaturesEnabled } from '../config/features'
 import { useMasterSubscription } from '../hooks/useMasterSubscription'
 import SubscriptionModal from '../components/SubscriptionModal'
+import { useAuth } from '../contexts/AuthContext'
 import { formatMoney } from '../utils/formatMoney'
 import { getCheapestPlanForFeature } from '../utils/getCheapestPlanForFeature'
 import ClientRestrictionsManager from '../components/ClientRestrictionsManager'
@@ -856,6 +857,7 @@ function SalonWorkSection({ onInvitationUpdate }) {
 }
 
 export default function MasterDashboard() {
+  const { isIosAppWebSession } = useAuth()
   const { showToast } = useToast()
   const {
     hasFinanceAccess,
@@ -1690,13 +1692,15 @@ export default function MasterDashboard() {
                               <BanknotesIcon className="h-6 w-6 text-white" strokeWidth={2} aria-hidden />
                             </div>
                           </div>
-                          <button
+                          {!isIosAppWebSession && (
+<button
                             type="button"
                             onClick={() => setShowSubscriptionModal(true)}
                             className="relative z-[1] w-full rounded-lg bg-white py-2.5 text-sm font-semibold text-[#2D2D2D] shadow-sm transition-colors hover:bg-white/95"
                           >
                             Продлить / Апгрейд
                           </button>
+)}
                         </div>
                       )}
 
@@ -1822,7 +1826,7 @@ export default function MasterDashboard() {
                   setRefreshKey((prev) => prev + 1);
                   setClientsUpdateTrigger((t) => t + 1);
                 }}
-                onOpenSubscriptionModal={() => setShowSubscriptionModal(true)}
+                onOpenSubscriptionModal={isIosAppWebSession ? () => handleTabChange('tariff') : () => setShowSubscriptionModal(true)}
                 onOpenSchedule={handleCopyPublicLink}
                 onOpenServices={() => handleTabChange('services')}
                 onOpenTariff={() => handleTabChange('tariff')}
@@ -1914,7 +1918,7 @@ export default function MasterDashboard() {
               <h1 className="mb-2 text-xl font-bold leading-snug tracking-tight text-gray-900 lg:mb-6 lg:text-3xl">Статистика</h1>
               <MasterStats 
                 hasExtendedStats={canUseExtendedStats}
-                onOpenSubscriptionModal={() => setShowSubscriptionModal(true)}
+                onOpenSubscriptionModal={isIosAppWebSession ? () => handleTabChange('tariff') : () => setShowSubscriptionModal(true)}
               />
             </div>
           )}
@@ -2052,7 +2056,7 @@ export default function MasterDashboard() {
       </div>
       
       {/* Модальное окно покупки подписки */}
-      {showSubscriptionModal && (
+      {!isIosAppWebSession && showSubscriptionModal && (
         <SubscriptionModal
           isOpen={showSubscriptionModal}
           onClose={() => setShowSubscriptionModal(false)}

@@ -13,3 +13,4 @@ export const YANDEX_MOBILE_AUTH_VISIBLE = '0';
 export const EXPO_PUBLIC_APPMETRICA_API_KEY = '';
 export const APPMETRICA_API_KEY = '';
 export const EXPO_PUBLIC_APPMETRICA_TEST_EVENT_ENABLED = 'false';
+export const EXPO_PUBLIC_REVENUECAT_IOS_API_KEY = '';

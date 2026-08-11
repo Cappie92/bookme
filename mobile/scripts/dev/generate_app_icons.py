@@ -72,7 +72,7 @@ def main() -> None:
 
     # App icon: solid green + white calendar mark
     icon = Image.new("RGBA", (SIZE, SIZE), BG)
-    fg = fit_center(SIZE, white, 0.52)
+    fg = fit_center(SIZE, white, 0.60)
     icon = Image.alpha_composite(icon, fg)
     save_rgb(icon, ASSETS / "icon.png")
 

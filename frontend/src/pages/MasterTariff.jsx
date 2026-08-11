@@ -24,6 +24,7 @@ import {
 } from '../utils/subscriptionPointsHistory'
 import { Button } from '../components/ui'
 import SubscriptionModal from '../components/SubscriptionModal'
+import { useAuth } from '../contexts/AuthContext'
 import PaymentHistoryTable from '../components/PaymentHistoryTable'
 import {
   getMasterTariffComparisonRows,
@@ -218,6 +219,7 @@ function MasterSidebar({ activeTab, setActiveTab, refreshKey, masterSettings, sc
 }
 
 export default function MasterTariff({ canCustomizeDomain, onRefreshSubscriptionFeatures }) {
+  const { isIosAppWebSession } = useAuth()
   const location = useLocation()
   const navigate = useNavigate()
   const [activeSection, setActiveSection] = useState('subscription')
@@ -696,6 +698,11 @@ export default function MasterTariff({ canCustomizeDomain, onRefreshSubscription
                   </div>
                     
                     {/* Кнопка покупки/продления подписки */}
+                    {isIosAppWebSession ? (
+                      <p className="text-sm text-gray-600 mt-auto" data-testid="tariff-ios-session-note">
+                        Управление тарифом доступно в этом разделе. Оплата на сайте в этой сессии недоступна.
+                      </p>
+                    ) : (
                     <button
                       onClick={() => setShowSubscriptionModal(true)}
                       data-testid="tariff-buy-button"
@@ -703,6 +710,7 @@ export default function MasterTariff({ canCustomizeDomain, onRefreshSubscription
                     >
                       {isFreePlan ? 'Купить подписку' : 'Продлить/повысить подписку'}
                     </button>
+                    )}
                 </div>
                 
                   <div className="flex flex-col">
@@ -1138,12 +1146,18 @@ export default function MasterTariff({ canCustomizeDomain, onRefreshSubscription
                   
                   {/* Кнопка выбора тарифа */}
                   <div>
+                    {isIosAppWebSession ? (
+                      <p className="text-sm text-gray-600">
+                        Оплата на сайте в этой сессии недоступна.
+                      </p>
+                    ) : (
                     <button
                       onClick={() => setShowSubscriptionModal(true)}
                       className="w-full py-3 px-4 bg-[#4CAF50] text-white rounded-lg font-medium hover:bg-[#45A049] transition-colors"
                     >
                       Выбрать тариф
                     </button>
+                    )}
                   </div>
                 </div>
                 
@@ -1153,7 +1167,7 @@ export default function MasterTariff({ canCustomizeDomain, onRefreshSubscription
           )}
       
       {/* Модальное окно выбора тарифа */}
-      {showSubscriptionModal && (
+      {!isIosAppWebSession && showSubscriptionModal && (
         <SubscriptionModal
           isOpen={showSubscriptionModal}
           onClose={() => {

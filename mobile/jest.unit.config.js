@@ -25,6 +25,11 @@ module.exports = {
         jsx: 'react-jsx',
       },
     }],
+    // shared/*.js uses ESM export; transform so unit tests can re-export Apple IAP map.
+    '^.+/shared/.+\\.js$': 'babel-jest',
   },
+  transformIgnorePatterns: [
+    '/node_modules/',
+  ],
 };
 

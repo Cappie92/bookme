@@ -230,6 +230,8 @@ async def get_my_subscription(
         "plan_display_name": plan_display_name,
         "features": plan_features,
         "limits": plan_limits,
+        "billing_provider": getattr(subscription, "billing_provider", None) or "robokassa",
+        "is_active": bool(getattr(subscription, "is_active", False)),
         **billing_fields,
     }
 
@@ -241,6 +243,12 @@ async def upgrade_subscription(
     db: Session = Depends(get_db)
 ):
     """Обновить подписку пользователя"""
+    if getattr(current_user, "web_session_origin", None) == "ios_app":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Subscription purchase via Robokassa is not available in this session",
+        )
+
     
     # Определяем тип подписки
     subscription_type = None
@@ -1258,6 +1266,12 @@ async def apply_upgrade_free(
 
     ВАЖНО: применение должно быть явным действием пользователя.
     """
+    if getattr(current_user, "web_session_origin", None) == "ios_app":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Subscription purchase via Robokassa is not available in this session",
+        )
+
     calculation_id = payload.get("calculation_id")
     if not calculation_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="calculation_id is required")
@@ -1400,6 +1414,12 @@ async def apply_upgrade_balance(
     Оплатить upgrade с баланса (final_price > 0, достаточно available_balance).
     Без Robokassa. Работает для immediate и after_expiry (даты — по upgrade_type).
     """
+    if getattr(current_user, "web_session_origin", None) == "ios_app":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Subscription purchase via Robokassa is not available in this session",
+        )
+
     calculation_id = payload.get("calculation_id")
     if not calculation_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="calculation_id is required")

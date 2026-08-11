@@ -4,8 +4,10 @@ import { API_BASE_URL } from '../utils/config'
 import { useMasterSubscription } from '../hooks/useMasterSubscription'
 import { Link } from 'react-router-dom'
 import { getPlanDisplayName } from '../utils/subscriptionPlanNames'
+import { useAuth } from '../contexts/AuthContext'
 
 export default function MasterSubscriptionPlans() {
+  const { isIosAppWebSession } = useAuth()
   const { planName, features } = useMasterSubscription()
   const [plans, setPlans] = useState([])
   const [loading, setLoading] = useState(true)
@@ -36,6 +38,10 @@ export default function MasterSubscriptionPlans() {
   }
 
   const handleUpgrade = async (planId) => {
+    if (isIosAppWebSession) {
+      alert('Оплата подписки в этой сессии недоступна')
+      return
+    }
     if (!confirm('Вы уверены, что хотите обновить план подписки?')) return
 
     try {
