@@ -6,15 +6,16 @@
 
 ## Critical: generic booking mutation authorization
 
-- **Severity:** `critical`
+- **Severity:** `critical` (остаточный scope)
 - **Confidence:** CONFIRMED
 - **Trust boundary:** authenticated identity → mutation of a Booking and its reschedule requests.
 - **Category:** missing/inconsistent object-level authorization enforcement.
-- **Confirmed scope:** mounted generic booking router содержит mutation handlers без role/ownership validation, тогда как соседние handlers выполняют такие проверки.
-- **Potential impact:** нарушение целостности booking-данных за пределами разрешённого пользователю объекта.
-- **Sources:** `backend/main.py` — booking router composition; `backend/routers/bookings.py` — `delete_booking`, `create_edit_request`, `update_edit_request`, comparison with `update_booking`.
-- **Status:** active repository-known debt. Не является правильной бизнес-логикой.
-- **Required action:** отдельный authorization remediation track с code/test изменениями после завершения или контролируемой остановки Knowledge track.
+- **Mitigated:** `DELETE /api/bookings/{id}` (`delete_booking`) теперь admin-only через `require_admin` и разрешает hard delete только будущей «чистой» брони; финансовые/loyalty/исторические связи → `409 BOOKING_HARD_DELETE_FORBIDDEN`. Client/master soft-cancel paths не затронуты.
+- **Remaining confirmed scope:** generic `create_edit_request` / `update_edit_request` (и сравнение с ownership checks в `update_booking`) всё ещё без полного object-level enforcement.
+- **Potential impact (остаточный):** нарушение целостности reschedule-запросов за пределами разрешённого пользователю объекта.
+- **Sources:** `backend/main.py` — booking router composition; `backend/routers/bookings.py` — `delete_booking`, `create_edit_request`, `update_edit_request`, comparison with `update_booking`; `backend/utils/booking_hard_delete.py`.
+- **Status:** partially remediated for hard delete; remaining edit-request authorization debt is active.
+- **Required action:** отдельный authorization remediation track для оставшихся generic edit-request mutations.
 
 Эксплуатационные шаги и углублённый exploitability analysis намеренно не входят в Knowledge.
 
