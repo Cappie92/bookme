@@ -27,7 +27,7 @@ def _parse_optional_client_birth_date(raw: Any) -> Optional[date_type]:
 
 
 from services.account_deletion import MASTER_ACCOUNT_DELETED_REASON, is_master_deleted
-from auth import get_current_active_user, require_client
+from auth import get_current_active_user, require_client, update_password_and_revoke_sessions
 from utils.booking_loyalty_reserve import clear_loyalty_points_reserve
 from database import get_db
 from models import (
@@ -1597,7 +1597,7 @@ def change_client_password(
     Смена пароля клиента
     """
     try:
-        from auth import verify_password, get_password_hash
+        from auth import verify_password
         
         current_password = password_data.get("current_password")
         new_password = password_data.get("new_password")
@@ -1609,11 +1609,20 @@ def change_client_password(
         if not verify_password(current_password, current_user.hashed_password):
             raise HTTPException(status_code=400, detail="Неверный текущий пароль")
         
-        # Хешируем новый пароль
-        hashed_new_password = get_password_hash(new_password)
-        current_user.hashed_password = hashed_new_password
-        
+        current_hash = current_user.hashed_password
+        if not update_password_and_revoke_sessions(
+            db,
+            current_user,
+            new_password,
+            expected_hashed_password=current_hash,
+        ):
+            db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Пароль уже был изменён. Войдите снова.",
+            )
         db.commit()
+        db.refresh(current_user)
         
         return {"message": "Пароль успешно изменен"}
     except HTTPException:
@@ -3128,4 +3137,3 @@ def get_all_client_notes(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Ошибка при получении заметок: {str(e)}"
         )
-

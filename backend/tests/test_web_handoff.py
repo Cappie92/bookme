@@ -51,7 +51,7 @@ def test_exchange_web_handoff_success_and_single_use(client, db, test_user, monk
         "get_settings",
         lambda: type("S", (), {"FRONTEND_URL": "https://dedato.ru", "is_production": False})(),
     )
-    code = auth_router._store_web_handoff(test_user.id, "ios_app")
+    code = auth_router._store_web_handoff(test_user.id, "ios_app", test_user.session_version)
 
     first = client.post("/api/auth/web-handoff/exchange", json={"code": code})
     second = client.post("/api/auth/web-handoff/exchange", json={"code": code})
@@ -69,6 +69,9 @@ def test_exchange_web_handoff_success_and_single_use(client, db, test_user, monk
     assert access_payload["web_session_origin"] == "ios_app"
     refresh_payload = jwt.decode(data["refresh_token"], SECRET_KEY, algorithms=[ALGORITHM])
     assert refresh_payload["web_session_origin"] == "ios_app"
+    assert access_payload["sub"] == refresh_payload["sub"] == str(test_user.id)
+    assert access_payload["token_type"] == "access"
+    assert refresh_payload["token_type"] == "refresh"
 
     assert second.status_code == status.HTTP_400_BAD_REQUEST
 
@@ -99,7 +102,7 @@ def test_android_handoff_does_not_set_web_session_origin(client, db, test_user, 
         "get_settings",
         lambda: type("S", (), {"FRONTEND_URL": "https://dedato.ru", "is_production": False})(),
     )
-    code = auth_router._store_web_handoff(test_user.id, "android_app")
+    code = auth_router._store_web_handoff(test_user.id, "android_app", test_user.session_version)
     response = client.post("/api/auth/web-handoff/exchange", json={"code": code})
     assert response.status_code == 200, response.text
     data = response.json()
@@ -114,7 +117,7 @@ def test_refresh_preserves_web_session_origin(client, db, test_user, monkeypatch
         "get_settings",
         lambda: type("S", (), {"FRONTEND_URL": "https://dedato.ru", "is_production": False})(),
     )
-    code = auth_router._store_web_handoff(test_user.id, "ios_app")
+    code = auth_router._store_web_handoff(test_user.id, "ios_app", test_user.session_version)
     exchanged = client.post("/api/auth/web-handoff/exchange", json={"code": code}).json()
     refreshed = client.post(
         "/api/auth/refresh",
@@ -128,13 +131,65 @@ def test_refresh_preserves_web_session_origin(client, db, test_user, monkeypatch
     assert refresh_payload["web_session_origin"] == "ios_app"
 
 
+def test_handoff_is_bound_to_source_session_version(client, db, test_user, monkeypatch):
+    monkeypatch.setattr(
+        auth_router,
+        "get_settings",
+        lambda: type("S", (), {"FRONTEND_URL": "https://dedato.ru", "is_production": False})(),
+    )
+    old_login = client.post(
+        "/api/auth/login",
+        json={"phone": test_user.phone, "password": "testpassword"},
+    ).json()
+    created = client.post(
+        "/api/auth/web-handoff",
+        json={"origin": "ios_app"},
+        headers=_auth_headers(old_login),
+    )
+    assert created.status_code == 200
+
+    changed = client.post(
+        "/api/auth/change-password",
+        json={"old_password": "testpassword", "new_password": "newpassword"},
+        headers=_auth_headers(old_login),
+    )
+    assert changed.status_code == 200
+    assert client.post(
+        "/api/auth/web-handoff/exchange",
+        json={"code": created.json()["code"]},
+    ).status_code == status.HTTP_401_UNAUTHORIZED
+    assert client.post(
+        "/api/auth/web-handoff",
+        json={"origin": "ios_app"},
+        headers=_auth_headers(old_login),
+    ).status_code == status.HTTP_401_UNAUTHORIZED
+
+    fresh = client.post(
+        "/api/auth/login",
+        json={"phone": test_user.phone, "password": "newpassword"},
+    ).json()
+    fresh_code = client.post(
+        "/api/auth/web-handoff",
+        json={"origin": "ios_app"},
+        headers=_auth_headers(fresh),
+    ).json()["code"]
+    exchanged = client.post(
+        "/api/auth/web-handoff/exchange",
+        json={"code": fresh_code},
+    )
+    assert exchanged.status_code == 200
+    payload = jwt.decode(exchanged.json()["access_token"], SECRET_KEY, algorithms=[ALGORITHM])
+    assert payload["sv"] == 2
+    assert payload["web_session_origin"] == "ios_app"
+
+
 def test_users_me_exposes_web_session_origin(client, db, test_user, monkeypatch):
     monkeypatch.setattr(
         auth_router,
         "get_settings",
         lambda: type("S", (), {"FRONTEND_URL": "https://dedato.ru", "is_production": False})(),
     )
-    code = auth_router._store_web_handoff(test_user.id, "ios_app")
+    code = auth_router._store_web_handoff(test_user.id, "ios_app", test_user.session_version)
     tokens = client.post("/api/auth/web-handoff/exchange", json={"code": code}).json()
     me = client.get("/api/auth/users/me", headers=_auth_headers(tokens))
     assert me.status_code == 200, me.text
@@ -157,7 +212,7 @@ def test_subscription_init_forbidden_for_ios_app_session(client, test_master, te
         "get_settings",
         lambda: type("S", (), {"FRONTEND_URL": "https://dedato.ru", "is_production": False})(),
     )
-    code = auth_router._store_web_handoff(test_master.id, "ios_app")
+    code = auth_router._store_web_handoff(test_master.id, "ios_app", test_master.session_version)
     tokens = client.post("/api/auth/web-handoff/exchange", json={"code": code}).json()
 
     blocked = client.post(

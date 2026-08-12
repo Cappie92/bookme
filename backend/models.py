@@ -53,6 +53,7 @@ class User(Base):
     phone = Column(String, unique=True)
     full_name = Column(String)
     hashed_password = Column(String)
+    session_version = Column(Integer, nullable=False, default=1, server_default="1")
     role = Column(Enum(UserRole))
     birth_date = Column(Date, nullable=True)
     is_active = Column(Boolean, default=True)

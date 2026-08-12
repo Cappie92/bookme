@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { apiGet, apiPut, apiRequest, getAuthHeaders } from '../utils/api'
+import { apiGet, apiPut, apiRequest, clearAuthSession, getAuthHeaders } from '../utils/api'
 import { PencilIcon, TrashIcon, EyeIcon, EyeSlashIcon, ChevronRightIcon } from "@heroicons/react/24/outline"
 import YandexAccountLinkPanel from '../components/auth/YandexAccountLinkPanel'
 import {
@@ -252,14 +252,8 @@ export default function ClientProfile() {
         current_password: passwordForm.currentPassword,
         new_password: passwordForm.newPassword
       })
-      
-      setSuccess('Пароль успешно изменен')
-      setShowPasswordModal(false)
-      setPasswordForm({
-        currentPassword: '',
-        newPassword: '',
-        confirmPassword: ''
-      })
+      clearAuthSession('password_changed')
+      navigate('/')
     } catch (error) {
       console.error('Ошибка смены пароля:', error)
       setError('Не удалось сменить пароль')
@@ -864,4 +858,4 @@ export default function ClientProfile() {
 
     </div>
   )
-} 
+}

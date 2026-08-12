@@ -4,6 +4,13 @@ import { CalendarIcon, ClockIcon, UserIcon, TagIcon } from '@heroicons/react/24/
 import { dateToISOString, formatTime, getMinDate, getSelectedCity } from '../../utils/dateUtils'
 import { metrikaGoal } from '../../analytics/metrika'
 import { M } from '../../analytics/metrikaEvents'
+import {
+  cancelPublicBookingVerification,
+  confirmPublicBookingVerification,
+  installPublicBookingSession,
+  isPendingPublicBooking,
+  requestPublicBookingVerification,
+} from '../../utils/publicBookingVerification'
 
 export default function SalonBookingModule({ 
   salonId, 
@@ -52,6 +59,7 @@ export default function SalonBookingModule({
   const [phoneVerificationLoading, setPhoneVerificationLoading] = useState(false)
   const [phoneVerificationError, setPhoneVerificationError] = useState('')
   const [currentClientPhone, setCurrentClientPhone] = useState('')
+  const [pendingPublicBooking, setPendingPublicBooking] = useState(null)
   
   // Функции валидации телефона
   const validatePhone = (phone) => {
@@ -440,7 +448,11 @@ export default function SalonBookingModule({
         branch_id: formData.branch_id ? parseInt(formData.branch_id) : null,
         start_time: startTime.toISOString(),
         end_time: endTime.toISOString(),
-        notes: formData.notes
+        notes: formData.notes,
+        client_name: currentUser?.full_name || currentUser?.phone || 'Клиент',
+        service_name: selectedService?.name || '',
+        service_duration: selectedService?.duration || 0,
+        service_price: selectedService?.price || 0,
       }
       
       if (currentUser) {
@@ -454,7 +466,7 @@ export default function SalonBookingModule({
         })
       } else {
         const params = new URLSearchParams({ client_phone: clientPhone })
-        response = await fetch(`/bookings/public?${params}`, {
+        response = await fetch(`/api/bookings/public?${params}`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json'
@@ -480,10 +492,13 @@ export default function SalonBookingModule({
         params.append('client_phone', clientPhone)
       }
       
-      response = await fetch(`/bookings/create-with-any-master?${params}`, {
+      response = await fetch(`/api/bookings/create-with-any-master?${params}`, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          ...(currentUser ? {
+            'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+          } : {})
         }
       })
     }
@@ -503,42 +518,15 @@ export default function SalonBookingModule({
           onBookingSuccess(result)
         }
       } else {
-        if (result.access_token) {
-          metrikaGoal(M.PUBLIC_BOOKING_SUCCESS, {
-            source: 'salon_module',
-            flow: 'guest_with_token',
-            salonId,
-          })
-          localStorage.setItem('access_token', result.access_token)
-          
-          if (result.needs_phone_verification) {
-            setCurrentClientPhone(clientPhone)
-            setShowPhoneVerificationModal(true)
-            return
-          }
-          
-          if (result.needs_password_setup) {
-            localStorage.setItem('new_client_setup', 'true')
-          }
-          
-          if (result.needs_password_verification) {
-            localStorage.setItem('existing_client_verification', 'true')
-          }
-          
-          navigate('/client')
-        } else if (result.success) {
-          metrikaGoal(M.PUBLIC_BOOKING_SUCCESS, {
-            source: 'salon_module',
-            flow: 'any_master',
-            salonId,
-          })
-          // Успешное создание записи с "Любым мастером"
-          setSuccess(`Запись успешно создана с мастером ${result.master_name}!`)
-          resetForm()
-          if (onBookingSuccess) {
-            onBookingSuccess(result)
-          }
+        if (isPendingPublicBooking(result)) {
+          const pending = await requestPublicBookingVerification(result)
+          setPendingPublicBooking(pending)
+          setCurrentClientPhone(pending.phone)
+          setShowPhoneModal(false)
+          setShowPhoneVerificationModal(true)
+          return
         }
+        throw new Error('Некорректный ответ public booking')
       }
     } else {
       const errorData = await response.json()
@@ -593,34 +581,41 @@ export default function SalonBookingModule({
     setPhoneVerificationError('')
     
     try {
-      const response = await fetch('/bookings/verify-phone-cjm', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          phone: currentClientPhone,
-          code: phoneVerificationCode
-        })
+      const result = await confirmPublicBookingVerification(
+        pendingPublicBooking,
+        phoneVerificationCode,
+      )
+      installPublicBookingSession(result)
+      metrikaGoal(M.PUBLIC_BOOKING_SUCCESS, {
+        source: 'salon_module',
+        flow: result.master_name ? 'any_master_after_phone_proof' : 'guest_after_phone_proof',
+        salonId,
       })
-      
-      const result = await response.json()
-      
-      if (result.success) {
-        setShowPhoneVerificationModal(false)
-        setPhoneVerificationCode('')
-        setCurrentClientPhone('')
-        setSuccess('Телефон успешно верифицирован!')
-        // Продолжаем процесс записи
-        navigate('/client')
-      } else {
-        setPhoneVerificationError(result.message || 'Ошибка верификации')
-      }
+      setShowPhoneVerificationModal(false)
+      setPhoneVerificationCode('')
+      setCurrentClientPhone('')
+      setPendingPublicBooking(null)
+      setSuccess(result.master_name
+        ? `Запись успешно создана с мастером ${result.master_name}!`
+        : 'Телефон подтверждён, запись создана!')
+      if (onBookingSuccess) onBookingSuccess(result)
+      navigate('/client')
     } catch (error) {
       console.error('Ошибка верификации телефона:', error)
       setPhoneVerificationError('Ошибка сети при верификации')
     } finally {
       setPhoneVerificationLoading(false)
+    }
+  }
+
+  const cancelPendingVerification = async () => {
+    try {
+      await cancelPublicBookingVerification(pendingPublicBooking)
+    } finally {
+      setShowPhoneVerificationModal(false)
+      setPhoneVerificationCode('')
+      setCurrentClientPhone('')
+      setPendingPublicBooking(null)
     }
   }
   
@@ -956,11 +951,7 @@ export default function SalonBookingModule({
               <div className="flex gap-3">
                 <button
                   type="button"
-                  onClick={() => {
-                    setShowPhoneVerificationModal(false)
-                    setPhoneVerificationCode('')
-                    setCurrentClientPhone('')
-                  }}
+                  onClick={cancelPendingVerification}
                   className="flex-1 bg-gray-200 text-gray-700 py-2 px-4 rounded-lg font-medium hover:bg-gray-300 transition-colors"
                 >
                   Отмена
@@ -979,4 +970,4 @@ export default function SalonBookingModule({
       )}
     </div>
   )
-} 
+}

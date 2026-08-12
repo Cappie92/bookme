@@ -4,6 +4,13 @@ import { CalendarIcon, ClockIcon, UserIcon, TagIcon } from '@heroicons/react/24/
 import { dateToISOString, formatTime, getMinDate, getSelectedCity } from '../../utils/dateUtils'
 import { metrikaGoal } from '../../analytics/metrika'
 import { M } from '../../analytics/metrikaEvents'
+import {
+  cancelPublicBookingVerification,
+  confirmPublicBookingVerification,
+  installPublicBookingSession,
+  isPendingPublicBooking,
+  requestPublicBookingVerification,
+} from '../../utils/publicBookingVerification'
 
 export default function BranchBookingModule({ 
   salonId, 
@@ -52,6 +59,7 @@ export default function BranchBookingModule({
   const [phoneVerificationLoading, setPhoneVerificationLoading] = useState(false)
   const [phoneVerificationError, setPhoneVerificationError] = useState('')
   const [currentClientPhone, setCurrentClientPhone] = useState('')
+  const [pendingPublicBooking, setPendingPublicBooking] = useState(null)
   
   // Функции валидации телефона
   const validatePhone = (phone) => {
@@ -353,11 +361,34 @@ export default function BranchBookingModule({
       branch_id: parseInt(branchId), // Всегда передаем branch_id
       start_time: startTime.toISOString(),
       end_time: endTime.toISOString(),
-      notes: formData.notes
+      notes: formData.notes,
+      client_name: currentUser?.full_name || currentUser?.phone || 'Клиент',
+      service_name: selectedService?.name || '',
+      service_duration: selectedService?.duration || 0,
+      service_price: selectedService?.price || 0,
     }
     
     let response
-    if (currentUser) {
+    if (!formData.master_id) {
+      const params = new URLSearchParams({
+        salon_id: salonId,
+        service_id: formData.service_id,
+        start_time: startTime.toISOString(),
+        end_time: endTime.toISOString(),
+        branch_id: branchId,
+        notes: formData.notes || '',
+      })
+      if (clientPhone) params.append('client_phone', clientPhone)
+      response = await fetch(`/api/bookings/create-with-any-master?${params}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(currentUser ? {
+            'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+          } : {})
+        }
+      })
+    } else if (currentUser) {
       response = await fetch('/client/bookings', {
         method: 'POST',
         headers: {
@@ -368,7 +399,7 @@ export default function BranchBookingModule({
       })
     } else {
       const params = new URLSearchParams({ client_phone: clientPhone })
-      response = await fetch(`/bookings/public?${params}`, {
+      response = await fetch(`/api/bookings/public?${params}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -393,31 +424,15 @@ export default function BranchBookingModule({
           onBookingSuccess(result)
         }
       } else {
-        if (result.access_token) {
-          metrikaGoal(M.PUBLIC_BOOKING_SUCCESS, {
-            source: 'branch_module',
-            flow: 'guest_with_token',
-            salonId,
-            branchId,
-          })
-          localStorage.setItem('access_token', result.access_token)
-          
-          if (result.needs_phone_verification) {
-            setCurrentClientPhone(clientPhone)
-            setShowPhoneVerificationModal(true)
-            return
-          }
-          
-          if (result.needs_password_setup) {
-            localStorage.setItem('new_client_setup', 'true')
-          }
-          
-          if (result.needs_password_verification) {
-            localStorage.setItem('existing_client_verification', 'true')
-          }
-          
-          navigate('/client')
+        if (isPendingPublicBooking(result)) {
+          const pending = await requestPublicBookingVerification(result)
+          setPendingPublicBooking(pending)
+          setCurrentClientPhone(pending.phone)
+          setShowPhoneModal(false)
+          setShowPhoneVerificationModal(true)
+          return
         }
+        throw new Error('Некорректный ответ public booking')
       }
     } else {
       const errorData = await response.json()
@@ -454,27 +469,7 @@ export default function BranchBookingModule({
     setError('')
     
     try {
-      const response = await fetch('/bookings/verify-phone-cjm', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          phone: formData.client_phone,
-          code: phoneVerificationCode
-        })
-      })
-      
-      if (response.ok) {
-        const result = await response.json()
-        if (result.success) {
-          await createBooking(formData.client_phone)
-        } else {
-          setError(result.message || 'Ошибка верификации')
-        }
-      } else {
-        setError('Ошибка верификации телефона')
-      }
+      await createBooking(formData.client_phone)
     } catch (error) {
       console.error('Ошибка верификации:', error)
       setError('Ошибка сети при верификации')
@@ -494,34 +489,40 @@ export default function BranchBookingModule({
     setPhoneVerificationError('')
     
     try {
-      const response = await fetch('/bookings/verify-phone-cjm', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          phone: currentClientPhone,
-          code: phoneVerificationCode
-        })
+      const result = await confirmPublicBookingVerification(
+        pendingPublicBooking,
+        phoneVerificationCode,
+      )
+      installPublicBookingSession(result)
+      metrikaGoal(M.PUBLIC_BOOKING_SUCCESS, {
+        source: 'branch_module',
+        flow: 'guest_after_phone_proof',
+        salonId,
+        branchId,
       })
-      
-      if (response.ok) {
-        const result = await response.json()
-        if (result.success) {
-          setShowPhoneVerificationModal(false)
-          setSuccess('Телефон подтвержден! Запись создана.')
-          resetForm()
-        } else {
-          setPhoneVerificationError(result.message || 'Неверный код')
-        }
-      } else {
-        setPhoneVerificationError('Ошибка подтверждения')
-      }
+      setShowPhoneVerificationModal(false)
+      setPhoneVerificationCode('')
+      setCurrentClientPhone('')
+      setPendingPublicBooking(null)
+      setSuccess('Телефон подтверждён! Запись создана.')
+      if (onBookingSuccess) onBookingSuccess(result)
+      resetForm()
     } catch (error) {
       console.error('Ошибка подтверждения:', error)
       setPhoneVerificationError('Ошибка сети')
     } finally {
       setPhoneVerificationLoading(false)
+    }
+  }
+
+  const cancelPendingVerification = async () => {
+    try {
+      await cancelPublicBookingVerification(pendingPublicBooking)
+    } finally {
+      setShowPhoneVerificationModal(false)
+      setPhoneVerificationCode('')
+      setCurrentClientPhone('')
+      setPendingPublicBooking(null)
     }
   }
   
@@ -813,7 +814,7 @@ export default function BranchBookingModule({
                 </button>
                 <button
                   type="button"
-                  onClick={() => setShowPhoneVerificationModal(false)}
+                  onClick={cancelPendingVerification}
                   className="flex-1 bg-gray-300 text-gray-700 py-2 px-4 rounded-lg hover:bg-gray-400"
                 >
                   Отмена
@@ -825,4 +826,4 @@ export default function BranchBookingModule({
       )}
     </div>
   )
-} 
+}

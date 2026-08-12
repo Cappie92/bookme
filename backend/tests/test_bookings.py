@@ -1,7 +1,8 @@
 from datetime import datetime, timedelta, time, date
 import pytest
+from jose import jwt
 
-from auth import get_password_hash
+from auth import ALGORITHM, SECRET_KEY, get_password_hash
 from models import (
     Master,
     MasterSchedule,
@@ -10,6 +11,7 @@ from models import (
     UserRole,
     SalonMasterServiceSettings,
 )
+from services.zvonok_service import ZVONOK_STUB_DIGITS
 
 # Используем client и db из conftest (с override get_db), чтобы все запросы шли в одну тестовую БД.
 
@@ -141,6 +143,50 @@ def test_create_booking(client, auth_headers, test_service, test_master):
     data = response.json()
     assert data["service_id"] == booking_data["service_id"]
     assert data["master_id"] == booking_data["master_id"]
+
+
+def test_public_booking_access_token_is_typed_numeric(
+    client, db, test_user, test_service, test_master, monkeypatch
+):
+    test_master.timezone = "Europe/Moscow"
+    db.commit()
+    response = client.post(
+        "/api/bookings/public",
+        params={"client_phone": test_user.phone},
+        json=_booking_payload(test_service, test_master),
+    )
+
+    assert response.status_code == 200, response.text
+    pending = response.json()
+    assert "access_token" not in pending
+    monkeypatch.setattr(
+        "routers.bookings.zvonok_service.send_verification_call",
+        lambda phone: {
+            "success": True,
+            "call_id": "typed-access-call",
+            "pincode": ZVONOK_STUB_DIGITS,
+        },
+    )
+    headers = {"Authorization": f"Bearer {pending['verification_token']}"}
+    requested = client.post(
+        "/api/bookings/public/verification/request", headers=headers
+    )
+    assert requested.status_code == 200, requested.text
+    confirmed = client.post(
+        "/api/bookings/public/verification/confirm",
+        headers=headers,
+        json={
+            "call_id": "typed-access-call",
+            "phone_digits": ZVONOK_STUB_DIGITS,
+        },
+    )
+    assert confirmed.status_code == 200, confirmed.text
+    payload = jwt.decode(
+        confirmed.json()["access_token"], SECRET_KEY, algorithms=[ALGORITHM]
+    )
+    assert payload["sub"] == str(test_user.id)
+    assert payload["sv"] == test_user.session_version
+    assert payload["token_type"] == "access"
 
 
 def test_get_bookings(client, auth_headers):

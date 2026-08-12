@@ -41,6 +41,7 @@ def _master(db: Session, idx: int) -> Master:
         role=UserRole.MASTER,
         is_active=True,
         is_verified=True,
+        is_phone_verified=True,
     )
     db.add(user)
     db.commit()
@@ -373,7 +374,9 @@ def test_calculate_preview_for_one_month_ineligible(client, db: Session):
     assert preview["ineligible_reason"] == "minimum_period_3_months"
 
 
-def test_registration_master_with_valid_promo_creates_pending_redemption(client, db: Session):
+def test_registration_master_with_valid_promo_creates_pending_redemption(
+    client, db: Session, monkeypatch
+):
     campaign = _campaign(db)
     _code(db, campaign, "REGOK")
 
@@ -388,10 +391,33 @@ def test_registration_master_with_valid_promo_creates_pending_redemption(client,
             "city": "Москва",
             "timezone": "Europe/Moscow",
             "promo_code": "regok",
+            "accept_terms": True,
+            "accept_personal_data": True,
         },
     )
 
     assert response.status_code == 200, response.json()
+    assert db.query(User).filter(User.email == "reg-ok@example.com").first() is None
+    assert db.query(PromoRedemption).count() == 0
+
+    monkeypatch.setattr(
+        "routers.auth.zvonok_service.send_verification_call",
+        lambda phone: {"success": True, "call_id": "promo-call", "pincode": "1234"},
+    )
+    headers = {
+        "Authorization": f"Bearer {response.json()['verification_token']}"
+    }
+    requested = client.post(
+        "/api/auth/request-signup-phone-verification", headers=headers
+    )
+    assert requested.status_code == 200, requested.json()
+    confirmed = client.post(
+        "/api/auth/confirm-signup-phone-verification",
+        headers=headers,
+        json={"call_id": "promo-call", "phone_digits": "1234"},
+    )
+    assert confirmed.status_code == 200, confirmed.json()
+
     user = db.query(User).filter(User.email == "reg-ok@example.com").first()
     master = db.query(Master).filter(Master.user_id == user.id).first()
     redemption = db.query(PromoRedemption).filter(PromoRedemption.redeemer_master_id == master.id).first()
@@ -411,6 +437,8 @@ def test_registration_master_invalid_promo_rolls_back(client, db: Session):
             "city": "Москва",
             "timezone": "Europe/Moscow",
             "promo_code": "NOPE",
+            "accept_terms": True,
+            "accept_personal_data": True,
         },
     )
 
@@ -428,6 +456,8 @@ def test_registration_client_with_promo_rejected_and_without_promo_unchanged(cli
             "password": "testpassword",
             "role": "client",
             "promo_code": "ANY",
+            "accept_terms": True,
+            "accept_personal_data": True,
         },
     )
     assert rejected.status_code == 400
@@ -440,6 +470,8 @@ def test_registration_client_with_promo_rejected_and_without_promo_unchanged(cli
             "full_name": "Client No Promo",
             "password": "testpassword",
             "role": "client",
+            "accept_terms": True,
+            "accept_personal_data": True,
         },
     )
     assert ok.status_code == 200, ok.json()

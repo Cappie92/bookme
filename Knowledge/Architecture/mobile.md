@@ -2,7 +2,7 @@
 type: Knowledge
 status: active
 project: DeDato
-last_runtime_check: 2026-08-05
+last_runtime_check: 2026-08-12
 ---
 
 # Mobile architecture
@@ -23,11 +23,15 @@ Mobile использует Expo 54, React Native 0.81, React 19 и Expo Router 
 
 ## Session bootstrap and state
 
-`AuthProvider` читает persisted token/user, подтверждает user через `/api/auth/users/me`, очищает session при definite authentication failure и сохраняет её при transient network/5xx failure. Storage contract и refresh-token divergence принадлежат [Identity and access](../Domain/identity-access.md) и [Security and privacy Debt](../Debt/security-and-privacy.md).
+`AuthProvider` читает persisted access/refresh tokens and user, подтверждает user через `/api/auth/users/me`, очищает session при definite authentication failure и сохраняет её при transient network/5xx failure. Access and refresh tokens use SecureStore when available with AsyncStorage duplication/fallback; Expo Go uses AsyncStorage. Storage risk belongs to [Security and privacy Debt](../Debt/security-and-privacy.md).
+
+Verify-first registration is a separate pre-auth lifecycle. `AuthContext` persists only typed pending registration metadata (opaque ticket, phone, expiry, origin/kind/role), removes any normal session before entering the flow and completes authentication only after server confirmation. `AuthGate` restores a non-expired pending flow to `/verify-phone`; cancel/expiry removes it and returns to login. Historical unverified-login proof shares the screen but is distinguished by `verification_kind` and server artifact.
+
+Phone password recovery has its own provider and storage key, separate from auth and registration state. The route sequence is `/forgot-password` → `/password-reset-verify` → `/reset-password`; restart resumes only a non-expired typed stage. Completion/cancel/expiry clears recovery state, and password mutation helpers force canonical local logout so a revoked server session is not retained on device.
 
 Большая часть screen state локальна или находится в contexts/hooks/AsyncStorage. Zustand используется для favorites с optimistic toggle и server re-hydration; это не общий server-state cache для всего приложения.
 
-**Sources:** `mobile/src/auth/AuthContext.tsx`; `mobile/src/auth/tokenStorage.ts`; `mobile/src/stores/favoritesStore.ts`; `mobile/src/contexts/`; `mobile/src/hooks/`.
+**Sources:** `mobile/src/auth/AuthContext.tsx`; `mobile/src/auth/tokenStorage.ts`; `mobile/src/auth/pendingPhoneVerificationStorage.ts`; `mobile/src/auth/PasswordResetRecoveryContext.tsx`; `mobile/src/auth/pendingPasswordResetStorage.ts`; `mobile/src/auth/authFlowRouting.ts`; `mobile/src/auth/passwordMutationLogout.ts`; `mobile/app/_layout.tsx`; `mobile/src/stores/favoritesStore.ts`.
 
 ## API client
 

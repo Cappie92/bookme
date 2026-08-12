@@ -15,6 +15,7 @@ import { env } from '@src/config/env';
 import { updateClientProfile, changePassword, deleteAccount } from '@src/services/api/profile';
 import { getContactPreferences, updateContactPreference } from '@src/services/contactPreferences';
 import { PasswordInput } from '@src/components/ui/PasswordInput';
+import { completePasswordMutationLogout } from '@src/auth/passwordMutationLogout';
 
 export default function SettingsScreen() {
   const pathname = usePathname();
@@ -259,11 +260,12 @@ export default function SettingsScreen() {
         current_password: currentPassword,
         new_password: newPassword,
       });
-      Alert.alert('Успешно', 'Пароль изменен');
       setShowPasswordModal(false);
       setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
+      await completePasswordMutationLogout(logout, router.replace);
+      Alert.alert('Успешно', 'Пароль изменен. Войдите снова.');
     } catch (error: any) {
       console.error('Ошибка смены пароля:', error);
       const errorMessage = error.response?.data?.detail || error.message || 'Не удалось сменить пароль';

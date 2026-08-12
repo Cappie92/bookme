@@ -8,6 +8,14 @@
 import { Stack } from 'expo-router';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AuthProvider, useAuth } from '@src/auth/AuthContext';
+import {
+  resolvePasswordResetAuthGateRoute,
+  resolvePhoneVerificationAuthGateRoute,
+} from '@src/auth/authFlowRouting';
+import {
+  PasswordResetRecoveryProvider,
+  usePasswordResetRecovery,
+} from '@src/auth/PasswordResetRecoveryContext';
 import { TabBarHeightProvider } from '@src/contexts/TabBarHeightContext';
 import { View, Text, ActivityIndicator, StyleSheet, TouchableOpacity, Linking } from 'react-native';
 import { useEffect, useRef, useState } from 'react';
@@ -101,7 +109,22 @@ function isPublicRoute(pathStr: string, segments: string[]): boolean {
 }
 
 function AuthGate({ children, rootInstanceId }: { children: React.ReactNode; rootInstanceId: string }) {
-  const { isAuthenticated, isLoading, token, user, logout, retryInit, ensureNoTokenOnLogin } = useAuth();
+  const {
+    isAuthenticated,
+    isLoading,
+    token,
+    user,
+    pendingPhoneVerification,
+    pendingVerificationNeedsLogin,
+    logout,
+    retryInit,
+    ensureNoTokenOnLogin,
+  } = useAuth();
+  const {
+    pendingPasswordReset,
+    passwordResetNeedsLogin,
+    isPasswordResetLoading,
+  } = usePasswordResetRecovery();
   const segments = useSegments();
   const pathname = usePathname();
   const didRedirectRef = useRef(false);
@@ -125,7 +148,7 @@ function AuthGate({ children, rootInstanceId }: { children: React.ReactNode; roo
     logger.debug('auth', '[AuthGate] ready/authState', { ready, isAuthenticated, isLoading });
   }, [ready, isAuthenticated, isLoading]);
 
-  const showSplash = isLoading || (isAuthenticated && !ready);
+  const showSplash = isLoading || isPasswordResetLoading || (isAuthenticated && !ready);
   const pathStr = (pathname != null ? String(pathname) : '') || '';
   const segmentsArr = (Array.isArray(segments) ? segments : []) as string[];
   const inPublic = isPublicRoute(pathStr, segmentsArr) || initialUrlIsPublic === true;
@@ -257,6 +280,7 @@ function AuthGate({ children, rootInstanceId }: { children: React.ReactNode; roo
     const t = target.replace(/^\//, '');
     if (pathStr === target || pathStr === t) return true;
     if (target === '/login' && pathStr.includes('login')) return true;
+    if (target === '/verify-phone' && pathStr.includes('verify-phone')) return true;
     if (target === '/welcome' && pathStr.includes('welcome')) return true;
     if (target === '/client/dashboard' && (pathStr.includes('client/dashboard') || pathStr.includes('client')))
       return true;
@@ -271,10 +295,60 @@ function AuthGate({ children, rootInstanceId }: { children: React.ReactNode; roo
     if (__DEV__ && env.DEBUG_AUTH) {
       logger.debug('auth', '[AuthGate] effect', { run: effectRunRef.current, pathname: pathStr });
     }
-    if (isLoading) return;
+    if (isLoading || isPasswordResetLoading) return;
 
     const first = (segments as string[])[0];
     const onLoginScreen = first === 'login' || pathStr.includes('login');
+    const onVerifyPhoneScreen = first === 'verify-phone' || pathStr.includes('verify-phone');
+    const onPasswordResetVerifyScreen =
+      first === 'password-reset-verify' || pathStr.includes('password-reset-verify');
+    const onResetPasswordScreen =
+      first === 'reset-password' || pathStr.includes('reset-password');
+
+    const phoneVerificationRoute = resolvePhoneVerificationAuthGateRoute({
+      isAuthenticated,
+      hasPendingVerification: !!pendingPhoneVerification,
+      pendingVerificationNeedsLogin,
+    });
+
+    if (phoneVerificationRoute === '/verify-phone') {
+      if (!onVerifyPhoneScreen) {
+        didRedirectRef.current = true;
+        router.replace('/verify-phone');
+      }
+      setReadyWithReason(true, 'pending phone verification');
+      return;
+    }
+
+    if (phoneVerificationRoute === '/login') {
+      if (!onLoginScreen) {
+        didRedirectRef.current = true;
+        router.replace('/login');
+      }
+      setReadyWithReason(true, 'expired pending verification → login');
+      return;
+    }
+
+    const passwordResetRoute = resolvePasswordResetAuthGateRoute({
+      isAuthenticated,
+      pending: pendingPasswordReset,
+      passwordResetNeedsLogin,
+    });
+    if (passwordResetRoute === '/password-reset-verify') {
+      if (!onPasswordResetVerifyScreen) router.replace('/password-reset-verify');
+      setReadyWithReason(true, 'pending password reset verification');
+      return;
+    }
+    if (passwordResetRoute === '/reset-password') {
+      if (!onResetPasswordScreen) router.replace('/reset-password');
+      setReadyWithReason(true, 'pending password reset token');
+      return;
+    }
+    if (passwordResetRoute === '/login') {
+      if (!onLoginScreen) router.replace('/login');
+      setReadyWithReason(true, 'password reset finished or expired');
+      return;
+    }
     const willCallEnsure = onLoginScreen && !isAuthenticated && !token;
     authTrace(
       `[AuthGate] path=${pathStr} firstSeg=${String(first)} onLoginScreen=${onLoginScreen} isLoading=false isAuthenticated=${isAuthenticated} tokenInContext=${!!token} userPresent=${!!user} willCallEnsureNoTokenOnLogin=${willCallEnsure} initialUrlIsPublic=${String(initialUrlIsPublic)} inPublic=${inPublic}`
@@ -383,7 +457,20 @@ function AuthGate({ children, rootInstanceId }: { children: React.ReactNode; roo
         logger.debug('auth', '[AuthGate] getPublicBookingDraft timeout/catch', (err as Error)?.message);
         doRedirect(target);
       });
-  }, [isAuthenticated, isLoading, token, user, segments, pathname, initialUrlIsPublic]);
+  }, [
+    isAuthenticated,
+    isLoading,
+    token,
+    user,
+    pendingPhoneVerification,
+    pendingVerificationNeedsLogin,
+    pendingPasswordReset,
+    passwordResetNeedsLogin,
+    isPasswordResetLoading,
+    segments,
+    pathname,
+    initialUrlIsPublic,
+  ]);
 
   // Failsafe: если > 8 сек на Splash — показываем экран восстановления (только __DEV__)
   useEffect(() => {
@@ -435,7 +522,7 @@ function AuthGate({ children, rootInstanceId }: { children: React.ReactNode; roo
     );
   }
 
-  if (isLoading) return <Splash />;
+  if (isLoading || isPasswordResetLoading) return <Splash />;
   if (isAuthenticated && !ready) return <Splash />;
 
   return <>{children}</>;
@@ -471,17 +558,23 @@ export default function RootLayout() {
   return (
     <SafeAreaProvider>
       <AuthProvider>
-        <TabBarHeightProvider>
-          <AuthGate rootInstanceId={rootInstanceIdRef.current}>
-            <Stack screenOptions={{ headerShown: false }}>
-              <Stack.Screen name="welcome" />
-              <Stack.Screen name="login" />
-              <Stack.Screen name="(master)" />
-              <Stack.Screen name="(client)" />
-              <Stack.Screen name="(public)" />
-            </Stack>
-          </AuthGate>
-        </TabBarHeightProvider>
+        <PasswordResetRecoveryProvider>
+          <TabBarHeightProvider>
+            <AuthGate rootInstanceId={rootInstanceIdRef.current}>
+              <Stack screenOptions={{ headerShown: false }}>
+                <Stack.Screen name="welcome" />
+                <Stack.Screen name="login" />
+                <Stack.Screen name="verify-phone" options={{ gestureEnabled: false }} />
+                <Stack.Screen name="forgot-password" options={{ gestureEnabled: false }} />
+                <Stack.Screen name="password-reset-verify" options={{ gestureEnabled: false }} />
+                <Stack.Screen name="reset-password" options={{ gestureEnabled: false }} />
+                <Stack.Screen name="(master)" />
+                <Stack.Screen name="(client)" />
+                <Stack.Screen name="(public)" />
+              </Stack>
+            </AuthGate>
+          </TabBarHeightProvider>
+        </PasswordResetRecoveryProvider>
       </AuthProvider>
       {/* Строго DEBUG_MOBILE_ERRORS=1 (не true/yes) — иначе FAB всплывает при опечатках в .env. */}
       {env.SHOW_DBG_FLOATING_PANEL ? <MobileErrorDebugPanel /> : null}

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { XMarkIcon } from '@heroicons/react/24/outline'
 import { useNavigate } from 'react-router-dom'
 import { Button } from '../components/ui'
@@ -190,9 +190,7 @@ export default function AuthModal() {
     closeAuthModal,
   } = useAuth()
   const open = authModalOpen
-  const onClose = closeAuthModal
   const defaultRegType = authModalType
-  const { handleBackdropClick, handleMouseDown } = useModal(onClose)
   const [tab, setTab] = useState('login')
   const [regType, setRegType] = useState(defaultRegType)
 
@@ -242,6 +240,7 @@ export default function AuthModal() {
   const [forgotPasswordMethod, setForgotPasswordMethod] = useState('phone') // 'phone' или 'email'
   const [forgotPasswordStep, setForgotPasswordStep] = useState('phone') // 'phone' | 'enter_digits' | 'new_password'
   const [forgotPasswordCallId, setForgotPasswordCallId] = useState('')
+  const [forgotPasswordChallengeToken, setForgotPasswordChallengeToken] = useState('')
   const [forgotPasswordDigits, setForgotPasswordDigits] = useState('')
   const [showResetPassword, setShowResetPassword] = useState(false)
   const [resetToken, setResetToken] = useState('')
@@ -257,6 +256,43 @@ export default function AuthModal() {
   const [verificationDigits, setVerificationDigits] = useState('')
   const [verificationDigitsError, setVerificationDigitsError] = useState('')
   const [showSuccessMessage, setShowSuccessMessage] = useState(false)
+  const [signupVerificationToken, setSignupVerificationToken] = useState('')
+  const [signupVerificationOrigin, setSignupVerificationOrigin] = useState('')
+  const [signupVerificationKind, setSignupVerificationKind] = useState('')
+  const verificationTokenRef = useRef('')
+
+  const clearSignupVerificationState = () => {
+    verificationTokenRef.current = ''
+    setSignupVerificationToken('')
+    setSignupVerificationOrigin('')
+    setSignupVerificationKind('')
+    setPhoneVerificationLoading(false)
+    setPhoneVerificationError('')
+    setPhoneVerificationData(null)
+    setPhoneVerificationStep('none')
+    setVerificationDigits('')
+    setVerificationDigitsError('')
+    setShowSuccessMessage(false)
+  }
+
+  const handleAuthModalClose = () => {
+    const restrictedToken = verificationTokenRef.current
+    const wasRestrictedFlow = Boolean(restrictedToken)
+    clearSignupVerificationState()
+    if (wasRestrictedFlow) {
+      void fetch('/api/auth/cancel-signup-phone-verification', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${restrictedToken}` },
+      }).catch(() => {})
+      localStorage.removeItem('access_token')
+      localStorage.removeItem('refresh_token')
+      localStorage.removeItem('user_role')
+    }
+    closeAuthModal()
+  }
+
+  const onClose = handleAuthModalClose
+  const { handleBackdropClick, handleMouseDown } = useModal(onClose)
   
   const navigate = useNavigate();
 
@@ -482,30 +518,26 @@ export default function AuthModal() {
       })
       if (res.ok) {
         const data = await res.json()
-        // Получаем роль пользователя
-        let role = null
-        // Пробуем декодировать JWT (access_token) чтобы узнать роль
-        try {
-          const payload = JSON.parse(atob(data.access_token.split('.')[1]))
-          role = payload.role
-        } catch {
-          // Игнорируем ошибки декодирования токена
+        if (
+          data.status !== 'phone_verification_required' ||
+          !data.verification_token ||
+          !data.phone ||
+          data.verification_kind !== 'new_registration'
+        ) {
+          setErrors({ general: 'Сервер вернул неожиданный ответ регистрации' })
+          return
         }
-        reportAuthRegisterSuccess({ role: (role || regType).toString() })
-        
-        // Сохраняем токены в localStorage
-        localStorage.setItem('access_token', data.access_token)
-        localStorage.setItem('refresh_token', data.refresh_token)
-        localStorage.setItem('user_role', role)
-        
-        // Обновляем состояние авторизации
-        login(data)
-        
-        // Инициируем верификацию телефона
-        await initiatePhoneVerification(form.phone)
-        
+
+        localStorage.removeItem('access_token')
+        localStorage.removeItem('refresh_token')
+        localStorage.removeItem('user_role')
+        verificationTokenRef.current = data.verification_token
+        setSignupVerificationToken(data.verification_token)
+        setSignupVerificationOrigin('register')
+        setSignupVerificationKind(data.verification_kind)
+        setPhoneVerificationData({ phone: data.phone, call_id: null })
+        await initiatePhoneVerification(data.verification_token, data.phone)
         setForm({})
-        // НЕ закрываем модальное окно - показываем форму верификации
       } else {
         const body = await readResponseJsonSafe(res)
         const detail = pickRegisterApiDetail(body)
@@ -539,6 +571,27 @@ export default function AuthModal() {
       )
       if (res.ok) {
         const data = await res.json()
+        if (data.status === 'phone_verification_required') {
+          if (
+            !data.verification_token ||
+            !data.phone ||
+            data.verification_kind !== 'existing_account'
+          ) {
+            setLoginErrors({ general: 'Сервер вернул неожиданный ответ входа' })
+            return
+          }
+          localStorage.removeItem('access_token')
+          localStorage.removeItem('refresh_token')
+          localStorage.removeItem('user_role')
+          verificationTokenRef.current = data.verification_token
+          setSignupVerificationToken(data.verification_token)
+          setSignupVerificationOrigin('login')
+          setSignupVerificationKind(data.verification_kind)
+          setPhoneVerificationData({ phone: data.phone, call_id: null })
+          await initiatePhoneVerification(data.verification_token, data.phone)
+          return
+        }
+
         let role = null
         try {
           const payload = JSON.parse(atob(data.access_token.split('.')[1]))
@@ -640,29 +693,33 @@ export default function AuthModal() {
     if (Object.keys(errs).length > 0) return
     setForgotPasswordLoading(true)
     try {
-      const payload = forgotPasswordMethod === 'phone' 
+      const isPhoneRecovery = forgotPasswordMethod === 'phone'
+      const payload = isPhoneRecovery
         ? { phone: normalizeRussianPhoneForApi(forgotPasswordForm.phone) }
         : { email: forgotPasswordForm.email }
-      
-      const res = await fetch('/api/auth/forgot-password', {
+
+      const endpoint = isPhoneRecovery
+        ? '/api/auth/request-password-reset-phone'
+        : '/api/auth/request-password-reset'
+      const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       })
       if (res.ok) {
         const data = await res.json()
-        if (data.success) {
-          if (forgotPasswordMethod === 'phone' && data.call_id) {
-            setForgotPasswordStep('enter_digits')
-            setForgotPasswordCallId(data.call_id)
-          } else {
-            const method = forgotPasswordMethod === 'phone' ? 'номер телефона' : 'email'
-            alert(`Инструкции по восстановлению пароля отправлены на ваш ${method}`)
-            setShowForgotPassword(false)
-            setForgotPasswordForm({ phone: '+7', email: '' })
-            setForgotPasswordMethod('phone')
-            setForgotPasswordStep('phone')
-          }
+        if (isPhoneRecovery && data.status === 'verification_required' && data.call_id && data.challenge_token) {
+          setForgotPasswordStep('enter_digits')
+          setForgotPasswordCallId(data.call_id)
+          setForgotPasswordChallengeToken(data.challenge_token)
+          setForgotPasswordDigits('')
+          setForgotPasswordErrors({})
+        } else if (!isPhoneRecovery && data.success) {
+          alert('Инструкции по восстановлению пароля отправлены на ваш email')
+          setShowForgotPassword(false)
+          setForgotPasswordForm({ phone: '+7', email: '' })
+          setForgotPasswordMethod('phone')
+          setForgotPasswordStep('phone')
         } else {
           alert('Ошибка: ' + (data.message || 'Не удалось отправить инструкции'))
         }
@@ -687,69 +744,27 @@ export default function AuthModal() {
     }
     setForgotPasswordLoading(true)
     try {
-      const res = await fetch('/api/auth/verify-phone', {
+      const res = await fetch('/api/auth/confirm-password-reset-phone', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          phone: normalizeRussianPhoneForApi(forgotPasswordForm.phone),
+          challenge_token: forgotPasswordChallengeToken,
           call_id: forgotPasswordCallId,
           phone_digits: forgotPasswordDigits,
         }),
       })
       const data = await res.json()
-      if (data.success) {
+      if (res.ok && data.status === 'reset_token_issued' && data.reset_token) {
+        setResetToken(data.reset_token)
+        setForgotPasswordErrors({})
         setForgotPasswordStep('new_password')
       } else {
-        setForgotPasswordErrors({ ...forgotPasswordErrors, digits: data.message || 'Неверный код' })
+        setForgotPasswordErrors({ ...forgotPasswordErrors, digits: data.detail || 'Неверный код' })
       }
     } catch {
       setForgotPasswordErrors({ ...forgotPasswordErrors, digits: 'Ошибка сети' })
     } finally {
       setForgotPasswordLoading(false)
-    }
-  }
-
-  const handleResetPasswordByPhone = async (e) => {
-    e.preventDefault()
-    const p1 = resetPasswordForm.password
-    const p2 = resetPasswordForm.password2
-    if (!p1 || p1.length < 6) {
-      setResetPasswordErrors({ ...resetPasswordErrors, password: 'Минимум 6 символов' })
-      return
-    }
-    if (p1 !== p2) {
-      setResetPasswordErrors({ ...resetPasswordErrors, password2: 'Пароли не совпадают' })
-      return
-    }
-    setResetPasswordLoading(true)
-    try {
-      const res = await fetch('/api/auth/reset-password-by-phone', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          phone: normalizeRussianPhoneForApi(forgotPasswordForm.phone),
-          call_id: forgotPasswordCallId,
-          phone_digits: forgotPasswordDigits,
-          new_password: p1,
-        }),
-      })
-      const data = await res.json()
-      if (data.success) {
-        alert('Пароль успешно изменен! Теперь вы можете войти.')
-        setShowForgotPassword(false)
-        setForgotPasswordForm({ phone: '+7', email: '' })
-        setForgotPasswordStep('phone')
-        setForgotPasswordCallId('')
-        setForgotPasswordDigits('')
-        setResetPasswordForm({ password: '', password2: '' })
-        onClose()
-      } else {
-        setResetPasswordErrors({ ...resetPasswordErrors, password: data.message })
-      }
-    } catch {
-      setResetPasswordErrors({ ...resetPasswordErrors, password: 'Ошибка сети' })
-    } finally {
-      setResetPasswordLoading(false)
     }
   }
 
@@ -773,7 +788,16 @@ export default function AuthModal() {
         if (data.success) {
           alert('Пароль успешно изменен! Теперь вы можете войти с новым паролем.')
           setShowResetPassword(false)
+          setShowForgotPassword(false)
+          setForgotPasswordForm({ phone: '+7', email: '' })
+          setForgotPasswordMethod('phone')
+          setForgotPasswordStep('phone')
+          setForgotPasswordCallId('')
+          setForgotPasswordChallengeToken('')
+          setForgotPasswordDigits('')
+          setForgotPasswordErrors({})
           setResetPasswordForm({ password: '', password2: '' })
+          setResetPasswordErrors({})
           setResetToken('')
           onClose()
         } else {
@@ -792,49 +816,49 @@ export default function AuthModal() {
     }
   }
 
-  const initiatePhoneVerification = async (phone) => {
-    const canonicalPhone = normalizeRussianPhoneForApi(phone)
-    console.log('🔔 Инициируем верификацию телефона:', canonicalPhone)
+  const initiatePhoneVerification = async (verificationToken, phone) => {
+    if (!verificationToken || verificationTokenRef.current !== verificationToken) return
     setPhoneVerificationLoading(true)
     setPhoneVerificationError('')
     setPhoneVerificationStep('calling')
-    
+
     try {
-      console.log('📡 Отправляем запрос на /api/auth/request-phone-verification')
-      const response = await fetch('/api/auth/request-phone-verification', {
+      const response = await fetch('/api/auth/request-signup-phone-verification', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json'
+          'Authorization': `Bearer ${verificationToken}`,
         },
-        body: JSON.stringify({ phone: canonicalPhone })
       })
-      
-      console.log('📨 Получен ответ:', response.status, response.statusText)
-      const result = await response.json()
-      console.log('📋 Данные ответа:', result)
+
+      const result = await readResponseJsonSafe(response)
+      if (verificationTokenRef.current !== verificationToken) return
 
       if (import.meta.env.DEV && result?.verification_number) {
         console.info('[dev] verification_number (stub):', result.verification_number)
       }
 
-      if (result.success) {
-        console.log('✅ Звонок успешно инициирован, call_id:', result.call_id)
+      if (response.ok && result.success && result.call_id) {
         setPhoneVerificationData({
           call_id: result.call_id,
-          phone: canonicalPhone
+          phone,
         })
         setPhoneVerificationStep('enter_digits')
       } else {
-        console.error('❌ Ошибка инициации звонка:', result.message)
-        setPhoneVerificationError(result.message || 'Ошибка инициации верификации телефона')
-        setPhoneVerificationStep('none')
+        setPhoneVerificationData({ phone, call_id: null })
+        setPhoneVerificationError(
+          result.detail || result.message || 'Ошибка инициации верификации телефона'
+        )
+        setPhoneVerificationStep('enter_digits')
       }
-    } catch (error) {
-      console.error('❌ Ошибка сети при верификации телефона:', error)
+    } catch {
+      if (verificationTokenRef.current !== verificationToken) return
+      setPhoneVerificationData({ phone, call_id: null })
       setPhoneVerificationError('Ошибка сети при инициации верификации телефона')
-      setPhoneVerificationStep('none')
+      setPhoneVerificationStep('enter_digits')
     } finally {
-      setPhoneVerificationLoading(false)
+      if (verificationTokenRef.current === verificationToken) {
+        setPhoneVerificationLoading(false)
+      }
     }
   }
   
@@ -844,50 +868,75 @@ export default function AuthModal() {
       return
     }
     
-    console.log('🔍 Проверяем введенные цифры:', verificationDigits)
-    console.log('📞 Данные верификации:', phoneVerificationData)
-    
+    const verificationToken = signupVerificationToken
+    if (!verificationToken || verificationTokenRef.current !== verificationToken) {
+      setVerificationDigitsError('Сессия подтверждения истекла. Войдите снова.')
+      return
+    }
+    const expectedKind = signupVerificationOrigin === 'register'
+      ? 'new_registration'
+      : 'existing_account'
+    if (signupVerificationKind !== expectedKind) {
+      setVerificationDigitsError('Сессия подтверждения имеет неверный тип. Начните заново.')
+      return
+    }
+
     setPhoneVerificationLoading(true)
     setVerificationDigitsError('')
-    
+
     try {
-      console.log('📡 Отправляем запрос на /api/auth/verify-phone')
-      const response = await fetch('/api/auth/verify-phone', {
+      const response = await fetch('/api/auth/confirm-signup-phone-verification', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${verificationToken}`,
         },
         body: JSON.stringify({
-          phone: phoneVerificationData.phone,
           call_id: phoneVerificationData.call_id,
-          phone_digits: verificationDigits
-        })
+          phone_digits: verificationDigits,
+        }),
       })
-      
-      console.log('📨 Получен ответ:', response.status, response.statusText)
-      const result = await response.json()
-      console.log('📋 Результат верификации:', result)
-      
-      if (result.success) {
-        console.log('✅ Телефон успешно верифицирован!')
-        console.log('🎯 Показываем окно успешной регистрации')
-        
-        // Телефон успешно верифицирован
-        setPhoneVerificationStep('none')
-        setPhoneVerificationData(null)
-        setVerificationDigits('')
-        
-        // Показываем окно успешной регистрации
-        console.log('🎯 Устанавливаем showSuccessMessage = true')
-        setShowSuccessMessage(true)
-        console.log('🎯 showSuccessMessage установлен в true')
-        
-        // Автоматически закрываем модальное окно и перенаправляем через 3 секунды
+
+      const result = await readResponseJsonSafe(response)
+      if (verificationTokenRef.current !== verificationToken) return
+
+      if (response.ok && result.access_token && result.refresh_token) {
+        const userResponse = await fetchWithTimeout(
+          '/api/auth/users/me',
+          {
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${result.access_token}`,
+            },
+          },
+          LOGIN_ME_TIMEOUT_MS
+        )
+        if (!userResponse.ok) {
+          throw new Error('profile_hydration_failed')
+        }
+        const userData = await userResponse.json()
+        if (verificationTokenRef.current !== verificationToken) return
+
+        localStorage.setItem('access_token', result.access_token)
+        localStorage.setItem('refresh_token', result.refresh_token)
+        if (userData.role) localStorage.setItem('user_role', userData.role)
+        login(userData)
+        if (signupVerificationOrigin === 'register') {
+          reportAuthRegisterSuccess({ role: (userData.role || regType).toString() })
+        } else {
+          reportAuthLoginSuccess({ role: (userData.role || '').toString() })
+        }
+
         const redirectMode = authModalRedirectMode
         const returnToPath = authModalReturnToPath
+        const verifiedRole = userData.role
+        const verifiedKind = signupVerificationKind
+        clearSignupVerificationState()
+        setSignupVerificationKind(verifiedKind)
+        setShowSuccessMessage(true)
         setTimeout(() => {
           setShowSuccessMessage(false)
-          onClose()
+          closeAuthModal()
           setAuthModalRedirectMode('default')
           setAuthModalReturnToPath(null)
           const stayOrReturn = redirectMode === 'stay' || redirectMode === 'returnTo'
@@ -895,8 +944,7 @@ export default function AuthModal() {
             const current = window.location.pathname + window.location.search
             if (current !== returnToPath) navigate(returnToPath)
           } else if (!stayOrReturn) {
-            const role = localStorage.getItem('user_role')
-            const r = (role || '').toString().toLowerCase()
+            const r = (verifiedRole || '').toString().toLowerCase()
             if (r === 'admin' || r === 'moderator') navigate('/admin')
             else if (r === 'client') navigate('/client')
             else if (r === 'master' || r === 'indie') navigate('/master')
@@ -905,14 +953,25 @@ export default function AuthModal() {
           }
         }, 3000)
       } else {
-        console.error('❌ Ошибка верификации:', result.message)
-        setVerificationDigitsError(result.message || 'Неверные цифры номера телефона')
+        setVerificationDigitsError(
+          result.detail || result.message || 'Неверные цифры номера телефона'
+        )
       }
     } catch (error) {
-      console.error('❌ Ошибка сети при верификации цифр:', error)
-      setVerificationDigitsError('Ошибка сети при верификации')
+      if (verificationTokenRef.current !== verificationToken) return
+      if (error?.message === 'profile_hydration_failed') {
+        const phone = phoneVerificationData?.phone || '+7'
+        clearSignupVerificationState()
+        setTab('login')
+        setLoginForm({ phone, password: '' })
+        setLoginErrors({ general: 'Телефон подтверждён. Войдите снова, чтобы загрузить профиль.' })
+      } else {
+        setVerificationDigitsError('Ошибка сети при верификации')
+      }
     } finally {
-      setPhoneVerificationLoading(false)
+      if (verificationTokenRef.current === verificationToken) {
+        setPhoneVerificationLoading(false)
+      }
     }
   }
 
@@ -965,10 +1024,20 @@ export default function AuthModal() {
               <div className="text-center mb-6">
                 <h3 className="text-lg font-semibold text-gray-800 mb-2">Верификация телефона</h3>
                 <p className="text-sm text-gray-600">
-                  На ваш номер {phoneVerificationData?.phone} поступит звонок. 
+                  На ваш номер{' '}
+                  <span data-testid="signup-phone-readonly" className="font-medium">
+                    {phoneVerificationData?.phone}
+                  </span>{' '}
+                  поступит звонок.
                   Введите последние 4 цифры номера, с которого вам звонят.
                 </p>
               </div>
+
+              {phoneVerificationError && (
+                <div className="mb-4 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+                  {phoneVerificationError}
+                </div>
+              )}
               
               <div className="flex flex-col gap-4">
                 <div>
@@ -977,8 +1046,10 @@ export default function AuthModal() {
                   </label>
                   <input
                     type="text"
+                    inputMode="numeric"
                     maxLength="4"
                     placeholder="1234"
+                    data-testid="signup-phone-digits"
                     value={verificationDigits}
                     onChange={(e) => {
                       const value = e.target.value.replace(/\D/g, '')
@@ -997,12 +1068,7 @@ export default function AuthModal() {
                   <Button
                     type="button"
                     variant="secondary"
-                    onClick={() => {
-                      setPhoneVerificationStep('none')
-                      setPhoneVerificationData(null)
-                      setVerificationDigits('')
-                      setVerificationDigitsError('')
-                    }}
+                    onClick={onClose}
                     className="flex-1"
                   >
                     Отмена
@@ -1010,7 +1076,7 @@ export default function AuthModal() {
                   <Button
                     type="button"
                     onClick={verifyPhoneDigits}
-                    disabled={phoneVerificationLoading || verificationDigits.length !== 4}
+                    disabled={phoneVerificationLoading || !phoneVerificationData?.call_id || verificationDigits.length !== 4}
                     className="flex-1"
                   >
                     {phoneVerificationLoading ? 'Проверка...' : 'Подтвердить'}
@@ -1020,7 +1086,7 @@ export default function AuthModal() {
                 <div className="text-center">
                   <button
                     type="button"
-                    onClick={() => initiatePhoneVerification(phoneVerificationData?.phone)}
+                    onClick={() => initiatePhoneVerification(signupVerificationToken, phoneVerificationData?.phone)}
                     disabled={phoneVerificationLoading}
                     className="text-sm text-[#4CAF50] hover:underline"
                   >
@@ -1037,9 +1103,15 @@ export default function AuthModal() {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                 </svg>
               </div>
-              <h3 className="text-xl font-semibold text-gray-800 mb-2">Регистрация успешна!</h3>
+              <h3 className="text-xl font-semibold text-gray-800 mb-2">
+                {signupVerificationKind === 'new_registration'
+                  ? 'Регистрация успешна!'
+                  : 'Телефон подтверждён!'}
+              </h3>
               <p className="text-sm text-gray-600 mb-4">
-                Ваш аккаунт создан и телефон верифицирован.<br/>
+                {signupVerificationKind === 'new_registration'
+                  ? 'Ваш аккаунт создан и телефон верифицирован.'
+                  : 'Ваш существующий аккаунт подтверждён.'}<br/>
                 Перенаправляем в личный кабинет...
               </p>
               <div className="w-full bg-gray-200 rounded-full h-2">
@@ -1112,7 +1184,11 @@ export default function AuthModal() {
                       setShowForgotPassword(false)
                       setForgotPasswordStep('phone')
                       setForgotPasswordCallId('')
+                      setForgotPasswordChallengeToken('')
                       setForgotPasswordDigits('')
+                      setResetToken('')
+                      setForgotPasswordErrors({})
+                      setResetPasswordErrors({})
                     }}
                   >
                     ← Назад к входу
@@ -1187,7 +1263,7 @@ export default function AuthModal() {
                     </Button>
                   </form>
                 ) : forgotPasswordStep === 'new_password' ? (
-                  <form className="flex flex-col gap-4" onSubmit={handleResetPasswordByPhone}>
+                  <form className="flex flex-col gap-4" onSubmit={handleResetPassword}>
                     <p className="text-sm text-gray-600">Придумайте новый пароль (минимум 6 символов)</p>
                     <div>
                       <label className="text-sm font-medium text-gray-700">Новый пароль</label>

@@ -28,6 +28,7 @@ import { PasswordInput } from '@src/components/ui/PasswordInput';
 import { isSalonFeaturesEnabled as getSalonFeaturesEnabled } from '@src/config/features';
 import { useTabBarHeight } from '@src/contexts/TabBarHeightContext';
 import { BOTTOM_NAV_CONTENT_FALLBACK_HEIGHT } from '@src/constants/bottomNavLayout';
+import { completePasswordMutationLogout } from '@src/auth/passwordMutationLogout';
 
 export default function MasterSettingsScreen() {
   const pathname = usePathname();
@@ -153,11 +154,12 @@ export default function MasterSettingsScreen() {
         current_password: currentPassword,
         new_password: newPassword,
       });
-      Alert.alert('Успешно', 'Пароль изменен');
       setShowPasswordModal(false);
       setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
+      await completePasswordMutationLogout(logout, router.replace);
+      Alert.alert('Успешно', 'Пароль изменен. Войдите снова.');
     } catch (error: any) {
       console.error('Ошибка смены пароля:', error);
       const errorMessage = error.response?.data?.detail || error.message || 'Не удалось сменить пароль';

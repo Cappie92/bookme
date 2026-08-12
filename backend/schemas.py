@@ -22,12 +22,15 @@ class UserCreate(BaseModel):
     email: Optional[EmailStr] = None
     phone: str = Field(..., pattern=r"^\+?1?\d{9,15}$")
     full_name: Optional[str] = None
-    password: str
+    password: str = Field(..., min_length=6)
     role: UserRole
     birth_date: Optional[date] = None
     city: Optional[str] = None
     timezone: Optional[str] = None
     promo_code: Optional[str] = None
+    accept_terms: bool = False
+    accept_personal_data: bool = False
+    marketing_opt_in: bool = False
 
     @field_validator("email", mode="before")
     @classmethod
@@ -641,6 +644,14 @@ class Token(BaseModel):
     access_token: str
     refresh_token: str
     token_type: str
+
+
+class PhoneVerificationRequiredResponse(BaseModel):
+    status: Literal["phone_verification_required"] = "phone_verification_required"
+    verification_token: str
+    phone: str
+    expires_in: int
+    verification_kind: Literal["new_registration", "existing_account"]
 
 
 class TokenData(BaseModel):
@@ -1789,6 +1800,30 @@ class PasswordResetResponse(BaseModel):
     call_id: Optional[str] = None
 
 
+class RequestPasswordResetPhoneRequest(BaseModel):
+    phone: str = Field(..., min_length=10, max_length=32)
+
+
+class RequestPasswordResetPhoneResponse(BaseModel):
+    status: Literal["verification_required"] = "verification_required"
+    message: str
+    challenge_token: str
+    call_id: str
+    expires_in: int
+
+
+class ConfirmPasswordResetPhoneRequest(BaseModel):
+    challenge_token: str = Field(..., min_length=1)
+    call_id: str = Field(..., min_length=1)
+    phone_digits: str = Field(..., min_length=4, max_length=4, pattern=r"^\d{4}$")
+
+
+class ConfirmPasswordResetPhoneResponse(BaseModel):
+    status: Literal["reset_token_issued"] = "reset_token_issued"
+    reset_token: str
+    expires_in: int
+
+
 class VerifyEmailRequest(BaseModel):
     token: str
 
@@ -1847,6 +1882,11 @@ class VerifyPhoneResponse(BaseModel):
     message: str
     success: bool
     user_id: Optional[int] = None
+
+
+class ConfirmSignupPhoneVerificationRequest(BaseModel):
+    call_id: str = Field(..., min_length=1)
+    phone_digits: str = Field(..., min_length=4, max_length=4, pattern=r"^\d{4}$")
 
 
 class RequestPhoneChangeRequest(BaseModel):

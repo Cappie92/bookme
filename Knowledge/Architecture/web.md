@@ -2,7 +2,7 @@
 type: Knowledge
 status: active
 project: DeDato
-last_runtime_check: 2026-08-04
+last_runtime_check: 2026-08-12
 ---
 
 # Web architecture
@@ -35,9 +35,15 @@ Route tree одновременно обслуживает:
 
 `AuthProvider` восстанавливает сессию через `/api/auth/users/me`, хранит current user в React state и синхронизирует logout между API wrapper, соседними вкладками и focus events. Bearer token persistence и связанные риски описаны в [Security and privacy Debt](../Debt/security-and-privacy.md).
 
+Common password registration is verify-first inside `AuthModal`: the first response is an opaque registration-verification ticket, not a JWT session; the modal requests the bound call, confirms digits and only then installs the returned access/refresh pair. Closing or cancelling the flow calls the cancellation endpoint and clears in-memory verification state. Login for a historical unverified account uses the same UI but a distinct server artifact and `verification_kind`.
+
+`MasterBookingModule`, `SalonBookingModule` and `BranchBookingModule` now use the same verify-first boundary for anonymous public booking. Initial specific-master and any-master requests return an opaque pending-booking ticket without `User`, `Booking` or normal JWT; the UI requests the bound call, keeps the submitted phone read-only, and installs the post-proof access token only after confirm has created the booking. Cancel discards the pending state and wrong proof keeps the flow pending without reporting booking success.
+
+Phone password recovery is an explicit three-step modal state machine: request challenge, confirm call proof, submit the opaque reset token with the new password. These artifacts are not written into normal auth token keys. Successful password change/setup/reset uses the shared local-session clearing path, matching server-side session revocation.
+
 Repository не использует единую application-wide server-state library. Runtime state распределён между React context/local state, browser storage и component-specific caches. Например, web favorites живут в `FavoritesContext`; declared React Query/SWR/Zustand/Redux dependencies не импортируются из `frontend/src` на момент проверки и поэтому не являются фактической web architecture.
 
-**Sources:** `frontend/src/contexts/AuthContext.jsx`; `frontend/src/contexts/FavoritesContext.jsx`; import inventory under `frontend/src`; `frontend/package.json`.
+**Sources:** `frontend/src/contexts/AuthContext.jsx`; `frontend/src/modals/AuthModal.jsx`; `frontend/src/modals/PasswordSetupModal.jsx`; `frontend/src/utils/api.js`; `frontend/src/utils/publicBookingVerification.js`; `frontend/src/components/booking/MasterBookingModule.jsx`; `frontend/src/components/booking/SalonBookingModule.jsx`; `frontend/src/components/booking/BranchBookingModule.jsx`; `frontend/src/contexts/FavoritesContext.jsx`; import inventory under `frontend/src`; `frontend/package.json`.
 
 ## API access
 

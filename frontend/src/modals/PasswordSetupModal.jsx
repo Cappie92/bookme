@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import { useModal } from '../hooks/useModal'
+import { clearAuthSession } from '../utils/api'
 
 export default function PasswordSetupModal({ isOpen, onClose, onSuccess, mode = 'setup' }) {
   const [formData, setFormData] = useState({
@@ -84,10 +85,11 @@ export default function PasswordSetupModal({ isOpen, onClose, onSuccess, mode = 
           localStorage.removeItem('existing_client_verification')
         } else {
           localStorage.removeItem('new_client_setup')
+          clearAuthSession('password_set')
         }
         
         // Вызываем только onSuccess, который сам закроет модальное окно
-        onSuccess()
+        onSuccess({ sessionRevoked: !isVerificationMode })
       } else {
         const errorData = await response.json()
         setError(errorData.detail || (isVerificationMode ? 'Неверный пароль' : 'Ошибка при установке пароля'))
@@ -187,4 +189,4 @@ export default function PasswordSetupModal({ isOpen, onClose, onSuccess, mode = 
         </div>
       </div>
   )
-} 
+}

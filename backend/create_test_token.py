@@ -1,15 +1,10 @@
-import os
-from datetime import datetime, timedelta
-from jose import jwt
-from database import SessionLocal
-from models import User, UserRole
-
-# Загружаем переменные окружения
 from dotenv import load_dotenv
+
 load_dotenv()
 
-SECRET_KEY = os.getenv("JWT_SECRET_KEY", "your-secret-key-here")
-ALGORITHM = "HS256"
+from auth import create_user_access_token
+from database import SessionLocal
+from models import User, UserRole
 
 def create_test_token():
     """Создает тестовый токен для администратора"""
@@ -24,14 +19,7 @@ def create_test_token():
     
     print(f"Найден администратор: {admin_user.email}")
     
-    # Создаем токен
-    to_encode = {
-        "sub": admin_user.email,
-        "role": admin_user.role.value,
-        "exp": datetime.utcnow() + timedelta(hours=24)  # Токен на 24 часа
-    }
-    
-    token = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    token = create_user_access_token(admin_user)
     
     print(f"Тестовый токен создан:")
     print(f"Bearer {token}")
@@ -50,14 +38,7 @@ def create_token_for_phone(phone):
     
     print(f"Найден пользователь: {user.email} (телефон: {user.phone})")
     
-    # Создаем токен
-    to_encode = {
-        "sub": user.email,
-        "role": user.role.value,
-        "exp": datetime.utcnow() + timedelta(hours=24)  # Токен на 24 часа
-    }
-    
-    token = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    token = create_user_access_token(user)
     
     print(f"Тестовый токен создан:")
     print(f"Bearer {token}")
@@ -80,4 +61,4 @@ if __name__ == "__main__":
             print("Поддерживаемые роли: client")
     else:
         print("Использование: python3 create_test_token.py client <номер_телефона>")
-        print("Пример: python3 create_test_token.py client +79735906386") 
+        print("Пример: python3 create_test_token.py client +79735906386")

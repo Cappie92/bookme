@@ -2,7 +2,18 @@ import React, { createContext, useContext, useState, useEffect, useRef, ReactNod
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 import { isAxiosError } from 'axios';
-import { login as apiLogin, register as apiRegister, getCurrentUser, LoginCredentials, RegisterCredentials, User } from '@src/services/api/auth';
+import {
+  login as apiLogin,
+  register as apiRegister,
+  cancelSignupPhoneVerification,
+  getCurrentUser,
+  isAuthenticatedResponse,
+  isPhoneVerificationRequiredResponse,
+  type AuthenticatedResponse,
+  type LoginCredentials,
+  type RegisterCredentials,
+  type User,
+} from '@src/services/api/auth';
 import { apiClient } from '@src/services/api/client';
 import { invalidateSubscriptionCaches } from '@src/utils/subscriptionCache';
 import { logger } from '@src/utils/logger';
@@ -17,6 +28,7 @@ import {
 import {
   AUTH_INSTALL_MARKER,
   AUTH_LOGOUT_MARKER,
+  AUTH_REFRESH_TOKEN_KEY,
   AUTH_TOKEN_KEY,
   AUTH_USER_KEY,
   clearLogoutMarker,
@@ -28,7 +40,17 @@ import {
   setInstallMarker,
   setLogoutMarker,
   writeToken,
+  writeRefreshToken,
 } from '@src/auth/tokenStorage';
+import {
+  clearPendingPhoneVerification,
+  getPendingPhoneVerification,
+  isPendingPhoneVerificationExpired,
+  setPendingPhoneVerification,
+  type PendingPhoneVerification,
+  type PendingPhoneVerificationOrigin,
+  type PendingPhoneVerificationRole,
+} from '@src/auth/pendingPhoneVerificationStorage';
 import { logAuthDiag } from '@src/debug/authDiag';
 import { registerInvalidSessionHandler } from '@src/auth/authSessionBridge';
 import { analytics, AnalyticsEvent } from '@src/services/analytics';
@@ -40,13 +62,22 @@ function userDiagFields(u: User | null): { userId: number | null; phone: string 
   return { userId: u.id, phone: u.phone ?? null, email: u.email ?? null };
 }
 
+export type AuthFlowResult =
+  | { status: 'authenticated'; user: User | null }
+  | { status: 'phone_verification_required'; pending: PendingPhoneVerification };
+
 interface AuthContextType {
   user: User | null;
   token: string | null;
+  pendingPhoneVerification: PendingPhoneVerification | null;
+  pendingVerificationNeedsLogin: boolean;
   isLoading: boolean;
   isAuthenticated: boolean;
-  login: (credentials: LoginCredentials) => Promise<User | null>;
-  register: (credentials: RegisterCredentials) => Promise<void>;
+  login: (credentials: LoginCredentials) => Promise<AuthFlowResult>;
+  register: (credentials: RegisterCredentials) => Promise<AuthFlowResult>;
+  completePhoneVerification: (response: AuthenticatedResponse) => Promise<User>;
+  cancelPendingPhoneVerification: () => Promise<void>;
+  expirePendingPhoneVerification: () => Promise<void>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
   /** Повторная попытка загрузки сессии (для failsafe) */
@@ -74,6 +105,7 @@ async function clearAllAuthStorage(
 ): Promise<void> {
   const toRemove = new Set<string>([
     AUTH_TOKEN_KEY,
+    AUTH_REFRESH_TOKEN_KEY,
     AUTH_USER_KEY,
     AUTH_LOGOUT_MARKER,
     AUTH_INSTALL_MARKER,
@@ -172,11 +204,60 @@ async function logAuthStorageSnapshot(label: string): Promise<void> {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(null);
+  const [pendingPhoneVerification, setPendingPhoneVerificationState] =
+    useState<PendingPhoneVerification | null>(null);
+  const [pendingVerificationNeedsLogin, setPendingVerificationNeedsLogin] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const initPromiseRef = useRef<Promise<void> | null>(null);
   const authContextInstanceIdRef = useRef(Math.random().toString(16).slice(2, 10));
   const isLoggingOutRef = useRef(false);
   const logoutPromiseRef = useRef<Promise<void> | null>(null);
+
+  const cancelPendingPhoneVerification = useCallback(async () => {
+    const verificationToken = pendingPhoneVerification?.verification_token;
+    if (verificationToken) {
+      await cancelSignupPhoneVerification(verificationToken).catch(() => undefined);
+    }
+    await clearPendingPhoneVerification();
+    setPendingPhoneVerificationState(null);
+    setPendingVerificationNeedsLogin(false);
+  }, [pendingPhoneVerification]);
+
+  const expirePendingPhoneVerification = useCallback(async () => {
+    await clearPendingPhoneVerification();
+    setPendingPhoneVerificationState(null);
+    setPendingVerificationNeedsLogin(true);
+  }, []);
+
+  const beginPendingPhoneVerification = async (
+    response: {
+      verification_token: string;
+      phone: string;
+      expires_in: number;
+      verification_kind: 'new_registration' | 'existing_account';
+    },
+    origin: PendingPhoneVerificationOrigin,
+    registrationRole?: PendingPhoneVerificationRole
+  ): Promise<PendingPhoneVerification> => {
+    const pending: PendingPhoneVerification = {
+      verification_token: response.verification_token,
+      phone: response.phone,
+      expires_at: Date.now() + response.expires_in * 1000,
+      origin,
+      verification_kind: response.verification_kind,
+      ...(registrationRole ? { registration_role: registrationRole } : {}),
+    };
+    await clearAllAuthStorage('begin_pending_phone_verification');
+    setToken(null);
+    setUser(null);
+    delete apiClient.defaults.headers.common['Authorization'];
+    await setPendingPhoneVerification(pending);
+    await setInstallMarker();
+    await clearLogoutMarker();
+    setPendingPhoneVerificationState(pending);
+    setPendingVerificationNeedsLogin(false);
+    return pending;
+  };
 
   const clearAuth = useCallback(async (reason: 'logout' | 'invalid_token' = 'logout') => {
     if (logoutPromiseRef.current) {
@@ -207,6 +288,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           `[clearAuth] clearAllAuthStorage reason=${reason} preserveLogoutMarker=${reason === 'logout'}`
         );
         await clearAllAuthStorage(reason, { preserveLogoutMarker: reason === 'logout' });
+        if (reason === 'logout') {
+          await clearPendingPhoneVerification();
+          setPendingPhoneVerificationState(null);
+          setPendingVerificationNeedsLogin(false);
+        }
         try {
           await invalidateSubscriptionCaches(userId);
           await invalidateSubscriptionCaches(null);
@@ -266,6 +352,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     authTrace('[bootstrap] loadStoredAuth ENTRY');
     const installMarker = await readInstallMarker();
+    let storedPending = await getPendingPhoneVerification();
+    if (!installMarker && storedPending) {
+      await clearPendingPhoneVerification();
+      storedPending = null;
+    }
+    if (storedPending && isPendingPhoneVerificationExpired(storedPending)) {
+      await clearPendingPhoneVerification();
+      storedPending = null;
+      setPendingVerificationNeedsLogin(true);
+    } else {
+      setPendingPhoneVerificationState(storedPending);
+      setPendingVerificationNeedsLogin(false);
+    }
     const peekToken = await peekSecureToken();
     const asyncTokenPeek = await withTimeout(AsyncStorage.getItem(TOKEN_KEY), 500).catch(() => null);
     if (!installMarker && (peekToken || asyncTokenPeek)) {
@@ -277,6 +376,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       );
       await clearAllAuthStorage('fresh_install_orphan_keychain');
       await deleteSecureAuthItems();
+      await clearPendingPhoneVerification();
+      setPendingPhoneVerificationState(null);
       setToken(null);
       setUser(null);
       delete apiClient.defaults.headers.common['Authorization'];
@@ -295,6 +396,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         });
       }
       await clearAllAuthStorage('logout_marker', { preserveLogoutMarker: false });
+      await clearPendingPhoneVerification();
+      setPendingPhoneVerificationState(null);
+      setPendingVerificationNeedsLogin(false);
       setToken(null);
       setUser(null);
       delete apiClient.defaults.headers.common['Authorization'];
@@ -345,6 +449,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             authTrace(`[me] GET /api/auth/users/me OK bootstrap userId=${userData.id} role=${userData.role}`);
             setUser(userData);
             await AsyncStorage.setItem(USER_KEY, JSON.stringify(userData));
+            await cancelPendingPhoneVerification();
             await invalidateSubscriptionCaches(userData.id);
             analytics.setUser({ id: userData.id, role: userData.role });
             logAuthDiag('/me OK (bootstrap)', {
@@ -374,6 +479,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               if (cached) {
                 meUser = cached;
                 setUser(cached);
+                await cancelPendingPhoneVerification();
                 analytics.setUser({ id: cached.id, role: cached.role });
                 logAuthDiag('/me transient → cached user (token kept)', {
                   restoredToken: true,
@@ -386,6 +492,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                   const retryUser = await withTimeout(getCurrentUser(), GET_USER_TIMEOUT_MS);
                   setUser(retryUser);
                   await AsyncStorage.setItem(USER_KEY, JSON.stringify(retryUser));
+                  await cancelPendingPhoneVerification();
                   await invalidateSubscriptionCaches(retryUser.id);
                   logger.debug('auth', '[Auth] Session restored after retry getCurrentUser');
                 } catch (err2: unknown) {
@@ -405,6 +512,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               if (cached) {
                 meUser = cached;
                 setUser(cached);
+                await cancelPendingPhoneVerification();
                 logAuthDiag('/me error → cached user (token kept)', {
                   restoredToken: true,
                   cachedUser: userDiagFields(cached),
@@ -453,13 +561,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await loadStoredAuth();
   };
 
-  const saveToken = async (newToken: string, reason: 'login' | 'register' = 'login') => {
+  const saveTokens = async (
+    response: AuthenticatedResponse,
+    reason: 'login' | 'register' = 'login'
+  ) => {
+    const newToken = response.access_token;
     try {
       authTrace(`[saveToken] clearAllAuthStorage(before_write) next_reason=${reason} new_token_len=${newToken.length}`);
       // Перед записью токена чистим старые auth-ключи (legacy/маркеры/юзер) в одном месте,
       // чтобы не было рассинхрона между Android/iOS из-за остатков в AsyncStorage/SecureStore.
       await clearAllAuthStorage('before_write');
       await writeToken(newToken, isLoggingOutRef, reason);
+      await writeRefreshToken(response.refresh_token, isLoggingOutRef);
       if (isLoggingOutRef.current) return;
       await setInstallMarker();
       setToken(newToken);
@@ -467,19 +580,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       logger.error('Ошибка сохранения токена:', error);
       if (!isLoggingOutRef.current) {
         await AsyncStorage.setItem(TOKEN_KEY, newToken);
+        await AsyncStorage.setItem(AUTH_REFRESH_TOKEN_KEY, response.refresh_token);
         setToken(newToken);
       }
     }
   };
 
-  const login = async (credentials: LoginCredentials): Promise<User | null> => {
+  const login = async (credentials: LoginCredentials): Promise<AuthFlowResult> => {
     try {
       const response = await apiLogin(credentials);
-      await saveToken(response.access_token, 'login');
+      if (isPhoneVerificationRequiredResponse(response)) {
+        const pending = await beginPendingPhoneVerification(response, 'login');
+        return { status: 'phone_verification_required', pending };
+      }
+      if (!isAuthenticatedResponse(response)) {
+        throw new Error('Сервер не вернул полноценную auth-сессию');
+      }
+      await saveTokens(response, 'login');
       try {
         const userData = await getCurrentUser();
         setUser(userData);
         await AsyncStorage.setItem(USER_KEY, JSON.stringify(userData));
+        await cancelPendingPhoneVerification();
         await invalidateSubscriptionCaches(userData.id);
         await clearLogoutMarker();
         analytics.setUser({ id: userData.id, role: userData.role });
@@ -487,7 +609,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         void authTraceStorageSnapshot('after_login_success');
         logAuthDiag('login success', { restoredToken: true, me: userDiagFields(userData) });
         logger.debug('auth', '🔑 [Auth] Login success', { userId: userData.id, phone: userData.phone, role: userData.role });
-        return userData;
+        return { status: 'authenticated', user: userData };
       } catch (error) {
         logger.error('Ошибка загрузки данных пользователя:', error);
         const userData = response.user ? (response.user as User) : null;
@@ -498,7 +620,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
         await clearLogoutMarker();
         void authTraceStorageSnapshot('after_login_partial_user');
-        return userData;
+        if (userData) await cancelPendingPhoneVerification();
+        return { status: 'authenticated', user: userData };
       }
     } catch (error: unknown) {
       logger.error('Ошибка входа:', error);
@@ -506,14 +629,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const register = async (credentials: RegisterCredentials) => {
+  const register = async (credentials: RegisterCredentials): Promise<AuthFlowResult> => {
     try {
       const response = await apiRegister(credentials);
-      await saveToken(response.access_token, 'register');
+      if (isPhoneVerificationRequiredResponse(response)) {
+        const role: PendingPhoneVerificationRole =
+          credentials.role === 'master' ? 'master' : 'client';
+        const pending = await beginPendingPhoneVerification(response, 'register', role);
+        return { status: 'phone_verification_required', pending };
+      }
+      if (!isAuthenticatedResponse(response)) {
+        throw new Error('Сервер не вернул полноценную auth-сессию');
+      }
+      await saveTokens(response, 'register');
       try {
         const userData = await getCurrentUser();
         setUser(userData);
         await AsyncStorage.setItem(USER_KEY, JSON.stringify(userData));
+        await cancelPendingPhoneVerification();
         await invalidateSubscriptionCaches(userData.id);
         await clearLogoutMarker();
         analytics.setUser({ id: userData.id, role: userData.role });
@@ -523,6 +656,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
         void authTraceStorageSnapshot('after_register_success');
         logger.debug('auth', '🔑 [Auth] Register success', { userId: userData.id, phone: userData.phone, role: userData.role });
+        return { status: 'authenticated', user: userData };
       } catch (error) {
         logger.error('Ошибка загрузки данных пользователя:', error);
         if (response.user) {
@@ -530,11 +664,48 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setUser(u);
           analytics.setUser({ id: u.id, role: u.role });
           analytics.track(AnalyticsEvent.RegistrationCompleted, { authMethod: 'phone' });
+          await cancelPendingPhoneVerification();
         }
         await clearLogoutMarker();
+        return { status: 'authenticated', user: response.user ? (response.user as User) : null };
       }
     } catch (error: unknown) {
       logger.error('Ошибка регистрации:', error);
+      throw error;
+    }
+  };
+
+  const completePhoneVerification = async (
+    response: AuthenticatedResponse
+  ): Promise<User> => {
+    const pending = pendingPhoneVerification;
+    if (!pending) {
+      throw new Error('Сессия подтверждения телефона не найдена');
+    }
+    try {
+      await saveTokens(response, pending.origin === 'register' ? 'register' : 'login');
+      const userData = await withTimeout(getCurrentUser(), GET_USER_TIMEOUT_MS);
+      setUser(userData);
+      await AsyncStorage.setItem(USER_KEY, JSON.stringify(userData));
+      await invalidateSubscriptionCaches(userData.id);
+      await clearLogoutMarker();
+      analytics.setUser({ id: userData.id, role: userData.role });
+      if (pending.origin === 'register') {
+        analytics.track(AnalyticsEvent.RegistrationCompleted, { authMethod: 'phone' });
+        if (userData.role) analytics.track(AnalyticsEvent.RoleSelected, { role: userData.role });
+      } else {
+        analytics.track(AnalyticsEvent.AuthPhoneSuccess, { authMethod: 'phone' });
+      }
+      await cancelPendingPhoneVerification();
+      return userData;
+    } catch (error) {
+      await clearAllAuthStorage('phone_verification_hydration_failed');
+      await clearPendingPhoneVerification();
+      setToken(null);
+      setUser(null);
+      setPendingPhoneVerificationState(null);
+      setPendingVerificationNeedsLogin(true);
+      delete apiClient.defaults.headers.common['Authorization'];
       throw error;
     }
   };
@@ -593,10 +764,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const value: AuthContextType = {
     user,
     token,
+    pendingPhoneVerification,
+    pendingVerificationNeedsLogin,
     isLoading,
     isAuthenticated: !!token && !!user,
     login,
     register,
+    completePhoneVerification,
+    cancelPendingPhoneVerification,
+    expirePendingPhoneVerification,
     logout,
     refreshUser,
     retryInit,
@@ -613,4 +789,3 @@ export function useAuth() {
   }
   return context;
 }
-

@@ -2,7 +2,7 @@
 type: Knowledge
 status: active
 project: DeDato
-last_runtime_check: 2026-08-04
+last_runtime_check: 2026-08-12
 ---
 
 # Privacy and data handling
@@ -37,7 +37,7 @@ OAuth onboarding requires terms and personal-data booleans before account creati
 
 Backend persists account/profile/booking/CRM/billing data in the application database and local uploaded media under repository-known upload paths. Production database and volume ownership are described in [data and migrations](../Architecture/data-and-migrations.md); host backup/encryption/retention facts are UNKNOWN.
 
-Web stores JWTs and role/demo state in `localStorage`. Mobile stores cached user JSON in AsyncStorage and access token in SecureStore plus AsyncStorage fallback/duplicate. These are repository-known client persistence choices and tracked as [security Debt](../Debt/security-and-privacy.md#high-client-token-persistence).
+Web stores JWTs and role/demo state in `localStorage`. Mobile stores cached user JSON in AsyncStorage and both access/refresh tokens in SecureStore plus AsyncStorage fallback/duplicate; Expo Go uses AsyncStorage. These are repository-known client persistence choices and tracked as [security Debt](../Debt/security-and-privacy.md#high-remaining-session-and-client-token-boundaries).
 
 Repository transport integrations use HTTP clients and configured provider endpoints. Production TLS termination and network topology are described only to the extent confirmed in [production topology](../Infrastructure/production-topology.md).
 

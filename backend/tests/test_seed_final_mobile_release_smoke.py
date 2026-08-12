@@ -5,10 +5,13 @@ import os
 import sys
 
 import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from auth import get_password_hash
+from database import Base
 from models import BalanceTransaction, TransactionType, User, UserBalance, UserRole
 from scripts import seed_final_mobile_release_smoke as smoke
 
@@ -181,7 +184,12 @@ def test_script_does_not_import_destructive_reseed():
     assert "set_balance" not in source
 
 
-def test_main_dry_run_exits_zero(capsys):
+def test_main_dry_run_exits_zero(capsys, monkeypatch, tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'final-mobile-smoke.db'}")
+    Base.metadata.create_all(bind=engine)
+    isolated_session = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    monkeypatch.setattr(smoke, "SessionLocal", isolated_session)
+
     code = smoke.main([])
     assert code == 0
     out = capsys.readouterr().out

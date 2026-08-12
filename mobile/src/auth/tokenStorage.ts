@@ -8,6 +8,7 @@ const STORAGE_TIMEOUT_MS = 3000;
 const LOGOUT_MARKER_TIMEOUT_MS = 1000;
 
 export const AUTH_TOKEN_KEY = 'access_token';
+export const AUTH_REFRESH_TOKEN_KEY = 'refresh_token';
 export const AUTH_USER_KEY = 'user_data';
 export const AUTH_LOGOUT_MARKER = 'auth_logout_marker';
 /** AsyncStorage marker: Keychain/SecureStore может пережить uninstall на iOS. */
@@ -28,7 +29,10 @@ export async function peekSecureToken(): Promise<string | null> {
   if (isExpoGo) return null;
   if (!SecureStore) return null;
   try {
-    const t = await withTimeout(SecureStore.getItemAsync(AUTH_TOKEN_KEY), 500);
+    const t = await withTimeout<string | null>(
+      SecureStore.getItemAsync(AUTH_TOKEN_KEY) as Promise<string | null>,
+      500
+    );
     return t || null;
   } catch {
     return null;
@@ -38,7 +42,7 @@ export async function peekSecureToken(): Promise<string | null> {
 export async function deleteSecureAuthItems(): Promise<void> {
   if (isExpoGo) return;
   if (!SecureStore) return;
-  for (const k of [AUTH_TOKEN_KEY, AUTH_USER_KEY]) {
+  for (const k of [AUTH_TOKEN_KEY, AUTH_REFRESH_TOKEN_KEY, AUTH_USER_KEY]) {
     try {
       await SecureStore.deleteItemAsync(k);
     } catch {
@@ -99,7 +103,10 @@ export async function readToken(): Promise<string | null> {
   }
   if (SecureStore) {
     try {
-      const t = await withTimeout(SecureStore.getItemAsync(AUTH_TOKEN_KEY), STORAGE_TIMEOUT_MS);
+      const t = await withTimeout<string | null>(
+        SecureStore.getItemAsync(AUTH_TOKEN_KEY) as Promise<string | null>,
+        STORAGE_TIMEOUT_MS
+      );
       if (t) return t;
     } catch {
       /* timeout or error */
@@ -107,6 +114,32 @@ export async function readToken(): Promise<string | null> {
   }
   try {
     return await withTimeout(AsyncStorage.getItem(AUTH_TOKEN_KEY), STORAGE_TIMEOUT_MS);
+  } catch {
+    return null;
+  }
+}
+
+export async function readRefreshToken(): Promise<string | null> {
+  if (isExpoGo) {
+    try {
+      return await withTimeout(AsyncStorage.getItem(AUTH_REFRESH_TOKEN_KEY), STORAGE_TIMEOUT_MS);
+    } catch {
+      return null;
+    }
+  }
+  if (SecureStore) {
+    try {
+      const value = await withTimeout<string | null>(
+        SecureStore.getItemAsync(AUTH_REFRESH_TOKEN_KEY) as Promise<string | null>,
+        STORAGE_TIMEOUT_MS
+      );
+      if (value) return value;
+    } catch {
+      /* timeout or error */
+    }
+  }
+  try {
+    return await withTimeout(AsyncStorage.getItem(AUTH_REFRESH_TOKEN_KEY), STORAGE_TIMEOUT_MS);
   } catch {
     return null;
   }
@@ -140,3 +173,27 @@ export async function writeToken(
   if (__DEV__ && env.DEBUG_AUTH) logger.debug('auth', '[TOKEN] write fallback AsyncStorage', { reason });
 }
 
+export async function writeRefreshToken(
+  refreshToken: string,
+  isLoggingOutRef: { current: boolean }
+): Promise<void> {
+  if (isLoggingOutRef.current) return;
+  if (isExpoGo) {
+    await AsyncStorage.setItem(AUTH_REFRESH_TOKEN_KEY, refreshToken);
+    return;
+  }
+  if (SecureStore) {
+    try {
+      await SecureStore.setItemAsync(AUTH_REFRESH_TOKEN_KEY, refreshToken);
+      try {
+        await AsyncStorage.setItem(AUTH_REFRESH_TOKEN_KEY, refreshToken);
+      } catch {
+        /* ignore */
+      }
+      return;
+    } catch {
+      /* fallback below */
+    }
+  }
+  await AsyncStorage.setItem(AUTH_REFRESH_TOKEN_KEY, refreshToken);
+}

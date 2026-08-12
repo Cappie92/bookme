@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Linking from 'expo-linking';
 import { useAuth } from '@src/auth/AuthContext';
+import { getVerificationRequiredRoute } from '@src/auth/authFlowRouting';
 import { router, useLocalSearchParams } from 'expo-router';
 import { logger } from '@src/utils/logger';
 import { normalizeRussianPhoneForApi } from '@src/utils/normalizeRussianPhoneForApi';
@@ -327,7 +328,14 @@ export default function LoginScreen() {
     setLoginErrors((e) => ({ ...e, general: undefined }));
     analytics.track(AnalyticsEvent.AuthPhoneStarted, { authMethod: 'phone' });
     try {
-      const loggedInUser = await login({ phone, password });
+      const result = await login({ phone, password });
+      const verificationRoute = getVerificationRequiredRoute(result);
+      if (verificationRoute) {
+        router.replace(verificationRoute);
+        return;
+      }
+      if (result.status !== 'authenticated') return;
+      const loggedInUser = result.user;
       logger.debug('auth', '✅ [LOGIN] Успешный вход!');
       const draft = await getPublicBookingDraft();
       if (isDraftValidForPostLoginRedirect(draft)) {
@@ -369,6 +377,9 @@ export default function LoginScreen() {
         password: registerPassword,
         full_name: fullName,
         role: userRole,
+        accept_terms: agree,
+        accept_personal_data: agree,
+        marketing_opt_in: infoAgree,
       };
       if (userRole === 'master' && (city || '').trim()) {
         payload.city = city.trim();
@@ -377,7 +388,14 @@ export default function LoginScreen() {
       if (userRole === 'master' && promoCode.trim()) {
         payload.promo_code = normalizeRegistrationPromoCode(promoCode);
       }
-      await register(payload);
+      const result = await register(payload);
+      setRegisterPassword('');
+      setConfirmPassword('');
+      const verificationRoute = getVerificationRequiredRoute(result);
+      if (verificationRoute) {
+        router.replace(verificationRoute);
+        return;
+      }
       logger.debug('auth', '✅ [REGISTER] Успешная регистрация!');
       const draft = await getPublicBookingDraft();
       if (isDraftValidForPostLoginRedirect(draft)) {
@@ -530,6 +548,17 @@ export default function LoginScreen() {
               ) : (
                 <Text style={styles.buttonText}>Войти</Text>
               )}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              testID="forgot-password-button"
+              accessibilityLabel="Забыли пароль"
+              accessibilityRole="button"
+              style={styles.forgotPasswordButton}
+              disabled={loginLoading}
+              onPress={() => router.push('/forgot-password')}
+            >
+              <Text style={styles.forgotPasswordText}>Забыли пароль?</Text>
             </TouchableOpacity>
 
             {yandexLoginPresentation.visible ? (
@@ -942,6 +971,17 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
+  },
+  forgotPasswordButton: {
+    minHeight: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 4,
+  },
+  forgotPasswordText: {
+    color: '#4CAF50',
+    fontSize: 14,
+    fontWeight: '500',
   },
   yandexAuthBlock: {
     marginTop: 10,

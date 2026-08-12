@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer, HTTPBearer, HTTPAuthorizationCredentials
@@ -22,6 +22,12 @@ ACCESS_TOKEN_EXPIRE_MINUTES = ACCESS_TOKEN_EXPIRE_DAYS * 24 * 60
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
 http_bearer_optional = HTTPBearer(auto_error=False)
+signup_phone_verification_bearer = HTTPBearer()
+
+SIGNUP_PHONE_VERIFICATION_PURPOSE = "signup_phone_verification"
+SIGNUP_PHONE_VERIFICATION_TOKEN_EXPIRE_MINUTES = 15
+PASSWORD_RESET_PHONE_VERIFICATION_PURPOSE = "password_reset_phone_verification"
+PASSWORD_RESET_PHONE_VERIFICATION_TOKEN_EXPIRE_MINUTES = 5
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -51,20 +57,199 @@ def create_refresh_token(data: dict) -> str:
     return encoded_jwt
 
 
+NORMAL_ACCESS_TOKEN_TYPE = "access"
+NORMAL_REFRESH_TOKEN_TYPE = "refresh"
+NORMAL_SESSION_EXTRA_CLAIMS = ("web_session_origin", "demo")
+
+
+def normal_session_claims(
+    user: User,
+    token_type: str,
+    extra_claims: Optional[dict] = None,
+) -> dict:
+    """Canonical claims for normal access/refresh sessions only."""
+    if token_type not in {NORMAL_ACCESS_TOKEN_TYPE, NORMAL_REFRESH_TOKEN_TYPE}:
+        raise ValueError("invalid normal session token type")
+    role = user.role.value if isinstance(user.role, UserRole) else str(user.role)
+    data = {
+        "sub": str(user.id),
+        "role": role.upper(),
+        "sv": int(user.session_version),
+        "token_type": token_type,
+    }
+    if extra_claims:
+        data.update(
+            {
+                claim: extra_claims[claim]
+                for claim in NORMAL_SESSION_EXTRA_CLAIMS
+                if extra_claims.get(claim) is not None
+            }
+        )
+    return data
+
+
+def normal_session_extra_claims(payload: dict) -> dict:
+    return {
+        claim: payload[claim]
+        for claim in NORMAL_SESSION_EXTRA_CLAIMS
+        if payload.get(claim) is not None
+    }
+
+
+def create_user_access_token(user: User, extra_claims: Optional[dict] = None) -> str:
+    return create_access_token(
+        data=normal_session_claims(user, NORMAL_ACCESS_TOKEN_TYPE, extra_claims)
+    )
+
+
+def create_user_refresh_token(user: User, extra_claims: Optional[dict] = None) -> str:
+    return create_refresh_token(
+        data=normal_session_claims(user, NORMAL_REFRESH_TOKEN_TYPE, extra_claims)
+    )
+
+
+def issue_tokens_for_user(user: User, extra_claims: Optional[dict] = None) -> dict:
+    return {
+        "access_token": create_user_access_token(user, extra_claims),
+        "refresh_token": create_user_refresh_token(user, extra_claims),
+        "token_type": "bearer",
+    }
+
+
+_UNSET: Any = object()
+
+
+def update_password_and_revoke_sessions(
+    db: Session,
+    user: User,
+    new_password: str,
+    *,
+    expected_hashed_password: Any = _UNSET,
+) -> bool:
+    """Atomically update password hash and increment the user's session version.
+
+    The caller owns commit/rollback so related security artifacts can participate in
+    the same DB transaction. Passing an expected hash (including ``None``) provides
+    compare-and-swap semantics for concurrent change/set-password requests.
+    """
+    query = db.query(User).filter(User.id == user.id)
+    if expected_hashed_password is not _UNSET:
+        if expected_hashed_password is None:
+            query = query.filter(User.hashed_password.is_(None))
+        else:
+            query = query.filter(User.hashed_password == expected_hashed_password)
+    changed = query.update(
+        {
+            User.hashed_password: get_password_hash(new_password),
+            User.session_version: User.session_version + 1,
+            User.updated_at: datetime.utcnow(),
+        },
+        synchronize_session=False,
+    )
+    return changed == 1
+
+
+def session_version_matches(payload: dict, user: User) -> bool:
+    """Validate normal JWT version under explicit compatibility/strict policy."""
+    if "sv" not in payload:
+        if get_settings().jwt_session_version_required:
+            return False
+        sub = str(payload.get("sub") or "").strip()
+        return bool(sub and sub.isdigit())
+    token_version = payload.get("sv")
+    if isinstance(token_version, bool) or not isinstance(token_version, int):
+        return False
+    return token_version == int(user.session_version)
+
+
+def bearer_token_type_matches(payload: dict) -> bool:
+    """Accept typed access, plus numeric untyped legacy bearer during rollout."""
+    token_type = payload.get("token_type")
+    if token_type == NORMAL_ACCESS_TOKEN_TYPE:
+        return True
+    if token_type is not None or get_settings().jwt_token_type_required:
+        return False
+    sub = str(payload.get("sub") or "").strip()
+    return bool(sub and sub.isdigit())
+
+
+def refresh_token_type_matches(payload: dict) -> bool:
+    """Refresh never accepts untyped JWTs because historical access/refresh are ambiguous."""
+    return payload.get("token_type") == NORMAL_REFRESH_TOKEN_TYPE
+
+
+def create_signup_phone_verification_token(
+    user_id: int,
+    source_session_version: Optional[int] = None,
+) -> str:
+    """Restricted token only for a historical unverified account."""
+    data = {
+        "sub": str(user_id),
+        "purpose": SIGNUP_PHONE_VERIFICATION_PURPOSE,
+    }
+    if source_session_version is not None:
+        data["source_session_version"] = int(source_session_version)
+    return create_access_token(
+        data=data,
+        expires_delta=timedelta(minutes=SIGNUP_PHONE_VERIFICATION_TOKEN_EXPIRE_MINUTES),
+    )
+
+
+def decode_signup_phone_verification_token(token: str) -> int:
+    payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+    if payload.get("purpose") != SIGNUP_PHONE_VERIFICATION_PURPOSE:
+        raise JWTError("wrong signup phone verification purpose")
+    sub = str(payload.get("sub") or "")
+    if not sub.isdigit():
+        raise JWTError("invalid signup phone verification subject")
+    return int(sub)
+
+
+def signup_phone_verification_version_matches(token: str, user: User) -> bool:
+    """Bind legacy-account verification to the password state that issued it."""
+    payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+    if payload.get("purpose") != SIGNUP_PHONE_VERIFICATION_PURPOSE:
+        return False
+    source_version = payload.get("source_session_version")
+    if isinstance(source_version, bool) or not isinstance(source_version, int):
+        return False
+    return source_version == int(user.session_version)
+
+
+def create_password_reset_phone_verification_token(phone: str, challenge_id: str) -> str:
+    """Restricted token for one password-reset phone challenge; never a login JWT."""
+    return create_access_token(
+        data={
+            "sub": phone,
+            "target": phone,
+            "challenge_id": challenge_id,
+            "purpose": PASSWORD_RESET_PHONE_VERIFICATION_PURPOSE,
+        },
+        expires_delta=timedelta(
+            minutes=PASSWORD_RESET_PHONE_VERIFICATION_TOKEN_EXPIRE_MINUTES
+        ),
+    )
+
+
+def decode_password_reset_phone_verification_token(token: str) -> dict:
+    payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+    if payload.get("purpose") != PASSWORD_RESET_PHONE_VERIFICATION_PURPOSE:
+        raise JWTError("wrong password reset phone verification purpose")
+    target = str(payload.get("target") or "")
+    challenge_id = str(payload.get("challenge_id") or "")
+    if not target or payload.get("sub") != target or not challenge_id:
+        raise JWTError("invalid password reset phone verification token")
+    return payload
+
+
 def resolve_user_from_token_sub(db: Session, sub: Optional[str]) -> Optional[User]:
-    """
-    Резолв пользователя из JWT sub.
-    Предпочтительно numeric user.id (безопасно при освобождении phone/email после удаления).
-    Fallback: email или phone (legacy tokens).
-    """
+    """Resolve normal-session identity exclusively from numeric user.id."""
     if not sub:
         return None
     s = str(sub).strip()
-    if s.isdigit():
-        user = db.query(User).filter(User.id == int(s)).first()
-        if user is not None:
-            return user
-    return db.query(User).filter((User.email == s) | (User.phone == s)).first()
+    if not s.isdigit():
+        return None
+    return db.query(User).filter(User.id == int(s)).first()
 
 
 def get_web_session_origin_from_payload(payload: Optional[dict]) -> Optional[str]:
@@ -101,6 +286,8 @@ async def get_current_user(
     )
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        if payload.get("purpose") or not bearer_token_type_matches(payload):
+            raise credentials_exception
         sub: str = payload.get("sub")
         if sub is None:
             raise credentials_exception
@@ -109,6 +296,8 @@ async def get_current_user(
 
     user = resolve_user_from_token_sub(db, sub)
     user = _reject_if_deleted_or_inactive(user)
+    if not session_version_matches(payload, user):
+        raise credentials_exception
     user.web_session_origin = get_web_session_origin_from_payload(payload)
     return user
 
@@ -122,16 +311,45 @@ async def get_current_user_optional(
         return None
     try:
         payload = jwt.decode(creds.credentials, SECRET_KEY, algorithms=[ALGORITHM])
+        if payload.get("purpose") or not bearer_token_type_matches(payload):
+            return None
         sub = payload.get("sub")
         if not sub:
             return None
         user = resolve_user_from_token_sub(db, sub)
         if user is None or getattr(user, "deleted_at", None) is not None or not user.is_active:
             return None
+        if not session_version_matches(payload, user):
+            return None
         user.web_session_origin = get_web_session_origin_from_payload(payload)
         return user
     except JWTError:
         return None
+
+
+async def get_signup_phone_verification_user(
+    creds: HTTPAuthorizationCredentials = Depends(signup_phone_verification_bearer),
+    db: Session = Depends(get_db),
+) -> User:
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid signup phone verification token",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        user_id = decode_signup_phone_verification_token(creds.credentials)
+    except JWTError:
+        raise credentials_exception
+
+    user = _reject_if_deleted_or_inactive(
+        db.query(User).filter(User.id == user_id).first()
+    )
+    try:
+        if not signup_phone_verification_version_matches(creds.credentials, user):
+            raise credentials_exception
+    except JWTError:
+        raise credentials_exception
+    return user
 
 
 async def get_current_active_user(

@@ -2,7 +2,7 @@
 type: Knowledge
 status: active
 project: DeDato
-last_runtime_check: 2026-08-04
+last_runtime_check: 2026-08-12
 ---
 
 # Identity and access
@@ -19,25 +19,27 @@ last_runtime_check: 2026-08-04
 
 ## 2. Registration and verification state
 
-Common registration создаёт active account с неподтверждёнными email и phone и сразу выдаёт JWT pair. Для master дополнительно требуются city/timezone и создаётся `Master`; для остальных ролей профиль в этом handler не создаётся.
+Password registration is verify-first. `/register` validates the payload, permits only self-service roles `client` and `master`, checks uniqueness and master city/timezone, hashes the password, then stores the pending payload under a 15-minute opaque registration ticket. It creates no `User`, `Master`, promo redemption or JWT session. In production the ticket store is Redis and storage failures return `503`; the process-local fallback is development/test only.
 
-Фактический common registration принимает role из полного enum и сохраняет её без server-side self-service allowlist. Это `critical` authorization debt, а не политика назначения privileged roles: [privileged role assignment](../Debt/security-and-privacy.md#critical-privileged-role-assignment-at-registration).
+The ticket authorizes only the registration verification endpoints. A phone challenge is bound to purpose, target phone, call id, expiry and attempt state. Successful confirmation atomically claims the ticket against replay, then creates `User` and the mandatory `Master`/promo side effects in one DB transaction and issues a normal JWT pair. Cancel/expiry leaves no account rows. Historical unverified accounts use a distinct, purpose-bound JWT artifact tied to the source `session_version`; they do not share the new-registration ticket semantics.
 
-Email verification использует одноразовые `EmailVerification` rows с purpose/expiry; password reset использует отдельные одноразовые rows. Phone verification хранит server-side target/code/call/expiry/attempt state. Current code-based flow сравнивает введённые данные с сохранённым state; legacy reverse-call flow нарушает этот invariant и отдельно отмечен как [critical Debt](../Debt/security-and-privacy.md#critical-legacy-reverse-call-verification).
+Email verification uses one-time `EmailVerification` rows. Phone password recovery uses a generic request response, a short-lived purpose-bound challenge token, server-side phone proof and then an opaque one-time `PasswordReset` row; the deprecated direct reset-by-phone endpoint returns `410`. Legacy reverse-call endpoints remain mounted and retain a separate [critical Debt](../Debt/security-and-privacy.md#critical-legacy-reverse-call-verification).
 
-`is_verified` и `is_phone_verified` — независимые атрибуты. Сам факт выданного JWT не означает, что оба подтверждены; конкретные endpoints должны явно проверять нужный verification state.
+`is_verified` and `is_phone_verified` are independent. A normal JWT does not by itself prove either attribute; endpoints must explicitly require the state they need.
 
-**Source:** `backend/routers/auth.py` — `register`, verification/change/reset handlers; `backend/services/verification_service.py`; `backend/services/zvonok_service.py`; `backend/models.py`.
+The verify-first invariant also covers both anonymous public-booking entry points. Specific-master and any-master initial requests persist only an expiring opaque ticket containing the normalized phone and fixed booking payload. Purpose/target/call/expiry/attempt-bound proof is required before the ticket can be atomically claimed. Confirm rechecks slot availability and creates or safely reuses the client plus booking in one DB transaction; conflict rolls back a newly created client. Cancel, expiry, wrong proof and replay create no permanent identity or booking rows. Anonymous use of an existing verified phone still requires possession proof; knowledge of the phone alone produces neither booking nor session.
+
+**Source:** `backend/routers/auth.py` — registration handlers; `backend/routers/bookings.py` — public-booking pending and completion handlers; `backend/services/pending_ticket_service.py`; `backend/services/verification_service.py`; `backend/models.py`; `backend/tests/test_signup_phone_verification.py`; `backend/tests/test_public_booking_phone_verification.py`; `backend/tests/test_password_reset_phone.py`; `backend/tests/test_bookings.py`.
 
 ## 3. Password and JWT sessions
 
-Пароли хешируются bcrypt. Access и refresh JWT подписываются одним symmetric algorithm и содержат subject, role и expiry. Новый subject — numeric `User.id`; resolver сохраняет compatibility fallback на email/phone для legacy tokens.
+Passwords are bcrypt hashes. Every normal access/refresh JWT is issued through the canonical user helpers with stringified numeric `User.id` in `sub`, current DB role, integer `sv=session_version` and `token_type=access|refresh`. Only allow-listed session metadata such as `demo` and `web_session_origin` can be copied into a new pair. Restricted verification/reset JWTs have an explicit `purpose` and are rejected by normal bearer/refresh resolution.
 
-Bearer dependency декодирует token, повторно загружает `User` и отклоняет отсутствующий, inactive или deleted account. Optional dependency превращает missing/invalid bearer в anonymous context. Role claim не является окончательным authority: role checks работают с текущей DB model.
+Bearer dependencies accept only access-class tokens, resolve identity exclusively by numeric user id, reload the active/non-deleted `User`, and compare `sv` with the DB. Refresh always requires `token_type=refresh`, validates the same session version and preserves only allow-listed session metadata. During the explicit rollout window, numeric untyped bearer tokens and numeric tokens without `sv` may be accepted according to separate flags; email/phone subjects are never a normal-session compatibility path.
 
-Repository не содержит session/revocation store. Refresh endpoint проверяет JWT и account, затем выдаёт новую пару. Token class отдельным claim не обозначен, а password change/reset не отзывает уже выданные JWT; это [session-security Debt](../Debt/security-and-privacy.md#high-jwt-class-and-revocation-boundaries).
+Every password change, first password setup, one-time reset and moderator password update increments the target user's `session_version` in the same transaction as the hash update. Previously issued access/refresh tokens and source-bound handoff/OAuth-link artifacts then fail. The repository still has no per-device session list or refresh-token rotation/reuse store; see [remaining session debt](../Debt/security-and-privacy.md#high-remaining-session-and-client-token-boundaries).
 
-**Source:** `backend/auth.py`; `backend/routers/auth.py` — login, refresh, password handlers; `backend/settings.py` — expiry/security configuration.
+**Source:** `backend/auth.py` — normal token helpers, resolvers and `update_password_and_revoke_sessions`; `backend/routers/auth.py` — issuance/refresh/password/handoff/OAuth paths; `backend/models.py` — `User.session_version`; migration `20260812_session_version`; `backend/tests/test_jwt_token_contract.py`; `backend/tests/test_session_revocation.py`.
 
 ## 4. OAuth boundary
 
@@ -46,6 +48,8 @@ Yandex OAuth включается конфигурацией. Login/link исп�
 Существующая provider link выбирает account; при отсутствии link verified provider email может связать существующий account. Для нового account создаётся onboarding ticket. OAuth onboarding ограничивает роль client/master, требует подтверждённый phone state и acceptance terms/personal-data flags. Эти flags не сохраняются как consent evidence; см. [Debt](../Debt/security-and-privacy.md#high-registration-consent-evidence).
 
 Link mode требует active bearer account. Provider credentials и ticket values не принадлежат Knowledge и не должны попадать в docs/logs.
+
+OAuth link state captures the initiating account's `session_version`; callback refuses a state created before password/session revocation. Mobile-to-web handoff codes likewise bind the source session version and are one-time, so revocation between creation and exchange invalidates the handoff.
 
 **Source:** `backend/routers/auth.py` — Yandex state/ticket/callback/link/onboarding functions; `backend/settings.py`; `backend/tests/test_auth_yandex.py`; `frontend/src/pages/OAuthCallback.jsx`.
 
@@ -75,13 +79,13 @@ Public demo access endpoint обеспечивает configured demo master и �
 
 ## 7. Client session behavior
 
-Web хранит access и refresh JWT в `localStorage`, валидирует session через `/api/auth/users/me`, а logout удаляет локальные keys. Tracked web API utility удаляет access token на protected 401; repository-known automatic refresh call отсутствует.
+Web хранит access и refresh JWT в `localStorage`, валидирует session через `/api/auth/users/me`, а canonical logout/защищённый `401` удаляют оба token key и session metadata. Repository-known automatic refresh call отсутствует. Verify-first registration state lives only inside the open auth modal; closing/cancelling explicitly discards the backend ticket.
 
-Mobile сохраняет access token через SecureStore, когда он доступен, но дублирует/читает fallback из AsyncStorage; Expo Go использует AsyncStorage. Cached user также хранится в AsyncStorage. Server login/register response включает refresh token, но tracked mobile context сохраняет только access token. Definitive 401 очищает session; network/timeout/server errors могут временно оставить token и cached user.
+Mobile сохраняет access и refresh tokens через SecureStore, когда он доступен, с AsyncStorage duplication/fallback; Expo Go использует AsyncStorage. Cached user lives in AsyncStorage. Registration verification and password-recovery artifacts use separate typed persistence modules and AuthGate routing, are never installed as a normal bearer session, survive a valid restart, and are removed on cancel/expiry/completion. Successful password mutations route through canonical local logout. Definitive `401` clears session; transient network/timeout/server errors may temporarily retain it.
 
-Storage choices — текущий runtime, не security recommendation; [client token persistence Debt](../Debt/security-and-privacy.md#high-client-token-persistence).
+Storage choices — текущий runtime, not a security recommendation; see [remaining session and client token Debt](../Debt/security-and-privacy.md#high-remaining-session-and-client-token-boundaries).
 
-**Source:** `frontend/src/contexts/AuthContext.jsx`, `frontend/src/modals/AuthModal.jsx`, `frontend/src/utils/api.js`; `mobile/src/auth/tokenStorage.ts`, `mobile/src/auth/AuthContext.tsx`, `mobile/src/services/api/auth.ts`.
+**Source:** `frontend/src/contexts/AuthContext.jsx`, `frontend/src/modals/AuthModal.jsx`, `frontend/src/utils/api.js`; `mobile/src/auth/tokenStorage.ts`, `mobile/src/auth/AuthContext.tsx`, `mobile/src/auth/PasswordResetRecoveryContext.tsx`, pending-flow storage/routing modules and `mobile/src/services/api/auth.ts`.
 
 ## 8. Account deletion
 

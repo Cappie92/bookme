@@ -2,7 +2,7 @@
 type: Knowledge
 status: active
 project: DeDato
-last_runtime_check: 2026-08-04
+last_runtime_check: 2026-08-12
 ---
 
 # Testing strategy
@@ -11,7 +11,7 @@ Repository-known map of executable test suites and their current guarantees. A f
 
 ## Backend
 
-Canonical backend pytest discovery is `backend/tests/`: `backend/pyproject.toml` sets `testpaths = ["tests"]` and standard `test_*` naming. At the latest inventory this directory contained 89 test modules. `backend/Makefile` runs pytest with coverage collection but has no minimum coverage threshold.
+Canonical backend pytest discovery is `backend/tests/`: `backend/pyproject.toml` sets `testpaths = ["tests"]` and standard `test_*` naming. At the latest inventory this directory contained 98 test modules. `backend/Makefile` runs pytest with coverage collection but has no minimum coverage threshold.
 
 The common function-scoped fixture uses a dedicated SQLite test engine, creates/drops schema per test and overrides FastAPI `get_db`. This isolates normal canonical tests from the configured application database. Individual tests/scripts can still replace fixtures or access external state, so the guarantee applies only to tests using the common fixture.
 
@@ -21,13 +21,13 @@ Twenty-nine `backend/test_*.py` files outside `backend/tests/` are excluded by d
 
 ## Web unit tests
 
-Vite/Vitest discovers `frontend/src/**/*.test.js` in Node environment. At inventory time seven modules matched. The package `test` and `test:unit` scripts both run the same Vitest suite. There is no repository-known coverage threshold or DOM-browser test environment in this config.
+Vite/Vitest discovers `frontend/src/**/*.test.js` in Node environment. At inventory time eight modules matched. The package `test` and `test:unit` scripts both run the same Vitest suite. There is no repository-known coverage threshold or DOM-browser test environment in this config.
 
 **Sources:** `frontend/vite.config.js`; `frontend/package.json`; `frontend/src/**/*.test.js` inventory.
 
 ## Web end-to-end tests
 
-Playwright discovers eight Chromium specs under `frontend/e2e/`. Config uses one worker, no retries in CI or locally, retained trace/video on failure and a global preflight that only proves the configured base URL serves SPA-like HTML. It does not reset or seed data.
+Playwright discovers nine Chromium specs under `frontend/e2e/`. Config uses one worker, no retries in CI or locally, retained trace/video on failure and a global preflight that only proves the configured base URL serves SPA-like HTML. It does not reset or seed data.
 
 `scripts/e2e_full.sh` is the repository harness that launches local backend/frontend, enables the development E2E surface, resets/seeds local test data, runs Playwright and cleans up processes. Treat it as destructive to its configured local test dataset. `scripts/test_e2e.sh` runs Playwright against already prepared services and does not perform that lifecycle.
 
@@ -39,7 +39,7 @@ Backend settings gate the E2E seed surface to development. Do not point either h
 
 Mobile separates:
 
-- 48 unit modules under `mobile/__tests__/unit/`, run by default `npm test`/`test:unit` with `jest.unit.config.js` and mocked env;
+- 59 unit modules under `mobile/__tests__/unit/`, run by default `npm test`/`test:unit` with `jest.unit.config.js` and mocked env;
 - two integration modules under `mobile/__tests__/integration/`, run only by `test:integration` with Expo/React Native setup;
 - Maestro flows under `mobile/.maestro/`, run separately by `test:e2e*` against an installed app.
 

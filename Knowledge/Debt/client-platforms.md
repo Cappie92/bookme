@@ -2,7 +2,7 @@
 type: Knowledge
 status: active
 project: DeDato
-last_runtime_check: 2026-08-04
+last_runtime_check: 2026-08-12
 ---
 
 # Debt — client platforms
@@ -12,9 +12,9 @@ last_runtime_check: 2026-08-04
 ## Fragmented web transport
 
 - **Confidence:** CONFIRMED.
-- **Evidence:** `utils/api.js` вручную классифицирует protected prefixes/public exceptions, но десятки components/pages выполняют direct `fetch`; domain-specific wrappers также реализуют собственные error behavior.
+- **Evidence:** `utils/api.js` вручную классифицирует protected prefixes/public exceptions, но десятки components/pages выполняют direct `fetch`; auth registration/recovery modals and domain-specific wrappers also implement their own response/error handling.
 - **Failure scenario:** новый или перемещённый endpoint может получить другое bearer, 401, credentials, demo-mode или error-body поведение в зависимости от call site.
-- **Sources:** `frontend/src/utils/api.js`; direct `fetch` inventory under `frontend/src`; `frontend/src/utils/adminPromoEngineApi.js`; `frontend/src/utils/subscriptionsApi.js`.
+- **Sources:** `frontend/src/utils/api.js`; `frontend/src/modals/AuthModal.jsx`; direct `fetch` inventory under `frontend/src`; `frontend/src/utils/adminPromoEngineApi.js`; `frontend/src/utils/subscriptionsApi.js`.
 - **Required action:** отдельный client transport contract/remediation; backend enforcement не должен зависеть от client prefix list.
 
 ## Client guards are not authorization

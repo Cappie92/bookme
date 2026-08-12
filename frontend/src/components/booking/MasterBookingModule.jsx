@@ -3,8 +3,14 @@ import { useNavigate } from 'react-router-dom'
 import { CalendarIcon, ClockIcon, TagIcon, ExclamationTriangleIcon } from '@heroicons/react/24/outline'
 import { apiGet, apiPost } from '../../utils/api'
 import { dateToISOString, formatTime, getMinDate, getSelectedCity } from '../../utils/dateUtils'
-import { supportsReverseFlashCall } from '../../utils/deviceUtils'
 import { useToast } from '../../contexts/ToastContext'
+import {
+  cancelPublicBookingVerification,
+  confirmPublicBookingVerification,
+  installPublicBookingSession,
+  isPendingPublicBooking,
+  requestPublicBookingVerification,
+} from '../../utils/publicBookingVerification'
 import PaymentModal from '../modals/PaymentModal'
 import { metrikaGoal } from '../../analytics/metrika'
 import { M } from '../../analytics/metrikaEvents'
@@ -55,12 +61,7 @@ export default function MasterBookingModule({
   const [phoneVerificationLoading, setPhoneVerificationLoading] = useState(false)
   const [phoneVerificationError, setPhoneVerificationError] = useState('')
   const [currentClientPhone, setCurrentClientPhone] = useState('')
-  
-  // Состояние для обратного FlashCall
-  const [reverseFlashCallLoading, setReverseFlashCallLoading] = useState(false)
-  const [reverseFlashCallError, setReverseFlashCallError] = useState('')
-  const [reverseFlashCallData, setReverseFlashCallData] = useState(null)
-  const [checkingReverseStatus, setCheckingReverseStatus] = useState(false)
+  const [pendingPublicBooking, setPendingPublicBooking] = useState(null)
   
   // Состояние для баллов лояльности
   const [availablePoints, setAvailablePoints] = useState(0)
@@ -524,30 +525,15 @@ export default function MasterBookingModule({
           onBookingSuccess(result)
         }
       } else {
-        if (result.access_token) {
-          metrikaGoal(M.PUBLIC_BOOKING_SUCCESS, {
-            source: slug ? 'master_module' : 'master_module_internal',
-            flow: 'guest_with_token',
-            slug: slug || undefined,
-          })
-          localStorage.setItem('access_token', result.access_token)
-          
-          if (result.needs_phone_verification) {
-            setCurrentClientPhone(clientPhone)
-            setShowPhoneVerificationModal(true)
-            return
-          }
-          
-          if (result.needs_password_setup) {
-            localStorage.setItem('new_client_setup', 'true')
-          }
-          
-          if (result.needs_password_verification) {
-            localStorage.setItem('existing_client_verification', 'true')
-          }
-          
-          navigate('/client')
+        if (isPendingPublicBooking(result)) {
+          const pending = await requestPublicBookingVerification(result)
+          setPendingPublicBooking(pending)
+          setCurrentClientPhone(pending.phone)
+          setShowPhoneModal(false)
+          setShowPhoneVerificationModal(true)
+          return
         }
+        throw new Error('Некорректный ответ public booking')
       }
     } else {
       const errorData = await response.json()
@@ -635,29 +621,23 @@ export default function MasterBookingModule({
     setPhoneVerificationError('')
     
     try {
-      const response = await fetch('/bookings/verify-phone-cjm', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          phone: currentClientPhone,
-          code: phoneVerificationCode
-        })
+      const result = await confirmPublicBookingVerification(
+        pendingPublicBooking,
+        phoneVerificationCode,
+      )
+      installPublicBookingSession(result)
+      metrikaGoal(M.PUBLIC_BOOKING_SUCCESS, {
+        source: slug ? 'master_module' : 'master_module_internal',
+        flow: 'guest_after_phone_proof',
+        slug: slug || undefined,
       })
-      
-      const result = await response.json()
-      
-      if (result.success) {
-        setShowPhoneVerificationModal(false)
-        setPhoneVerificationCode('')
-        setCurrentClientPhone('')
-        setSuccess('Телефон успешно верифицирован!')
-        // Продолжаем процесс записи
-        navigate('/client')
-      } else {
-        setPhoneVerificationError(result.message || 'Ошибка верификации')
-      }
+      setShowPhoneVerificationModal(false)
+      setPhoneVerificationCode('')
+      setCurrentClientPhone('')
+      setPendingPublicBooking(null)
+      setSuccess('Телефон подтверждён, запись создана!')
+      if (onBookingSuccess) onBookingSuccess(result)
+      navigate('/client')
     } catch (error) {
       console.error('Ошибка верификации телефона:', error)
       setPhoneVerificationError('Ошибка сети при верификации')
@@ -666,74 +646,15 @@ export default function MasterBookingModule({
     }
   }
   
-  const handleReverseFlashCall = async (phone) => {
-    setReverseFlashCallLoading(true)
-    setReverseFlashCallError('')
-    
+  const cancelPendingVerification = async () => {
     try {
-      const response = await fetch('/auth/request-reverse-phone-verification', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ phone })
-      })
-      
-      const result = await response.json()
-      
-      if (result.success) {
-        setReverseFlashCallData({
-          call_id: result.call_id,
-          verification_number: result.verification_number,
-          phone: phone
-        })
-        // Начинаем проверку статуса
-        startReverseStatusCheck(result.call_id, phone)
-      } else {
-        setReverseFlashCallError(result.message || 'Ошибка инициации обратного FlashCall')
-      }
-    } catch (error) {
-      console.error('Ошибка обратного FlashCall:', error)
-      setReverseFlashCallError('Ошибка сети при инициации обратного FlashCall')
+      await cancelPublicBookingVerification(pendingPublicBooking)
     } finally {
-      setReverseFlashCallLoading(false)
+      setShowPhoneVerificationModal(false)
+      setPhoneVerificationCode('')
+      setCurrentClientPhone('')
+      setPendingPublicBooking(null)
     }
-  }
-  
-  const startReverseStatusCheck = (call_id, phone) => {
-    setCheckingReverseStatus(true)
-    
-    const checkStatus = async () => {
-      try {
-        const response = await fetch('/auth/check-reverse-phone-verification', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({ call_id, phone })
-        })
-        
-        const result = await response.json()
-        
-        if (result.success) {
-          setCheckingReverseStatus(false)
-          setReverseFlashCallData(null)
-          setSuccess('Телефон успешно верифицирован!')
-          // Продолжаем процесс записи
-          navigate('/client')
-        } else {
-          // Продолжаем проверку через 2 секунды
-          setTimeout(checkStatus, 2000)
-        }
-      } catch (error) {
-        console.error('Ошибка проверки статуса:', error)
-        setCheckingReverseStatus(false)
-        setReverseFlashCallError('Ошибка проверки статуса верификации')
-      }
-    }
-    
-    // Запускаем первую проверку через 5 секунд
-    setTimeout(checkStatus, 5000)
   }
   
   const resetForm = () => {
@@ -1085,64 +1006,7 @@ export default function MasterBookingModule({
               Введите код, который прозвучит в звонке.
             </p>
             
-            {/* Показываем разные формы для мобильных и десктопных устройств */}
-            {supportsReverseFlashCall() ? (
-              // Мобильная версия - обратный FlashCall
-              <div className="space-y-4">
-                <div className="p-4 bg-[#DFF5EC] border border-[#4CAF50] rounded-lg">
-                  <p className="text-sm text-[#4CAF50] mb-3">
-                    <strong>Мобильная верификация:</strong> Позвоните на номер для автоматической верификации
-                  </p>
-                  <button 
-                    type="button"
-                    onClick={() => handleReverseFlashCall(currentClientPhone)}
-                    disabled={reverseFlashCallLoading || checkingReverseStatus}
-                    className="w-full bg-[#4CAF50] text-white py-2 px-4 rounded-lg font-medium hover:bg-[#45A049] transition-colors disabled:opacity-50"
-                  >
-                    {reverseFlashCallLoading ? 'Инициация...' : 
-                     checkingReverseStatus ? 'Проверка звонка...' : 
-                     'Позвонить для верификации'}
-                  </button>
-                </div>
-                
-                {reverseFlashCallData && (
-                  <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
-                    <p className="text-sm text-green-800 mb-2">
-                      <strong>Номер для звонка:</strong>
-                    </p>
-                    <p className="text-lg font-bold text-green-900 mb-2">
-                      {reverseFlashCallData.verification_number}
-                    </p>
-                    <p className="text-xs text-green-600">
-                      Позвоните на этот номер с вашего телефона для автоматической верификации
-                    </p>
-                  </div>
-                )}
-                
-                {reverseFlashCallError && (
-                  <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
-                    <p className="text-red-600">{reverseFlashCallError}</p>
-                  </div>
-                )}
-                
-                <div className="flex gap-3">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowPhoneVerificationModal(false)
-                      setPhoneVerificationCode('')
-                      setCurrentClientPhone('')
-                      setReverseFlashCallData(null)
-                    }}
-                    className="flex-1 bg-gray-200 text-gray-700 py-2 px-4 rounded-lg font-medium hover:bg-gray-300 transition-colors"
-                  >
-                    Отмена
-                  </button>
-                </div>
-              </div>
-            ) : (
-              // Десктопная версия - ввод кода
-              <form onSubmit={handlePhoneVerification} className="space-y-4">
+            <form onSubmit={handlePhoneVerification} className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Код из звонка <span className="text-red-500">*</span>
@@ -1166,11 +1030,7 @@ export default function MasterBookingModule({
                 <div className="flex gap-3">
                   <button
                     type="button"
-                    onClick={() => {
-                      setShowPhoneVerificationModal(false)
-                      setPhoneVerificationCode('')
-                      setCurrentClientPhone('')
-                    }}
+                    onClick={cancelPendingVerification}
                     className="flex-1 bg-gray-200 text-gray-700 py-2 px-4 rounded-lg font-medium hover:bg-gray-300 transition-colors"
                   >
                     Отмена
@@ -1183,8 +1043,7 @@ export default function MasterBookingModule({
                     {phoneVerificationLoading ? 'Проверка...' : 'Подтвердить'}
                   </button>
                 </div>
-              </form>
-            )}
+            </form>
           </div>
         </div>
       )}
@@ -1204,4 +1063,4 @@ export default function MasterBookingModule({
       />
     </div>
   )
-} 
+}

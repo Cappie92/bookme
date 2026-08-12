@@ -2,9 +2,10 @@ from types import SimpleNamespace
 from urllib.parse import parse_qs, urlparse
 
 from fastapi import status
+from jose import jwt
 
 import routers.auth as auth_router
-from auth import get_password_hash
+from auth import ALGORITHM, SECRET_KEY, get_password_hash, update_password_and_revoke_sessions
 from models import User, Master, UserOAuthAccount, UserRole
 
 
@@ -164,7 +165,12 @@ def test_yandex_link_callback_attaches_to_current_user_without_creating_user(cli
             "default_phone": {"number": "+79005550101"},
         },
     )
-    state = auth_router._create_oauth_state(mode="link", user_id=test_user.id, return_to="/client/profile")
+    state = auth_router._create_oauth_state(
+        mode="link",
+        user_id=test_user.id,
+        return_to="/client/profile",
+        source_session_version=test_user.session_version,
+    )
     before_count = db.query(User).count()
 
     response = client.get(f"/api/auth/yandex/callback?code=abc&state={state}", follow_redirects=False)
@@ -191,7 +197,12 @@ def test_yandex_link_callback_rejects_yandex_bound_to_other_user(client, db, tes
     db.add(UserOAuthAccount(provider="yandex", provider_user_id="ya-link-conflict", email="taken@example.com", user_id=test_master.id))
     db.commit()
     _mock_yandex(monkeypatch, {"id": "ya-link-conflict", "default_email": "taken@example.com", "real_name": "Taken"})
-    state = auth_router._create_oauth_state(mode="link", user_id=test_user.id, return_to="/client/profile")
+    state = auth_router._create_oauth_state(
+        mode="link",
+        user_id=test_user.id,
+        return_to="/client/profile",
+        source_session_version=test_user.session_version,
+    )
 
     response = client.get(f"/api/auth/yandex/callback?code=abc&state={state}", follow_redirects=False)
 
@@ -430,6 +441,96 @@ def test_yandex_existing_oauth_account_logs_in_same_user(client, db, monkeypatch
     assert me.json()["role"] == "master"
     account = db.query(UserOAuthAccount).filter(UserOAuthAccount.provider_user_id == "ya-3").one()
     assert account.email == "updated@example.com"
+
+
+def test_fresh_yandex_login_after_password_revocation_uses_current_version(
+    client, db, monkeypatch
+):
+    user = User(
+        email="oauth-revoked@example.com",
+        phone="+79005550901",
+        full_name="OAuth Revoked",
+        hashed_password=get_password_hash("testpassword"),
+        role=UserRole.CLIENT,
+        is_active=True,
+        is_verified=True,
+        is_phone_verified=True,
+    )
+    db.add(user)
+    db.flush()
+    db.add(
+        UserOAuthAccount(
+            provider="yandex",
+            provider_user_id="ya-revoked-login",
+            email=user.email,
+            user_id=user.id,
+        )
+    )
+    db.commit()
+    db.refresh(user)
+    assert update_password_and_revoke_sessions(db, user, "newpassword") is True
+    db.commit()
+    db.refresh(user)
+
+    _mock_yandex(
+        monkeypatch,
+        {
+            "id": "ya-revoked-login",
+            "default_email": user.email,
+            "real_name": user.full_name,
+        },
+    )
+    state = auth_router._create_oauth_state()
+    callback = client.get(
+        f"/api/auth/yandex/callback?code=abc&state={state}",
+        follow_redirects=False,
+    )
+    ticket = _callback_ticket(callback.headers["location"])
+    exchange = _exchange_ticket(client, ticket)
+
+    assert exchange.status_code == 200, exchange.text
+    payload = jwt.decode(
+        exchange.json()["access_token"], SECRET_KEY, algorithms=[ALGORITHM]
+    )
+    refresh_payload = jwt.decode(
+        exchange.json()["refresh_token"], SECRET_KEY, algorithms=[ALGORITHM]
+    )
+    assert payload["sv"] == user.session_version == 2
+    assert payload["sub"] == refresh_payload["sub"] == str(user.id)
+    assert payload["token_type"] == "access"
+    assert refresh_payload["token_type"] == "refresh"
+    assert db.query(UserOAuthAccount).filter_by(user_id=user.id).count() == 1
+
+
+def test_yandex_link_state_created_before_revocation_is_rejected(
+    client, db, test_user, monkeypatch
+):
+    _mock_yandex(
+        monkeypatch,
+        {
+            "id": "ya-stale-link",
+            "default_email": "stale-link@example.com",
+            "real_name": "Stale Link",
+        },
+    )
+    state = auth_router._create_oauth_state(
+        mode="link",
+        user_id=test_user.id,
+        return_to="/client/profile",
+        source_session_version=test_user.session_version,
+    )
+    assert update_password_and_revoke_sessions(db, test_user, "newpassword") is True
+    db.commit()
+
+    response = client.get(
+        f"/api/auth/yandex/callback?code=abc&state={state}",
+        follow_redirects=False,
+    )
+
+    assert response.status_code in (302, 307)
+    params = parse_qs(urlparse(response.headers["location"]).query)
+    assert "отозвана" in params["error"][0]
+    assert db.query(UserOAuthAccount).filter_by(provider_user_id="ya-stale-link").count() == 0
 
 
 def test_yandex_new_user_never_gets_admin_role_without_onboarding(client, db, monkeypatch):

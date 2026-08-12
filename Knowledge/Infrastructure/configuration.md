@@ -2,7 +2,7 @@
 type: Knowledge
 status: active
 project: DeDato
-last_runtime_check: 2026-08-04
+last_runtime_check: 2026-08-12
 ---
 
 # Configuration and feature flags
@@ -38,7 +38,11 @@ Main categories:
 
 Production validation rejects a default/missing signing secret and requires provider credential categories when selected live modes need them. Dev/E2E route properties explicitly prevent mounting unauthenticated E2E helpers in production; dev test-data requires development environment as well as opt-in.
 
-**Source:** `backend/settings.py` — `Settings`, validators, computed properties and `get_settings`; `backend/main.py` — conditional router composition; `backend/utils/master_canon.py` — import-time flags; `deploy/prod/backend.env.example`.
+Normal JWT rollout has two independent settings. `JWT_SESSION_VERSION_REQUIRED=0` temporarily accepts numeric normal bearer tokens without `sv`; `JWT_TOKEN_TYPE_REQUIRED=0` temporarily accepts numeric untyped bearer tokens as access only. Canonical issuance always includes both claims, and `/refresh` always requires `token_type=refresh`. First rollout keeps both flags at `0`; strict phase changes both to `1` only after all backend instances issue canonical claims and the compatibility window has elapsed.
+
+Verify-first password registration and anonymous public booking share the purpose-namespaced pending-ticket store in Redis. Every ticket read/write/claim/delete path fails closed with `503` in production if Redis is unavailable; only non-production may use the in-process fallback. `docker-compose.prod.yml` supplies the Redis service host, while the production env template's localhost value is documented only for an out-of-compose local process.
+
+**Source:** `backend/settings.py` — `Settings`, JWT rollout properties, validators and `get_settings`; `backend/auth.py` — compatibility enforcement; `backend/services/pending_ticket_service.py`; `backend/routers/auth.py`; `backend/routers/bookings.py`; `backend/main.py`; `backend/utils/master_canon.py`; `backend/.env.example`; `deploy/prod/backend.env.example`; `docker-compose.prod.yml`.
 
 ## 3. Backend flag precedence
 

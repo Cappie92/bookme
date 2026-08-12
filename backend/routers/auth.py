@@ -3,42 +3,76 @@ import hashlib
 import hmac
 import json
 import secrets
-from datetime import datetime, timedelta
-from typing import Any, List, Optional
+from datetime import date, datetime, timedelta
+from typing import Any, List, Optional, Union
 from urllib.parse import urlencode, urlparse
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import RedirectResponse
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 from pydantic import BaseModel
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from auth import (
     ACCESS_TOKEN_EXPIRE_MINUTES,
     ALGORITHM,
+    PASSWORD_RESET_PHONE_VERIFICATION_TOKEN_EXPIRE_MINUTES,
     SECRET_KEY,
-    create_access_token,
-    create_refresh_token,
+    SIGNUP_PHONE_VERIFICATION_TOKEN_EXPIRE_MINUTES,
+    create_password_reset_phone_verification_token,
+    create_signup_phone_verification_token,
+    decode_signup_phone_verification_token,
+    decode_password_reset_phone_verification_token,
     get_current_active_user,
     get_password_hash,
+    issue_tokens_for_user,
+    normal_session_extra_claims,
+    refresh_token_type_matches,
     resolve_user_from_token_sub,
+    session_version_matches,
+    signup_phone_verification_version_matches,
+    update_password_and_revoke_sessions,
     verify_password,
 )
 from database import get_db
-from models import User, Master, Booking, UserRole, EmailVerification, UserOAuthAccount
-from schemas import LoginRequest, Token, ChangePasswordRequest, SetPasswordRequest, MessageOut
+from models import User, Master, Booking, UserRole, EmailVerification, PasswordReset, UserOAuthAccount
+from schemas import (
+    ChangePasswordRequest,
+    ConfirmSignupPhoneVerificationRequest,
+    LoginRequest,
+    MessageOut,
+    PhoneVerificationRequiredResponse,
+    SetPasswordRequest,
+    Token,
+)
 from schemas import User as UserSchema
 from schemas import UserCreate, VerifyRequest
-from services.verification_service import VerificationService
+from services.verification_service import PhoneChallengeError, VerificationService
 from services.zvonok_service import zvonok_service
 from services.demo_master_seed import ensure_demo_master_exists
-from services.promo_engine import PromoEngineError, create_pending_redemption, normalize_promo_code
+from services.promo_engine import (
+    PromoEngineError,
+    create_pending_redemption,
+    validate_promo_code_for_registration,
+)
+from services.pending_ticket_service import (
+    claim_pending_ticket,
+    delete_pending_ticket,
+    get_pending_ticket,
+    pending_ticket_memory_store,
+    save_pending_ticket,
+    store_pending_ticket,
+)
 from settings import get_settings
 from sms import verify_sms_code
 from schemas import (
     EmailVerificationRequest, EmailVerificationResponse,
     PasswordResetRequest, PasswordResetResponse,
+    RequestPasswordResetPhoneRequest, RequestPasswordResetPhoneResponse,
+    ConfirmPasswordResetPhoneRequest, ConfirmPasswordResetPhoneResponse,
     VerifyEmailRequest, VerifyEmailResponse,
     ResetPasswordRequest, ResetPasswordResponse, ResetPasswordByPhoneRequest,
     ResendVerificationRequest, ResendVerificationResponse,
@@ -67,11 +101,21 @@ OAUTH_STATE_TTL_SECONDS = 10 * 60
 OAUTH_TICKET_TTL_SECONDS = 120
 OAUTH_ONBOARDING_TICKET_TTL_SECONDS = 10 * 60
 _oauth_ticket_memory_store: dict[str, dict] = {}
+REGISTRATION_TICKET_TTL_SECONDS = 15 * 60
+REGISTRATION_TICKET_PURPOSE = "signup_registration"
+LEGACY_ACCOUNT_VERIFICATION_PURPOSE = "legacy_existing_account"
+_registration_ticket_memory_store = pending_ticket_memory_store
+registration_verification_bearer = HTTPBearer()
 
 WEB_HANDOFF_TTL_SECONDS = 60
 WEB_SESSION_ORIGIN_IOS_APP = "ios_app"
 WEB_SESSION_ORIGIN_ANDROID_APP = "android_app"
 WEB_HANDOFF_ALLOWED_ORIGINS = {WEB_SESSION_ORIGIN_IOS_APP, WEB_SESSION_ORIGIN_ANDROID_APP}
+PASSWORD_RESET_TOKEN_TTL_MINUTES = 15
+PASSWORD_RESET_GENERIC_MESSAGE = (
+    "Если аккаунт с таким номером существует, звонок для восстановления будет отправлен."
+)
+PASSWORD_RESET_CONFIRM_ERROR = "Неверные или истекшие данные подтверждения"
 WEB_HANDOFF_REDIRECT_TO = "/pricing"
 _web_handoff_memory_store: dict[str, dict] = {}
 
@@ -174,7 +218,12 @@ def _decode_b64_json(value: str) -> dict:
     return json.loads(base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8"))
 
 
-def _create_oauth_state(mode: str = "login", user_id: Optional[int] = None, return_to: Optional[str] = None) -> str:
+def _create_oauth_state(
+    mode: str = "login",
+    user_id: Optional[int] = None,
+    return_to: Optional[str] = None,
+    source_session_version: Optional[int] = None,
+) -> str:
     normalized_mode = mode if mode in {"login", "link"} else "login"
     data = {
         "provider": YANDEX_PROVIDER,
@@ -185,6 +234,7 @@ def _create_oauth_state(mode: str = "login", user_id: Optional[int] = None, retu
     if normalized_mode == "link":
         data["user_id"] = int(user_id or 0)
         data["return_to"] = _sanitize_oauth_return_to(return_to)
+        data["source_session_version"] = int(source_session_version or 0)
     payload = _b64_json({
         **data,
     })
@@ -205,24 +255,25 @@ def _verify_oauth_state(state: str) -> dict:
         if mode not in {"login", "link"}:
             raise ValueError("bad mode")
         data["mode"] = mode
-        if mode == "link" and not int(data.get("user_id") or 0):
-            raise ValueError("missing link user")
+        if mode == "link":
+            if not int(data.get("user_id") or 0):
+                raise ValueError("missing link user")
+            if not int(data.get("source_session_version") or 0):
+                raise ValueError("missing link session version")
         return data
     except Exception:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Недействительная OAuth-сессия")
 
 
-def _issue_tokens_for_user(user: User, web_session_origin: Optional[str] = None) -> dict:
-    token_sub = str(user.id)
-    data = {"sub": token_sub, "role": user.role.value.upper()}
+def _issue_tokens_for_user(
+    user: User,
+    web_session_origin: Optional[str] = None,
+    extra_claims: Optional[dict] = None,
+) -> dict:
+    claims = dict(extra_claims or {})
     if web_session_origin:
-        data["web_session_origin"] = web_session_origin
-    access_token = create_access_token(
-        data=data,
-        expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
-    )
-    refresh_token = create_refresh_token(data=dict(data))
-    return {"access_token": access_token, "refresh_token": refresh_token, "token_type": "bearer"}
+        claims["web_session_origin"] = web_session_origin
+    return issue_tokens_for_user(user, claims)
 
 
 def _token_response_for_user(user: User) -> dict:
@@ -239,6 +290,71 @@ def _token_response_for_user(user: User) -> dict:
         "phone_verified": user.phone_verified,
     }
     return tokens
+
+
+def _legacy_phone_verification_required_response(user: User) -> dict:
+    return {
+        "status": "phone_verification_required",
+        "verification_token": create_signup_phone_verification_token(
+            user.id,
+            user.session_version,
+        ),
+        "phone": user.phone,
+        "expires_in": SIGNUP_PHONE_VERIFICATION_TOKEN_EXPIRE_MINUTES * 60,
+        "verification_kind": "existing_account",
+    }
+
+
+def _store_registration_ticket(payload: dict) -> str:
+    return store_pending_ticket(
+        purpose=REGISTRATION_TICKET_PURPOSE,
+        payload={"registration": payload},
+        ttl_seconds=REGISTRATION_TICKET_TTL_SECONDS,
+        unavailable_detail="Registration ticket storage unavailable",
+    )
+
+
+def _get_registration_ticket(ticket: str) -> Optional[dict]:
+    return get_pending_ticket(
+        ticket,
+        purpose=REGISTRATION_TICKET_PURPOSE,
+        unavailable_detail="Registration ticket storage unavailable",
+    )
+
+
+def _save_registration_ticket(ticket: str, data: dict) -> None:
+    save_pending_ticket(
+        ticket,
+        data,
+        purpose=REGISTRATION_TICKET_PURPOSE,
+        unavailable_detail="Registration ticket storage unavailable",
+    )
+
+
+def _delete_registration_ticket(ticket: str) -> None:
+    delete_pending_ticket(
+        ticket,
+        purpose=REGISTRATION_TICKET_PURPOSE,
+        unavailable_detail="Registration ticket storage unavailable",
+    )
+
+
+def _claim_registration_ticket(ticket: str) -> Optional[dict]:
+    return claim_pending_ticket(
+        ticket,
+        purpose=REGISTRATION_TICKET_PURPOSE,
+        unavailable_detail="Registration ticket storage unavailable",
+    )
+
+
+def _registration_ticket_response(ticket: str, phone: str) -> dict:
+    return {
+        "status": "phone_verification_required",
+        "verification_token": ticket,
+        "phone": phone,
+        "expires_in": REGISTRATION_TICKET_TTL_SECONDS,
+        "verification_kind": "new_registration",
+    }
 
 
 def _oauth_error_redirect(message: str, mode: str = "login", return_to: Optional[str] = None) -> RedirectResponse:
@@ -351,12 +467,13 @@ def _cleanup_memory_web_handoff() -> None:
             _web_handoff_memory_store.pop(key, None)
 
 
-def _store_web_handoff(user_id: int, origin: str) -> str:
+def _store_web_handoff(user_id: int, origin: str, source_session_version: int) -> str:
     code = secrets.token_urlsafe(32)
     payload_dict = {
         "user_id": int(user_id),
         "origin": origin,
         "purpose": "web_handoff",
+        "source_session_version": int(source_session_version),
     }
     payload = json.dumps(payload_dict, separators=(",", ":"))
     settings = get_settings()
@@ -962,18 +1079,7 @@ def demo_master_access(db: Session = Depends(get_db)) -> Any:
     if not user:
         raise HTTPException(status_code=500, detail="Не удалось подготовить demo master")
 
-    token_sub = str(user.id)
-    access_token = create_access_token(
-        data={"sub": token_sub, "role": user.role.value.upper(), "demo": True},
-        expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
-    )
-    refresh_token = create_refresh_token(data={"sub": token_sub, "role": user.role.value.upper(), "demo": True})
-
-    return {
-        "access_token": access_token,
-        "refresh_token": refresh_token,
-        "token_type": "bearer",
-    }
+    return _issue_tokens_for_user(user, extra_claims={"demo": True})
 
 
 @router.get("/yandex/login", include_in_schema=False)
@@ -1008,7 +1114,12 @@ def yandex_link(
         query = urlencode({"ticket": ticket, "mode": "link"})
         redirect_url = f"{settings.FRONTEND_URL.rstrip('/')}/auth/oauth/callback?{query}"
         return {"redirect_url": redirect_url} if as_json else RedirectResponse(redirect_url)
-    state = _create_oauth_state(mode="link", user_id=current_user.id, return_to=safe_return_to)
+    state = _create_oauth_state(
+        mode="link",
+        user_id=current_user.id,
+        return_to=safe_return_to,
+        source_session_version=current_user.session_version,
+    )
     redirect = _yandex_authorize_redirect(settings, state)
     return {"redirect_url": redirect.headers["location"]} if as_json else redirect
 
@@ -1029,6 +1140,24 @@ def yandex_callback(
         access_token = _exchange_yandex_code_for_token(code, redirect_uri, settings)
         profile = _fetch_yandex_profile(access_token)
         if state_data["mode"] == "link":
+            source_user = (
+                db.query(User)
+                .filter(
+                    User.id == int(state_data["user_id"]),
+                    User.is_active == True,
+                    User.deleted_at.is_(None),
+                )
+                .first()
+            )
+            if (
+                not source_user
+                or int(state_data["source_session_version"])
+                != int(source_user.session_version)
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="OAuth-сессия была отозвана",
+                )
             user, link_status, message = _link_yandex_profile_to_user(db, profile, int(state_data["user_id"]))
             ticket = _store_oauth_ticket(
                 user.id,
@@ -1139,7 +1268,7 @@ def oauth_onboarding_complete(payload: OAuthOnboardingCompleteRequest, db: Sessi
 
 @router.post(
     "/register",
-    response_model=Token,
+    response_model=PhoneVerificationRequiredResponse,
     summary="Регистрация нового пользователя",
     responses={
         400: {"description": "Email или телефон уже заняты / не указаны город и часовой пояс для мастера"},
@@ -1147,14 +1276,22 @@ def oauth_onboarding_complete(payload: OAuthOnboardingCompleteRequest, db: Sessi
     },
 )
 async def register(user_in: UserCreate, db: Session = Depends(get_db)) -> Any:
-    """
-    Регистрация нового пользователя.
+    """Validate and store a pre-registration ticket without creating any account rows."""
+    if user_in.role not in {UserRole.CLIENT, UserRole.MASTER}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Для password-регистрации выберите роль client или master",
+        )
+    if not user_in.accept_terms or not user_in.accept_personal_data:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Примите пользовательское соглашение и согласие на обработку персональных данных",
+        )
 
-    - **email**: Email пользователя
-    - **phone**: Номер телефона
-    - **password**: Пароль
-    - **role**: Роль пользователя (client, master, salon, admin)
-    """
+    phone = normalize_to_canonical(user_in.phone)
+    if not phone:
+        raise HTTPException(status_code=400, detail="Укажите корректный номер телефона")
+    email = str(user_in.email or "").strip().lower() or None
     promo_code = (user_in.promo_code or "").strip()
     if promo_code and user_in.role != UserRole.MASTER:
         raise HTTPException(
@@ -1164,141 +1301,52 @@ async def register(user_in: UserCreate, db: Session = Depends(get_db)) -> Any:
 
     if promo_code:
         try:
-            promo_code = normalize_promo_code(promo_code)
+            promo_code = validate_promo_code_for_registration(db, promo_code)
         except PromoEngineError as exc:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail={"code": exc.code, "message": exc.message})
 
-    if user_in.email:
-        user = db.query(User).filter(User.email == user_in.email).first()
+    if email:
+        user = db.query(User).filter(User.email == email).first()
         if user:
             raise HTTPException(status_code=400, detail="Email already registered")
 
-    # Проверяем, не занят ли телефон
-    phone_user = db.query(User).filter(User.phone == user_in.phone).first()
+    phone_user = db.query(User).filter(User.phone == phone).first()
     if phone_user:
         raise HTTPException(status_code=400, detail="Phone number already registered")
 
-    master = None
+    city = None
+    timezone = None
     if user_in.role == UserRole.MASTER:
         city = (user_in.city or "").strip()
-        tz = (user_in.timezone or "").strip()
-        if not city or not tz:
+        timezone = (user_in.timezone or "").strip()
+        expected_timezone = get_timezone_by_city(city)
+        if not city or not timezone or not expected_timezone:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Для регистрации мастера укажите город. Часовой пояс определяется автоматически.",
             )
+        if timezone != expected_timezone:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Часовой пояс не соответствует выбранному городу",
+            )
 
-    # Создаем пользователя с неподтвержденным email и телефоном
-    print(f"🔍 [REGISTER] Начало создания пользователя: email={user_in.email}, phone={user_in.phone}, role={user_in.role}")
-    try:
-        user = User(
-            email=user_in.email,
-            phone=user_in.phone,
-            hashed_password=get_password_hash(user_in.password),
-            role=user_in.role,
-            is_active=True,  # Пользователь активен
-            is_verified=False,  # Email не подтвержден
-            is_phone_verified=False,  # Телефон не подтвержден
-            full_name=user_in.full_name,
-            birth_date=user_in.birth_date,
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow(),
-        )
-        db.add(user)
-        print(f"🔍 [REGISTER] Пользователь добавлен в сессию, выполняю commit...")
-        db.commit()
-        print(f"🔍 [REGISTER] Commit выполнен успешно")
-        db.refresh(user)
-        print(f"✅ [REGISTER] Пользователь создан: id={user.id}, email={user.email}, phone={user.phone}, role={user.role}")
-    except Exception as e:
-        db.rollback()
-        print(f"❌ [REGISTER] Ошибка создания пользователя: {e}")
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Ошибка создания пользователя: {str(e)}")
-
-    # Если пользователь регистрируется как мастер, создаем профиль мастера
-    if user_in.role == UserRole.MASTER:
-        city = (user_in.city or "").strip()
-        tz = (user_in.timezone or "").strip()
-        timezone_confirmed = bool(city and tz)
-        master = Master(
-            user_id=user.id,
-            bio="",
-            experience_years=0,
-            can_work_independently=True,
-            can_work_in_salon=True,
-            website=None,
-            created_at=datetime.utcnow(),
-            city=city,
-            timezone=tz,
-            timezone_confirmed=timezone_confirmed,
-        )
-        db.add(master)
-        db.commit()
-        db.refresh(master)
-
-        from utils.base62 import generate_unique_domain
-        master.domain = generate_unique_domain(master.id, db)
-        db.commit()
-
-        if promo_code:
-            try:
-                create_pending_redemption(db, master.id, promo_code)
-                db.commit()
-            except PromoEngineError as exc:
-                db.rollback()
-                try:
-                    db.delete(master)
-                    db.delete(user)
-                    db.commit()
-                except Exception:
-                    db.rollback()
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail={"code": exc.code, "message": exc.message},
-                )
-            except Exception as exc:
-                db.rollback()
-                try:
-                    db.delete(master)
-                    db.delete(user)
-                    db.commit()
-                except Exception:
-                    db.rollback()
-                raise HTTPException(status_code=500, detail=f"Ошибка применения промокода: {str(exc)}")
-
-    # Отправляем письмо верификации email (та же сессия db, что и при создании пользователя)
-    try:
-        await VerificationService.send_verification_email(user, db)
-    except Exception as e:
-        print(f"Ошибка отправки письма верификации: {e}")
-        # Не прерываем регистрацию, если письмо не отправилось
-
-    # Звонок для верификации телефона будет отправлен по запросу пользователя
-    # через /api/auth/request-phone-verification
-
-    # Генерируем токены для входа (sub = user.id)
-    token_sub = str(user.id)
-    access_token = create_access_token(
-        data={"sub": token_sub, "role": user.role.value.upper()},
-        expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
-    )
-    refresh_token = create_refresh_token(data={"sub": token_sub, "role": user.role.value.upper()})
-
-    return {
-        "access_token": access_token,
-        "refresh_token": refresh_token,
-        "token_type": "bearer",
-        "user": {
-            "id": user.id,
-            "email": user.email,
-            "phone": user.phone,
-            "role": user.role,
-            "is_verified": user.is_verified,
-            "is_phone_verified": user.is_phone_verified,
-        }
+    pending_payload = {
+        "email": email,
+        "phone": phone,
+        "hashed_password": get_password_hash(user_in.password),
+        "role": user_in.role.value,
+        "full_name": user_in.full_name,
+        "birth_date": user_in.birth_date.isoformat() if user_in.birth_date else None,
+        "city": city,
+        "timezone": timezone,
+        "promo_code": promo_code or None,
+        "accept_terms": True,
+        "accept_personal_data": True,
+        "marketing_opt_in": bool(user_in.marketing_opt_in),
     }
+    ticket = _store_registration_ticket(pending_payload)
+    return _registration_ticket_response(ticket, phone)
 
 
 @router.post("/verify", response_model=Token, summary="Подтверждение регистрации")
@@ -1321,24 +1369,12 @@ def verify(verify_data: VerifyRequest, db: Session = Depends(get_db)) -> Any:
     user.is_verified = True
     db.commit()
 
-    # Генерируем токены
-    token_sub = str(user.id)
-    access_token = create_access_token(
-        data={"sub": token_sub, "role": user.role.value.upper()},
-        expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
-    )
-    refresh_token = create_refresh_token(data={"sub": token_sub, "role": user.role.value.upper()})
-
-    return {
-        "access_token": access_token,
-        "refresh_token": refresh_token,
-        "token_type": "bearer",
-    }
+    return _issue_tokens_for_user(user)
 
 
 @router.post(
     "/login",
-    response_model=Token,
+    response_model=Union[Token, PhoneVerificationRequiredResponse],
     summary="Вход в систему",
     responses={
         401: {"description": "Неверный телефон или пароль"},
@@ -1366,19 +1402,10 @@ def login(login_data: LoginRequest, db: Session = Depends(get_db)) -> Any:
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    # sub = user.id: безопасно при повторной регистрации на тот же phone после удаления
-    token_sub = str(user.id)
-    access_token = create_access_token(
-        data={"sub": token_sub, "role": user.role.value.upper()},
-        expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
-    )
-    refresh_token = create_refresh_token(data={"sub": token_sub, "role": user.role.value.upper()})
+    if not user.is_phone_verified:
+        return _legacy_phone_verification_required_response(user)
 
-    return {
-        "access_token": access_token,
-        "refresh_token": refresh_token,
-        "token_type": "bearer",
-    }
+    return _issue_tokens_for_user(user)
 
 
 
@@ -1408,7 +1435,11 @@ def create_web_handoff(
     if not current_user.is_active or getattr(current_user, "deleted_at", None) is not None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Inactive user")
 
-    code = _store_web_handoff(current_user.id, origin)
+    code = _store_web_handoff(
+        current_user.id,
+        origin,
+        current_user.session_version,
+    )
     frontend = get_settings().FRONTEND_URL.rstrip("/")
     url = f"{frontend}/auth/mobile-handoff?code={code}"
     return {
@@ -1434,6 +1465,11 @@ def exchange_web_handoff(
     user = db.query(User).filter(User.id == int(ticket_data["user_id"])).first()
     if not user or not user.is_active or getattr(user, "deleted_at", None) is not None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+    if int(ticket_data.get("source_session_version") or 0) != int(user.session_version):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Handoff session was revoked",
+        )
 
     origin = str(ticket_data.get("origin") or "").strip()
     web_session_origin = origin if origin == WEB_SESSION_ORIGIN_IOS_APP else None
@@ -1471,8 +1507,12 @@ def refresh_token(refresh_data: dict, db: Session = Depends(get_db)) -> Any:
         payload = jwt.decode(
             refresh_data["refresh_token"], SECRET_KEY, algorithms=[ALGORITHM]
         )
+        if payload.get("purpose") or not refresh_token_type_matches(payload):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token"
+            )
         sub: str = payload.get("sub")
-        if sub is None:
+        if sub is None or not str(sub).strip().isdigit():
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token"
             )
@@ -1481,29 +1521,21 @@ def refresh_token(refresh_data: dict, db: Session = Depends(get_db)) -> Any:
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token"
         )
 
-    # Логин кладёт в sub user.id (legacy: phone/email); резолв через resolve_user_from_token_sub
     user = resolve_user_from_token_sub(db, sub)
     if not user or not user.is_active or getattr(user, "deleted_at", None) is not None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found"
         )
+    if not session_version_matches(payload, user):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid refresh token",
+        )
 
-    token_sub = str(user.id)
-    data = {"sub": token_sub, "role": user.role.value.upper()}
-    web_session_origin = payload.get("web_session_origin")
-    if web_session_origin:
-        data["web_session_origin"] = web_session_origin
-    access_token = create_access_token(
-        data=data,
-        expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
+    return _issue_tokens_for_user(
+        user,
+        extra_claims=normal_session_extra_claims(payload),
     )
-    new_refresh_token = create_refresh_token(data=dict(data))
-
-    return {
-        "access_token": access_token,
-        "refresh_token": new_refresh_token,
-        "token_type": "bearer",
-    }
 
 
 @router.get(
@@ -1545,10 +1577,18 @@ def change_password(
             detail="Неверный текущий пароль"
         )
     
-    # Хешируем новый пароль
-    current_user.hashed_password = get_password_hash(password_data.new_password)
-    current_user.updated_at = datetime.utcnow()
-    
+    current_hash = current_user.hashed_password
+    if not update_password_and_revoke_sessions(
+        db,
+        current_user,
+        password_data.new_password,
+        expected_hashed_password=current_hash,
+    ):
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Пароль уже был изменён. Войдите снова.",
+        )
     db.commit()
     db.refresh(current_user)
     
@@ -1583,9 +1623,19 @@ def set_password(
             detail="Пароль должен содержать минимум 6 символов"
         )
     
-    current_user.hashed_password = get_password_hash(password_data.password)
-    current_user.updated_at = datetime.utcnow()
+    if not update_password_and_revoke_sessions(
+        db,
+        current_user,
+        password_data.password,
+        expected_hashed_password=None,
+    ):
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Пароль уже установлен",
+        )
     db.commit()
+    db.refresh(current_user)
     
     return MessageOut(message="Пароль успешно установлен")
 
@@ -1803,7 +1853,7 @@ async def request_password_reset(request: PasswordResetRequest, db: Session = De
             )
         
         # Отправляем письмо сброса пароля
-        success = await VerificationService.send_password_reset_email(user)
+        success = await VerificationService.send_password_reset_email(user, db)
         
         if success:
             return PasswordResetResponse(
@@ -1824,22 +1874,155 @@ async def request_password_reset(request: PasswordResetRequest, db: Session = De
         )
 
 
+@router.post(
+    "/request-password-reset-phone",
+    response_model=RequestPasswordResetPhoneResponse,
+)
+async def request_password_reset_phone(
+    request: RequestPasswordResetPhoneRequest,
+    db: Session = Depends(get_db),
+):
+    """Start a purpose-bound challenge while keeping existing/unknown responses equivalent."""
+    target_phone = normalize_to_canonical(request.phone) or "+70000000000"
+    challenge_id = secrets.token_urlsafe(24)
+    user = None
+    if normalize_to_canonical(request.phone):
+        user = (
+            db.query(User)
+            .filter(User.phone == target_phone)
+            .with_for_update()
+            .first()
+        )
+    eligible = bool(
+        user
+        and user.is_active
+        and getattr(user, "deleted_at", None) is None
+        and user.hashed_password
+    )
+    if eligible and user is not None:
+        # Every resend invalidates the previous challenge before contacting the provider.
+        VerificationService.clear_phone_challenge(user)
+        db.commit()
+        call_result = zvonok_service.send_verification_call(user.phone)
+        if call_result.get("success"):
+            internal_result = dict(call_result)
+            internal_result["call_id"] = challenge_id
+            try:
+                VerificationService.start_phone_challenge(
+                    user,
+                    purpose="password_reset",
+                    target_phone=user.phone,
+                    call_result=internal_result,
+                    db=db,
+                )
+            except PhoneChallengeError:
+                VerificationService.clear_phone_challenge(user)
+                db.commit()
+
+    challenge_token = create_password_reset_phone_verification_token(
+        target_phone,
+        challenge_id,
+    )
+    return RequestPasswordResetPhoneResponse(
+        message=PASSWORD_RESET_GENERIC_MESSAGE,
+        challenge_token=challenge_token,
+        call_id=challenge_id,
+        expires_in=PASSWORD_RESET_PHONE_VERIFICATION_TOKEN_EXPIRE_MINUTES * 60,
+    )
+
+
+@router.post(
+    "/confirm-password-reset-phone",
+    response_model=ConfirmPasswordResetPhoneResponse,
+)
+async def confirm_password_reset_phone(
+    request: ConfirmPasswordResetPhoneRequest,
+    db: Session = Depends(get_db),
+):
+    """Consume the current phone challenge and issue a short-lived PasswordReset token."""
+    try:
+        payload = decode_password_reset_phone_verification_token(request.challenge_token)
+    except JWTError:
+        raise HTTPException(status_code=400, detail=PASSWORD_RESET_CONFIRM_ERROR)
+
+    target_phone = str(payload.get("target") or "")
+    token_challenge_id = str(payload.get("challenge_id") or "")
+    if not hmac.compare_digest(token_challenge_id, request.call_id):
+        raise HTTPException(status_code=400, detail=PASSWORD_RESET_CONFIRM_ERROR)
+    user = (
+        db.query(User)
+        .filter(User.phone == target_phone)
+        .with_for_update()
+        .first()
+    )
+    if (
+        not user
+        or not user.is_active
+        or getattr(user, "deleted_at", None) is not None
+        or not user.hashed_password
+    ):
+        raise HTTPException(status_code=400, detail=PASSWORD_RESET_CONFIRM_ERROR)
+    try:
+        VerificationService.consume_phone_challenge(
+            user,
+            purpose="password_reset",
+            target_phone=user.phone,
+            call_id=request.call_id,
+            phone_digits=request.phone_digits,
+            db=db,
+        )
+        reset = VerificationService.create_password_reset(
+            user,
+            db,
+            ttl_minutes=PASSWORD_RESET_TOKEN_TTL_MINUTES,
+            commit=False,
+        )
+        db.commit()
+        db.refresh(reset)
+    except PhoneChallengeError:
+        raise HTTPException(status_code=400, detail=PASSWORD_RESET_CONFIRM_ERROR)
+    except Exception:
+        db.rollback()
+        raise
+    return ConfirmPasswordResetPhoneResponse(
+        reset_token=reset.token,
+        expires_in=PASSWORD_RESET_TOKEN_TTL_MINUTES * 60,
+    )
+
+
 @router.post("/reset-password", response_model=ResetPasswordResponse)
 async def reset_password(request: ResetPasswordRequest, db: Session = Depends(get_db)):
-    """Сброс пароля по токену"""
+    """Atomically consume a one-time PasswordReset token and update the password."""
     try:
-        # Проверяем токен
-        user = VerificationService.verify_password_reset_token(request.token, db)
-        
-        if not user:
+        reset = (
+            db.query(PasswordReset)
+            .filter(
+                PasswordReset.token == request.token,
+                PasswordReset.is_used == False,
+                PasswordReset.expires_at > datetime.utcnow(),
+            )
+            .with_for_update()
+            .first()
+        )
+        if not reset:
             return ResetPasswordResponse(
                 message="Недействительный или истекший токен",
                 success=False
             )
-        
-        # Хешируем новый пароль
-        hashed_password = get_password_hash(request.new_password)
-        user.hashed_password = hashed_password
+        user = (
+            db.query(User)
+            .filter(User.id == reset.user_id)
+            .with_for_update()
+            .first()
+        )
+        if not user or not user.is_active or getattr(user, "deleted_at", None) is not None:
+            return ResetPasswordResponse(
+                message="Недействительный или истекший токен",
+                success=False,
+            )
+        if not update_password_and_revoke_sessions(db, user, request.new_password):
+            raise RuntimeError("password reset user update failed")
+        reset.is_used = True
         db.commit()
         
         return ResetPasswordResponse(
@@ -1849,6 +2032,7 @@ async def reset_password(request: ResetPasswordRequest, db: Session = Depends(ge
         )
         
     except Exception as e:
+        db.rollback()
         print(f"Ошибка сброса пароля: {e}")
         return ResetPasswordResponse(
             message="Внутренняя ошибка сервера",
@@ -1858,26 +2042,11 @@ async def reset_password(request: ResetPasswordRequest, db: Session = Depends(ge
 
 @router.post("/reset-password-by-phone", response_model=ResetPasswordResponse)
 async def reset_password_by_phone(request: ResetPasswordByPhoneRequest, db: Session = Depends(get_db)):
-    """Сброс пароля после верификации по звонку (call_id + digits)."""
-    try:
-        user = db.query(User).filter(User.phone == request.phone).first()
-        if not user:
-            return ResetPasswordResponse(message="Пользователь не найден", success=False)
-        verification_result = zvonok_service.verify_phone_digits(request.call_id, request.phone_digits)
-        if not (verification_result.get("success") and verification_result.get("verified")):
-            return ResetPasswordResponse(
-                message=verification_result.get("message", "Неверный код верификации"),
-                success=False
-            )
-        hashed_password = get_password_hash(request.new_password)
-        user.hashed_password = hashed_password
-        user.password_reset_code = None
-        user.password_reset_expires = None
-        db.commit()
-        return ResetPasswordResponse(message="Пароль успешно изменен", success=True, user_id=user.id)
-    except Exception as e:
-        print(f"Ошибка сброса пароля по телефону: {e}")
-        return ResetPasswordResponse(message="Внутренняя ошибка сервера", success=False)
+    """Deprecated insecure legacy contract; use the tokenized three-step flow."""
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail="Используйте новый безопасный flow восстановления пароля по телефону",
+    )
 
 
 @router.post("/resend-verification", response_model=ResendVerificationResponse)
@@ -1921,175 +2090,310 @@ async def resend_verification(request: ResendVerificationRequest, db: Session = 
         )
 
 
+@router.post(
+    "/request-signup-phone-verification",
+    response_model=PhoneVerificationResponse,
+)
+async def request_signup_phone_verification(
+    creds: HTTPAuthorizationCredentials = Depends(registration_verification_bearer),
+    db: Session = Depends(get_db),
+):
+    """Start either a new-registration proof or a historical-account proof."""
+    ticket = creds.credentials
+    registration_state = _get_registration_ticket(ticket)
+    current_user = None
+    if registration_state:
+        phone = str(registration_state.get("registration", {}).get("phone") or "")
+        purpose = REGISTRATION_TICKET_PURPOSE
+    else:
+        try:
+            user_id = decode_signup_phone_verification_token(ticket)
+        except JWTError:
+            raise HTTPException(status_code=401, detail="Invalid phone verification token")
+        current_user = db.query(User).filter(User.id == user_id).first()
+        if (
+            not current_user
+            or not current_user.is_active
+            or current_user.deleted_at is not None
+        ):
+            raise HTTPException(status_code=401, detail="Invalid phone verification token")
+        try:
+            version_matches = signup_phone_verification_version_matches(ticket, current_user)
+        except JWTError:
+            version_matches = False
+        if not version_matches:
+            raise HTTPException(status_code=401, detail="Invalid phone verification token")
+        if current_user.is_phone_verified:
+            raise HTTPException(status_code=409, detail="Телефон уже подтверждён")
+        phone = current_user.phone
+        purpose = LEGACY_ACCOUNT_VERIFICATION_PURPOSE
+
+    call_result = zvonok_service.send_verification_call(phone)
+    if not call_result.get("success"):
+        return PhoneVerificationResponse(
+            message=call_result.get("error") or "Ошибка инициации звонка",
+            success=False,
+        )
+
+    try:
+        if registration_state:
+            challenge = VerificationService.create_phone_challenge_state(
+                purpose=purpose,
+                target_phone=phone,
+                call_result=call_result,
+            )
+            registration_state.update(challenge)
+            _save_registration_ticket(ticket, registration_state)
+            call_id = challenge["phone_verification_call_id"]
+        else:
+            call_id = VerificationService.start_phone_challenge(
+                current_user,
+                purpose=purpose,
+                target_phone=phone,
+                call_result=call_result,
+                db=db,
+            )
+    except PhoneChallengeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=exc.detail,
+        )
+
+    return PhoneVerificationResponse(
+        message="Звонок для верификации инициирован. Введите последние 4 цифры номера, с которого вам звонят.",
+        success=True,
+        call_id=call_id,
+        verification_number=(
+            str(call_result.get("pincode") or call_result.get("verification_number") or "")
+            if get_settings().zvonok_stub
+            else None
+        ),
+    )
+
+
+def _create_password_account_from_registration(
+    registration: dict,
+    db: Session,
+) -> User:
+    """Create User + mandatory role rows + promo side effect in one DB transaction."""
+    phone = str(registration.get("phone") or "")
+    email = str(registration.get("email") or "").strip().lower() or None
+    if db.query(User).filter(User.phone == phone).first():
+        raise HTTPException(status_code=409, detail="Phone number already registered")
+    if email and db.query(User).filter(User.email == email).first():
+        raise HTTPException(status_code=409, detail="Email already registered")
+
+    try:
+        role = UserRole(str(registration.get("role") or ""))
+        birth_date_raw = registration.get("birth_date")
+        user = User(
+            email=email,
+            phone=phone,
+            hashed_password=str(registration.get("hashed_password") or ""),
+            role=role,
+            is_active=True,
+            is_verified=False,
+            is_phone_verified=True,
+            full_name=registration.get("full_name"),
+            birth_date=date.fromisoformat(birth_date_raw) if birth_date_raw else None,
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow(),
+        )
+        db.add(user)
+        db.flush()
+
+        if role == UserRole.MASTER:
+            city = str(registration.get("city") or "").strip()
+            timezone = str(registration.get("timezone") or "").strip()
+            master = Master(
+                user_id=user.id,
+                bio="",
+                experience_years=0,
+                can_work_independently=True,
+                can_work_in_salon=True,
+                website=None,
+                created_at=datetime.utcnow(),
+                city=city,
+                timezone=timezone,
+                timezone_confirmed=bool(city and timezone),
+            )
+            db.add(master)
+            db.flush()
+            from utils.base62 import generate_unique_domain
+            master.domain = generate_unique_domain(master.id, db)
+            promo_code = str(registration.get("promo_code") or "").strip()
+            if promo_code:
+                create_pending_redemption(db, master.id, promo_code)
+
+        db.commit()
+        db.refresh(user)
+        return user
+    except HTTPException:
+        db.rollback()
+        raise
+    except PromoEngineError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": exc.code, "message": exc.message},
+        )
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Phone or email already registered",
+        )
+    except Exception:
+        db.rollback()
+        raise
+
+
+@router.post(
+    "/confirm-signup-phone-verification",
+    response_model=Token,
+)
+async def confirm_signup_phone_verification(
+    request: ConfirmSignupPhoneVerificationRequest,
+    creds: HTTPAuthorizationCredentials = Depends(registration_verification_bearer),
+    db: Session = Depends(get_db),
+):
+    """Complete new registration or verify one historical unverified account."""
+    ticket = creds.credentials
+    registration_state = _get_registration_ticket(ticket)
+    if registration_state:
+        phone = str(registration_state.get("registration", {}).get("phone") or "")
+        try:
+            VerificationService.consume_phone_challenge_state(
+                registration_state,
+                purpose=REGISTRATION_TICKET_PURPOSE,
+                target_phone=phone,
+                call_id=request.call_id,
+                phone_digits=request.phone_digits,
+            )
+        except PhoneChallengeError as exc:
+            _save_registration_ticket(ticket, registration_state)
+            raise HTTPException(status_code=400, detail=exc.detail)
+
+        claimed = _claim_registration_ticket(ticket)
+        if not claimed:
+            raise HTTPException(status_code=409, detail="Верификация уже завершена")
+        try:
+            VerificationService.consume_phone_challenge_state(
+                claimed,
+                purpose=REGISTRATION_TICKET_PURPOSE,
+                target_phone=phone,
+                call_id=request.call_id,
+                phone_digits=request.phone_digits,
+            )
+        except PhoneChallengeError:
+            raise HTTPException(status_code=409, detail="Верификация уже завершена")
+        user = _create_password_account_from_registration(claimed["registration"], db)
+        try:
+            await VerificationService.send_verification_email(user, db)
+        except Exception:
+            pass
+        return _issue_tokens_for_user(user)
+
+    try:
+        user_id = decode_signup_phone_verification_token(ticket)
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid phone verification token")
+    user = (
+        db.query(User)
+        .filter(User.id == user_id)
+        .with_for_update()
+        .first()
+    )
+    if not user or not user.is_active or user.deleted_at is not None:
+        raise HTTPException(status_code=401, detail="Invalid phone verification token")
+    try:
+        version_matches = signup_phone_verification_version_matches(ticket, user)
+    except JWTError:
+        version_matches = False
+    if not version_matches:
+        raise HTTPException(status_code=401, detail="Invalid phone verification token")
+    if user.is_phone_verified:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Верификация уже завершена",
+        )
+    try:
+        VerificationService.consume_phone_challenge(
+            user,
+            purpose=LEGACY_ACCOUNT_VERIFICATION_PURPOSE,
+            target_phone=user.phone,
+            call_id=request.call_id,
+            phone_digits=request.phone_digits,
+            db=db,
+        )
+    except PhoneChallengeError as exc:
+        raise HTTPException(status_code=400, detail=exc.detail)
+
+    user.is_phone_verified = True
+    db.commit()
+
+    return _issue_tokens_for_user(user)
+
+
+@router.post("/cancel-signup-phone-verification", status_code=204)
+async def cancel_signup_phone_verification(
+    creds: HTTPAuthorizationCredentials = Depends(registration_verification_bearer),
+    db: Session = Depends(get_db),
+):
+    """Explicitly discard pending registration; historical accounts themselves are preserved."""
+    ticket = creds.credentials
+    if _get_registration_ticket(ticket):
+        _delete_registration_ticket(ticket)
+        return None
+    try:
+        user_id = decode_signup_phone_verification_token(ticket)
+    except JWTError:
+        return None
+    user = db.query(User).filter(User.id == user_id).first()
+    try:
+        version_matches = bool(user) and signup_phone_verification_version_matches(ticket, user)
+    except JWTError:
+        version_matches = False
+    if user and version_matches and not user.is_phone_verified:
+        VerificationService.clear_phone_challenge(user)
+        db.commit()
+    return None
+
+
 @router.post("/request-phone-verification", response_model=PhoneVerificationResponse)
 async def request_phone_verification(request: PhoneVerificationRequest, db: Session = Depends(get_db)):
-    """Запрос на верификацию телефона через звонок"""
-    try:
-        # Ищем пользователя по телефону
-        user = db.query(User).filter(User.phone == request.phone).first()
-        if not user:
-            return PhoneVerificationResponse(
-                message="Пользователь с таким номером телефона не найден",
-                success=False
-            )
-        
-        # Инициируем звонок через Zvonok (без генерации кода)
-        call_result = zvonok_service.send_verification_call(request.phone)
-        
-        if call_result["success"]:
-            # Сохраняем pincode/expiry/attempts для безопасной проверки на backend
-            pin_raw = str(
-                call_result.get("pincode")
-                or call_result.get("verification_number")
-                or ""
-            ).strip() or None
-            user.phone_verification_code = pin_raw
-            user.phone_verification_call_id = str(call_result.get("call_id") or "").strip() or None
-            user.phone_verification_expires = datetime.utcnow() + timedelta(minutes=5)
-            user.phone_verification_attempts = 0
-            user.phone_verification_target_phone = user.phone
-            user.phone_verification_purpose = "signup"
-            db.commit()
-            from settings import get_settings
-            stub = get_settings().zvonok_stub
-            return PhoneVerificationResponse(
-                message="Звонок для верификации инициирован. Введите последние 4 цифры номера, с которого вам звонят.",
-                success=True,
-                call_id=call_result.get("call_id"),
-                verification_number=pin_raw if stub else None,
-            )
-        else:
-            error_message = call_result.get('error', 'Неизвестная ошибка')
-            return PhoneVerificationResponse(
-                message=f"Ошибка инициации звонка: {error_message}",
-                success=False
-            )
-            
-    except Exception as e:
-        print(f"Ошибка запроса верификации телефона: {e}")
-        return PhoneVerificationResponse(
-            message="Внутренняя ошибка сервера",
-            success=False
-        )
+    """Deprecated: signup and recovery now use purpose-bound restricted contracts."""
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail="Используйте purpose-bound endpoint подтверждения телефона",
+    )
 
 
 @router.post("/verify-phone", response_model=VerifyPhoneResponse)
 async def verify_phone(request: VerifyPhoneRequest, db: Session = Depends(get_db)):
-    """Верификация телефона по коду"""
-    try:
-        # Ищем пользователя по телефону
-        user = db.query(User).filter(User.phone == request.phone).first()
-        if not user:
-            return VerifyPhoneResponse(
-                message="Пользователь с таким номером телефона не найден",
-                success=False
-            )
-
-        # Безопасная backend-проверка: сверяем введённые 4 цифры с pincode, сохранённым при flashcall.
-        if not user.phone_verification_code or not user.phone_verification_expires:
-            return VerifyPhoneResponse(message="Верификация не инициирована", success=False)
-        if user.phone_verification_expires <= datetime.utcnow():
-            return VerifyPhoneResponse(message="Код истёк. Запросите звонок ещё раз.", success=False)
-        if user.phone_verification_call_id and str(user.phone_verification_call_id) != str(request.call_id):
-            return VerifyPhoneResponse(message="Неверная сессия верификации. Запросите звонок ещё раз.", success=False)
-        attempts = int(user.phone_verification_attempts or 0)
-        if attempts >= 5:
-            return VerifyPhoneResponse(message="Превышено число попыток. Запросите звонок ещё раз.", success=False)
-        if str(user.phone_verification_code) != str(request.phone_digits):
-            user.phone_verification_attempts = attempts + 1
-            db.commit()
-            return VerifyPhoneResponse(message="Неверные цифры номера телефона", success=False)
-
-        # Успех
-        user.is_phone_verified = True
-        user.phone_verification_code = None
-        user.phone_verification_call_id = None
-        user.phone_verification_expires = None
-        user.phone_verification_attempts = 0
-        user.phone_verification_target_phone = None
-        user.phone_verification_purpose = None
-        db.commit()
-
-        return VerifyPhoneResponse(message="Телефон успешно верифицирован", success=True, user_id=user.id)
-            
-    except Exception as e:
-        print(f"Ошибка верификации телефона: {e}")
-        return VerifyPhoneResponse(
-            message="Внутренняя ошибка сервера",
-            success=False
-        )
+    """Deprecated insecure phone-only verifier; purpose-bound endpoints replace it."""
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail="Используйте purpose-bound endpoint подтверждения телефона",
+    )
 
 
 @router.post("/forgot-password", response_model=PasswordResetResponse)
 async def forgot_password(request: dict, db: Session = Depends(get_db)):
-    """Универсальный endpoint для восстановления пароля (email или телефон)"""
-    try:
-        phone = request.get("phone")
-        email = request.get("email")
-        
-        if not phone and not email:
-            return PasswordResetResponse(
-                message="Необходимо указать телефон или email",
-                success=False
-            )
-        
-        # Ищем пользователя
-        user = None
-        if phone:
-            user = db.query(User).filter(User.phone == phone).first()
-        elif email:
-            user = db.query(User).filter(User.email == email).first()
-        
-        if not user:
-            return PasswordResetResponse(
-                message="Пользователь не найден",
-                success=False
-            )
-        
-        # Если указан телефон, используем звонок
-        if phone:
-            # Генерируем код для сброса пароля
-            reset_code = VerificationService.generate_verification_code()
-            user.password_reset_code = reset_code
-            user.password_reset_expires = datetime.utcnow() + timedelta(minutes=10)
-            db.commit()
-            
-            # Инициируем звонок (FlashCall - пользователь вводит последние 4 цифры номера)
-            call_result = zvonok_service.send_verification_call(phone)
-            
-            if call_result["success"]:
-                return PasswordResetResponse(
-                    message="Звонок с кодом для сброса пароля инициирован",
-                    success=True,
-                    call_id=call_result.get("call_id")
-                )
-            else:
-                return PasswordResetResponse(
-                    message=f"Ошибка инициации звонка: {call_result['message']}",
-                    success=False
-                )
-        
-        # Если указан email, используем email
-        elif email:
-            success = await VerificationService.send_password_reset_email(user)
-            
-            if success:
-                return PasswordResetResponse(
-                    message="Письмо для сброса пароля отправлено",
-                    success=True
-                )
-            else:
-                return PasswordResetResponse(
-                    message="Ошибка отправки письма",
-                    success=False
-                )
-            
-    except Exception as e:
-        print(f"Ошибка восстановления пароля: {e}")
-        return PasswordResetResponse(
-            message="Внутренняя ошибка сервера",
-            success=False
+    """Email compatibility wrapper; insecure legacy phone branch is retired."""
+    if request.get("phone"):
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail="Используйте /api/auth/request-password-reset-phone",
         )
+    email = request.get("email")
+    if not email:
+        return PasswordResetResponse(message="Необходимо указать email", success=False)
+    try:
+        payload = PasswordResetRequest(email=email)
+    except Exception:
+        return PasswordResetResponse(message="Некорректный email", success=False)
+    return await request_password_reset(payload, db)
 
 
 @router.get("/zvonok/balance")

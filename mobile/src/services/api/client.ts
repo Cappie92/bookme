@@ -198,9 +198,11 @@ apiClient.interceptors.request.use(
     try {
       const token = await readToken();
       
-      if (token && config.headers) {
+      if (token && config.headers && !config.headers.Authorization) {
         config.headers.Authorization = `Bearer ${token}`;
         logger.http('🔑 [API] Токен добавлен в заголовки');
+      } else if (config.headers?.Authorization) {
+        logger.http('🔑 [API] Использован явно заданный Bearer-токен');
       } else {
         logger.http('🔑 [API] Токен не найден (первый запрос)');
       }
@@ -391,4 +393,3 @@ apiClient.interceptors.response.use(
 
 export { apiClient };
 export default apiClient;
-

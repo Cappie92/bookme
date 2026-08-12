@@ -10,13 +10,19 @@ def test_register_user(client, db):
         "phone": "+79001234567",
         "full_name": "Test User",
         "role": "client",
+        "accept_terms": True,
+        "accept_personal_data": True,
     }
     response = client.post("/api/auth/register", json=user_data)
     assert response.status_code == status.HTTP_200_OK
     data = response.json()
-    assert "access_token" in data
-    assert "refresh_token" in data
-    assert data["token_type"] == "bearer"
+    assert data["status"] == "phone_verification_required"
+    assert data["phone"] == user_data["phone"]
+    assert data["verification_token"]
+    assert data["verification_kind"] == "new_registration"
+    assert "access_token" not in data
+    assert "refresh_token" not in data
+    assert db.query(User).filter(User.phone == user_data["phone"]).first() is None
 
 
 def test_register_duplicate_email(client, test_user):
@@ -26,13 +32,15 @@ def test_register_duplicate_email(client, test_user):
         "phone": "+79001234568",
         "full_name": "Another User",
         "role": "client",
+        "accept_terms": True,
+        "accept_personal_data": True,
     }
     response = client.post("/api/auth/register", json=user_data)
     assert response.status_code == status.HTTP_400_BAD_REQUEST
 
 
-def test_register_master_with_city_timezone_sets_confirmed(client, db):
-    """Регистрация мастера с city+timezone -> master.timezone_confirmed=True, city/timezone сохранены."""
+def test_register_master_with_city_timezone_stays_pending(client, db):
+    """Valid master data creates only a pre-registration ticket."""
     user_data = {
         "email": "master_reg@example.com",
         "phone": "+79001112233",
@@ -41,18 +49,17 @@ def test_register_master_with_city_timezone_sets_confirmed(client, db):
         "role": "master",
         "city": "Москва",
         "timezone": "Europe/Moscow",
+        "accept_terms": True,
+        "accept_personal_data": True,
     }
     response = client.post("/api/auth/register", json=user_data)
     assert response.status_code == status.HTTP_200_OK
     data = response.json()
-    assert "access_token" in data
+    assert data["status"] == "phone_verification_required"
+    assert "access_token" not in data
     u = db.query(User).filter(User.email == user_data["email"]).first()
-    assert u is not None
-    m = db.query(Master).filter(Master.user_id == u.id).first()
-    assert m is not None
-    assert (m.city or "").strip() == "Москва"
-    assert (m.timezone or "").strip() == "Europe/Moscow"
-    assert m.timezone_confirmed is True
+    assert u is None
+    assert db.query(Master).count() == 0
 
 
 def test_register_master_without_city_or_timezone_returns_400(client, db):
@@ -63,6 +70,8 @@ def test_register_master_without_city_or_timezone_returns_400(client, db):
         "full_name": "M1",
         "password": "testpassword",
         "role": "master",
+        "accept_terms": True,
+        "accept_personal_data": True,
     }
     r1 = client.post("/api/auth/register", json={**base, "phone": "+79001112234"})
     assert r1.status_code == status.HTTP_400_BAD_REQUEST

@@ -31,6 +31,13 @@ class Settings(BaseSettings):
     JWT_SECRET_KEY: str = "your-secret-key-here-change-in-production"
     ACCESS_TOKEN_EXPIRE_DAYS: int = 7
     REFRESH_TOKEN_EXPIRE_DAYS: int = 30
+    # Rollout phase 1: false accepts only numeric legacy sub without sv.
+    # Rollout phase 2: true requires sv on every normal JWT session.
+    JWT_SESSION_VERSION_REQUIRED: str = "0"
+    # Rollout phase 1: false accepts numeric untyped JWT only as bearer access.
+    # Rollout phase 2: true requires token_type=access for bearer auth.
+    # /refresh always requires token_type=refresh regardless of this flag.
+    JWT_TOKEN_TYPE_REQUIRED: str = "0"
 
     # --- Database ---
     DATABASE_URL: str = ""
@@ -177,6 +184,14 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.ENVIRONMENT.strip().lower() == "production"
+
+    @property
+    def jwt_session_version_required(self) -> bool:
+        return _parse_bool(self.JWT_SESSION_VERSION_REQUIRED)
+
+    @property
+    def jwt_token_type_required(self) -> bool:
+        return _parse_bool(self.JWT_TOKEN_TYPE_REQUIRED)
 
     @property
     def enable_dev_testdata(self) -> bool:

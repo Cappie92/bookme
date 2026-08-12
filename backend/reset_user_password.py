@@ -1,7 +1,7 @@
 import os
 from database import SessionLocal
 from models import User
-from auth import get_password_hash
+from auth import update_password_and_revoke_sessions
 
 def reset_user_password(phone: str, new_password: str):
     """Сбрасывает пароль пользователя"""
@@ -13,11 +13,9 @@ def reset_user_password(phone: str, new_password: str):
         print(f"Пользователь с телефоном {phone} не найден!")
         return False
     
-    # Хешируем новый пароль
-    hashed_password = get_password_hash(new_password)
-    
-    # Обновляем пароль
-    user.hashed_password = hashed_password
+    if not update_password_and_revoke_sessions(db, user, new_password):
+        db.rollback()
+        return False
     db.commit()
     
     print(f"Пароль для пользователя {user.email} (телефон: {user.phone}) успешно изменен!")
@@ -27,4 +25,4 @@ def reset_user_password(phone: str, new_password: str):
 
 if __name__ == "__main__":
     # Сбрасываем пароль для пользователя с телефоном +73333333333
-    reset_user_password("+73333333333", "test123") 
+    reset_user_password("+73333333333", "test123")

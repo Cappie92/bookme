@@ -360,6 +360,17 @@ def test_tokens_return_401_after_master_deletion(client, db, deletion_world):
     assert r_after.status_code == 401
 
     legacy = create_access_token(data={"sub": w["old_phone"], "role": "MASTER"})
+    replacement = User(
+        email=w["old_email"],
+        phone=w["old_phone"],
+        full_name="Replacement Master",
+        hashed_password=get_password_hash("replacement"),
+        role=UserRole.MASTER,
+        is_active=True,
+        is_verified=True,
+    )
+    db.add(replacement)
+    db.commit()
     r_legacy = client.get(
         "/api/auth/users/me",
         headers={"Authorization": f"Bearer {legacy}"},

@@ -140,21 +140,10 @@ def test_duplicate_email_rejected_on_request_email_change(client, test_user_toke
     assert r.json()["success"] is False
 
 
-def test_request_phone_verification_stub_returns_success(client, db, test_user):
-    """Регистрация: при stub flashcall ответ содержит call_id и verification_number (smoke)."""
-    from services.zvonok_service import ZVONOK_STUB_CALL_ID, ZVONOK_STUB_DIGITS
-
+def test_legacy_request_phone_verification_is_deprecated(client, test_user):
+    """Signup and recovery must use their purpose-bound challenge endpoints."""
     r = client.post(
         "/api/auth/request-phone-verification",
         json={"phone": test_user.phone},
     )
-    assert r.status_code == 200, r.text
-    data = r.json()
-    assert data["success"] is True
-    assert data.get("call_id") == ZVONOK_STUB_CALL_ID
-    assert data.get("verification_number") == ZVONOK_STUB_DIGITS
-
-    u = db.query(User).filter(User.email == "test@example.com").first()
-    assert u is not None
-    assert u.phone_verification_code == ZVONOK_STUB_DIGITS
-
+    assert r.status_code == 410, r.text

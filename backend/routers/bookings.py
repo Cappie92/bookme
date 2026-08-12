@@ -2,9 +2,11 @@ from datetime import datetime, timedelta
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
-from auth import get_current_user
+from auth import get_current_user, get_current_user_optional
 from database import get_db
 from models import (
     Booking,
@@ -27,17 +29,85 @@ from schemas import (
     BookingCreate,
     BookingUpdate,
     AvailableSlotOut,
+    ConfirmSignupPhoneVerificationRequest,
+    PhoneVerificationResponse,
 )
 from services.scheduling import check_booking_conflicts, get_available_slots, get_available_slots_any_master_logic, get_best_master_for_slot
-from services.verification_service import VerificationService
-from services.plusofon_service import plusofon_service
+from services.pending_ticket_service import (
+    claim_pending_ticket,
+    delete_pending_ticket,
+    get_pending_ticket,
+    save_pending_ticket,
+    store_pending_ticket,
+)
+from services.verification_service import PhoneChallengeError, VerificationService
+from services.zvonok_service import zvonok_service
+from settings import get_settings
 from utils.loyalty_discounts import evaluate_and_prepare_applied_discount, build_applied_discount_info
+from utils.phone import normalize_to_canonical
 
 router = APIRouter(
     prefix="/bookings",
     tags=["bookings"],
     responses={401: {"description": "Требуется авторизация"}},
 )
+
+PUBLIC_BOOKING_TICKET_TTL_SECONDS = 15 * 60
+PUBLIC_BOOKING_TICKET_PURPOSE = "public_booking_registration"
+PUBLIC_BOOKING_STORAGE_ERROR = "Public booking ticket storage unavailable"
+public_booking_verification_bearer = HTTPBearer()
+
+
+def _store_public_booking_ticket(payload: dict) -> str:
+    return store_pending_ticket(
+        purpose=PUBLIC_BOOKING_TICKET_PURPOSE,
+        payload={"pending_booking": payload},
+        ttl_seconds=PUBLIC_BOOKING_TICKET_TTL_SECONDS,
+        unavailable_detail=PUBLIC_BOOKING_STORAGE_ERROR,
+    )
+
+
+def _get_public_booking_ticket(ticket: str) -> Optional[dict]:
+    return get_pending_ticket(
+        ticket,
+        purpose=PUBLIC_BOOKING_TICKET_PURPOSE,
+        unavailable_detail=PUBLIC_BOOKING_STORAGE_ERROR,
+    )
+
+
+def _save_public_booking_ticket(ticket: str, data: dict) -> None:
+    save_pending_ticket(
+        ticket,
+        data,
+        purpose=PUBLIC_BOOKING_TICKET_PURPOSE,
+        unavailable_detail=PUBLIC_BOOKING_STORAGE_ERROR,
+    )
+
+
+def _delete_public_booking_ticket(ticket: str) -> None:
+    delete_pending_ticket(
+        ticket,
+        purpose=PUBLIC_BOOKING_TICKET_PURPOSE,
+        unavailable_detail=PUBLIC_BOOKING_STORAGE_ERROR,
+    )
+
+
+def _claim_public_booking_ticket(ticket: str) -> Optional[dict]:
+    return claim_pending_ticket(
+        ticket,
+        purpose=PUBLIC_BOOKING_TICKET_PURPOSE,
+        unavailable_detail=PUBLIC_BOOKING_STORAGE_ERROR,
+    )
+
+
+def _public_booking_pending_response(ticket: str, phone: str) -> dict:
+    return {
+        "status": "phone_verification_required",
+        "verification_kind": "public_booking",
+        "verification_token": ticket,
+        "phone": phone,
+        "expires_in": PUBLIC_BOOKING_TICKET_TTL_SECONDS,
+    }
 
 
 @router.get("/", response_model=List[BookingSchema])
@@ -315,163 +385,149 @@ async def create_booking_public(
     client_phone: str,
     db: Session = Depends(get_db),
 ):
-    """
-    Создать новое бронирование (публичный endpoint)
-    """
-    from utils.master_canon import LEGACY_INDIE_MODE
-    from models import IndieMaster
+    """Validate a public booking and persist only opaque, expiring server-side state."""
+    phone = _validate_public_booking_phone(client_phone, db)
+    _validate_specific_public_booking(booking, db, conflict_status=400)
+    ticket = _store_public_booking_ticket({
+        "flow": "specific",
+        "phone": phone,
+        "booking": booking.model_dump(mode="json"),
+    })
+    return _public_booking_pending_response(ticket, phone)
 
-    # master-only: indie_master_id запрещён (400). legacy: резолв indie→master.
-    effective_master_id = booking.master_id
-    effective_indie_id = booking.indie_master_id
-    if booking.indie_master_id:
-        if not LEGACY_INDIE_MODE:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Use master_id. Indie-masters merged into masters."
-            )
-        im = db.query(IndieMaster).filter(IndieMaster.id == booking.indie_master_id).first()
-        if not im or im.master_id is None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Use master_id. Indie-masters merged into masters."
-            )
-        effective_master_id = im.master_id
-        effective_indie_id = None
 
-    # Guard: мастер без timezone не может принимать записи
-    if effective_master_id:
-        master = db.query(Master).filter(Master.id == effective_master_id).first()
-        if master and (not getattr(master, "timezone", None) or not str(master.timezone).strip()):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Мастер не настроил часовой пояс. Запись невозможна.",
-            )
-
-    # Проверяем конфликты
-    owner_type = None
-    owner_id = None
-
-    if effective_master_id:
-        owner_type = OwnerType.MASTER
-        owner_id = effective_master_id
-        from services.scheduling import check_master_working_hours
-        is_salon_work = booking.salon_id is not None
-        salon_id = booking.salon_id if is_salon_work else None
-        if not check_master_working_hours(db, effective_master_id, booking.start_time, booking.end_time,
-                                        is_salon_work=is_salon_work, salon_id=salon_id):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Мастер не работает в указанное время"
-            )
-    elif effective_indie_id:
-        owner_type = OwnerType.INDIE_MASTER
-        owner_id = effective_indie_id
-        from services.scheduling import check_master_working_hours
-        if not check_master_working_hours(db, effective_indie_id, booking.start_time, booking.end_time):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Мастер не работает в указанное время"
-            )
-    elif booking.salon_id:
-        owner_type = OwnerType.SALON
-        owner_id = booking.salon_id
-        # Для салона проверяем, есть ли мастер, который работает в это время
-        if booking.master_id:
-            from services.scheduling import check_master_working_hours
-            if not check_master_working_hours(db, booking.master_id, booking.start_time, booking.end_time, 
-                                            is_salon_work=True, salon_id=booking.salon_id):
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Мастер не работает в салоне в указанное время"
-                )
-    else:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, 
-            detail="Не указан мастер, индивидуальный мастер или салон"
-        )
-    
-    if check_booking_conflicts(
-        db,
-        booking.start_time,
-        booking.end_time,
-        owner_type,
-        owner_id,
+def _validate_public_booking_phone(client_phone: str, db: Session) -> str:
+    phone = normalize_to_canonical(client_phone)
+    if not phone:
+        raise HTTPException(status_code=400, detail="Некорректный номер телефона")
+    user = db.query(User).filter(User.phone == phone).first()
+    if user and (
+        str(getattr(user.role, "value", user.role)) != "client"
+        or not user.is_active
+        or user.deleted_at is not None
     ):
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Выбранное время уже занято"
+            status_code=400,
+            detail="Запись не удалась, войдите под аккаунтом клиента",
         )
+    return phone
 
-    # Ищем или создаем клиента по номеру телефона
-    client = db.query(User).filter(User.phone == client_phone).first()
-    is_new_client = False
-    needs_password_setup = False
-    needs_password_verification = False
-    needs_phone_verification = False
-    
-    if not client:
-        # Создаем нового клиента
-        client = User(
-            phone=client_phone,
-            email=f"{client_phone}@temp.com",  # Временный email для токена
-            role="client",
-            is_active=True,
-            is_verified=True,
-            is_phone_verified=False,  # Телефон не верифицирован
-            full_name=f"Клиент {client_phone}",
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow()
-        )
-        db.add(client)
-        db.commit()
-        db.refresh(client)
-        is_new_client = True
-        needs_password_setup = True
-        needs_phone_verification = True
-    elif client.role != "client":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, 
-            detail="Запись не удалась, войдите под аккаунтом клиента"
-        )
-    else:
-        # Существующий клиент - добавляем email если его нет
-        if not client.email:
-            client.email = f"{client_phone}@temp.com"
-            db.commit()
-            db.refresh(client)
-        
-        # Проверяем, нужна ли установка пароля
-        if not client.hashed_password:
-            needs_password_setup = True
-        else:
-            # Существующий пользователь с паролем - нужно проверить пароль
-            needs_password_verification = True
-        
-        # Проверяем, нужна ли верификация телефона
-        if not client.is_phone_verified:
-            needs_phone_verification = True
 
-    # Определяем начальный статус записи
-    initial_status = BookingStatus.CREATED
-    
-    # Проверяем, нужно ли автоматически подтвердить запись
-    if effective_master_id:
-        master = db.query(Master).filter(Master.id == effective_master_id).first()
-        if master and master.auto_confirm_bookings:
-            from services.scheduling import check_master_working_hours
-            is_salon_work = booking.salon_id is not None
-            salon_id = booking.salon_id if is_salon_work else None
-            if check_master_working_hours(db, effective_master_id, booking.start_time, booking.end_time,
-                                        is_salon_work=is_salon_work, salon_id=salon_id):
-                initial_status = BookingStatus.COMPLETED
-    
-    # Цена и скидки (runtime)
+def _validate_specific_public_booking(
+    booking: BookingCreate, db: Session, *, conflict_status: int
+) -> tuple[Optional[int], Optional[int]]:
+    from models import IndieMaster
+    from services.scheduling import check_master_working_hours
+    from utils.master_canon import LEGACY_INDIE_MODE
+
+    effective_master_id = booking.master_id
+    effective_indie_id = booking.indie_master_id
+    if effective_indie_id:
+        if not LEGACY_INDIE_MODE:
+            raise HTTPException(400, "Use master_id. Indie-masters merged into masters.")
+        indie = db.query(IndieMaster).filter(IndieMaster.id == effective_indie_id).first()
+        if not indie or indie.master_id is None:
+            raise HTTPException(400, "Use master_id. Indie-masters merged into masters.")
+        effective_master_id, effective_indie_id = indie.master_id, None
+
     service = db.query(Service).filter(Service.id == booking.service_id).first()
     if not service:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Service not found")
-    base_price = service.price or 0
+        raise HTTPException(status_code=404, detail="Service not found")
+    if booking.end_time <= booking.start_time:
+        raise HTTPException(400, "Время окончания должно быть больше времени начала")
+    duration_minutes = (booking.end_time - booking.start_time).total_seconds() / 60
+    if service.duration and abs(duration_minutes - service.duration) > 1:
+        raise HTTPException(400, "Продолжительность услуги не соответствует времени записи")
 
-    discounted_payment_amount, applied_discount_data = evaluate_and_prepare_applied_discount(
+    if effective_master_id:
+        master_query = db.query(Master).filter(Master.id == effective_master_id)
+        if conflict_status == status.HTTP_409_CONFLICT:
+            master_query = master_query.with_for_update()
+        master = master_query.first()
+        if not master:
+            raise HTTPException(status_code=404, detail="Master not found")
+        if not getattr(master, "timezone", None) or not str(master.timezone).strip():
+            raise HTTPException(400, "Мастер не настроил часовой пояс. Запись невозможна.")
+        if not check_master_working_hours(
+            db,
+            effective_master_id,
+            booking.start_time,
+            booking.end_time,
+            is_salon_work=booking.salon_id is not None,
+            salon_id=booking.salon_id,
+        ):
+            raise HTTPException(400, "Мастер не работает в указанное время")
+        owner_type, owner_id = OwnerType.MASTER, effective_master_id
+    elif effective_indie_id:
+        if not check_master_working_hours(
+            db, effective_indie_id, booking.start_time, booking.end_time
+        ):
+            raise HTTPException(400, "Мастер не работает в указанное время")
+        owner_type, owner_id = OwnerType.INDIE_MASTER, effective_indie_id
+    elif booking.salon_id:
+        owner_type, owner_id = OwnerType.SALON, booking.salon_id
+    else:
+        raise HTTPException(400, "Не указан мастер, индивидуальный мастер или салон")
+
+    if check_booking_conflicts(
+        db, booking.start_time, booking.end_time, owner_type, owner_id
+    ):
+        raise HTTPException(conflict_status, "Выбранное время уже занято")
+    return effective_master_id, effective_indie_id
+
+
+def _resolve_or_create_verified_public_client(
+    phone: str, client_name: Optional[str], db: Session
+) -> tuple[User, bool]:
+    client = db.query(User).filter(User.phone == phone).with_for_update().first()
+    if client:
+        if (
+            str(getattr(client.role, "value", client.role)) != "client"
+            or not client.is_active
+            or client.deleted_at is not None
+        ):
+            raise HTTPException(409, "Номер уже принадлежит другому типу аккаунта")
+        client.is_phone_verified = True
+        return client, False
+    client = User(
+        phone=phone,
+        email=f"{phone}@temp.com",
+        role="client",
+        is_active=True,
+        is_verified=True,
+        is_phone_verified=True,
+        full_name=(client_name or "").strip() or f"Клиент {phone}",
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow(),
+    )
+    db.add(client)
+    db.flush()
+    return client, True
+
+
+def _create_specific_public_booking_after_proof(
+    pending: dict, db: Session
+) -> tuple[Booking, User, bool, Optional[dict]]:
+    from utils.booking_factory import BookingOwnerError, normalize_booking_fields
+
+    booking = BookingCreate(**pending["booking"])
+    effective_master_id, effective_indie_id = _validate_specific_public_booking(
+        booking, db, conflict_status=409
+    )
+    client, is_new_client = _resolve_or_create_verified_public_client(
+        pending["phone"], booking.client_name, db
+    )
+    service = db.query(Service).filter(Service.id == booking.service_id).first()
+    initial_status = BookingStatus.CREATED
+    master = (
+        db.query(Master).filter(Master.id == effective_master_id).first()
+        if effective_master_id
+        else None
+    )
+    if master and master.auto_confirm_bookings:
+        initial_status = BookingStatus.COMPLETED
+
+    discounted_amount, discount_data = evaluate_and_prepare_applied_discount(
         master_id=effective_master_id,
         client_id=client.id,
         client_phone=client.phone,
@@ -479,91 +535,177 @@ async def create_booking_public(
         service_id=booking.service_id,
         db=db,
     )
-
-    # Создаем бронирование (salon_id/branch_id только через normalize_booking_fields)
-    from utils.booking_factory import normalize_booking_fields, BookingOwnerError
-
-    booking_dict = booking.dict()
-    booking_dict.pop('client_name', None)
-    booking_dict.pop('service_name', None)
-    booking_dict.pop('service_duration', None)
-    booking_dict.pop('service_price', None)
-    booking_dict.pop('use_loyalty_points', None)
-    booking_dict.pop('salon_id', None)
-    booking_dict.pop('branch_id', None)
-    booking_dict['loyalty_points_used'] = 0
-    booking_dict['status'] = initial_status.value
-    booking_dict['payment_amount'] = (
-        discounted_payment_amount if discounted_payment_amount is not None else base_price
-    )
-    booking_dict['client_id'] = client.id
-
+    data = booking.model_dump()
+    for key in (
+        "client_name", "service_name", "service_duration", "service_price",
+        "use_loyalty_points", "salon_id", "branch_id",
+    ):
+        data.pop(key, None)
+    data.update({
+        "client_id": client.id,
+        "loyalty_points_used": 0,
+        "status": initial_status.value,
+        "payment_amount": discounted_amount if discounted_amount is not None else (service.price or 0),
+    })
     if effective_indie_id:
-        owner_type_str = "indie"
-        owner_id_val = effective_indie_id
-    elif effective_master_id:
-        owner_type_str = "master" if (service.salon_id is None) else "salon"
-        owner_id_val = effective_master_id
+        owner_type, owner_id = "indie", effective_indie_id
     else:
-        owner_type_str = "salon"
-        owner_id_val = booking.salon_id
+        owner_type = "master" if service.salon_id is None else "salon"
+        owner_id = effective_master_id or booking.salon_id
     try:
-        booking_dict = normalize_booking_fields(
-            booking_dict, service, owner_type_str, owner_id_val, db=db
-        )
-    except BookingOwnerError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-
-    db_booking = Booking(**booking_dict)
-    db.add(db_booking)
+        data = normalize_booking_fields(data, service, owner_type, owner_id, db=db)
+    except BookingOwnerError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    created = Booking(**data)
+    db.add(created)
     db.flush()
-
-    if applied_discount_data:
-        applied_discount = AppliedDiscount(
-            booking_id=db_booking.id,
-            discount_id=applied_discount_data["rule_id"] if applied_discount_data["rule_type"] != "personal" else None,
-            personal_discount_id=applied_discount_data["rule_id"] if applied_discount_data["rule_type"] == "personal" else None,
-            discount_percent=applied_discount_data["discount_percent"],
-            discount_amount=applied_discount_data["discount_amount"],
+    applied = None
+    if discount_data:
+        applied = AppliedDiscount(
+            booking_id=created.id,
+            discount_id=discount_data["rule_id"] if discount_data["rule_type"] != "personal" else None,
+            personal_discount_id=discount_data["rule_id"] if discount_data["rule_type"] == "personal" else None,
+            discount_percent=discount_data["discount_percent"],
+            discount_amount=discount_data["discount_amount"],
         )
-        db.add(applied_discount)
+        db.add(applied)
+    return created, client, is_new_client, applied
 
-    db.commit()
-    db.refresh(db_booking)
-    
-    # Если нужна верификация телефона, отправляем звонок
-    if needs_phone_verification:
-        try:
-            verification_code = VerificationService.generate_verification_code()
-            client.phone_verification_code = verification_code
-            client.phone_verification_expires = datetime.utcnow() + timedelta(minutes=5)
-            db.commit()
-            
-            call_result = await plusofon_service.initiate_call(client_phone, verification_code)
-            if not call_result["success"]:
-                print(f"Ошибка отправки звонка верификации: {call_result['message']}")
-        except Exception as e:
-            print(f"Ошибка отправки звонка верификации: {e}")
-    
-    # Создаем токен для клиента
-    from auth import create_access_token
-    access_token = create_access_token(data={"sub": client.email})
-    
-    return {
-        "booking": db_booking,
-        "access_token": access_token,
+
+@router.post("/public/verification/request", response_model=PhoneVerificationResponse)
+async def request_public_booking_phone_verification(
+    creds: HTTPAuthorizationCredentials = Depends(public_booking_verification_bearer),
+):
+    ticket = creds.credentials
+    state = _get_public_booking_ticket(ticket)
+    if not state:
+        raise HTTPException(401, "Invalid or expired public booking ticket")
+    phone = str(state.get("pending_booking", {}).get("phone") or "")
+    call_result = zvonok_service.send_verification_call(phone)
+    if not call_result.get("success"):
+        return PhoneVerificationResponse(
+            message=call_result.get("error") or "Ошибка инициации звонка",
+            success=False,
+        )
+    try:
+        challenge = VerificationService.create_phone_challenge_state(
+            purpose=PUBLIC_BOOKING_TICKET_PURPOSE,
+            target_phone=phone,
+            call_result=call_result,
+        )
+    except PhoneChallengeError as exc:
+        raise HTTPException(502, exc.detail) from exc
+    state.update(challenge)
+    _save_public_booking_ticket(ticket, state)
+    return PhoneVerificationResponse(
+        message="Звонок инициирован. Введите последние 4 цифры входящего номера.",
+        success=True,
+        call_id=challenge["phone_verification_call_id"],
+        verification_number=(
+            str(call_result.get("pincode") or call_result.get("verification_number") or "")
+            if get_settings().zvonok_stub
+            else None
+        ),
+    )
+
+
+@router.post("/public/verification/confirm")
+async def confirm_public_booking_phone_verification(
+    request: ConfirmSignupPhoneVerificationRequest,
+    creds: HTTPAuthorizationCredentials = Depends(public_booking_verification_bearer),
+    db: Session = Depends(get_db),
+):
+    ticket = creds.credentials
+    state = _get_public_booking_ticket(ticket)
+    if not state:
+        raise HTTPException(401, "Invalid or expired public booking ticket")
+    pending = state.get("pending_booking") or {}
+    phone = str(pending.get("phone") or "")
+    try:
+        VerificationService.consume_phone_challenge_state(
+            state,
+            purpose=PUBLIC_BOOKING_TICKET_PURPOSE,
+            target_phone=phone,
+            call_id=request.call_id,
+            phone_digits=request.phone_digits,
+        )
+    except PhoneChallengeError as exc:
+        _save_public_booking_ticket(ticket, state)
+        raise HTTPException(400, exc.detail) from exc
+
+    claimed = _claim_public_booking_ticket(ticket)
+    if not claimed:
+        raise HTTPException(409, "Верификация уже завершена")
+    claimed_pending = claimed.get("pending_booking") or {}
+    try:
+        VerificationService.consume_phone_challenge_state(
+            claimed,
+            purpose=PUBLIC_BOOKING_TICKET_PURPOSE,
+            target_phone=str(claimed_pending.get("phone") or ""),
+            call_id=request.call_id,
+            phone_digits=request.phone_digits,
+        )
+        if claimed_pending.get("flow") == "specific":
+            booking, client, is_new_client, applied = _create_specific_public_booking_after_proof(
+                claimed_pending, db
+            )
+            master_name = None
+        elif claimed_pending.get("flow") == "any_master":
+            booking, client, is_new_client, master_name = _create_any_master_public_booking_after_proof(
+                claimed_pending, db
+            )
+            applied = None
+        else:
+            raise HTTPException(400, "Unknown public booking flow")
+        db.commit()
+        db.refresh(booking)
+        if applied:
+            booking.applied_discount = build_applied_discount_info(applied)
+    except HTTPException:
+        db.rollback()
+        raise
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(409, "Phone or booking conflict") from exc
+    except Exception:
+        db.rollback()
+        raise
+
+    from auth import create_user_access_token
+
+    result = {
+        "success": True,
+        "booking": booking,
+        "booking_id": booking.id,
+        "access_token": create_user_access_token(client),
         "is_new_client": is_new_client,
-        "needs_password_setup": needs_password_setup,
-        "needs_password_verification": needs_password_verification,
-        "needs_phone_verification": needs_phone_verification,
+        "needs_password_setup": not bool(client.hashed_password),
+        "needs_password_verification": bool(client.hashed_password),
+        "needs_phone_verification": False,
         "client": {
             "id": client.id,
             "phone": client.phone,
             "full_name": client.full_name,
-            "role": client.role,
-            "is_phone_verified": client.is_phone_verified
-        }
+            "role": getattr(client.role, "value", client.role),
+            "is_phone_verified": client.is_phone_verified,
+        },
     }
+    if master_name:
+        result.update({
+            "master_id": booking.master_id,
+            "master_name": master_name,
+            "message": f"Запись создана с мастером {master_name}",
+        })
+    return result
+
+
+@router.post("/public/verification/cancel", status_code=204)
+async def cancel_public_booking_phone_verification(
+    creds: HTTPAuthorizationCredentials = Depends(public_booking_verification_bearer),
+):
+    if _get_public_booking_ticket(creds.credentials):
+        _delete_public_booking_ticket(creds.credentials)
+    return None
 
 
 @router.put("/{booking_id}", response_model=BookingSchema)
@@ -918,50 +1060,12 @@ async def get_booking(
 
 @router.post("/verify-phone-cjm", summary="Верификация телефона в CJM записи на услугу")
 async def verify_phone_cjm(
-    phone: str,
-    code: str,
-    db: Session = Depends(get_db)
 ):
-    """
-    Верификация телефона по коду в процессе записи на услугу.
-    """
-    try:
-        # Ищем пользователя по телефону
-        user = db.query(User).filter(User.phone == phone).first()
-        if not user:
-            return {
-                "success": False,
-                "message": "Пользователь с таким номером телефона не найден"
-            }
-        
-        # Проверяем код верификации
-        if (user.phone_verification_code == code and 
-            user.phone_verification_expires and 
-            user.phone_verification_expires > datetime.utcnow()):
-            
-            # Отмечаем телефон как верифицированный
-            user.is_phone_verified = True
-            user.phone_verification_code = None
-            user.phone_verification_expires = None
-            db.commit()
-            
-            return {
-                "success": True,
-                "message": "Телефон успешно верифицирован",
-                "user_id": user.id
-            }
-        else:
-            return {
-                "success": False,
-                "message": "Неверный код или код истек"
-            }
-            
-    except Exception as e:
-        print(f"Ошибка верификации телефона в CJM: {e}")
-        return {
-            "success": False,
-            "message": "Внутренняя ошибка сервера"
-        }
+    """Deprecated unsafe phone-only lookup; public booking uses a bound ticket."""
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail="Используйте purpose-bound public booking verification",
+    )
 
 
 @router.post("/create-with-any-master", response_model=dict)
@@ -974,118 +1078,131 @@ async def create_booking_with_any_master(
     notes: Optional[str] = None,
     client_phone: Optional[str] = None,
     db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
 ):
-    """
-    Создать запись с автоматическим выбором лучшего мастера
-    """
-    try:
-        print(f"\n{'='*60}")
-        print(f"=== СОЗДАНИЕ ЗАПИСИ С 'ЛЮБЫМ МАСТЕРОМ' ===")
-        print(f"salon_id: {salon_id}")
-        print(f"service_id: {service_id}")
-        print(f"start_time: {start_time}")
-        print(f"end_time: {end_time}")
-        print(f"branch_id: {branch_id}")
-        print(f"notes: {notes}")
-        print(f"client_phone: {client_phone}")
-        print(f"{'='*60}")
-        
-        # Получаем лучшего мастера для данного времени
-        best_master = get_best_master_for_slot(
-            db, salon_id, service_id, start_time, end_time, branch_id
-        )
-        
-        if not best_master:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Нет доступных мастеров для выбранного времени"
-            )
-        
-        print(f"Выбран лучший мастер: {best_master['id']} ({best_master['name']})")
-        
-        # Создаем данные для записи
-        booking_data = {
-            "service_id": service_id,
-            "master_id": best_master['id'],
-            "salon_id": salon_id,
-            "branch_id": branch_id,
-            "start_time": start_time,
-            "end_time": end_time,
-            "notes": notes
-        }
-        
-        # Проверяем конфликты
-        if check_booking_conflicts(
-            db, start_time, end_time, OwnerType.MASTER, best_master['id']
-        ):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Выбранное время уже занято"
-            )
-        
-        # Создаем запись (salon_id/branch_id через normalize_booking_fields)
-        from models import Booking, BookingStatus, Service
-        from datetime import datetime
-        from utils.booking_factory import normalize_booking_fields, BookingOwnerError
-
-        service = db.query(Service).filter(Service.id == service_id).first()
-        if not service:
-            raise HTTPException(status_code=404, detail="Service not found")
-        base_data = {
-            "service_id": service_id,
-            "master_id": best_master["id"],
-            "start_time": start_time,
-            "end_time": end_time,
-            "notes": notes,
-            "status": BookingStatus.CREATED.value,
-            "payment_amount": service.price or 0,
-        }
+    """Validate any-master selection and persist no permanent rows before proof."""
+    if current_user and (
+        str(getattr(current_user.role, "value", current_user.role)) != "client"
+        or not current_user.is_active
+        or current_user.deleted_at is not None
+        or not current_user.is_phone_verified
+    ):
+        raise HTTPException(403, "Требуется подтверждённый аккаунт клиента")
+    if not current_user and not client_phone:
+        raise HTTPException(400, "Номер телефона обязателен")
+    if end_time <= start_time:
+        raise HTTPException(400, "Время окончания должно быть больше времени начала")
+    phone = (
+        current_user.phone
+        if current_user
+        else _validate_public_booking_phone(client_phone, db)
+    )
+    service = db.query(Service).filter(Service.id == service_id).first()
+    if not service:
+        raise HTTPException(404, "Service not found")
+    if service.salon_id != salon_id:
+        raise HTTPException(400, "Service does not belong to the selected salon")
+    duration_minutes = (end_time - start_time).total_seconds() / 60
+    if service.duration and abs(duration_minutes - service.duration) > 1:
+        raise HTTPException(400, "Продолжительность услуги не соответствует времени записи")
+    best_master = get_best_master_for_slot(
+        db, salon_id, service_id, start_time, end_time, branch_id
+    )
+    if not best_master:
+        raise HTTPException(400, "Нет доступных мастеров для выбранного времени")
+    if check_booking_conflicts(
+        db, start_time, end_time, OwnerType.MASTER, best_master["id"]
+    ):
+        raise HTTPException(400, "Выбранное время уже занято")
+    pending = {
+        "flow": "any_master",
+        "phone": phone,
+        "salon_id": salon_id,
+        "service_id": service_id,
+        "start_time": start_time.isoformat(),
+        "end_time": end_time.isoformat(),
+        "branch_id": branch_id,
+        "notes": notes,
+    }
+    if current_user:
         try:
-            booking_data = normalize_booking_fields(
-                base_data, service, "salon", best_master["id"], db=db
+            booking, _, _, master_name = _create_any_master_public_booking_after_proof(
+                pending, db
             )
-        except BookingOwnerError as e:
-            raise HTTPException(status_code=400, detail=str(e)) from e
-        new_booking = Booking(**booking_data, created_at=datetime.utcnow())
-        
-        # Если указан телефон клиента, создаем или находим пользователя
-        if client_phone:
-            from models import User
-            user = db.query(User).filter(User.phone == client_phone).first()
-            if user:
-                new_booking.client_id = user.id
-            else:
-                # Создаем нового пользователя
-                user = User(
-                    phone=client_phone,
-                    role="client",
-                    is_active=True,
-                    created_at=datetime.utcnow()
-                )
-                db.add(user)
-                db.flush()  # Получаем ID пользователя
-                new_booking.client_id = user.id
-        
-        db.add(new_booking)
-        db.commit()
-        db.refresh(new_booking)
-        
-        print(f"Запись успешно создана: ID {new_booking.id}")
-        print(f"{'='*60}\n")
-        
+            db.commit()
+            db.refresh(booking)
+        except HTTPException:
+            db.rollback()
+            raise
+        except Exception:
+            db.rollback()
+            raise
         return {
             "success": True,
-            "booking_id": new_booking.id,
-            "master_id": best_master['id'],
-            "master_name": best_master['name'],
-            "message": f"Запись создана с мастером {best_master['name']}"
+            "booking_id": booking.id,
+            "master_id": booking.master_id,
+            "master_name": master_name,
+            "message": f"Запись создана с мастером {master_name}",
         }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"Ошибка создания записи: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Ошибка при создании записи: {str(e)}"
+    ticket = _store_public_booking_ticket(pending)
+    return _public_booking_pending_response(ticket, phone)
+
+
+def _create_any_master_public_booking_after_proof(
+    pending: dict, db: Session
+) -> tuple[Booking, User, bool, str]:
+    from utils.booking_factory import BookingOwnerError, normalize_booking_fields
+
+    start_time = datetime.fromisoformat(pending["start_time"])
+    end_time = datetime.fromisoformat(pending["end_time"])
+    service = db.query(Service).filter(Service.id == pending["service_id"]).first()
+    if not service:
+        raise HTTPException(404, "Service not found")
+    if service.salon_id != pending["salon_id"]:
+        raise HTTPException(409, "Service no longer belongs to the selected salon")
+    best_master = get_best_master_for_slot(
+        db,
+        pending["salon_id"],
+        pending["service_id"],
+        start_time,
+        end_time,
+        pending.get("branch_id"),
+    )
+    if not best_master or check_booking_conflicts(
+        db, start_time, end_time, OwnerType.MASTER,
+        best_master["id"] if best_master else 0,
+    ):
+        raise HTTPException(409, "Выбранное время уже занято")
+    locked_master = (
+        db.query(Master)
+        .filter(Master.id == best_master["id"])
+        .with_for_update()
+        .first()
+    )
+    if not locked_master or check_booking_conflicts(
+        db, start_time, end_time, OwnerType.MASTER, best_master["id"]
+    ):
+        raise HTTPException(409, "Выбранное время уже занято")
+    client, is_new_client = _resolve_or_create_verified_public_client(
+        pending["phone"], None, db
+    )
+    data = {
+        "service_id": service.id,
+        "master_id": best_master["id"],
+        "start_time": start_time,
+        "end_time": end_time,
+        "notes": pending.get("notes"),
+        "status": BookingStatus.CREATED.value,
+        "payment_amount": service.price or 0,
+        "client_id": client.id,
+    }
+    try:
+        data = normalize_booking_fields(
+            data, service, "salon", best_master["id"], db=db
         )
+    except BookingOwnerError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    created = Booking(**data, created_at=datetime.utcnow())
+    db.add(created)
+    db.flush()
+    return created, client, is_new_client, best_master["name"]

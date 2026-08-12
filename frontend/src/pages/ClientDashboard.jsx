@@ -876,7 +876,7 @@ export default function ClientDashboard() {
     }
   }
 
-  const handlePasswordSuccess = () => {
+  const handlePasswordSuccess = ({ sessionRevoked = false } = {}) => {
     // Обновляем данные после успешной установки/проверки пароля
     // Удаляем обработчик beforeunload
     removeBeforeUnloadHandler()
@@ -888,6 +888,11 @@ export default function ClientDashboard() {
     // Закрываем модальное окно
     setShowPasswordModal(false)
     
+    if (sessionRevoked) {
+      navigate('/')
+      return
+    }
+
     // Обновляем данные
     loadDashboardData()
     

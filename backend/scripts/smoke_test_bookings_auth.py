@@ -9,19 +9,19 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from sqlalchemy.orm import Session
 from database import SessionLocal
 from models import User, Master, Salon, SalonBranch, Booking, AppliedDiscount, Service
-from jose import jwt
-from datetime import datetime, timedelta
 import json
-
-# Конфигурация (из auth.py)
-SECRET_KEY = os.getenv("JWT_SECRET_KEY", "your-secret-key-here-change-in-production")
-ALGORITHM = "HS256"
+from auth import create_user_access_token
 
 def create_test_token(user_id: int, email: str) -> str:
-    """Создать тестовый JWT токен"""
-    expire = datetime.utcnow() + timedelta(days=7)
-    to_encode = {"sub": email, "exp": expire}
-    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    """Создать canonical access JWT; email retained only for call compatibility."""
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user:
+            raise ValueError(f"User {user_id} not found")
+        return create_user_access_token(user)
+    finally:
+        db.close()
 
 def get_master_by_user_id(db: Session, user_id: int):
     """Получить Master по user_id"""

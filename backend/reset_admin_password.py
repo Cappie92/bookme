@@ -2,7 +2,7 @@ import asyncio
 from database import engine
 from models import User
 from sqlalchemy.orm import sessionmaker
-from auth import get_password_hash
+from auth import update_password_and_revoke_sessions
 
 async def reset_admin_password():
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -15,8 +15,8 @@ async def reset_admin_password():
         if admin:
             # Устанавливаем новый пароль
             new_password = "1JaK999ddd9"
-            admin.hashed_password = get_password_hash(new_password)
-            
+            if not update_password_and_revoke_sessions(db, admin, new_password):
+                raise RuntimeError("Admin password update failed")
             db.commit()
             print(f"Пароль для администратора {admin.phone} успешно сброшен на: {new_password}")
         else:
@@ -29,4 +29,4 @@ async def reset_admin_password():
         db.close()
 
 if __name__ == "__main__":
-    asyncio.run(reset_admin_password()) 
+    asyncio.run(reset_admin_password())

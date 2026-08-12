@@ -5,6 +5,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
+from sqlalchemy import event
 from sqlalchemy.orm import sessionmaker
 
 from auth import get_password_hash
@@ -18,6 +19,24 @@ engine = create_engine(
     SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}
 )
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def canonical_authenticated_user_default():
+    """Legacy test builders represent login-ready users unless explicitly unverified.
+
+    Runtime model defaults stay unchanged. Registration/legacy lifecycle tests pass
+    ``is_phone_verified=False`` explicitly and therefore bypass this test-only default.
+    """
+    def set_verified_default(target, args, kwargs):
+        if "is_phone_verified" not in kwargs:
+            target.is_phone_verified = True
+
+    event.listen(User, "init", set_verified_default)
+    try:
+        yield
+    finally:
+        event.remove(User, "init", set_verified_default)
 
 
 @pytest.fixture(scope="function")
@@ -59,6 +78,7 @@ def test_user(db):
         role=UserRole.CLIENT,
         is_active=True,
         is_verified=True,
+        is_phone_verified=True,
     )
     db.add(user)
     db.commit()
@@ -76,6 +96,7 @@ def test_admin(db):
         role=UserRole.ADMIN,
         is_active=True,
         is_verified=True,
+        is_phone_verified=True,
     )
     db.add(admin)
     db.commit()
@@ -93,6 +114,7 @@ def test_master(db):
         role=UserRole.MASTER,
         is_active=True,
         is_verified=True,
+        is_phone_verified=True,
     )
     db.add(master)
     db.commit()
@@ -110,6 +132,7 @@ def test_salon(db):
         role=UserRole.SALON,
         is_active=True,
         is_verified=True,
+        is_phone_verified=True,
     )
     db.add(salon)
     db.commit()

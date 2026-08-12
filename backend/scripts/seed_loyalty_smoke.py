@@ -161,6 +161,7 @@ def _upsert_client(
         user.full_name = full_name
         user.is_active = True
         user.is_verified = True
+        user.is_phone_verified = True
         user.hashed_password = get_password_hash(SMOKE_PASSWORD)
         return user
     user = User(
@@ -171,6 +172,7 @@ def _upsert_client(
         role=UserRole.CLIENT,
         is_active=True,
         is_verified=True,
+        is_phone_verified=True,
     )
     db.add(user)
     db.flush()
@@ -195,6 +197,7 @@ def _upsert_master_user(
         user.full_name = full_name
         user.is_active = True
         user.is_verified = True
+        user.is_phone_verified = True
         user.hashed_password = get_password_hash(SMOKE_PASSWORD)
         return user
     user = User(
@@ -205,6 +208,7 @@ def _upsert_master_user(
         role=UserRole.MASTER,
         is_active=True,
         is_verified=True,
+        is_phone_verified=True,
     )
     db.add(user)
     db.flush()
@@ -233,6 +237,7 @@ def _upsert_master(
             city="Москва",
             address=f"Smoke address {SMOKE_TAG}",
             site_description=f"{SMOKE_TAG} public booking smoke",
+            is_deleted=False,
         )
         db.add(m)
         db.flush()
@@ -241,6 +246,7 @@ def _upsert_master(
         m.timezone = "Europe/Moscow"
         m.timezone_confirmed = True
         m.city = "Москва"
+        m.is_deleted = False
         if not (m.site_description and SMOKE_TAG in m.site_description):
             m.site_description = f"{SMOKE_TAG} public booking smoke"
     return m
@@ -514,19 +520,30 @@ def verify_loyalty_preview(db: Session) -> Dict[str, Any]:
     }
 
 
-def verify_public_http() -> Dict[str, Any]:
+def verify_public_http(db: Optional[Session] = None) -> Dict[str, Any]:
     """GET публичных профилей мастеров (200)."""
     from fastapi.testclient import TestClient
+    from database import get_db
     from main import app
 
-    client = TestClient(app)
-    out: Dict[str, Any] = {"masters": {}, "ok": True}
-    for domain in SMOKE_DOMAINS:
-        r = client.get(f"/api/public/masters/{domain}")
-        out["masters"][domain] = {"status_code": r.status_code}
-        if r.status_code != 200:
-            out["ok"] = False
-    return out
+    previous_override = app.dependency_overrides.get(get_db)
+    if db is not None:
+        app.dependency_overrides[get_db] = lambda: db
+    try:
+        with TestClient(app) as client:
+            out: Dict[str, Any] = {"masters": {}, "ok": True}
+            for domain in SMOKE_DOMAINS:
+                r = client.get(f"/api/public/masters/{domain}")
+                out["masters"][domain] = {"status_code": r.status_code}
+                if r.status_code != 200:
+                    out["ok"] = False
+            return out
+    finally:
+        if db is not None:
+            if previous_override is None:
+                app.dependency_overrides.pop(get_db, None)
+            else:
+                app.dependency_overrides[get_db] = previous_override
 
 
 def print_smoke_users_report(db: Session) -> None:
@@ -555,7 +572,7 @@ def run_post_seed_self_check(db: Session) -> Dict[str, Any]:
     if not email_chk["ok"]:
         report["ok"] = False
 
-    http_chk = verify_public_http()
+    http_chk = verify_public_http(db)
     report["sections"]["public_http"] = http_chk
     if not http_chk["ok"]:
         report["ok"] = False

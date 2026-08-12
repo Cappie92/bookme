@@ -17,7 +17,7 @@ def _ios_app_tokens(client, user, monkeypatch):
         "get_settings",
         lambda: type("S", (), {"FRONTEND_URL": "https://dedato.ru", "is_production": False})(),
     )
-    code = auth_router._store_web_handoff(user.id, "ios_app")
+    code = auth_router._store_web_handoff(user.id, "ios_app", user.session_version)
     return client.post("/api/auth/web-handoff/exchange", json={"code": code}).json()
 
 

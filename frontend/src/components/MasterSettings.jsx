@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react'
 import { ArrowTopRightOnSquareIcon, ClipboardDocumentIcon, UserCircleIcon } from '@heroicons/react/24/outline'
 import { cities, getTimezoneByCity } from '../utils/cities'
 import { getImageUrl, API_BASE_URL } from '../utils/config'
-import { apiGet, apiPut, apiFetch } from '../utils/api'
+import { apiGet, apiPut, apiFetch, clearAuthSession } from '../utils/api'
 import PaymentMethodSelector from './PaymentMethodSelector'
 import Tooltip from './Tooltip'
 import FreeSlotsShareCardModal from './FreeSlotsShareCardModal'
@@ -539,13 +539,8 @@ export default function MasterSettings({
         })
       })
       if (res.ok) {
-        setSuccess('Пароль успешно изменен')
-        setPasswordMode(false)
-        setPasswordForm({
-          oldPassword: '',
-          newPassword: '',
-          confirmPassword: ''
-        })
+        clearAuthSession('password_changed')
+        navigate('/')
       } else {
         const data = await res.json()
         setError(data.detail || 'Ошибка изменения пароля')

@@ -665,6 +665,57 @@ def validate_promo_code_for_master(
     )
 
 
+def validate_promo_code_for_registration(db: Session, code: str) -> str:
+    """Read-only validation possible before a new master entity exists.
+
+    Completion still runs the full master-bound validation so races and
+    per-master constraints are enforced inside the account transaction.
+    """
+    normalized = normalize_promo_code(code)
+    now = datetime.utcnow()
+    promo_code = (
+        db.query(PromoEngineCode)
+        .filter(PromoEngineCode.code == normalized)
+        .first()
+    )
+    if not promo_code:
+        raise PromoEngineError("code_not_found", "Промокод не найден")
+    if promo_code.status != PromoCodeStatus.ACTIVE:
+        raise PromoEngineError("code_inactive", "Промокод отключён")
+
+    campaign = promo_code.campaign
+    if not campaign:
+        raise PromoEngineError("campaign_not_found", "Кампания не найдена")
+    if campaign.status != PromoCampaignStatus.ACTIVE:
+        raise PromoEngineError("campaign_inactive", "Кампания неактивна")
+    if campaign.starts_at and campaign.starts_at > now:
+        raise PromoEngineError("campaign_not_started", "Кампания ещё не началась")
+    if campaign.ends_at and campaign.ends_at < now:
+        raise PromoEngineError("campaign_expired", "Кампания истекла")
+    if campaign.promo_category != PromoCategory.ACQUISITION:
+        raise PromoEngineError("wrong_category", "Промокод недоступен для этой категории")
+    if campaign.eligible_subscription_type != SubscriptionType.MASTER:
+        raise PromoEngineError("wrong_subscription_type", "Промокод недоступен для мастеров")
+    if (
+        promo_code.max_redemptions is not None
+        and promo_code.current_redemptions >= promo_code.max_redemptions
+    ):
+        raise PromoEngineError("code_limit_reached", "Промокод исчерпан")
+    if campaign.max_total_redemptions is not None:
+        total = (
+            db.query(func.count(PromoRedemption.id))
+            .filter(
+                PromoRedemption.campaign_id == campaign.id,
+                PromoRedemption.status.in_(ACTIVE_REDEMPTION_STATUSES),
+            )
+            .scalar()
+            or 0
+        )
+        if total >= campaign.max_total_redemptions:
+            raise PromoEngineError("campaign_limit_reached", "Лимит кампании исчерпан")
+    return normalized
+
+
 def create_pending_redemption(db: Session, master_id: int, code: str) -> PromoRedemption:
     result = validate_promo_code_for_master(db, master_id, code, PromoCategory.ACQUISITION)
     campaign = result.campaign

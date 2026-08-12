@@ -62,6 +62,17 @@ export const getAuthHeaders = () => {
   return headers
 }
 
+export const clearAuthSession = (reason = 'logout') => {
+  localStorage.removeItem('access_token')
+  localStorage.removeItem('refresh_token')
+  localStorage.removeItem('user_role')
+  localStorage.removeItem('demo_mode')
+  localStorage.removeItem('new_client_setup')
+  localStorage.removeItem('existing_client_verification')
+  sessionStorage.removeItem('dedato_web_session_origin')
+  window.dispatchEvent(new CustomEvent('auth:logout', { detail: { reason } }))
+}
+
 // Функция для выполнения API запросов
 export const apiRequest = async (endpoint, options = {}) => {
   const method = (options.method || 'GET').toUpperCase()
@@ -133,8 +144,7 @@ export const apiRequest = async (endpoint, options = {}) => {
       if (response.status === 401 && requiresAuth(endpoint)) {
         try {
           if (typeof window !== 'undefined') {
-            localStorage.removeItem('access_token')
-            window.dispatchEvent(new CustomEvent('auth:logout', { detail: { reason: '401', endpoint } }))
+            clearAuthSession('401')
           }
         } catch { /* noop */ }
       }

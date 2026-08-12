@@ -54,17 +54,14 @@ Repository-known security/privacy debt. Документ не содержит c
 - **Validity evidence:** подтверждение наличия или действительности credentials отсутствует; файлы нельзя считать ни безопасными fixtures, ни retired material без отдельной проверки.
 - **Required action:** authorized security/data owner performs separate inventory, containment and remediation without copying values into Knowledge.
 
-## Critical: privileged role assignment at registration
+## Additional credential-like literals in tracked operator/Yandex artifacts
 
-- **Severity:** `critical`
-- **Confidence:** CONFIRMED
-- **Trust boundary:** anonymous registration request → persisted account role and authorization identity.
-- **Category:** missing server-side allowlist for privileged role assignment.
-- **Confirmed scope:** common registration schema accepts the complete role enum and the handler persists the supplied role; OAuth onboarding separately limits new accounts to client/master.
-- **Potential impact:** creation of an identity with privileges not intended for self-service registration.
-- **Sources:** `backend/schemas.py` — `UserCreate`; `backend/routers/auth.py` — `register`, `_create_user_from_oauth_onboarding`.
-- **Status:** active repository-known debt; this is not canonical business policy.
-- **Required action:** separate authorization remediation with code and regression tests.
+- **Evidence class:** repository evidence; values intentionally not reproduced or externally validated.
+- **Sensitivity:** HIGH
+- **Validity:** UNKNOWN
+- **Locations:** `YANDEX_API_SOLUTION.md`; `backend/reset_admin_password.py`; `frontend/test_yandex_api.html`; `update_master_passwords.py`.
+- **Validity evidence:** the repository contains credential-shaped assignments, but current provider/account validity is not established. None was introduced by the A–F added-line diff.
+- **Required action:** authorized security owner inventories and rotates/removes or replaces them with environment-only inputs in a separate history-aware remediation.
 
 ## Critical: admin router root enforcement
 
@@ -90,34 +87,34 @@ Repository-known security/privacy debt. Документ не содержит c
 - **Status:** active repository-known debt; it is not the intended verification invariant.
 - **Required action:** separate identity/security remediation and deprecation or corrected enforcement.
 
-## High: JWT class and revocation boundaries
+## High: remaining session and client token boundaries
 
 - **Severity:** `high`
 - **Confidence:** CONFIRMED
-- **Category:** access and refresh tokens are not cryptographically distinguished by token type; sessions are stateless and have no repository-known revocation store.
-- **Confirmed scope:** both token creators use the same signing algorithm and claim shape apart from expiry; bearer authentication validates signature/expiry and resolves the current active user. Refresh rotates tokens but does not invalidate the prior token, and password changes do not revoke issued JWTs.
-- **Potential impact:** token purpose cannot be enforced by the generic bearer dependency and invalidation is delayed until expiry unless the account is deactivated/deleted.
-- **Sources:** `backend/auth.py` — token creators and bearer dependencies; `backend/routers/auth.py` — login, refresh and password-change/reset handlers.
-- **Required action:** separate session-security design and remediation.
-
-## High: client token persistence
-
-- **Severity:** `high`
-- **Confidence:** CONFIRMED
-- **Category:** bearer credentials are persisted in script-readable or non-secure client storage.
-- **Confirmed scope:** web stores access and refresh tokens in `localStorage`; mobile stores access token in SecureStore when available but also duplicates/falls back to AsyncStorage, while Expo Go uses AsyncStorage only. Tracked mobile auth does not persist the returned refresh token.
-- **Potential impact:** compromise of client runtime/storage has a larger credential exposure window; refresh behavior differs between server contract and tracked clients.
+- **Category:** normal JWT invalidation is account-wide/version-based, while credential persistence and refresh lifecycle retain broader exposure than per-device sessions.
+- **Confirmed scope:** access/refresh token class and `session_version` are enforced and password mutations revoke prior pairs. There is no repository-known per-device session list, refresh-token rotation/reuse store or server logout endpoint. Web stores both tokens in `localStorage`; mobile stores both via SecureStore when available but duplicates/falls back to AsyncStorage, while Expo Go uses AsyncStorage only.
+- **Potential impact:** client runtime/storage compromise exposes bearer credentials until expiry or an account-wide version change; one device cannot selectively revoke another session and refresh-token replay is not tracked server-side.
 - **Sources:** `frontend/src/contexts/AuthContext.jsx`, `frontend/src/modals/AuthModal.jsx`, `frontend/src/pages/OAuthCallback.jsx`; `mobile/src/auth/tokenStorage.ts`, `mobile/src/auth/AuthContext.tsx`, `mobile/src/services/api/auth.ts`.
 - **Required action:** separate client session-hardening decision and implementation.
+
+## High: auth abuse controls and compatibility retirement
+
+- **Severity:** `high`
+- **Confidence:** CONFIRMED for repository code; edge/provider controls outside the repository are UNKNOWN.
+- **Category:** incomplete server-side abuse controls and rollout retirement mechanism.
+- **Confirmed scope:** phone challenges enforce expiry and attempt limits after creation, and password-recovery request responses are semantically generic. The repository does not establish a shared per-IP/per-phone request throttle, timing normalization, CAPTCHA/device risk boundary or durable audit trail for registration/login/recovery attempts. JWT compatibility flags are manual environment switches with no repository-known telemetry or automatic retirement gate.
+- **Potential impact:** call/request endpoints can consume provider capacity or leak timing distinctions under abuse; compatibility acceptance may remain enabled longer than intended without an operational signal.
+- **Sources:** `backend/routers/auth.py` — registration/login/password-recovery request paths; `backend/services/verification_service.py`; `backend/settings.py` — JWT compatibility flags.
+- **Required action:** separately define rate/abuse policy and rollout observability, then retire both compatibility flags after measured client expiry.
 
 ## High: registration consent evidence
 
 - **Severity:** `high`
 - **Confidence:** CONFIRMED
 - **Category:** displayed consent controls are not consistently enforced or persisted as auditable evidence.
-- **Confirmed scope:** web common registration sends consent-like extra fields absent from `UserCreate`; the handler neither validates nor persists them. Mobile common registration has no equivalent request fields. OAuth onboarding requires terms and personal-data booleans but does not persist consent evidence; marketing choice is accepted but not persisted.
+- **Confirmed scope:** common password registration on web/mobile and OAuth onboarding require terms and personal-data booleans; marketing choice is accepted. Pending flows carry these choices long enough to complete registration, but the resulting account has no auditable consent record containing legal text/version/timestamp; marketing choice is not persisted as consent evidence.
 - **Potential impact:** repository data cannot establish which legal text/version and choices were accepted for an account.
-- **Sources:** `backend/schemas.py` — `UserCreate`; `backend/routers/auth.py` — `OAuthOnboardingCompleteRequest`, `_create_user_from_oauth_onboarding`, `register`; `frontend/src/modals/AuthModal.jsx`; `mobile/src/services/api/auth.ts`, `mobile/src/components/auth/RegistrationAgreementRow.tsx`.
+- **Sources:** `backend/schemas.py` — `UserCreate`; `backend/routers/auth.py` — pending registration and OAuth onboarding; `frontend/src/modals/AuthModal.jsx`; `mobile/src/services/api/auth.ts`, `mobile/src/components/auth/RegistrationAgreementRow.tsx`.
 - **Required action:** separate privacy/legal contract decision followed by schema, storage and client alignment.
 
 ## High: analytics and store-declaration drift
@@ -135,9 +132,9 @@ Repository-known security/privacy debt. Документ не содержит c
 - **Severity:** `high`
 - **Confidence:** CONFIRMED for log statements; production log routing and retention are UNKNOWN.
 - **Category:** authentication and verification paths log personal or credential-bearing structures.
-- **Confirmed scope:** registration and mobile auth diagnostics include account contact attributes; the live call-verification service logs request/response structures that can contain phone and credential-like/provider verification data.
+- **Confirmed scope:** mobile auth diagnostics include account contact attributes; the live call-verification service logs request/response structures that can contain phone and credential-like/provider verification data.
 - **Potential impact:** sensitive data may be copied into logs outside its primary storage boundary.
-- **Sources:** `backend/routers/auth.py` — `register`; `backend/services/zvonok_service.py` — live request/response logging; `mobile/src/auth/AuthContext.tsx` — diagnostic fields.
+- **Sources:** `backend/services/zvonok_service.py` — live request/response logging; `mobile/src/auth/AuthContext.tsx` — diagnostic fields.
 - **Required action:** separate logging inventory, redaction and retention remediation.
 
 ## High: broad authenticated user search

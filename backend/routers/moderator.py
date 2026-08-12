@@ -4,7 +4,12 @@ from typing import Any, List
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from auth import get_current_active_user, require_admin, get_password_hash
+from auth import (
+    get_current_active_user,
+    require_admin,
+    get_password_hash,
+    update_password_and_revoke_sessions,
+)
 from database import get_db
 from models import User, UserRole, ModeratorPermissions
 from schemas import (
@@ -158,7 +163,7 @@ def get_moderator(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Moderator not found"
         )
-    
+
     permissions = db.query(ModeratorPermissions).filter(
         ModeratorPermissions.user_id == moderator.id
     ).first()
@@ -197,6 +202,10 @@ def update_moderator(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Moderator not found"
         )
+
+    permissions = db.query(ModeratorPermissions).filter(
+        ModeratorPermissions.user_id == moderator.id
+    ).first()
     
     # Проверяем, что не пытаемся удалить админа
     if moderator.role == UserRole.ADMIN:
@@ -210,17 +219,15 @@ def update_moderator(
     if update_data:
         for field, value in update_data.items():
             if field == "password" and value:
-                setattr(moderator, "hashed_password", get_password_hash(value))
+                if not update_password_and_revoke_sessions(db, moderator, value):
+                    db.rollback()
+                    raise HTTPException(status_code=409, detail="Moderator password update conflict")
             elif field != "password":
                 setattr(moderator, field, value)
         moderator.updated_at = datetime.utcnow()
     
     # Обновляем права
     if moderator_in.permissions:
-        permissions = db.query(ModeratorPermissions).filter(
-            ModeratorPermissions.user_id == moderator.id
-        ).first()
-        
         if permissions:
             update_permissions = moderator_in.permissions.dict(exclude_unset=True)
             for field, value in update_permissions.items():
@@ -236,7 +243,8 @@ def update_moderator(
     
     db.commit()
     db.refresh(moderator)
-    db.refresh(permissions)
+    if permissions:
+        db.refresh(permissions)
     
     return {
         "id": moderator.id,
@@ -352,4 +360,4 @@ def update_moderator_permissions(
         "created_at": moderator.created_at,
         "updated_at": moderator.updated_at,
         "permissions": permissions
-    } 
+    }

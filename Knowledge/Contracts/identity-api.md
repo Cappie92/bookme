@@ -2,7 +2,7 @@
 type: Knowledge
 status: active
 project: DeDato
-last_runtime_check: 2026-08-04
+last_runtime_check: 2026-08-12
 ---
 
 # Contract: Identity API
@@ -13,7 +13,7 @@ Repository-known `/api/auth` contract for tracked web/mobile clients. It describ
 
 | Family | Authentication | Current purpose |
 |--------|----------------|-----------------|
-| register/login/refresh | anonymous with credentials/token in body | Create account or issue/rotate JWT pair |
+| register/login/refresh | anonymous with credentials/ticket/token | Stage registration, authenticate or rotate JWT pair |
 | users/me | active bearer | Resolve current DB account and role |
 | email/phone verification | mixed anonymous or active depending operation | Verify initial contact or pending contact change |
 | password change/reset | active for change; anonymous reset flows | Update password state |
@@ -26,33 +26,37 @@ Router is mounted from `backend/main.py`. Exact dependency and object filter, no
 
 ## 2. Token response and bearer contract
 
-Successful register/login/OAuth exchange/demo/refresh responses can contain `access_token`, `refresh_token` and bearer token type. New JWT subject is stringified numeric user ID; legacy subject by email/phone remains readable. The server loads current `User` on bearer use and rejects inactive/deleted accounts.
+Successful login, completed registration/legacy verification, OAuth exchange, demo and refresh responses contain `access_token`, `refresh_token` and bearer token type. Normal JWTs use numeric user ID in `sub`, integer `sv` and `token_type=access|refresh`. Normal bearer rejects purpose-bound artifacts and refresh-class tokens; refresh rejects access and untyped tokens. Identity resolution never falls back to email/phone.
 
-Access and refresh token claim shapes are not distinguished by a token-purpose claim, prior refresh tokens are not repository-revoked, and password change/reset does not revoke sessions. Consumers must treat this as current [Debt](../Debt/security-and-privacy.md#high-jwt-class-and-revocation-boundaries), not a guarantee that either token is safe in every bearer context.
+Password mutations increment `User.session_version` transactionally and revoke prior pairs. Phase-one flags may temporarily accept numeric bearer tokens missing `sv` and/or `token_type`; `/refresh` is typed immediately. Per-device logout, refresh rotation/reuse detection and token-at-rest hardening remain outside this contract.
 
 **Source:** `backend/auth.py`; `backend/routers/auth.py` — `_token_response_for_user`, register/login/refresh/demo/OAuth exchange.
 
 ## 3. Registration
 
-Common body includes phone, password, role, optional email/name/birth date, and master city/timezone/promo context. Success creates an active but initially unverified account and returns tokens. Master registration creates its profile; email-delivery failure is logged but does not undo account creation.
+Common body includes phone, password, role, required terms/personal-data booleans, optional marketing choice/email/name/birth date, and master city/timezone/promo context. Self-service roles are exactly `client` and `master`. Success is `phone_verification_required` with an opaque 15-minute bearer ticket, phone, expiry and `verification_kind=new_registration`; no account/profile/promo/JWT exists yet.
 
-Common request schema has no consent fields. Extra consent-like web fields are not part of the server contract. More importantly, the schema accepts the full role enum and the handler persists it; privileged self-assignment is [critical Debt](../Debt/security-and-privacy.md#critical-privileged-role-assignment-at-registration). Clients must not interpret this defect as authorized role-selection policy.
+The ticket is accepted only by request/confirm/cancel signup-phone endpoints. Confirmation requires the bound call id and digits; successful proof consumes the ticket before creating account-side rows in one transaction and returns the normal pair. Reuse returns conflict, and cancel/expiry leaves no account. Production registration ticket operations require Redis and fail with `503` when unavailable.
+
+Anonymous account creation through public booking follows the same invariant. `/api/bookings/public` and `/api/bookings/create-with-any-master` validate the request and return a separate `verification_kind=public_booking` opaque ticket without creating `User`, `Booking` or normal JWT. The public-booking request/confirm/cancel endpoints bind proof to purpose, target phone and call id; confirm atomically claims the ticket, rechecks availability, creates or safely reuses the verified client, creates the booking and only then may return a canonical access JWT. Existing verified phone numbers still require possession proof when submitted anonymously.
 
 OAuth onboarding is a distinct contract limited to client/master and requires its phone/terms/personal-data checks.
 
-**Source:** `backend/schemas.py` — `UserCreate`; `backend/routers/auth.py` — `register`, OAuth onboarding.
+**Source:** `backend/schemas.py` — `UserCreate`; `backend/routers/auth.py` — `register`, OAuth onboarding; `backend/routers/bookings.py` — public-booking pending and verification handlers; `backend/services/pending_ticket_service.py`.
 
 ## 4. Login, current account and refresh
 
 Login uses phone/password and rejects unknown, deleted or inactive accounts. It does not require completed email/phone verification. `/users/me` returns the current user schema after active-account and demo-write dependency checks.
 
-Refresh accepts a refresh-token field, decodes it, resolves the current account and rotates a pair. Tracked web saves both tokens but has no repository-known automatic refresh call; tracked mobile saves only access token. A consumer cannot assume silent refresh is implemented merely because the server endpoint exists.
+Refresh accepts a `refresh_token` field, requires refresh class plus matching `sv`, resolves the active current account and returns a new pair. Both tracked clients persist both tokens, but neither establishes a repository-wide guarantee of automatic refresh. A consumer cannot assume silent refresh merely because the endpoint exists.
 
 **Source:** `backend/routers/auth.py`; `frontend/src/contexts/AuthContext.jsx`, `frontend/src/modals/AuthModal.jsx`, `frontend/src/utils/api.js`; `mobile/src/auth/AuthContext.tsx`, `mobile/src/services/api/auth.ts`.
 
 ## 5. Verification and contact changes
 
-Email verification/reset records are one-time and expire. Initial phone and pending-phone-change flows initiate a call, store server-side verification state with expiry/attempt limits, and compare the submitted code before changing verified state. Stub mode may expose test verification data in the response; live mode does not intentionally return it.
+Email verification/reset records are one-time and expire. New-registration and historical-account phone proofs use distinct artifacts. Initial phone and pending-phone-change flows initiate a call, store server-side verification state with purpose/target/expiry/attempt limits, and compare submitted proof before changing state. Stub mode may expose test verification data; live mode does not intentionally return it.
+
+Phone password recovery is a three-step anonymous flow: generic request response plus restricted challenge token, proof confirmation producing an opaque one-time `PasswordReset` token, then `/reset-password`. Unknown/ineligible accounts receive the same request shape. The direct `/reset-password-by-phone` contract is retired with `410`. Successful reset returns no session tokens and invalidates prior sessions.
 
 Legacy SMS and reverse-call endpoints remain mounted for compatibility. Reverse-call live status enforcement is [critical Debt](../Debt/security-and-privacy.md#critical-legacy-reverse-call-verification); clients must not rely on it as proof of provider-verified possession.
 
@@ -65,6 +69,8 @@ Request endpoints may return different errors for existing/missing accounts. The
 Yandex authorization endpoints are unavailable when the feature is disabled and unavailable-for-service when required configuration is incomplete. Login/link begin with signed state. Callback exchanges provider code on the backend and redirects web with an opaque short-lived login or onboarding ticket.
 
 Login ticket exchange is one-time and produces JWTs. New-user onboarding validates ticket, verified phone state, client/master role and required acceptance flags. Link requires active bearer and associates provider identity with the current account; an existing account can also be matched/linked by verified provider email according to current runtime.
+
+OAuth link state and mobile-to-web handoff codes capture the source `session_version`; password/session revocation before callback/exchange invalidates them. Handoff exchange preserves only the server-trusted platform origin in the new session pair.
 
 Frontend must clean ticket-bearing callback URLs and must never persist provider credentials. Global analytics includes query data, so callback query minimization is tracked in [privacy Debt](../Debt/security-and-privacy.md#high-analytics-and-store-declaration-drift).
 
