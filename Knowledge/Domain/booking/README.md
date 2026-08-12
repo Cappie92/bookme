@@ -70,7 +70,7 @@ List helper временно меняет ORM object для формирован
 
 Runtime использует общий `cancelled` и две client cancellation категории. Accounting reasons: `client_requested`, `client_no_show`, `mutual_agreement`, `master_unavailable`. Не все paths записывают initiator/reason: client DELETE очищает loyalty reserve и ставит общий `cancelled` без детализации.
 
-Отмена сохраняет Booking в основных client/accounting flows. Generic compatibility router содержит отдельную mutation boundary с неполным object-level enforcement; её authorization-состояние имеет severity `critical` и описано только на безопасном уровне в [Debt](../../Debt/booking-scheduling.md#critical-generic-booking-mutation-authorization).
+Отмена сохраняет Booking в основных client/accounting flows. Generic `DELETE /api/bookings/{id}` ограничен admin-only hard delete чистой будущей брони; остаточный critical gap касается edit-request mutations и описан в [Debt](../../Debt/booking-scheduling.md#critical-generic-booking-mutation-authorization).
 
 ### Reschedule
 
