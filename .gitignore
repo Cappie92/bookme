@@ -68,6 +68,7 @@ logs
 # --- DeDato: production deploy / local & server runtime (do not commit) ---
 # Secrets
 deploy/prod/backend.env
+deploy/staging/backend.env
 
 # Dataset export/import, Playwright, local CI
 artifacts/

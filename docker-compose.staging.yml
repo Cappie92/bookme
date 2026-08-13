@@ -1,0 +1,83 @@
+name: dedato-staging
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: dedato-staging-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+    networks:
+      - staging
+
+  backend:
+    build:
+      context: ./backend
+    container_name: dedato-staging-backend
+    restart: unless-stopped
+    env_file:
+      - ${STAGING_BACKEND_ENV_FILE:-./deploy/staging/backend.env}
+    environment:
+      # These values are deliberately forced by Compose so an env-file cannot
+      # redirect staging to a production database or Redis instance.
+      DATABASE_URL: sqlite:////data/bookme.db
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+    volumes:
+      - /data/dedato-staging:/data
+      - /data/dedato-staging/uploads:/app/uploads
+      - /var/log/dedato-staging/backend:/app/logs
+    ports:
+      # Host nginx is the only intended caller. This is not a public listener.
+      - "127.0.0.1:8001:8000"
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    networks:
+      - staging
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile.prod
+    container_name: dedato-staging-frontend
+    restart: unless-stopped
+    ports:
+      # Host nginx proxies public web traffic to this loopback-only listener.
+      - "127.0.0.1:8081:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    networks:
+      - staging
+
+networks:
+  staging:
+    name: dedato_staging_network
+
+volumes:
+  redis_data:
+    name: dedato_staging_redis_data
