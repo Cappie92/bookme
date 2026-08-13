@@ -17,13 +17,28 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
+def _existing_columns(bind, table_name: str) -> set[str]:
+    inspector = sa.inspect(bind)
+    if table_name not in inspector.get_table_names():
+        raise RuntimeError(f"Required table does not exist: {table_name}")
+    return {column["name"] for column in inspector.get_columns(table_name)}
+
+
 def upgrade() -> None:
-    op.add_column("users", sa.Column("deleted_at", sa.DateTime(), nullable=True))
-    op.add_column(
-        "masters",
-        sa.Column("is_deleted", sa.Boolean(), nullable=False, server_default=sa.false()),
-    )
-    op.add_column("masters", sa.Column("deleted_at", sa.DateTime(), nullable=True))
+    bind = op.get_bind()
+    users_columns = _existing_columns(bind, "users")
+    masters_columns = _existing_columns(bind, "masters")
+
+    if "deleted_at" not in users_columns:
+        op.add_column("users", sa.Column("deleted_at", sa.DateTime(), nullable=True))
+
+    if "is_deleted" not in masters_columns:
+        op.add_column(
+            "masters",
+            sa.Column("is_deleted", sa.Boolean(), nullable=False, server_default=sa.false()),
+        )
+    if "deleted_at" not in masters_columns:
+        op.add_column("masters", sa.Column("deleted_at", sa.DateTime(), nullable=True))
 
 
 def downgrade() -> None:

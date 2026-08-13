@@ -18,17 +18,40 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
-def upgrade() -> None:
-    op.add_column("users", sa.Column("phone_verification_call_id", sa.String(), nullable=True))
-    op.add_column("users", sa.Column("phone_verification_attempts", sa.Integer(), nullable=False, server_default="0"))
-    op.add_column("users", sa.Column("phone_verification_target_phone", sa.String(), nullable=True))
-    op.add_column("users", sa.Column("phone_verification_purpose", sa.String(), nullable=True))
-    op.add_column("users", sa.Column("pending_phone", sa.String(), nullable=True))
-    op.add_column("users", sa.Column("pending_phone_expires_at", sa.DateTime(), nullable=True))
-    op.add_column("users", sa.Column("pending_email", sa.String(), nullable=True))
+def _existing_columns(bind, table_name: str) -> set[str]:
+    inspector = sa.inspect(bind)
+    if table_name not in inspector.get_table_names():
+        raise RuntimeError(f"Required table does not exist: {table_name}")
+    return {column["name"] for column in inspector.get_columns(table_name)}
 
-    op.add_column("email_verifications", sa.Column("purpose", sa.String(), nullable=False, server_default="signup"))
-    op.add_column("email_verifications", sa.Column("email_to_verify", sa.String(), nullable=True))
+
+def upgrade() -> None:
+    bind = op.get_bind()
+    users_columns = _existing_columns(bind, "users")
+    email_verification_columns = _existing_columns(bind, "email_verifications")
+
+    users_additions = (
+        sa.Column("phone_verification_call_id", sa.String(), nullable=True),
+        sa.Column("phone_verification_attempts", sa.Integer(), nullable=False, server_default="0"),
+        sa.Column("phone_verification_target_phone", sa.String(), nullable=True),
+        sa.Column("phone_verification_purpose", sa.String(), nullable=True),
+        sa.Column("pending_phone", sa.String(), nullable=True),
+        sa.Column("pending_phone_expires_at", sa.DateTime(), nullable=True),
+        sa.Column("pending_email", sa.String(), nullable=True),
+    )
+    for column in users_additions:
+        if column.name not in users_columns:
+            op.add_column("users", column)
+            users_columns.add(column.name)
+
+    email_verification_additions = (
+        sa.Column("purpose", sa.String(), nullable=False, server_default="signup"),
+        sa.Column("email_to_verify", sa.String(), nullable=True),
+    )
+    for column in email_verification_additions:
+        if column.name not in email_verification_columns:
+            op.add_column("email_verifications", column)
+            email_verification_columns.add(column.name)
 
 
 def downgrade() -> None:
