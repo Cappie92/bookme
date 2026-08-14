@@ -2,9 +2,10 @@ from datetime import datetime, timedelta
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
-from auth import get_current_user
+from auth import get_current_user, require_admin
 from database import get_db
 from models import (
     Booking,
@@ -18,6 +19,11 @@ from models import (
     Service,
     Salon,
     SalonBranch,
+)
+from utils.booking_hard_delete import (
+    delete_clean_booking,
+    get_hard_delete_blockers,
+    hard_delete_forbidden_detail,
 )
 from schemas import (
     Booking as BookingSchema,
@@ -648,10 +654,11 @@ async def update_booking(
 async def delete_booking(
     booking_id: int,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user: User = Depends(require_admin),
 ):
     """
-    Удалить бронирование
+    Admin-only hard delete будущей «чистой» брони.
+    Финансовые / loyalty / исторические записи блокируют удаление (409).
     """
     db_booking = db.query(Booking).filter(Booking.id == booking_id).first()
     if not db_booking:
@@ -659,8 +666,28 @@ async def delete_booking(
             status_code=status.HTTP_404_NOT_FOUND, detail="Бронирование не найдено"
         )
 
-    db.delete(db_booking)
-    db.commit()
+    blockers = get_hard_delete_blockers(db, db_booking)
+    if blockers:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=hard_delete_forbidden_detail(blockers),
+            headers={"X-Error-Code": "BOOKING_HARD_DELETE_FORBIDDEN"},
+        )
+
+    try:
+        delete_clean_booking(db, db_booking)
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=hard_delete_forbidden_detail(["integrity_error"]),
+            headers={"X-Error-Code": "BOOKING_HARD_DELETE_FORBIDDEN"},
+        )
+    except Exception:
+        db.rollback()
+        raise
+
     return {"message": "Бронирование успешно удалено"}
 
 

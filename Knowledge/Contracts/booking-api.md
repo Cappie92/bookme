@@ -17,7 +17,7 @@ last_runtime_check: 2026-08-04
 | `/api/client/bookings` | Client lists, create/update/cancel, calendar, temporary booking | active user + client router dependency | Client-owned records; compatibility create differs from primary public create |
 | `/api/master/*` | Master lists/schedule/settings | active user; endpoint-specific master lookup | Operational master views and schedule writes |
 | `/api/master/accounting` | Pre/post-visit status and completion | active user + booking owner filters | Completion side effects live here |
-| `/api/bookings` | Generic/legacy booking, slots, any-master and edit requests | mixed: authenticated and public endpoints | Authorization enforcement heterogeneous; critical gap is tracked in [Debt](../Debt/booking-scheduling.md#critical-generic-booking-mutation-authorization) |
+| `/api/bookings` | Generic/legacy booking, slots, any-master and edit requests | mixed: authenticated and public endpoints; `DELETE /{id}` is admin-only clean hard-delete | Remaining edit-request authorization gaps tracked in [Debt](../Debt/booking-scheduling.md#critical-generic-booking-mutation-authorization) |
 
 Router composition is explicit in `backend/main.py`; prefix text alone does not prove a role guard.
 
@@ -65,7 +65,7 @@ The current primary public create rejects a client restricted to advance payment
 
 ## 7. Authorization boundary
 
-Authentication and ownership are distinct. Some route families filter Booking by client/master owner; generic mutations do not have uniform ownership enforcement. This is a `critical` trust-boundary defect, not intended business behavior. Only sanitized scope is recorded in [Debt](../Debt/booking-scheduling.md#critical-generic-booking-mutation-authorization); detailed remediation belongs to a separate authorized track.
+Authentication and ownership are distinct. Client and master cancel paths filter by owner and soft-cancel. Generic `DELETE /api/bookings/{id}` is restricted to `admin` and only deletes a future clean booking (no finance/loyalty/history blockers); otherwise `409 BOOKING_HARD_DELETE_FORBIDDEN`. Other generic mutations (notably edit requests) still lack uniform object-level enforcement — sanitized residual debt is in [Debt](../Debt/booking-scheduling.md#critical-generic-booking-mutation-authorization).
 
 ## 8. Compatibility and UNKNOWN
 
