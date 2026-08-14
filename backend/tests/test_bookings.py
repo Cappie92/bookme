@@ -231,13 +231,41 @@ def test_update_booking(client, auth_headers, test_service, test_master, db):
     assert updated_booking["end_time"] == update_data["end_time"]
 
 
-def test_delete_booking(client, auth_headers, test_service, test_master):
+def test_delete_booking(client, auth_headers, test_service, test_master, db):
+    """Client больше не может hard-delete; admin удаляет чистую будущую бронь."""
+    from auth import get_password_hash
+    from models import Booking
+
     booking_data = _booking_payload(test_service, test_master)
     response = client.post("/api/bookings/", json=booking_data, headers=auth_headers)
+    assert response.status_code == 200, response.json()
     booking_id = response.json()["id"]
 
+    # non-admin: forbidden, booking remains
     response = client.delete(f"/api/bookings/{booking_id}", headers=auth_headers)
-    assert response.status_code == 200
+    assert response.status_code == 403
+    assert db.query(Booking).filter(Booking.id == booking_id).first() is not None
+
+    admin = User(
+        email="bookings-admin@example.com",
+        hashed_password=get_password_hash("testpassword"),
+        phone="+79007654321",
+        full_name="Bookings Admin",
+        role=UserRole.ADMIN,
+        is_active=True,
+        is_verified=True,
+    )
+    db.add(admin)
+    db.commit()
+    login = client.post(
+        "/api/auth/login", json={"phone": admin.phone, "password": "testpassword"}
+    )
+    assert login.status_code == 200
+    admin_headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+    response = client.delete(f"/api/bookings/{booking_id}", headers=admin_headers)
+    assert response.status_code == 200, response.json()
+    assert db.query(Booking).filter(Booking.id == booking_id).first() is None
     response = client.get(f"/api/bookings/{booking_id}", headers=auth_headers)
     assert response.status_code == 404
 
