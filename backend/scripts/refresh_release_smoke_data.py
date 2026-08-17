@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import os
 import sys
 from collections import Counter
 from dataclasses import dataclass
@@ -90,6 +91,7 @@ SCENARIO_LABELS = (
     "LOYALTY_RESERVE",
     "COMPLETED_LOYALTY_SPEND_EARN",
 )
+LOYALTY_DISCOUNT_KEYS = ("first_visit", "returning", "birthday", "happy_hours")
 
 
 class SmokeRefreshError(RuntimeError):
@@ -129,16 +131,37 @@ class RefreshCounters:
     loyalty_transactions_created: int = 0
 
 
+@dataclass(frozen=True)
+class OwnedIds:
+    bookings_by_label: dict[str, Booking]
+    booking_ids: frozenset[int]
+    loyalty_transactions_by_source: dict[str, LoyaltyTransaction]
+    loyalty_transaction_ids: frozenset[int]
+    loyalty_discount_ids: frozenset[int]
+    personal_discount_ids: frozenset[int]
+    applied_discount_ids: frozenset[int]
+    booking_confirmation_ids: frozenset[int]
+    income_ids: frozenset[int]
+    missed_revenue_ids: frozenset[int]
+    booking_edit_request_ids: frozenset[int]
+
+
+@dataclass
+class CreatedIds:
+    services: set[int]
+    master_services: set[int]
+    master_service_categories: set[int]
+    service_links: set[tuple[int, int]]
+    loyalty_settings: set[int]
+    schedules: set[int]
+
+    @classmethod
+    def empty(cls) -> "CreatedIds":
+        return cls(set(), set(), set(), set(), set(), set())
+
+
 def _fail(message: str) -> None:
     raise SmokeRefreshError(message)
-
-
-def _contains_marker(column: Any, marker: str) -> Any:
-    return func.coalesce(column, "").contains(marker)
-
-
-def _not_contains_marker(column: Any, marker: str) -> Any:
-    return ~_contains_marker(column, marker)
 
 
 def _parse_hhmm(value: Any, field: str) -> time:
@@ -163,11 +186,63 @@ def _load_manifest(path: Path) -> dict[str, Any]:
     return raw
 
 
+def _canonical_booking_notes(marker: str) -> dict[str, str]:
+    return {label: f"[{marker}][{label}]" for label in SCENARIO_LABELS}
+
+
+def _canonical_loyalty_sources(marker: str) -> dict[str, str]:
+    return {
+        "OPENING_PRIMARY": f"{marker}:OPENING_BALANCE_PRIMARY:EARNED",
+        "OPENING_SECONDARY": f"{marker}:OPENING_BALANCE_SECONDARY:EARNED",
+        "COMPLETED_PAID_EARNED": f"{marker}:COMPLETED_PAID:EARNED",
+        "COMPLETED_UNPAID_EARNED": f"{marker}:COMPLETED_UNPAID:EARNED",
+        "COMPLETED_LOYALTY_SPEND_EARN_SPENT": (
+            f"{marker}:COMPLETED_LOYALTY_SPEND_EARN:SPENT"
+        ),
+        "COMPLETED_LOYALTY_SPEND_EARN_EARNED": (
+            f"{marker}:COMPLETED_LOYALTY_SPEND_EARN:EARNED"
+        ),
+    }
+
+
+def _canonical_discount_identifiers(marker: str) -> dict[str, dict[str, str]]:
+    description = f"[{marker}] Release smoke discount"
+    return {
+        "first_visit": {"name": f"First visit [{marker}]", "description": description},
+        "returning": {"name": f"Returning [{marker}]", "description": description},
+        "birthday": {"name": f"Birthday [{marker}]", "description": description},
+        "happy_hours": {"name": f"Happy hours [{marker}]", "description": description},
+    }
+
+
 def _validate_manifest(manifest: dict[str, Any]) -> None:
     if manifest.get("version") != 1:
         _fail("Manifest version must be 1")
     if manifest.get("marker") != EXPECTED_MARKER:
         _fail(f"Manifest marker must be exactly {EXPECTED_MARKER!r}")
+
+    ownership = manifest.get("ownership") or {}
+    if ownership.get("booking_notes") != _canonical_booking_notes(EXPECTED_MARKER):
+        _fail("ownership.booking_notes must equal the canonical exact note map")
+    if ownership.get("loyalty_sources") != _canonical_loyalty_sources(EXPECTED_MARKER):
+        _fail("ownership.loyalty_sources must equal the canonical exact source map")
+    if ownership.get("loyalty_discounts") != _canonical_discount_identifiers(
+        EXPECTED_MARKER
+    ):
+        _fail(
+            "ownership.loyalty_discounts must equal the canonical exact identifier map"
+        )
+    if ownership.get("personal_discount") != {
+        "description": f"Personal discount [{EXPECTED_MARKER}]"
+    }:
+        _fail("ownership.personal_discount must equal the canonical exact identifier")
+    if set(ownership) != {
+        "booking_notes",
+        "loyalty_sources",
+        "loyalty_discounts",
+        "personal_discount",
+    }:
+        _fail("Manifest ownership contains unknown or missing sections")
 
     users = manifest.get("users") or {}
     masters = tuple(users.get("masters") or ())
@@ -210,18 +285,31 @@ def _validate_manifest(manifest: dict[str, Any]) -> None:
             "schedule.max_existing_rows_in_scope must be between 1 and "
             f"{ABSOLUTE_MAX_SCHEDULE_ROWS}"
         )
+    schedule = manifest.get("schedule") or {}
+    offsets = [int(value) for value in schedule.get("working_day_offsets") or []]
+    if offsets != [-3, 3, 4, 5, 6, 7] or len(offsets) != len(set(offsets)):
+        _fail("schedule.working_day_offsets must equal the canonical relative dates")
+    if int(schedule.get("closed_day_offset", 0)) != 6:
+        _fail("schedule.closed_day_offset must be 6")
+    if int(schedule.get("partial_day_offset", 0)) != 7:
+        _fail("schedule.partial_day_offset must be 7")
 
 
-def _guard_environment(manifest: dict[str, Any]) -> str:
+def _guard_environment(manifest: dict[str, Any], *, apply: bool) -> str:
+    explicit_environment = (os.environ.get("ENVIRONMENT") or "").strip().lower()
+    if apply and not explicit_environment:
+        _fail("--apply requires ENVIRONMENT to be explicitly set")
     environment = get_settings().ENVIRONMENT.strip().lower()
+    if apply and explicit_environment != environment:
+        _fail("Explicit ENVIRONMENT does not match the loaded application settings")
     allowed = {str(x).strip().lower() for x in manifest["allowed_environments"]}
+    if environment in {"prod", "production", "live"}:
+        _fail(f"Production-like ENVIRONMENT={environment!r} is always forbidden")
     if environment not in allowed:
         _fail(
             f"Refusing to run in ENVIRONMENT={environment!r}; allowed: "
             + ", ".join(sorted(allowed))
         )
-    if environment == "production":
-        _fail("Production is always forbidden")
     return environment
 
 
@@ -231,6 +319,36 @@ def _configure_connection_safety(db: Session) -> None:
         enabled = int(db.execute(text("PRAGMA foreign_keys")).scalar() or 0)
         if enabled != 1:
             _fail("Could not enable SQLite foreign key enforcement")
+
+
+def _sqlite_main_database_path(db: Session) -> Path:
+    rows = db.execute(text("PRAGMA database_list")).all()
+    main_rows = [row for row in rows if str(row[1]) == "main"]
+    if len(main_rows) != 1 or not str(main_rows[0][2] or "").strip():
+        _fail("Could not resolve the active SQLite main database path")
+    return Path(str(main_rows[0][2])).expanduser().resolve()
+
+
+def _guard_database_target(
+    db: Session, *, apply: bool, expected_db: Path | None
+) -> str:
+    dialect = db.get_bind().dialect.name
+    if dialect != "sqlite":
+        if apply:
+            _fail("--apply is supported only for an exact verified SQLite target")
+        return f"dialect={dialect}"
+
+    actual = _sqlite_main_database_path(db)
+    if expected_db is not None:
+        expected = expected_db.expanduser().resolve()
+        if actual != expected:
+            _fail(
+                "Active SQLite database does not match --expected-db: "
+                f"actual={actual}, expected={expected}"
+            )
+    elif apply:
+        _fail("--apply requires --expected-db with the exact SQLite database path")
+    return str(actual)
 
 
 def _assert_schema_compatible(db: Session) -> None:
@@ -300,97 +418,60 @@ def _query_snapshot(
     return _model_snapshot(query.order_by(model.id).all(), model)
 
 
-def _association_snapshot(db: Session, marker: str) -> tuple[tuple[int, int], ...]:
+def _association_snapshot(db: Session) -> tuple[tuple[int, int], ...]:
     rows = db.execute(
-        select(master_services.c.master_id, master_services.c.service_id)
-        .join(Service, Service.id == master_services.c.service_id)
-        .where(
-            _not_contains_marker(Service.name, marker),
-            _not_contains_marker(Service.description, marker),
+        select(master_services.c.master_id, master_services.c.service_id).order_by(
+            master_services.c.master_id, master_services.c.service_id
         )
-        .order_by(master_services.c.master_id, master_services.c.service_id)
     ).all()
     return tuple((int(master_id), int(service_id)) for master_id, service_id in rows)
 
 
-def _protected_child_snapshot(
-    db: Session, model: Any, marker: str
+def _query_snapshot_excluding_ids(
+    db: Session, model: Any, excluded_ids: Iterable[int]
 ) -> dict[int, tuple[Any, ...]]:
-    rows = (
-        db.query(model)
-        .outerjoin(Booking, Booking.id == model.booking_id)
-        .filter(or_(Booking.id.is_(None), _not_contains_marker(Booking.notes, marker)))
-        .order_by(model.id)
-        .all()
-    )
-    return _model_snapshot(rows, model)
+    ids = tuple(int(row_id) for row_id in excluded_ids)
+    if ids:
+        return _query_snapshot(db, model, ~model.id.in_(ids))
+    return _query_snapshot(db, model)
 
 
 def _capture_protected_state(
     db: Session,
-    marker: str,
-    master_ids: set[int],
-    window_start: date,
-    window_end: date,
+    owned: OwnedIds,
 ) -> dict[str, Any]:
-    schedule_outside = or_(
-        MasterSchedule.master_id.is_(None),
-        ~MasterSchedule.master_id.in_(master_ids),
-        MasterSchedule.date.is_(None),
-        MasterSchedule.date < window_start,
-        MasterSchedule.date > window_end,
-    )
     return {
         "users": _query_snapshot(db, User),
         "masters": _query_snapshot(db, Master),
-        "bookings": _query_snapshot(
-            db, Booking, _not_contains_marker(Booking.notes, marker)
-        ),
-        "services": _query_snapshot(
-            db,
-            Service,
-            _not_contains_marker(Service.name, marker),
-            _not_contains_marker(Service.description, marker),
-        ),
-        "master_services_list": _query_snapshot(
-            db,
-            MasterService,
-            _not_contains_marker(MasterService.name, marker),
-            _not_contains_marker(MasterService.description, marker),
-        ),
-        "master_service_categories": _query_snapshot(
-            db,
-            MasterServiceCategory,
-            _not_contains_marker(MasterServiceCategory.name, marker),
-        ),
-        "service_links": _association_snapshot(db, marker),
-        "schedule_outside": _query_snapshot(db, MasterSchedule, schedule_outside),
+        "bookings": _query_snapshot_excluding_ids(db, Booking, owned.booking_ids),
+        "services": _query_snapshot(db, Service),
+        "master_services_list": _query_snapshot(db, MasterService),
+        "master_service_categories": _query_snapshot(db, MasterServiceCategory),
+        "service_links": _association_snapshot(db),
+        "schedules": _query_snapshot(db, MasterSchedule),
         "availability_slots": _query_snapshot(db, AvailabilitySlot),
-        "loyalty_discounts": _query_snapshot(
-            db,
-            LoyaltyDiscount,
-            _not_contains_marker(LoyaltyDiscount.name, marker),
-            _not_contains_marker(LoyaltyDiscount.description, marker),
+        "loyalty_discounts": _query_snapshot_excluding_ids(
+            db, LoyaltyDiscount, owned.loyalty_discount_ids
         ),
-        "personal_discounts": _query_snapshot(
-            db,
-            PersonalDiscount,
-            _not_contains_marker(PersonalDiscount.description, marker),
+        "personal_discounts": _query_snapshot_excluding_ids(
+            db, PersonalDiscount, owned.personal_discount_ids
         ),
-        "loyalty_transactions": _query_snapshot(
-            db,
-            LoyaltyTransaction,
-            _not_contains_marker(LoyaltyTransaction.source, marker),
+        "loyalty_transactions": _query_snapshot_excluding_ids(
+            db, LoyaltyTransaction, owned.loyalty_transaction_ids
         ),
         "loyalty_settings": _query_snapshot(db, LoyaltySettings),
-        "booking_edit_requests": _protected_child_snapshot(
-            db, BookingEditRequest, marker
+        "booking_edit_requests": _query_snapshot_excluding_ids(
+            db, BookingEditRequest, owned.booking_edit_request_ids
         ),
-        "applied_discounts": _protected_child_snapshot(db, AppliedDiscount, marker),
-        "incomes": _protected_child_snapshot(db, Income, marker),
-        "missed_revenues": _protected_child_snapshot(db, MissedRevenue, marker),
-        "booking_confirmations": _protected_child_snapshot(
-            db, BookingConfirmation, marker
+        "applied_discounts": _query_snapshot_excluding_ids(
+            db, AppliedDiscount, owned.applied_discount_ids
+        ),
+        "incomes": _query_snapshot_excluding_ids(db, Income, owned.income_ids),
+        "missed_revenues": _query_snapshot_excluding_ids(
+            db, MissedRevenue, owned.missed_revenue_ids
+        ),
+        "booking_confirmations": _query_snapshot_excluding_ids(
+            db, BookingConfirmation, owned.booking_confirmation_ids
         ),
     }
 
@@ -398,30 +479,44 @@ def _capture_protected_state(
 def _assert_protected_state(
     before: dict[str, Any],
     after: dict[str, Any],
-    created_loyalty_setting_ids: set[int],
+    created: CreatedIds,
     allowlist_master_ids: set[int],
 ) -> None:
+    allowed_new_ids = {
+        "services": created.services,
+        "master_services_list": created.master_services,
+        "master_service_categories": created.master_service_categories,
+        "loyalty_settings": created.loyalty_settings,
+        "schedules": created.schedules,
+    }
     for name, expected in before.items():
         actual = after[name]
-        if name == "loyalty_settings":
+        if name == "service_links":
+            expected_counts = Counter(expected)
+            expected_counts.update(created.service_links)
+            if Counter(actual) != expected_counts:
+                _fail("Service associations differ from exact existing + created sets")
+            continue
+        if name in allowed_new_ids:
             for row_id, row_value in expected.items():
                 if actual.get(row_id) != row_value:
-                    _fail(
-                        f"Existing LoyaltySettings row {row_id} was modified or removed"
-                    )
-            unexpected = set(actual) - set(expected) - created_loyalty_setting_ids
-            if unexpected:
-                _fail(f"Unexpected LoyaltySettings rows created: {sorted(unexpected)}")
+                    _fail(f"Existing protected {name} row {row_id} changed")
+            actual_new = set(actual) - set(expected)
+            if actual_new != allowed_new_ids[name]:
+                _fail(
+                    f"Created {name} ID set mismatch: expected "
+                    f"{sorted(allowed_new_ids[name])}, got {sorted(actual_new)}"
+                )
             continue
         if actual != expected:
             _fail(f"Protected non-smoke state changed: {name}")
 
-    for row_id in created_loyalty_setting_ids:
+    for row_id in created.loyalty_settings:
         row = after["loyalty_settings"].get(row_id)
         if row is None:
             _fail(f"Created LoyaltySettings row {row_id} disappeared")
     # master_id is the second model column after id.
-    for row_id in created_loyalty_setting_ids:
+    for row_id in created.loyalty_settings:
         if int(after["loyalty_settings"][row_id][1]) not in allowlist_master_ids:
             _fail(f"LoyaltySettings row {row_id} is outside the allowlist")
 
@@ -511,247 +606,224 @@ def _resolve_anchors(db: Session, manifest: dict[str, Any]) -> Anchors:
     return Anchors(masters_by_phone=masters_by_phone, clients_by_phone=clients_by_phone)
 
 
-def _assert_marker_scope(db: Session, marker: str, anchors: Anchors) -> None:
-    marker_bookings = (
-        db.query(Booking).filter(_contains_marker(Booking.notes, marker)).all()
-    )
-    for booking in marker_bookings:
-        if (
-            booking.master_id not in anchors.master_ids
-            or booking.client_id not in anchors.client_ids
-        ):
-            _fail(f"Marker booking {booking.id} is outside the allowlist")
+def _resolve_owned_ids(
+    db: Session, manifest: dict[str, Any], anchors: Anchors
+) -> OwnedIds:
+    ownership = manifest["ownership"]
+    note_by_label = ownership["booking_notes"]
+    label_by_note = {note: label for label, note in note_by_label.items()}
+    primary_master = anchors.masters_by_phone[manifest["primary_master_phone"]][1]
+    primary_client = anchors.clients_by_phone[manifest["primary_client_phone"]]
+    secondary_client = anchors.clients_by_phone[manifest["secondary_client_phone"]]
+    client_by_label = {
+        "COMPLETED_PAID": primary_client.id,
+        "COMPLETED_UNPAID": secondary_client.id,
+        "UPCOMING_PAID": primary_client.id,
+        "UPCOMING_UNPAID": secondary_client.id,
+        "AWAITING_CONFIRMATION": secondary_client.id,
+        "CANCELLED": primary_client.id,
+        "WITH_DISCOUNT": primary_client.id,
+        "LOYALTY_RESERVE": primary_client.id,
+        "COMPLETED_LOYALTY_SPEND_EARN": primary_client.id,
+    }
 
-    marker_loyalty = (
+    bookings_by_label: dict[str, Booking] = {}
+    booking_rows = (
+        db.query(Booking)
+        .filter(Booking.notes.in_(tuple(note_by_label.values())))
+        .order_by(Booking.id)
+        .all()
+    )
+    for booking in booking_rows:
+        label = label_by_note.get(booking.notes)
+        if label is None:
+            _fail(f"Booking {booking.id} does not have an exact canonical smoke note")
+        if label in bookings_by_label:
+            _fail(f"Duplicate exact smoke booking note for scenario {label}")
+        if booking.master_id != primary_master.id:
+            _fail(f"Exact smoke booking {booking.id} has the wrong master")
+        if booking.client_id != client_by_label[label]:
+            _fail(f"Exact smoke booking {booking.id} has the wrong client")
+        bookings_by_label[label] = booking
+    booking_ids = frozenset(int(row.id) for row in bookings_by_label.values())
+
+    source_by_key = ownership["loyalty_sources"]
+    key_by_source = {source: key for key, source in source_by_key.items()}
+    expected_loyalty = {
+        "OPENING_PRIMARY": (primary_client.id, "earned", None),
+        "OPENING_SECONDARY": (secondary_client.id, "earned", None),
+        "COMPLETED_PAID_EARNED": (primary_client.id, "earned", "COMPLETED_PAID"),
+        "COMPLETED_UNPAID_EARNED": (
+            secondary_client.id,
+            "earned",
+            "COMPLETED_UNPAID",
+        ),
+        "COMPLETED_LOYALTY_SPEND_EARN_SPENT": (
+            primary_client.id,
+            "spent",
+            "COMPLETED_LOYALTY_SPEND_EARN",
+        ),
+        "COMPLETED_LOYALTY_SPEND_EARN_EARNED": (
+            primary_client.id,
+            "earned",
+            "COMPLETED_LOYALTY_SPEND_EARN",
+        ),
+    }
+    loyalty_by_source: dict[str, LoyaltyTransaction] = {}
+    loyalty_rows = (
         db.query(LoyaltyTransaction)
-        .filter(_contains_marker(LoyaltyTransaction.source, marker))
+        .filter(LoyaltyTransaction.source.in_(tuple(source_by_key.values())))
+        .order_by(LoyaltyTransaction.id)
         .all()
     )
-    marker_booking_ids = {booking.id for booking in marker_bookings}
-    unmarked_booking_transaction = (
-        db.query(LoyaltyTransaction.id)
-        .join(Booking, Booking.id == LoyaltyTransaction.booking_id)
-        .filter(
-            Booking.id.in_(marker_booking_ids),
-            _not_contains_marker(LoyaltyTransaction.source, marker),
-        )
-        .first()
-        if marker_booking_ids
-        else None
-    )
-    if unmarked_booking_transaction:
-        _fail(
-            "A marker booking has a loyalty transaction without the release smoke marker"
-        )
-    for transaction in marker_loyalty:
+    for row in loyalty_rows:
+        key = key_by_source.get(row.source)
+        if key is None:
+            _fail(f"Loyalty transaction {row.id} has no exact canonical source")
+        if row.source in loyalty_by_source:
+            _fail(f"Duplicate exact loyalty source {row.source!r}")
+        client_id, transaction_type, booking_label = expected_loyalty[key]
         if (
-            transaction.master_id not in anchors.master_ids
-            or transaction.client_id not in anchors.client_ids
+            row.master_id != primary_master.id
+            or row.client_id != client_id
+            or row.transaction_type != transaction_type
         ):
-            _fail(
-                f"Marker loyalty transaction {transaction.id} is outside the allowlist"
-            )
-        if (
-            transaction.booking_id is not None
-            and transaction.booking_id not in marker_booking_ids
-        ):
-            _fail(
-                f"Marker loyalty transaction {transaction.id} references a non-marker booking"
-            )
-
-    for rule in db.query(LoyaltyDiscount).filter(
-        or_(
-            _contains_marker(LoyaltyDiscount.name, marker),
-            _contains_marker(LoyaltyDiscount.description, marker),
-        )
-    ):
-        if rule.master_id not in anchors.master_ids:
-            _fail(f"Marker loyalty discount {rule.id} is outside the allowlist")
-
-    for rule in db.query(PersonalDiscount).filter(
-        _contains_marker(PersonalDiscount.description, marker)
-    ):
-        if rule.master_id not in anchors.master_ids:
-            _fail(f"Marker personal discount {rule.id} is outside the allowlist")
-
-    for item in db.query(MasterService).filter(
-        or_(
-            _contains_marker(MasterService.name, marker),
-            _contains_marker(MasterService.description, marker),
-        )
-    ):
-        if item.master_id not in anchors.master_ids:
-            _fail(f"Marker MasterService {item.id} is outside the allowlist")
-
-    for category in db.query(MasterServiceCategory).filter(
-        _contains_marker(MasterServiceCategory.name, marker)
-    ):
-        if category.master_id not in anchors.master_ids:
-            _fail(f"Marker service category {category.id} is outside the allowlist")
-
-    marker_services = (
-        db.query(Service)
-        .filter(
-            or_(
-                _contains_marker(Service.name, marker),
-                _contains_marker(Service.description, marker),
-            )
-        )
-        .all()
-    )
-    for service in marker_services:
-        linked_master_ids = set(
-            db.execute(
-                select(master_services.c.master_id).where(
-                    master_services.c.service_id == service.id
+            _fail(f"Exact smoke loyalty transaction {row.id} has unsafe ownership")
+        if booking_label is None:
+            if row.booking_id is not None:
+                _fail(f"Opening loyalty transaction {row.id} must be detached")
+        else:
+            booking = bookings_by_label.get(booking_label)
+            if booking is None or row.booking_id != booking.id:
+                _fail(
+                    f"Exact smoke loyalty transaction {row.id} is not attached to "
+                    f"scenario {booking_label}"
                 )
-            ).scalars()
-        )
-        if not linked_master_ids or not linked_master_ids.issubset(anchors.master_ids):
-            _fail(
-                f"Marker Service {service.id} has missing or out-of-allowlist ownership"
+        loyalty_by_source[str(row.source)] = row
+    loyalty_transaction_ids = frozenset(int(row.id) for row in loyalty_rows)
+
+    if booking_ids:
+        unexpected_tx = (
+            db.query(LoyaltyTransaction.id)
+            .filter(
+                LoyaltyTransaction.booking_id.in_(booking_ids),
+                ~LoyaltyTransaction.id.in_(loyalty_transaction_ids),
             )
+            .first()
+        )
+        if unexpected_tx:
+            _fail("An exact smoke booking has a non-owned loyalty transaction")
 
+    loyalty_discount_ids: set[int] = set()
+    for key in LOYALTY_DISCOUNT_KEYS:
+        identifier = ownership["loyalty_discounts"][key]
+        rows = (
+            db.query(LoyaltyDiscount)
+            .filter(
+                LoyaltyDiscount.name == identifier["name"],
+                LoyaltyDiscount.description == identifier["description"],
+            )
+            .all()
+        )
+        if len(rows) > 1:
+            _fail(f"Duplicate exact smoke loyalty discount identifier {key}")
+        if rows:
+            if rows[0].master_id != primary_master.id:
+                _fail(f"Exact smoke loyalty discount {key} has the wrong master")
+            loyalty_discount_ids.add(int(rows[0].id))
 
-def _booking_scenario_label(booking: Booking) -> str:
-    matches = [
-        label for label in SCENARIO_LABELS if f"[{label}]" in (booking.notes or "")
-    ]
-    if len(matches) != 1:
-        _fail(f"Marker booking {booking.id} has no unique smoke scenario label")
-    return matches[0]
+    personal_identifier = ownership["personal_discount"]
+    personal_rows = (
+        db.query(PersonalDiscount)
+        .filter(
+            PersonalDiscount.client_phone == primary_client.phone,
+            PersonalDiscount.description == personal_identifier["description"],
+        )
+        .all()
+    )
+    if len(personal_rows) > 1:
+        _fail("Duplicate exact smoke personal discount identifier")
+    if personal_rows and personal_rows[0].master_id != primary_master.id:
+        _fail("Exact smoke personal discount has the wrong master")
+    personal_discount_ids = frozenset(int(row.id) for row in personal_rows)
 
+    def child_rows(model: Any) -> list[Any]:
+        if not booking_ids:
+            return []
+        return db.query(model).filter(model.booking_id.in_(booking_ids)).all()
 
-def _loyalty_source(marker: str, label: str, transaction_type: str) -> str:
-    return f"{marker}:{label}:{transaction_type.upper()}"
+    applied_rows = child_rows(AppliedDiscount)
+    discount_booking = bookings_by_label.get("WITH_DISCOUNT")
+    if len(applied_rows) > (1 if discount_booking is not None else 0):
+        _fail("Exact smoke bookings have unexpected AppliedDiscount rows")
+    if applied_rows and applied_rows[0].booking_id != discount_booking.id:
+        _fail("AppliedDiscount is attached to the wrong exact smoke scenario")
 
+    completed_ids = {
+        bookings_by_label[label].id
+        for label in (
+            "COMPLETED_PAID",
+            "COMPLETED_UNPAID",
+            "COMPLETED_LOYALTY_SPEND_EARN",
+        )
+        if label in bookings_by_label
+    }
+    confirmation_rows = child_rows(BookingConfirmation)
+    income_rows = child_rows(Income)
+    for model_name, rows in (
+        ("BookingConfirmation", confirmation_rows),
+        ("Income", income_rows),
+    ):
+        if len({row.booking_id for row in rows}) != len(rows):
+            _fail(f"Duplicate {model_name} rows for an exact smoke booking")
+        if any(row.booking_id not in completed_ids for row in rows):
+            _fail(f"Unexpected {model_name} on a non-completed smoke scenario")
 
-def _opening_loyalty_source(marker: str, client_slot: str) -> str:
-    return _loyalty_source(marker, f"OPENING_BALANCE_{client_slot}", "earned")
+    missed_rows = child_rows(MissedRevenue)
+    edit_rows = child_rows(BookingEditRequest)
+    if missed_rows:
+        _fail("Exact smoke bookings have unexpected MissedRevenue rows")
+    if edit_rows:
+        _fail("Exact smoke bookings have unexpected BookingEditRequest rows")
+
+    return OwnedIds(
+        bookings_by_label=bookings_by_label,
+        booking_ids=booking_ids,
+        loyalty_transactions_by_source=loyalty_by_source,
+        loyalty_transaction_ids=loyalty_transaction_ids,
+        loyalty_discount_ids=frozenset(loyalty_discount_ids),
+        personal_discount_ids=personal_discount_ids,
+        applied_discount_ids=frozenset(int(row.id) for row in applied_rows),
+        booking_confirmation_ids=frozenset(int(row.id) for row in confirmation_rows),
+        income_ids=frozenset(int(row.id) for row in income_rows),
+        missed_revenue_ids=frozenset(),
+        booking_edit_request_ids=frozenset(),
+    )
 
 
 def _prepare_existing_smoke_transactions(
     db: Session,
-    manifest: dict[str, Any],
-    anchors: Anchors,
+    owned: OwnedIds,
 ) -> dict[str, LoyaltyTransaction]:
-    """Normalize, park, and zero only owned ledger rows before booking rebuild."""
-    marker = manifest["marker"]
-    primary_client = anchors.clients_by_phone[manifest["primary_client_phone"]]
-    secondary_client = anchors.clients_by_phone[manifest["secondary_client_phone"]]
-    completed_labels = {
-        "COMPLETED_PAID",
-        "COMPLETED_UNPAID",
-        "COMPLETED_LOYALTY_SPEND_EARN",
-    }
-    result: dict[str, LoyaltyTransaction] = {}
-    rows = (
-        db.query(LoyaltyTransaction)
-        .filter(_contains_marker(LoyaltyTransaction.source, marker))
-        .order_by(LoyaltyTransaction.id)
-        .all()
-    )
-    for row in rows:
-        if row.booking_id is not None:
-            booking = db.get(Booking, row.booking_id)
-            if booking is None:
-                _fail(
-                    f"Marker loyalty transaction {row.id} references a missing booking"
-                )
-            label = _booking_scenario_label(booking)
-            if label not in completed_labels:
-                _fail(
-                    f"Marker loyalty transaction {row.id} belongs to unexpected scenario {label}"
-                )
-            source = _loyalty_source(marker, label, str(row.transaction_type))
-        elif "OPENING_BALANCE" in (row.source or ""):
-            if row.client_id == primary_client.id:
-                source = _opening_loyalty_source(marker, "PRIMARY")
-            elif row.client_id == secondary_client.id:
-                source = _opening_loyalty_source(marker, "SECONDARY")
-            else:
-                _fail(
-                    f"Opening-balance transaction {row.id} is outside the client allowlist"
-                )
-            if row.transaction_type != "earned":
-                _fail(f"Opening-balance transaction {row.id} must be earned")
-        else:
-            _fail(
-                f"Detached marker loyalty transaction {row.id} has unsupported source {row.source!r}"
-            )
-
-        if source in result:
-            _fail(f"Duplicate marker loyalty natural key: {source}")
-        row.source = source
+    """Park and zero only the exact preflight-owned ledger rows."""
+    result = dict(owned.loyalty_transactions_by_source)
+    for source, row in result.items():
+        if row.source != source or row.id not in owned.loyalty_transaction_ids:
+            _fail(f"Owned loyalty natural-key mismatch for row {row.id}")
         row.booking_id = None
         row.points = 0
-        result[source] = row
     db.flush()
     return result
-
-
-def _schedule_snapshot(
-    db: Session, master_ids: set[int], window_start: date, window_end: date
-) -> list[tuple[Any, ...]]:
-    rows = (
-        db.query(MasterSchedule)
-        .filter(
-            MasterSchedule.master_id.in_(master_ids),
-            MasterSchedule.date >= window_start,
-            MasterSchedule.date <= window_end,
-        )
-        .order_by(
-            MasterSchedule.master_id,
-            MasterSchedule.date,
-            MasterSchedule.start_time,
-            MasterSchedule.id,
-        )
-        .all()
-    )
-    return [
-        (
-            row.id,
-            row.master_id,
-            row.salon_id,
-            row.branch_id,
-            row.place_id,
-            row.date,
-            row.start_time,
-            row.end_time,
-            bool(row.is_available),
-        )
-        for row in rows
-    ]
 
 
 def _schedule_snapshot_hash(snapshot: Sequence[tuple[Any, ...]]) -> str:
     return hashlib.sha256(repr(tuple(snapshot)).encode("utf-8")).hexdigest()[:16]
 
 
-def _validate_schedule_scope(
-    snapshot: Sequence[tuple[Any, ...]],
-    master_ids: set[int],
-    window_start: date,
-    window_end: date,
-    max_rows: int,
-) -> None:
-    if len(snapshot) > max_rows:
-        _fail(f"Schedule scope has {len(snapshot)} rows; safety limit is {max_rows}")
-    for row in snapshot:
-        _, master_id, _, _, _, row_date, *_ = row
-        if master_id not in master_ids:
-            _fail(f"Schedule snapshot contains non-allowlist master_id={master_id}")
-        if row_date is None or not (window_start <= row_date <= window_end):
-            _fail(f"Schedule snapshot contains out-of-window date={row_date}")
-
-
 def _delete_previous_smoke_layer(
-    db: Session, marker: str, anchors: Anchors, counters: RefreshCounters
+    db: Session, owned: OwnedIds, counters: RefreshCounters
 ) -> None:
-    marker_bookings = (
-        db.query(Booking).filter(_contains_marker(Booking.notes, marker)).all()
-    )
-    booking_ids = [booking.id for booking in marker_bookings]
+    booking_ids = tuple(sorted(owned.booking_ids))
 
     if booking_ids:
         still_attached = (
@@ -763,40 +835,44 @@ def _delete_previous_smoke_layer(
             _fail(
                 "Marker loyalty transactions were not safely parked before booking deletion"
             )
-        for model in (
-            BookingConfirmation,
-            Income,
-            MissedRevenue,
-            AppliedDiscount,
-            BookingEditRequest,
-        ):
-            db.query(model).filter(model.booking_id.in_(booking_ids)).delete(
-                synchronize_session=False
+        child_sets = (
+            (BookingConfirmation, owned.booking_confirmation_ids),
+            (Income, owned.income_ids),
+            (MissedRevenue, owned.missed_revenue_ids),
+            (AppliedDiscount, owned.applied_discount_ids),
+            (BookingEditRequest, owned.booking_edit_request_ids),
+        )
+        for model, exact_ids in child_sets:
+            if not exact_ids:
+                continue
+            deleted = (
+                db.query(model)
+                .filter(model.id.in_(tuple(exact_ids)))
+                .delete(synchronize_session=False)
             )
-        counters.bookings_deleted = (
+            if deleted != len(exact_ids):
+                _fail(
+                    f"Exact owned delete count mismatch for {model.__tablename__}: "
+                    f"expected {len(exact_ids)}, got {deleted}"
+                )
+        deleted_bookings = (
             db.query(Booking)
             .filter(Booking.id.in_(booking_ids))
             .delete(synchronize_session=False)
         )
+        if deleted_bookings != len(booking_ids):
+            _fail(
+                "Exact owned booking delete count mismatch: "
+                f"expected {len(booking_ids)}, got {deleted_bookings}"
+            )
+        counters.bookings_deleted = deleted_bookings
+        for booking in owned.bookings_by_label.values():
+            if booking in db:
+                db.expunge(booking)
     db.flush()
 
-    marker_loyalty_rules = (
-        db.query(LoyaltyDiscount)
-        .filter(
-            or_(
-                _contains_marker(LoyaltyDiscount.name, marker),
-                _contains_marker(LoyaltyDiscount.description, marker),
-            )
-        )
-        .all()
-    )
-    marker_personal_rules = (
-        db.query(PersonalDiscount)
-        .filter(_contains_marker(PersonalDiscount.description, marker))
-        .all()
-    )
-    loyalty_rule_ids = [rule.id for rule in marker_loyalty_rules]
-    personal_rule_ids = [rule.id for rule in marker_personal_rules]
+    loyalty_rule_ids = tuple(sorted(owned.loyalty_discount_ids))
+    personal_rule_ids = tuple(sorted(owned.personal_discount_ids))
     dangling_applied = (
         db.query(AppliedDiscount.id)
         .filter(
@@ -817,16 +893,24 @@ def _delete_previous_smoke_layer(
     )
     if dangling_applied:
         _fail(
-            "A marker discount is referenced by a non-marker booking; refusing to delete the rule"
+            "An exact owned discount is referenced outside the owned AppliedDiscount set"
         )
     if loyalty_rule_ids:
-        db.query(LoyaltyDiscount).filter(
-            LoyaltyDiscount.id.in_(loyalty_rule_ids)
-        ).delete(synchronize_session=False)
+        deleted = (
+            db.query(LoyaltyDiscount)
+            .filter(LoyaltyDiscount.id.in_(loyalty_rule_ids))
+            .delete(synchronize_session=False)
+        )
+        if deleted != len(loyalty_rule_ids):
+            _fail("Exact owned LoyaltyDiscount delete count mismatch")
     if personal_rule_ids:
-        db.query(PersonalDiscount).filter(
-            PersonalDiscount.id.in_(personal_rule_ids)
-        ).delete(synchronize_session=False)
+        deleted = (
+            db.query(PersonalDiscount)
+            .filter(PersonalDiscount.id.in_(personal_rule_ids))
+            .delete(synchronize_session=False)
+        )
+        if deleted != len(personal_rule_ids):
+            _fail("Exact owned PersonalDiscount delete count mismatch")
     db.flush()
 
 
@@ -836,6 +920,7 @@ def _find_service(
     spec: dict[str, Any],
     marker: str,
     counters: RefreshCounters,
+    created: CreatedIds,
 ) -> Service:
     duration = int(spec["duration"])
     preferred_name = str(spec["preferred_name"])
@@ -876,6 +961,8 @@ def _find_service(
         db.execute(
             master_services.insert().values(master_id=master.id, service_id=service.id)
         )
+        created.services.add(int(service.id))
+        created.service_links.add((int(master.id), int(service.id)))
         counters.services_created += 1
 
     if service.price is None or float(service.price) <= 0:
@@ -891,6 +978,7 @@ def _ensure_master_catalog_service(
     spec: dict[str, Any],
     marker: str,
     counters: RefreshCounters,
+    created: CreatedIds,
 ) -> MasterService:
     duration = int(spec["duration"])
     preferred_name = str(spec["preferred_name"])
@@ -940,6 +1028,7 @@ def _ensure_master_catalog_service(
         category = MasterServiceCategory(master_id=master.id, name=category_name)
         db.add(category)
         db.flush()
+        created.master_service_categories.add(int(category.id))
 
     service = MasterService(
         master_id=master.id,
@@ -951,6 +1040,7 @@ def _ensure_master_catalog_service(
     )
     db.add(service)
     db.flush()
+    created.master_services.add(int(service.id))
     counters.master_services_created += 1
     return service
 
@@ -960,15 +1050,16 @@ def _resolve_services(
     manifest: dict[str, Any],
     anchors: Anchors,
     counters: RefreshCounters,
+    created: CreatedIds,
 ) -> dict[int, dict[int, Service]]:
     marker = manifest["marker"]
     result: dict[int, dict[int, Service]] = {}
     for _, master in anchors.masters_by_phone.values():
         by_duration: dict[int, Service] = {}
         for spec in manifest["services"]:
-            service = _find_service(db, master, spec, marker, counters)
+            service = _find_service(db, master, spec, marker, counters, created)
             catalog_service = _ensure_master_catalog_service(
-                db, master, spec, marker, counters
+                db, master, spec, marker, counters, created
             )
             if (
                 catalog_service.name != service.name
@@ -983,36 +1074,6 @@ def _resolve_services(
         result[master.id] = by_duration
     db.flush()
     return result
-
-
-def _pick_special_schedule_dates(
-    db: Session,
-    primary_master: Master,
-    today: date,
-    window_end: date,
-    workdays: set[int],
-) -> tuple[date, date]:
-    recurring_days = {
-        int(day)
-        for (day,) in db.query(AvailabilitySlot.day_of_week)
-        .filter(
-            AvailabilitySlot.owner_type == OwnerType.MASTER,
-            AvailabilitySlot.owner_id == primary_master.id,
-        )
-        .all()
-        if day is not None
-    }
-    candidates = [
-        today + timedelta(days=offset)
-        for offset in range(3, (window_end - today).days + 1)
-        if (today + timedelta(days=offset)).isoweekday() in workdays
-        and (today + timedelta(days=offset)).isoweekday() not in recurring_days
-    ]
-    if len(candidates) < 2:
-        _fail(
-            "Cannot select closed/partial days without touching recurring AvailabilitySlot rows"
-        )
-    return candidates[0], candidates[1]
 
 
 def _time_range(
@@ -1034,36 +1095,29 @@ def _refresh_schedule(
     window_start: date,
     window_end: date,
     counters: RefreshCounters,
+    created: CreatedIds,
 ) -> tuple[date, date, dict[int, set[tuple[date, time, time]]]]:
     schedule_cfg = manifest["schedule"]
     max_rows = min(
         int(schedule_cfg["max_existing_rows_in_scope"]),
         ABSOLUTE_MAX_SCHEDULE_ROWS,
     )
-    before = _schedule_snapshot(db, anchors.master_ids, window_start, window_end)
-    _validate_schedule_scope(
-        before, anchors.master_ids, window_start, window_end, max_rows
-    )
-    print(
-        f"Schedule preflight: rows={len(before)}, snapshot={_schedule_snapshot_hash(before)}, "
-        f"window={window_start}..{window_end}"
-    )
-
-    counters.schedule_deleted = (
-        db.query(MasterSchedule)
-        .filter(
-            MasterSchedule.master_id.in_(anchors.master_ids),
-            MasterSchedule.date >= window_start,
-            MasterSchedule.date <= window_end,
-        )
-        .delete(synchronize_session=False)
-    )
-
     primary_master = anchors.masters_by_phone[manifest["primary_master_phone"]][1]
-    workdays = {int(day) for day in schedule_cfg["weekdays"]}
-    closed_day, partial_day = _pick_special_schedule_dates(
-        db, primary_master, today, window_end, workdays
-    )
+    offsets = [int(value) for value in schedule_cfg["working_day_offsets"]]
+    target_dates = [today + timedelta(days=offset) for offset in offsets]
+    if any(not (window_start <= target <= window_end) for target in target_dates):
+        _fail("Canonical relative schedule dates are outside the refresh window")
+    closed_day = today + timedelta(days=int(schedule_cfg["closed_day_offset"]))
+    partial_day = today + timedelta(days=int(schedule_cfg["partial_day_offset"]))
+    if (
+        closed_day == partial_day
+        or closed_day not in target_dates
+        or partial_day not in target_dates
+    ):
+        _fail(
+            "Closed and partial schedule dates must be distinct canonical target dates"
+        )
+
     start = _parse_hhmm(schedule_cfg["work_start"], "schedule.work_start")
     end = _parse_hhmm(schedule_cfg["work_end"], "schedule.work_end")
     partial_start = _parse_hhmm(
@@ -1076,15 +1130,70 @@ def _refresh_schedule(
     if step != 30 or start >= end or not (start < partial_start < partial_end < end):
         _fail("Invalid managed schedule configuration")
 
+    scoped_rows = (
+        db.query(MasterSchedule)
+        .filter(
+            MasterSchedule.master_id.in_(anchors.master_ids),
+            MasterSchedule.date.in_(target_dates),
+        )
+        .order_by(
+            MasterSchedule.master_id,
+            MasterSchedule.date,
+            MasterSchedule.start_time,
+            MasterSchedule.id,
+        )
+        .all()
+    )
+    if len(scoped_rows) > max_rows:
+        _fail(f"Exact schedule scope has {len(scoped_rows)} rows; limit is {max_rows}")
+    scoped_snapshot = [
+        (
+            row.id,
+            row.master_id,
+            row.salon_id,
+            row.branch_id,
+            row.place_id,
+            row.date,
+            row.start_time,
+            row.end_time,
+            bool(row.is_available),
+        )
+        for row in scoped_rows
+    ]
+    print(
+        f"Schedule preflight: rows={len(scoped_rows)}, "
+        f"snapshot={_schedule_snapshot_hash(scoped_snapshot)}, "
+        f"dates={','.join(day.isoformat() for day in target_dates)}"
+    )
+
+    recurring_closed = (
+        db.query(AvailabilitySlot.id)
+        .filter(
+            AvailabilitySlot.owner_type == OwnerType.MASTER,
+            AvailabilitySlot.owner_id == primary_master.id,
+            AvailabilitySlot.day_of_week == closed_day.isoweekday(),
+        )
+        .first()
+    )
+    if recurring_closed:
+        _fail(
+            "Canonical closed day has recurring AvailabilitySlot rows; refusing to alter effective availability"
+        )
+
     generated: dict[int, set[tuple[date, time, time]]] = {
         master_id: set() for master_id in anchors.master_ids
     }
-    day = window_start
-    while day <= window_end:
-        if day.isoweekday() in workdays:
-            for master_id in sorted(anchors.master_ids):
-                if master_id == primary_master.id and day == closed_day:
-                    continue
+    existing_by_owner_date: dict[tuple[int, date], list[MasterSchedule]] = {}
+    for row in scoped_rows:
+        existing_by_owner_date.setdefault((int(row.master_id), row.date), []).append(
+            row
+        )
+
+    pending: list[MasterSchedule] = []
+    for master_id in sorted(anchors.master_ids):
+        for day in target_dates:
+            expected: set[tuple[time, time, bool, None, None, None]] = set()
+            if not (master_id == primary_master.id and day == closed_day):
                 for slot_start, slot_end in _time_range(start, end, step):
                     if (
                         master_id == primary_master.id
@@ -1093,26 +1202,51 @@ def _refresh_schedule(
                         and slot_end > partial_start
                     ):
                         continue
-                    db.add(
-                        MasterSchedule(
-                            master_id=master_id,
-                            salon_id=None,
-                            branch_id=None,
-                            place_id=None,
-                            date=day,
-                            start_time=slot_start,
-                            end_time=slot_end,
-                            is_available=True,
-                        )
+                    expected.add((slot_start, slot_end, True, None, None, None))
+
+            existing = existing_by_owner_date.get((master_id, day), [])
+            actual = [
+                (
+                    row.start_time,
+                    row.end_time,
+                    bool(row.is_available),
+                    row.salon_id,
+                    row.branch_id,
+                    row.place_id,
+                )
+                for row in existing
+            ]
+            if existing:
+                if len(actual) != len(set(actual)) or set(actual) != expected:
+                    _fail(
+                        "Existing MasterSchedule is partial, duplicate, closed, or non-canonical: "
+                        f"master_id={master_id}, date={day}"
                     )
-                    generated[master_id].add((day, slot_start, slot_end))
-                    counters.schedule_created += 1
-        day += timedelta(days=1)
-    if counters.schedule_created > max_rows:
-        _fail(
-            f"Generated schedule has {counters.schedule_created} rows; limit is {max_rows}"
-        )
+            elif expected:
+                for slot_start, slot_end, *_ in sorted(expected):
+                    row = MasterSchedule(
+                        master_id=master_id,
+                        salon_id=None,
+                        branch_id=None,
+                        place_id=None,
+                        date=day,
+                        start_time=slot_start,
+                        end_time=slot_end,
+                        is_available=True,
+                    )
+                    db.add(row)
+                    pending.append(row)
+
+            for slot_start, slot_end, *_ in expected:
+                generated[master_id].add((day, slot_start, slot_end))
+
+    if len(pending) > max_rows:
+        _fail(f"Generated schedule has {len(pending)} rows; limit is {max_rows}")
     db.flush()
+    for row in pending:
+        created.schedules.add(int(row.id))
+    counters.schedule_created = len(pending)
+    counters.schedule_deleted = 0
     return closed_day, partial_day, generated
 
 
@@ -1173,17 +1307,17 @@ def _create_discount_rules(
     manifest: dict[str, Any],
     counters: RefreshCounters,
 ) -> None:
-    marker = manifest["marker"]
     cfg = manifest["discounts"]
+    identifiers = manifest["ownership"]["loyalty_discounts"]
     rules = (
         (
-            "First visit",
+            "first_visit",
             "first_visit",
             {},
             float(cfg["first_visit_percent"]),
         ),
         (
-            "Returning",
+            "returning",
             "returning_client",
             {
                 "min_days_since_last_visit": int(cfg["returning_min_days"]),
@@ -1192,7 +1326,7 @@ def _create_discount_rules(
             float(cfg["returning_percent"]),
         ),
         (
-            "Birthday",
+            "birthday",
             "birthday",
             {
                 "days_before": int(cfg["birthday_days_before"]),
@@ -1201,7 +1335,7 @@ def _create_discount_rules(
             float(cfg["birthday_percent"]),
         ),
         (
-            "Happy hours",
+            "happy_hours",
             "happy_hours",
             {
                 "days": [int(day) for day in cfg["happy_hours_days"]],
@@ -1215,14 +1349,15 @@ def _create_discount_rules(
             float(cfg["happy_hours_percent"]),
         ),
     )
-    for name, condition_type, parameters, percent in rules:
+    for key, condition_type, parameters, percent in rules:
+        identifier = identifiers[key]
         db.add(
             LoyaltyDiscount(
                 master_id=master.id,
                 salon_id=None,
                 discount_type=LoyaltyDiscountType.QUICK,
-                name=f"{name} [{marker}]",
-                description=f"[{marker}] Release smoke discount",
+                name=identifier["name"],
+                description=identifier["description"],
                 discount_percent=percent,
                 max_discount_amount=None,
                 conditions={"condition_type": condition_type, "parameters": parameters},
@@ -1238,7 +1373,7 @@ def _create_discount_rules(
             client_phone=client.phone,
             discount_percent=float(cfg["personal_percent"]),
             max_discount_amount=None,
-            description=f"Personal discount [{marker}]",
+            description=manifest["ownership"]["personal_discount"]["description"],
             is_active=True,
         )
     )
@@ -1297,7 +1432,7 @@ def _allocate_booking_time(
 def _new_booking(
     db: Session,
     *,
-    marker: str,
+    manifest: dict[str, Any],
     label: str,
     client: User,
     master: Master,
@@ -1318,7 +1453,7 @@ def _new_booking(
         start_time=start,
         end_time=start + timedelta(minutes=int(service.duration)),
         status=status,
-        notes=f"[{marker}][{label}]",
+        notes=manifest["ownership"]["booking_notes"][label],
         payment_method="on_visit",
         payment_deadline=None,
         payment_amount=float(
@@ -1337,6 +1472,7 @@ def _upsert_smoke_transaction(
     existing: dict[str, LoyaltyTransaction],
     counters: RefreshCounters,
     *,
+    manifest: dict[str, Any],
     source: str,
     master_id: int,
     client_id: int,
@@ -1347,8 +1483,9 @@ def _upsert_smoke_transaction(
     expires_at: datetime | None,
     service_id: int | None,
 ) -> LoyaltyTransaction:
-    if not source.startswith(f"{EXPECTED_MARKER}:"):
-        _fail(f"Unsafe loyalty source outside marker namespace: {source!r}")
+    exact_sources = set(manifest["ownership"]["loyalty_sources"].values())
+    if source not in exact_sources:
+        _fail(f"Unsafe loyalty source outside canonical manifest: {source!r}")
     if points <= 0:
         _fail(f"Smoke loyalty transaction {source} must have positive points")
     row = existing.get(source)
@@ -1377,7 +1514,7 @@ def _prepare_completion_transactions(
     existing: dict[str, LoyaltyTransaction],
     counters: RefreshCounters,
     *,
-    marker: str,
+    manifest: dict[str, Any],
     label: str,
     booking: Booking,
     master: Master,
@@ -1390,7 +1527,8 @@ def _prepare_completion_transactions(
             db,
             existing,
             counters,
-            source=_loyalty_source(marker, label, "spent"),
+            manifest=manifest,
+            source=manifest["ownership"]["loyalty_sources"][f"{label}_SPENT"],
             master_id=master.id,
             client_id=booking.client_id,
             booking_id=booking.id,
@@ -1411,7 +1549,8 @@ def _prepare_completion_transactions(
         db,
         existing,
         counters,
-        source=_loyalty_source(marker, label, "earned"),
+        manifest=manifest,
+        source=manifest["ownership"]["loyalty_sources"][f"{label}_EARNED"],
         master_id=master.id,
         client_id=booking.client_id,
         booking_id=booking.id,
@@ -1465,6 +1604,7 @@ def _seed_opening_loyalty_balance(
     db: Session,
     existing: dict[str, LoyaltyTransaction],
     counters: RefreshCounters,
+    manifest: dict[str, Any],
     master: Master,
     client: User,
     service: Service,
@@ -1480,6 +1620,7 @@ def _seed_opening_loyalty_balance(
         db,
         existing,
         counters,
+        manifest=manifest,
         source=source,
         master_id=master.id,
         client_id=client.id,
@@ -1540,7 +1681,7 @@ def _create_booking_scenarios(
     created: dict[str, Booking] = {}
     completed_paid = _new_booking(
         db,
-        marker=marker,
+        manifest=manifest,
         label="COMPLETED_PAID",
         client=client,
         master=master,
@@ -1553,7 +1694,7 @@ def _create_booking_scenarios(
         db,
         existing_transactions,
         counters,
-        marker=marker,
+        manifest=manifest,
         label="COMPLETED_PAID",
         booking=completed_paid,
         master=master,
@@ -1564,7 +1705,7 @@ def _create_booking_scenarios(
 
     completed_unpaid = _new_booking(
         db,
-        marker=marker,
+        manifest=manifest,
         label="COMPLETED_UNPAID",
         client=second_client,
         master=master,
@@ -1577,7 +1718,7 @@ def _create_booking_scenarios(
         db,
         existing_transactions,
         counters,
-        marker=marker,
+        manifest=manifest,
         label="COMPLETED_UNPAID",
         booking=completed_unpaid,
         master=master,
@@ -1593,7 +1734,7 @@ def _create_booking_scenarios(
         )
     completed_spend = _new_booking(
         db,
-        marker=marker,
+        manifest=manifest,
         label="COMPLETED_LOYALTY_SPEND_EARN",
         client=client,
         master=master,
@@ -1607,7 +1748,7 @@ def _create_booking_scenarios(
         db,
         existing_transactions,
         counters,
-        marker=marker,
+        manifest=manifest,
         label="COMPLETED_LOYALTY_SPEND_EARN",
         booking=completed_spend,
         master=master,
@@ -1619,7 +1760,7 @@ def _create_booking_scenarios(
 
     awaiting = _new_booking(
         db,
-        marker=marker,
+        manifest=manifest,
         label="AWAITING_CONFIRMATION",
         client=second_client,
         master=master,
@@ -1632,7 +1773,7 @@ def _create_booking_scenarios(
 
     upcoming_paid = _new_booking(
         db,
-        marker=marker,
+        manifest=manifest,
         label="UPCOMING_PAID",
         client=client,
         master=master,
@@ -1645,7 +1786,7 @@ def _create_booking_scenarios(
 
     upcoming_unpaid = _new_booking(
         db,
-        marker=marker,
+        manifest=manifest,
         label="UPCOMING_UNPAID",
         client=second_client,
         master=master,
@@ -1664,7 +1805,7 @@ def _create_booking_scenarios(
         _fail("Insufficient effective points for cancellation reserve scenario")
     cancelled = _new_booking(
         db,
-        marker=marker,
+        manifest=manifest,
         label="CANCELLED",
         client=client,
         master=master,
@@ -1723,7 +1864,7 @@ def _create_booking_scenarios(
         _fail("Discount engine did not select the maximum applicable percentage")
     discounted = _new_booking(
         db,
-        marker=marker,
+        manifest=manifest,
         label="WITH_DISCOUNT",
         client=client,
         master=master,
@@ -1745,7 +1886,7 @@ def _create_booking_scenarios(
         _fail("Insufficient effective points for active reserve scenario")
     reserve = _new_booking(
         db,
-        marker=marker,
+        manifest=manifest,
         label="LOYALTY_RESERVE",
         client=client,
         master=master,
@@ -1795,30 +1936,17 @@ def _verify_schedule_and_scenarios(
     closed_day: date,
     partial_day: date,
     today: date,
-    window_start: date,
-    window_end: date,
     scenario_result: dict[str, Any],
-    expected_schedule_count: int,
+    generated_schedule: dict[int, set[tuple[date, time, time]]],
+    owned: OwnedIds,
 ) -> None:
-    marker = manifest["marker"]
     master = anchors.masters_by_phone[manifest["primary_master_phone"]][1]
     service30 = services[master.id][30]
     bookings = scenario_result["bookings"]
 
-    marker_rows = (
-        db.query(Booking).filter(_contains_marker(Booking.notes, marker)).all()
-    )
-    labels = [
-        next(
-            (label for label in SCENARIO_LABELS if f"[{label}]" in (row.notes or "")),
-            None,
-        )
-        for row in marker_rows
-    ]
-    if len(marker_rows) != len(SCENARIO_LABELS) or Counter(labels) != Counter(
-        SCENARIO_LABELS
-    ):
-        _fail("Marker booking labels are missing or duplicated")
+    marker_rows = list(owned.bookings_by_label.values())
+    if set(owned.bookings_by_label) != set(SCENARIO_LABELS):
+        _fail("Exact canonical booking notes are missing or duplicated")
 
     expected = {
         "COMPLETED_PAID": (BookingStatus.COMPLETED.value, True, False),
@@ -1852,7 +1980,8 @@ def _verify_schedule_and_scenarios(
         .filter(
             LoyaltyTransaction.booking_id == bookings["COMPLETED_PAID"].id,
             LoyaltyTransaction.transaction_type == "earned",
-            _contains_marker(LoyaltyTransaction.source, marker),
+            LoyaltyTransaction.source
+            == manifest["ownership"]["loyalty_sources"]["COMPLETED_PAID_EARNED"],
         )
         .count()
     )
@@ -1864,38 +1993,15 @@ def _verify_schedule_and_scenarios(
             "Completed booking without points must create exactly one earned transaction"
         )
 
-    marker_loyalty_rules = (
-        db.query(LoyaltyDiscount)
-        .filter(
-            or_(
-                _contains_marker(LoyaltyDiscount.name, marker),
-                _contains_marker(LoyaltyDiscount.description, marker),
-            )
-        )
-        .count()
-    )
-    marker_personal_rules = (
-        db.query(PersonalDiscount)
-        .filter(_contains_marker(PersonalDiscount.description, marker))
-        .count()
-    )
-    if marker_loyalty_rules != 4 or marker_personal_rules != 1:
+    if len(owned.loyalty_discount_ids) != 4 or len(owned.personal_discount_ids) != 1:
         _fail("Smoke discount rules are missing or duplicated")
+    if len(owned.applied_discount_ids) != 1:
+        _fail("WITH_DISCOUNT must have exactly one owned AppliedDiscount")
+    if len(owned.booking_confirmation_ids) != 3 or len(owned.income_ids) != 3:
+        _fail("Completed scenarios must have exact BookingConfirmation and Income sets")
 
-    expected_loyalty_sources = {
-        _opening_loyalty_source(marker, "PRIMARY"),
-        _opening_loyalty_source(marker, "SECONDARY"),
-        _loyalty_source(marker, "COMPLETED_PAID", "earned"),
-        _loyalty_source(marker, "COMPLETED_UNPAID", "earned"),
-        _loyalty_source(marker, "COMPLETED_LOYALTY_SPEND_EARN", "spent"),
-        _loyalty_source(marker, "COMPLETED_LOYALTY_SPEND_EARN", "earned"),
-    }
-    marker_sources = [
-        source
-        for (source,) in db.query(LoyaltyTransaction.source)
-        .filter(_contains_marker(LoyaltyTransaction.source, marker))
-        .all()
-    ]
+    expected_loyalty_sources = set(manifest["ownership"]["loyalty_sources"].values())
+    marker_sources = list(owned.loyalty_transactions_by_source)
     if len(marker_sources) != len(set(marker_sources)):
         _fail("Marker loyalty natural keys are duplicated")
     if set(marker_sources) != expected_loyalty_sources:
@@ -1904,12 +2010,16 @@ def _verify_schedule_and_scenarios(
             f"expected {sorted(expected_loyalty_sources)}, got {sorted(marker_sources)}"
         )
 
+    target_dates = [
+        today + timedelta(days=int(offset))
+        for offset in manifest["schedule"]["working_day_offsets"]
+    ]
+    expected_schedule_count = sum(len(slots) for slots in generated_schedule.values())
     schedule_count = (
         db.query(MasterSchedule)
         .filter(
             MasterSchedule.master_id.in_(anchors.master_ids),
-            MasterSchedule.date >= window_start,
-            MasterSchedule.date <= window_end,
+            MasterSchedule.date.in_(target_dates),
         )
         .count()
     )
@@ -1928,8 +2038,7 @@ def _verify_schedule_and_scenarios(
         )
         .filter(
             MasterSchedule.master_id.in_(anchors.master_ids),
-            MasterSchedule.date >= window_start,
-            MasterSchedule.date <= window_end,
+            MasterSchedule.date.in_(target_dates),
         )
         .group_by(
             MasterSchedule.master_id,
@@ -2001,7 +2110,6 @@ def _verify_schedule_and_scenarios(
 def _run_refresh(
     db: Session, manifest: dict[str, Any]
 ) -> tuple[RefreshCounters, dict[str, Any]]:
-    marker = manifest["marker"]
     anchors = _resolve_anchors(db, manifest)
     primary_master = anchors.masters_by_phone[manifest["primary_master_phone"]][1]
     try:
@@ -2018,31 +2126,21 @@ def _run_refresh(
     counters = RefreshCounters(
         users_found=len(anchors.master_ids) + len(anchors.client_ids)
     )
-    _assert_marker_scope(db, marker, anchors)
-    protected_before = _capture_protected_state(
-        db, marker, anchors.master_ids, window_start, window_end
-    )
+    created = CreatedIds.empty()
+    owned_before = _resolve_owned_ids(db, manifest, anchors)
+    protected_before = _capture_protected_state(db, owned_before)
     orphans_before = _foreign_key_orphans(db)
 
-    schedule_before = _schedule_snapshot(
-        db, anchors.master_ids, window_start, window_end
-    )
-    _validate_schedule_scope(
-        schedule_before,
-        anchors.master_ids,
-        window_start,
-        window_end,
-        int(manifest["schedule"]["max_existing_rows_in_scope"]),
-    )
-    existing_transactions = _prepare_existing_smoke_transactions(db, manifest, anchors)
-    _delete_previous_smoke_layer(db, marker, anchors, counters)
-    services = _resolve_services(db, manifest, anchors, counters)
+    existing_transactions = _prepare_existing_smoke_transactions(db, owned_before)
+    _delete_previous_smoke_layer(db, owned_before, counters)
+    services = _resolve_services(db, manifest, anchors, counters, created)
 
     primary_client = anchors.clients_by_phone[manifest["primary_client_phone"]]
     secondary_client = anchors.clients_by_phone[manifest["secondary_client_phone"]]
     loyalty_settings, created_loyalty_setting_ids = _ensure_loyalty_settings(
         db, primary_master, manifest, counters
     )
+    created.loyalty_settings.update(created_loyalty_setting_ids)
     _create_discount_rules(db, primary_master, primary_client, manifest, counters)
 
     closed_day, partial_day, generated_schedule = _refresh_schedule(
@@ -2053,15 +2151,17 @@ def _run_refresh(
         window_start,
         window_end,
         counters,
+        created,
     )
     opening = _seed_opening_loyalty_balance(
         db,
         existing_transactions,
         counters,
+        manifest,
         primary_master,
         primary_client,
         services[primary_master.id][90],
-        _opening_loyalty_source(marker, "PRIMARY"),
+        manifest["ownership"]["loyalty_sources"]["OPENING_PRIMARY"],
         int(manifest["loyalty"]["target_available_points"]),
     )
     if opening.points <= 0:
@@ -2070,10 +2170,11 @@ def _run_refresh(
         db,
         existing_transactions,
         counters,
+        manifest,
         primary_master,
         secondary_client,
         services[primary_master.id][30],
-        _opening_loyalty_source(marker, "SECONDARY"),
+        manifest["ownership"]["loyalty_sources"]["OPENING_SECONDARY"],
         int(manifest["loyalty"]["target_available_points"]),
     )
     if secondary_opening.points <= 0:
@@ -2091,11 +2192,8 @@ def _run_refresh(
         counters,
     )
     db.flush()
-    marker_loyalty_total = (
-        db.query(LoyaltyTransaction)
-        .filter(_contains_marker(LoyaltyTransaction.source, marker))
-        .count()
-    )
+    owned_after = _resolve_owned_ids(db, manifest, anchors)
+    marker_loyalty_total = len(owned_after.loyalty_transaction_ids)
 
     _verify_schedule_and_scenarios(
         db,
@@ -2105,18 +2203,15 @@ def _run_refresh(
         closed_day,
         partial_day,
         today,
-        window_start,
-        window_end,
         scenario_result,
-        counters.schedule_created,
+        generated_schedule,
+        owned_after,
     )
-    protected_after = _capture_protected_state(
-        db, marker, anchors.master_ids, window_start, window_end
-    )
+    protected_after = _capture_protected_state(db, owned_after)
     _assert_protected_state(
         protected_before,
         protected_after,
-        created_loyalty_setting_ids,
+        created,
         anchors.master_ids,
     )
     _assert_no_new_orphans(orphans_before, _foreign_key_orphans(db))
@@ -2132,9 +2227,7 @@ def _run_refresh(
         "closed_day": closed_day.isoformat(),
         "partial_day": partial_day.isoformat(),
         "discount_winner": scenario_result["discount_winner"],
-        "marker_bookings": db.query(Booking)
-        .filter(_contains_marker(Booking.notes, marker))
-        .count(),
+        "marker_bookings": len(owned_after.booking_ids),
         "marker_loyalty_transactions": marker_loyalty_total,
     }
     return counters, details
@@ -2147,6 +2240,7 @@ def _print_summary(
     print(f"Release smoke refresh {verb} successfully")
     print(f"Mode: {mode}")
     print(f"Environment: {environment}")
+    print(f"Database target: {details['database_target']}")
     print(f"Window: {details['window']}")
     print(f"Closed day: {details['closed_day']}")
     print(f"Partial closed day: {details['partial_day']}")
@@ -2167,7 +2261,7 @@ def _print_summary(
     print(f"Discount winner: {details['discount_winner']}")
 
 
-def _parse_args() -> argparse.Namespace:
+def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument(
@@ -2182,21 +2276,31 @@ def _parse_args() -> argparse.Namespace:
         default=DEFAULT_MANIFEST,
         help=f"manifest path (default: {DEFAULT_MANIFEST})",
     )
-    return parser.parse_args()
+    parser.add_argument(
+        "--expected-db",
+        type=Path,
+        default=None,
+        help="exact SQLite database file required by --apply",
+    )
+    return parser.parse_args(argv)
 
 
-def main() -> int:
-    args = _parse_args()
+def main(argv: Sequence[str] | None = None) -> int:
+    args = _parse_args(argv)
     mode = "apply" if args.apply else "dry-run"
     db: Session | None = None
     try:
         manifest = _load_manifest(args.manifest.resolve())
         _validate_manifest(manifest)
-        environment = _guard_environment(manifest)
+        environment = _guard_environment(manifest, apply=bool(args.apply))
         db = SessionLocal()
         _configure_connection_safety(db)
+        database_target = _guard_database_target(
+            db, apply=bool(args.apply), expected_db=args.expected_db
+        )
         _assert_schema_compatible(db)
         counters, details = _run_refresh(db, manifest)
+        details["database_target"] = database_target
         if args.apply:
             db.commit()
         else:

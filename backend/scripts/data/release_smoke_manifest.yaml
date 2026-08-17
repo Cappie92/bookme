@@ -1,6 +1,40 @@
 version: 1
 marker: "RELEASE_SMOKE:v1"
 
+ownership:
+  booking_notes:
+    COMPLETED_PAID: "[RELEASE_SMOKE:v1][COMPLETED_PAID]"
+    COMPLETED_UNPAID: "[RELEASE_SMOKE:v1][COMPLETED_UNPAID]"
+    UPCOMING_PAID: "[RELEASE_SMOKE:v1][UPCOMING_PAID]"
+    UPCOMING_UNPAID: "[RELEASE_SMOKE:v1][UPCOMING_UNPAID]"
+    AWAITING_CONFIRMATION: "[RELEASE_SMOKE:v1][AWAITING_CONFIRMATION]"
+    CANCELLED: "[RELEASE_SMOKE:v1][CANCELLED]"
+    WITH_DISCOUNT: "[RELEASE_SMOKE:v1][WITH_DISCOUNT]"
+    LOYALTY_RESERVE: "[RELEASE_SMOKE:v1][LOYALTY_RESERVE]"
+    COMPLETED_LOYALTY_SPEND_EARN: "[RELEASE_SMOKE:v1][COMPLETED_LOYALTY_SPEND_EARN]"
+  loyalty_sources:
+    OPENING_PRIMARY: "RELEASE_SMOKE:v1:OPENING_BALANCE_PRIMARY:EARNED"
+    OPENING_SECONDARY: "RELEASE_SMOKE:v1:OPENING_BALANCE_SECONDARY:EARNED"
+    COMPLETED_PAID_EARNED: "RELEASE_SMOKE:v1:COMPLETED_PAID:EARNED"
+    COMPLETED_UNPAID_EARNED: "RELEASE_SMOKE:v1:COMPLETED_UNPAID:EARNED"
+    COMPLETED_LOYALTY_SPEND_EARN_SPENT: "RELEASE_SMOKE:v1:COMPLETED_LOYALTY_SPEND_EARN:SPENT"
+    COMPLETED_LOYALTY_SPEND_EARN_EARNED: "RELEASE_SMOKE:v1:COMPLETED_LOYALTY_SPEND_EARN:EARNED"
+  loyalty_discounts:
+    first_visit:
+      name: "First visit [RELEASE_SMOKE:v1]"
+      description: "[RELEASE_SMOKE:v1] Release smoke discount"
+    returning:
+      name: "Returning [RELEASE_SMOKE:v1]"
+      description: "[RELEASE_SMOKE:v1] Release smoke discount"
+    birthday:
+      name: "Birthday [RELEASE_SMOKE:v1]"
+      description: "[RELEASE_SMOKE:v1] Release smoke discount"
+    happy_hours:
+      name: "Happy hours [RELEASE_SMOKE:v1]"
+      description: "[RELEASE_SMOKE:v1] Release smoke discount"
+  personal_discount:
+    description: "Personal discount [RELEASE_SMOKE:v1]"
+
 allowed_environments:
   - development
   - staging
@@ -24,7 +58,9 @@ refresh_window:
   days_after: 35
 
 schedule:
-  weekdays: [1, 2, 3, 4, 5, 6]
+  working_day_offsets: [-3, 3, 4, 5, 6, 7]
+  closed_day_offset: 6
+  partial_day_offset: 7
   work_start: "09:00"
   work_end: "18:00"
   slot_minutes: 30
