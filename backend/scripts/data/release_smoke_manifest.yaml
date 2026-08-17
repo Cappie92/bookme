@@ -1,0 +1,73 @@
+version: 1
+marker: "RELEASE_SMOKE:v1"
+
+allowed_environments:
+  - development
+  - staging
+  - test
+
+users:
+  masters:
+    - "+79990000008"
+    - "+79990000002"
+    - "+79990000003"
+  clients:
+    - "+79990000101"
+    - "+79990000102"
+
+primary_master_phone: "+79990000008"
+primary_client_phone: "+79990000101"
+secondary_client_phone: "+79990000102"
+
+refresh_window:
+  days_before: 7
+  days_after: 35
+
+schedule:
+  weekdays: [1, 2, 3, 4, 5, 6]
+  work_start: "09:00"
+  work_end: "18:00"
+  slot_minutes: 30
+  partial_closed_start: "13:00"
+  partial_closed_end: "14:30"
+  max_existing_rows_in_scope: 3000
+
+services:
+  - key: short
+    preferred_name: "Стрижка мужская"
+    fallback_name: "Стрижка 30 минут"
+    duration: 30
+    fallback_price: 1000
+  - key: medium
+    preferred_name: "Стрижка женская"
+    fallback_name: "Стрижка 60 минут"
+    duration: 60
+    fallback_price: 1500
+  - key: long
+    preferred_name: "Окрашивание корни"
+    fallback_name: "Услуга 90 минут"
+    duration: 90
+    fallback_price: 2200
+
+loyalty:
+  default_accrual_percent: 10
+  default_max_payment_percent: 40
+  default_points_lifetime_days: 90
+  target_available_points: 500
+  completed_spend_points: 60
+  cancelled_reserve_points: 40
+  active_reserve_points: 50
+
+discounts:
+  first_visit_percent: 10
+  returning_percent: 12
+  birthday_percent: 20
+  happy_hours_percent: 15
+  personal_percent: 25
+  returning_min_days: 0
+  returning_max_days: 365
+  birthday_days_before: 366
+  birthday_days_after: 366
+  happy_hours_days: [1, 2, 3, 4, 5, 6, 7]
+  happy_hours_start: "12:00"
+  happy_hours_end: "18:00"
