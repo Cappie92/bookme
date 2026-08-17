@@ -14,8 +14,12 @@ from sqlalchemy.orm import sessionmaker
 
 from database import Base
 from models import (
+    AppliedDiscount,
     AvailabilitySlot,
     Booking,
+    BookingConfirmation,
+    BookingEditRequest,
+    Income,
     LoyaltyDiscount,
     LoyaltyDiscountType,
     LoyaltyTransaction,
@@ -23,6 +27,7 @@ from models import (
     MasterSchedule,
     MasterService,
     MasterServiceCategory,
+    MissedRevenue,
     OwnerType,
     PersonalDiscount,
     Service,
@@ -153,6 +158,71 @@ def _run_apply(monkeypatch, factory, database_path: Path) -> int:
 
 def _snapshot_rows(db, model) -> dict[int, tuple]:
     return smoke._query_snapshot(db, model)
+
+
+def _mutation_guard_snapshot(db) -> dict[str, object]:
+    return {
+        "users": _snapshot_rows(db, User),
+        "masters": _snapshot_rows(db, Master),
+        "services": _snapshot_rows(db, Service),
+        "schedules": _snapshot_rows(db, MasterSchedule),
+        "bookings": _snapshot_rows(db, Booking),
+        "applied_discounts": _snapshot_rows(db, AppliedDiscount),
+        "booking_confirmations": _snapshot_rows(db, BookingConfirmation),
+        "incomes": _snapshot_rows(db, Income),
+        "missed_revenues": _snapshot_rows(db, MissedRevenue),
+        "booking_edit_requests": _snapshot_rows(db, BookingEditRequest),
+        "loyalty_transactions": _snapshot_rows(db, LoyaltyTransaction),
+    }
+
+
+def _add_orphan_booking_child(db, kind: str, ids: dict[str, int], booking_id: int):
+    if kind == "applied_discounts":
+        row = AppliedDiscount(
+            booking_id=booking_id,
+            discount_percent=10,
+            discount_amount=100,
+        )
+    elif kind == "booking_confirmations":
+        master_user_id = db.get(Master, ids["primary_master"]).user_id
+        row = BookingConfirmation(
+            booking_id=booking_id,
+            master_id=master_user_id,
+            confirmed_income=1000,
+        )
+    elif kind == "incomes":
+        row = Income(
+            booking_id=booking_id,
+            total_amount=1000,
+            master_earnings=1000,
+            salon_earnings=0,
+            income_date=date.today(),
+            service_date=date.today(),
+        )
+    else:  # pragma: no cover - protects the test helper itself
+        raise AssertionError(f"Unsupported orphan kind: {kind}")
+    db.add(row)
+    db.flush()
+    return row
+
+
+def _add_exact_discount_booking(db, ids: dict[str, int]) -> Booking:
+    manifest = _manifest()
+    start = datetime.utcnow() + timedelta(days=10)
+    booking = Booking(
+        client_id=ids["primary_client"],
+        master_id=ids["primary_master"],
+        service_id=ids["service30"],
+        start_time=start,
+        end_time=start + timedelta(minutes=30),
+        status="confirmed",
+        notes=manifest["ownership"]["booking_notes"]["WITH_DISCOUNT"],
+        is_paid=False,
+        payment_amount=900,
+    )
+    db.add(booking)
+    db.flush()
+    return booking
 
 
 def test_manifest_uses_only_canonical_exact_ownership():
@@ -473,6 +543,140 @@ def test_service_and_master_service_ambiguity_fail_closed(tmp_path):
                 smoke.RefreshCounters(),
                 smoke.CreatedIds.empty(),
             )
+    finally:
+        db.rollback()
+        db.close()
+        engine.dispose()
+
+
+@pytest.mark.parametrize(
+    "child_table",
+    ("applied_discounts", "booking_confirmations", "incomes"),
+)
+def test_booking_child_orphan_fails_before_any_mutation(
+    tmp_path, monkeypatch, capsys, child_table
+):
+    path, engine, factory = _database(tmp_path, f"orphan-{child_table}.db")
+    ids = _seed_anchors_and_services(factory)
+
+    db = factory()
+    try:
+        assert db.query(Booking).count() == 0
+        orphan = _add_orphan_booking_child(db, child_table, ids, booking_id=1)
+        db.commit()
+        orphan_id = int(orphan.id)
+        before = _mutation_guard_snapshot(db)
+    finally:
+        db.close()
+
+    assert _run_apply(monkeypatch, factory, path) == 1
+    output = capsys.readouterr()
+    assert "Booking-child orphan preflight failed" in output.err
+    assert f"table={child_table}" in output.err
+    assert f"child_id={orphan_id}" in output.err
+    assert "missing_booking_id=1" in output.err
+    assert "Schedule preflight" not in output.out
+
+    db = factory()
+    try:
+        assert _mutation_guard_snapshot(db) == before
+        exact_notes = tuple(_manifest()["ownership"]["booking_notes"].values())
+        assert db.query(Booking).filter(Booking.notes.in_(exact_notes)).count() == 0
+    finally:
+        db.close()
+        engine.dispose()
+
+
+def test_unrelated_historical_fk_violation_is_preserved(tmp_path, monkeypatch):
+    path, engine, factory = _database(tmp_path, "unrelated-orphan.db")
+    _seed_anchors_and_services(factory)
+
+    db = factory()
+    try:
+        db.execute(
+            master_services.insert().values(master_id=999_998, service_id=999_999)
+        )
+        db.commit()
+        before = smoke._association_snapshot(db)
+    finally:
+        db.close()
+
+    assert _run_apply(monkeypatch, factory, path) == 0
+
+    db = factory()
+    try:
+        assert smoke._association_snapshot(db) == before
+    finally:
+        db.close()
+        engine.dispose()
+
+
+def test_exact_booking_rejects_foreign_applied_discount_rule(tmp_path):
+    _, engine, factory = _database(tmp_path, "foreign-discount.db")
+    ids = _seed_anchors_and_services(factory)
+    manifest = _manifest()
+    db = factory()
+    try:
+        booking = _add_exact_discount_booking(db, ids)
+        foreign_rule = LoyaltyDiscount(
+            master_id=ids["primary_master"],
+            discount_type=LoyaltyDiscountType.QUICK,
+            name="Foreign rule",
+            description="Not release-smoke owned",
+            discount_percent=10,
+            conditions={"condition_type": "first_visit", "parameters": {}},
+            is_active=True,
+        )
+        db.add(foreign_rule)
+        db.flush()
+        db.add(
+            AppliedDiscount(
+                booking_id=booking.id,
+                discount_id=foreign_rule.id,
+                discount_percent=10,
+                discount_amount=100,
+            )
+        )
+        db.flush()
+
+        anchors = smoke._resolve_anchors(db, manifest)
+        with pytest.raises(smoke.SmokeRefreshError, match="non-canonical"):
+            smoke._resolve_owned_ids(db, manifest, anchors)
+    finally:
+        db.rollback()
+        db.close()
+        engine.dispose()
+
+
+def test_with_discount_accepts_exact_canonical_personal_rule(tmp_path):
+    _, engine, factory = _database(tmp_path, "canonical-discount.db")
+    ids = _seed_anchors_and_services(factory)
+    manifest = _manifest()
+    db = factory()
+    try:
+        booking = _add_exact_discount_booking(db, ids)
+        rule = PersonalDiscount(
+            master_id=ids["primary_master"],
+            client_phone=manifest["primary_client_phone"],
+            discount_percent=float(manifest["discounts"]["personal_percent"]),
+            description=manifest["ownership"]["personal_discount"]["description"],
+            is_active=True,
+        )
+        db.add(rule)
+        db.flush()
+        applied = AppliedDiscount(
+            booking_id=booking.id,
+            personal_discount_id=rule.id,
+            discount_percent=rule.discount_percent,
+            discount_amount=100,
+        )
+        db.add(applied)
+        db.flush()
+
+        anchors = smoke._resolve_anchors(db, manifest)
+        owned = smoke._resolve_owned_ids(db, manifest, anchors)
+        assert owned.applied_discount_ids == frozenset({int(applied.id)})
+        assert owned.personal_discount_ids == frozenset({int(rule.id)})
     finally:
         db.rollback()
         db.close()

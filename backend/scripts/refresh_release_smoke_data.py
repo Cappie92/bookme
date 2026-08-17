@@ -561,6 +561,38 @@ def _assert_no_new_orphans(before: dict[str, int], after: dict[str, int]) -> Non
         _fail(f"Refresh created new FK orphans: {details}")
 
 
+def _assert_no_booking_child_orphans(db: Session) -> None:
+    """Fail before mutations when a stale child could bind to a reused Booking PK."""
+    child_models = (
+        AppliedDiscount,
+        BookingConfirmation,
+        Income,
+        MissedRevenue,
+        BookingEditRequest,
+        LoyaltyTransaction,
+    )
+    diagnostics: list[tuple[str, int, int]] = []
+    for model in child_models:
+        rows = (
+            db.query(model.id, model.booking_id)
+            .outerjoin(Booking, model.booking_id == Booking.id)
+            .filter(model.booking_id.isnot(None), Booking.id.is_(None))
+            .order_by(model.id)
+            .all()
+        )
+        diagnostics.extend(
+            (model.__tablename__, int(child_id), int(booking_id))
+            for child_id, booking_id in rows
+        )
+
+    if diagnostics:
+        details = "; ".join(
+            f"table={table}, child_id={child_id}, missing_booking_id={booking_id}"
+            for table, child_id, booking_id in diagnostics
+        )
+        _fail(f"Booking-child orphan preflight failed: {details}")
+
+
 def _resolve_anchors(db: Session, manifest: dict[str, Any]) -> Anchors:
     masters_by_phone: dict[str, tuple[User, Master]] = {}
     clients_by_phone: dict[str, User] = {}
@@ -754,10 +786,23 @@ def _resolve_owned_ids(
 
     applied_rows = child_rows(AppliedDiscount)
     discount_booking = bookings_by_label.get("WITH_DISCOUNT")
-    if len(applied_rows) > (1 if discount_booking is not None else 0):
+    if len(applied_rows) > 1:
         _fail("Exact smoke bookings have unexpected AppliedDiscount rows")
-    if applied_rows and applied_rows[0].booking_id != discount_booking.id:
-        _fail("AppliedDiscount is attached to the wrong exact smoke scenario")
+    if applied_rows:
+        applied = applied_rows[0]
+        if discount_booking is None or applied.booking_id != discount_booking.id:
+            _fail("AppliedDiscount is attached to the wrong exact smoke scenario")
+        has_loyalty_rule = applied.discount_id is not None
+        has_personal_rule = applied.personal_discount_id is not None
+        if has_loyalty_rule == has_personal_rule:
+            _fail("Owned AppliedDiscount must reference exactly one discount rule")
+        if has_loyalty_rule and int(applied.discount_id) not in loyalty_discount_ids:
+            _fail("Owned AppliedDiscount references a non-canonical LoyaltyDiscount")
+        if (
+            has_personal_rule
+            and int(applied.personal_discount_id) not in personal_discount_ids
+        ):
+            _fail("Owned AppliedDiscount references a non-canonical PersonalDiscount")
 
     completed_ids = {
         bookings_by_label[label].id
@@ -778,6 +823,16 @@ def _resolve_owned_ids(
             _fail(f"Duplicate {model_name} rows for an exact smoke booking")
         if any(row.booking_id not in completed_ids for row in rows):
             _fail(f"Unexpected {model_name} on a non-completed smoke scenario")
+    master_user = anchors.masters_by_phone[manifest["primary_master_phone"]][0]
+    if any(row.master_id != master_user.id for row in confirmation_rows):
+        _fail("Exact smoke BookingConfirmation has the wrong master")
+    if any(
+        row.salon_id is not None
+        or row.indie_master_id is not None
+        or row.branch_id is not None
+        for row in income_rows
+    ):
+        _fail("Exact smoke Income has an unexpected owner scope")
 
     missed_rows = child_rows(MissedRevenue)
     edit_rows = child_rows(BookingEditRequest)
@@ -2111,6 +2166,7 @@ def _run_refresh(
     db: Session, manifest: dict[str, Any]
 ) -> tuple[RefreshCounters, dict[str, Any]]:
     anchors = _resolve_anchors(db, manifest)
+    _assert_no_booking_child_orphans(db)
     primary_master = anchors.masters_by_phone[manifest["primary_master_phone"]][1]
     try:
         today = datetime.now(ZoneInfo(primary_master.timezone)).date()
