@@ -87,6 +87,19 @@ Repository-known security/privacy debt. Документ не содержит c
 - **Status:** active repository-known debt; it is not the intended verification invariant.
 - **Required action:** separate identity/security remediation and deprecation or corrected enforcement.
 
+## Critical: live Zvonok verification contract is fragmented
+
+- **Severity:** `critical`
+- **Confidence:** CONFIRMED for repository behavior; provider/account behavior is UNKNOWN.
+- **Trust boundary:** Zvonok callback data and user-entered digits → verified phone or destructive account action.
+- **Category:** multiple incompatible challenge implementations prevent safe live-provider enablement.
+- **Confirmed scope:** common registration uses `VerificationService` purpose/target/call binding, expiry and attempt limits. Account deletion instead persists a locally generated random code while separately starting a provider call, so the value being checked is not the provider `pincode`. OAuth onboarding stores an ad-hoc ticket challenge rather than consuming the common contract. Phone change performs several binding checks but implements its own non-locking read/check/clear sequence instead of an atomic common challenge consume. Legacy reverse endpoints retain the unsafe status behavior above.
+- **Additional provider boundary:** the service hard-codes its campaign identifier and live request/response logging includes the request payload and provider response, which may expose API key, phone, call ID and `pincode`.
+- **Potential impact:** enabling `ZVONOK_MODE` live can create unverifiable, replay/race-prone or disclosure-prone identity flows; not every successful call initiation can be safely bound to the later action.
+- **Sources:** `backend/services/verification_service.py` — common challenge contract; `backend/services/zvonok_service.py` — campaign selection, live logging and reverse status; `backend/routers/auth.py` — account deletion, OAuth onboarding, phone change and reverse endpoints.
+- **Status:** live Zvonok is blocked on staging; stub mode is the current staging contract.
+- **Required action:** migrate all phone-proof flows to the unified challenge contract with atomic consume/row locking; retire reverse endpoints with `410 Gone` or migrate them; redact live logs; move campaign selection to `ZVONOK_CAMPAIGN_ID`; add focused concurrency/provider-contract tests before live smoke.
+
 ## High: remaining session and client token boundaries
 
 - **Severity:** `high`

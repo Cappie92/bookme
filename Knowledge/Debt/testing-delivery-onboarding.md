@@ -2,7 +2,7 @@
 type: Knowledge
 status: active
 project: DeDato
-last_runtime_check: 2026-08-04
+last_runtime_check: 2026-08-17
 ---
 
 # Debt — testing, delivery and onboarding
@@ -18,23 +18,23 @@ Confirmed gaps in executable quality gates and developer entrypoints.
 - **Sources:** `.github/workflows/`; backend/frontend/mobile test manifests.
 - **Required action:** separate CI design/implementation defines required suites by change scope.
 
-## Validation begins on the deployment target
+## Deployment starts without an application validation gate
 
 - **Severity:** `high`.
 - **Confidence:** CONFIRMED.
-- **Evidence:** `deploy.yml` has one job; backend pytest runs inside the remote deployment step before Compose update. There is no isolated pre-deploy artifact build/test job or immutable artifact promotion.
-- **Failure scenario:** validation consumes production-host access and mutable checkout state; client build/lint/mobile checks are absent from the gate.
+- **Evidence:** `deploy.yml` has one job and runs no backend or client test suite before or during delivery. It transfers the checkout and builds mutable images on the target; there is no isolated pre-deploy artifact build/test job or immutable artifact promotion.
+- **Failure scenario:** unvalidated application changes reach the production-host build/recreate path; client build/lint/mobile checks are absent from the gate.
 - **Sources:** `.github/workflows/deploy.yml` — jobs/step ordering.
 - **Required action:** separate delivery remediation establishes pre-deploy validation and artifact ownership without documenting host procedures here.
 
-## Deployment has no explicit migration gate
+## Services start before the explicit migration step
 
 - **Severity:** `high`.
 - **Confidence:** CONFIRMED for workflow content.
-- **Evidence:** deploy workflow updates Compose services but contains no explicit Alembic command/revision check; backend startup still calls `create_all`.
-- **Failure scenario:** application code can start against an older/incompatible schema while process health remains green.
+- **Evidence:** deploy workflow explicitly invokes `scripts/prod/migrate.sh`, which runs `alembic upgrade head`, but only after Compose services start. Backend startup still calls `create_all`; no separate schema-readiness prerequisite prevents requests/background jobs before Alembic succeeds.
+- **Failure scenario:** application code and in-process jobs can start against an older/incompatible schema before the explicit migration completes, while shallow process health can remain green.
 - **Sources:** `.github/workflows/deploy.yml`; `backend/main.py`; [Data and migrations](../Architecture/data-and-migrations.md).
-- **Required action:** data/infrastructure owners define migration ordering, failure stop and rollback policy in a separate delivery track.
+- **Required action:** make migration success a pre-service/readiness gate and define failure stop/rollback policy in a separate delivery track.
 
 ## Health check is liveness-only
 

@@ -2,13 +2,14 @@
 type: Knowledge
 status: active
 project: DeDato
+last_runtime_check: 2026-08-17
 ---
 
 # Data and migrations
 
 ## Scope
 
-Этот документ владеет repository-known контрактом production database и schema lifecycle: идентичностью SQLite, созданием SQLAlchemy engine, Alembic graph, точками выполнения `Base.metadata.create_all()` и Alembic, а также подтверждённой неоднозначностью schema ownership.
+Этот документ владеет repository-known контрактом database/schema lifecycle: идентичностью production SQLite, созданием SQLAlchemy engine, Alembic graph, точками выполнения `Base.metadata.create_all()` и Alembic, а также подтверждённой неоднозначностью schema ownership. Текущее содержимое и operational state staging clone принадлежат [Staging infrastructure](../Infrastructure/staging.md).
 
 Документ не является migration runbook, не описывает backup/restore и не подтверждает состояние production database. Он фиксирует существующий механизм и возможные failure scenarios без утверждения, что они уже происходили.
 
@@ -51,11 +52,11 @@ Alembic environment:
 - использует `NullPool` для online migration connection;
 - поддерживает online и offline migration modes.
 
-На дату repository-проверки 2026-08-04 Alembic успешно разобрал configured graph:
+На дату repository-проверки 2026-08-17 Alembic успешно разобрал configured graph:
 
 - graph содержит исторические branch points и поэтому не является строго линейным;
-- разрешён один repository head: `20260721_account_deletion_fields`;
-- head revision ссылается на `20260713_subscription_points_debit_unique` как `down_revision`.
+- разрешён один repository head: `20260812_session_version`;
+- current tail проходит `20260721_account_deletion_fields` → `20260809_apple_iap_fields` → `20260812_session_version`.
 
 Это `CONFIRMED` для текущего repository checkout. Оно не доказывает текущую revision production DB и не подтверждает соответствие physical schema этому head.
 
@@ -71,6 +72,26 @@ Alembic environment:
 `create_all()` выполняется после импорта `Base` и `engine`, но до создания FastAPI application, регистрации startup handler и запуска Uvicorn serving lifecycle. Это не Alembic revision operation: оно не продвигает Alembic version table и не заменяет последовательные data/alter migrations.
 
 Одновременное существование этих механизмов — `CONFIRMED dual-ownership`. Repository не определяет явную границу, при которой один механизм является единственным владельцем production schema. Возможные конфликты между ними являются failure scenarios, а не доказательством уже произошедшего повреждения или рассогласования.
+
+## Supported compatibility path
+
+Текущий repository-tested compatibility contract:
+
+```text
+Base.metadata.create_all()
+→ alembic upgrade head
+```
+
+Commit `7ad7b85` добавил existence guards в migrations `838e2b24a042`, `20260721_account_deletion_fields`, `20260809_apple_iap_fields` и `20260812_session_version`. Они пропускают уже созданные ORM columns/indexes и добавляют отсутствующие объекты. `backend/tests/test_alembic_create_all_then_upgrade.py` проверяет полный create-all → head path и partial/repeated upgrade cases.
+
+Этот narrow compatibility layer не делает оба владельца schema эквивалентными:
+
+- bare Alembic-only bootstrap пустой database не является repository-supported bootstrap path и не покрыт этим regression contract;
+- historical migrations всё ещё могут предполагать наличие ORM-created tables;
+- defaults/nullability между ORM metadata и migration-built schema не нормализованы;
+- `create_all()` не выставляет Alembic revision и не выполняет versioned data migrations.
+
+Operational staging clone успешно прошёл tail migrations до `20260812_session_version` по release handoff; это `REPORTED`, а не repository proof состояния VPS. Детали snapshot/integrity принадлежат staging-документу.
 
 ## Startup and migration ordering
 
@@ -108,7 +129,7 @@ Backend может начать startup lifecycle и стать HTTP-досту�
 
 ### `create_all()` changes Alembic starting conditions
 
-На пустой или отстающей database `create_all()` может создать metadata objects до выполнения versioned migrations. Последующая migration, которая ожидает создать те же objects или пройти промежуточное schema state, может завершиться конфликтом, если конкретная revision не защищена от такого состояния.
+На пустой или отстающей database `create_all()` может создать metadata objects до выполнения versioned migrations. Четыре release-relevant migrations теперь защищены для текущего tested path, но это не является общим доказательством idempotency всего historical graph. Другие revisions могут конфликтовать, если ожидают создать те же objects или пройти промежуточное schema state.
 
 ### Revision and physical schema diverge
 
@@ -128,8 +149,8 @@ Backend `/health` не обращается к database и поэтому не �
 |---------|------------------|--------------|
 | Production DB identity | SQLite URL `/data/bookme.db`, volume `dedato_data` | Фактический container environment, mount и file identity |
 | ORM schema | Metadata, импортируемая из repository models | Соответствие physical schema текущим models |
-| Alembic graph | Один repository head и исторические branches | Current host DB revision и migration history |
-| Schema ownership | `create_all()` и Alembic оба исполняемы | Происходили ли конфликты или ручные schema changes |
+| Alembic graph | Один repository head `20260812_session_version` и исторические branches | Current production host DB revision и migration history |
+| Schema ownership | `create_all()` и Alembic оба исполняемы; current create-all → head path regression-tested | Происходили ли иные конфликты или ручные schema changes |
 | Ordering | Workflow запускает services до Alembic | Фактический активный deploy path и время доступности трафика |
 | SQLite behavior | `check_same_thread=False`; один file path | Journal mode, timeout, active locks и integrity |
 | Concurrency | Один backend service в Compose; jobs in-process | Workers, replicas, external writers и schedulers |
@@ -144,7 +165,11 @@ Backend `/health` не обращается к database и поэтому не �
 - `backend/alembic/env.py` — URL selection, `target_metadata`, online/offline migration execution и `NullPool`.
 - `backend/alembic.ini` — container-side Alembic script location и fallback URL.
 - `alembic.ini` — root Alembic entry point и fallback URL.
-- `backend/alembic/versions/20260721_account_deletion_fields.py` — current repository head revision.
+- `backend/alembic/versions/838e2b24a042_add_pending_contact_verification.py` — guarded contact-verification additions.
+- `backend/alembic/versions/20260721_account_deletion_fields.py` — guarded account-deletion additions.
+- `backend/alembic/versions/20260809_apple_iap_subscription_fields.py` — guarded Apple IAP additions.
+- `backend/alembic/versions/20260812_user_session_version.py` — current repository head and guarded session-version addition.
+- `backend/tests/test_alembic_create_all_then_upgrade.py` — supported compatibility path regression.
 - `scripts/prod/migrate.sh` — Alembic execution inside running backend container.
 - `.github/workflows/deploy.yml` — repository-confirmed start-before-migrate ordering.
 - `Knowledge/Debt/subscriptions-billing.md` — confirmed SQLite and locking-related billing constraints.
@@ -152,4 +177,5 @@ Backend `/health` не обращается к database и поэтому не �
 ## Related documents
 
 - [Production topology](../Infrastructure/production-topology.md) — services, network, persistent volumes and process model.
+- [Staging infrastructure](../Infrastructure/staging.md) — active production clone, applied revision and integrity state.
 - [Debt — subscriptions billing](../Debt/subscriptions-billing.md) — billing-specific concurrency and reliability constraints.

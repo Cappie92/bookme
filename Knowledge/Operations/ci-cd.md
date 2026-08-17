@@ -2,7 +2,7 @@
 type: Knowledge
 status: active
 project: DeDato
-last_runtime_check: 2026-08-05
+last_runtime_check: 2026-08-17
 ---
 
 # CI/CD
@@ -35,6 +35,26 @@ MkDocs uses `docs_dir: docs`; canonical `Knowledge/` is outside that build and t
 Mobile EAS build/submit profiles exist in `mobile/eas.json`, but no root workflow invokes EAS. They are build capability, not a root CI or deployment gate.
 
 **Sources:** root workflow job/step inventory; `backend/.github/workflows/ci.yml`; `mkdocs.yml`; `docs.sh`; `frontend/package.json`; `mobile/package.json`; `mobile/eas.json`; [Testing strategy](testing-strategy.md).
+
+## Manual staging release gate
+
+Для текущего release 1.0 действует `REPORTED` branch-specific delivery process:
+
+```text
+feature / integration branch
+→ test/apple-iap-handoff
+→ manual staging deploy
+→ manual functional smoke
+→ explicit APPROVE
+→ user-managed merge to main
+→ production workflow
+```
+
+Проверенный staging baseline — `9dcd4ed`. Repository подтверждает, что `deploy/staging/deploy-staging.sh` принимает уже выбранный clean commit, может проверить expected SHA, не fetch/checkout Git и не выполняет production actions. Сам manual smoke, approval и provider checks не являются GitHub Actions gates.
+
+Процесс запрещает agent/automation-initiated commit, push, merge, PR или deploy: Git mutations и environment actions выполняет пользователь после review и отдельного явного `APPROVE`. Это текущий release contract, но ещё не generalized permanent workflow для следующих релизов. Topology, smoke scope и staging-specific open debt принадлежат [Staging infrastructure](../Infrastructure/staging.md).
+
+**Sources:** `deploy/staging/deploy-staging.sh`; Git baseline `9dcd4ed`; release handoff dated 2026-08-17.
 
 ## Deployment
 

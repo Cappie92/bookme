@@ -101,7 +101,7 @@
 - [Debt/testing-delivery-onboarding.md](Debt/testing-delivery-onboarding.md) — test discovery, CI/deploy gates и onboarding drift
 - [Debt/subscriptions-billing.md](Debt/subscriptions-billing.md) — подтверждённые ограничения billing-контура
 - [Infrastructure/production-topology.md](Infrastructure/production-topology.md) — repository-known production-топология и внешние границы
-- [Infrastructure/staging.md](Infrastructure/staging.md) — изолированный staging-контур, bootstrap, deploy и DNS/TLS runbook
+- [Infrastructure/staging.md](Infrastructure/staging.md) — обязательный pre-production gate, active topology/DB, integration policy, smoke state и staging-specific debt
 - [Infrastructure/configuration.md](Infrastructure/configuration.md) — env/DB/build configuration layers и precedence
 - [Architecture/data-and-migrations.md](Architecture/data-and-migrations.md) — production database и lifecycle схемы данных
 - [Architecture/background-jobs.md](Architecture/background-jobs.md) — lifecycle, cadence и reliability пяти in-process jobs
