@@ -51,9 +51,9 @@ There is no globally enforced transition function. Accounting routes enforce the
 
 ## 5. Availability and time
 
-Primary public availability returns ISO with master timezone and excludes started slots. Generic slot endpoints return scheduling service values and include compatibility variants. Create always needs server revalidation because availability is not a reservation and concurrent requests can race.
+Primary public availability returns ISO with master timezone and excludes started slots. Generic slot endpoints return scheduling service values and include compatibility variants. The four primary create paths revalidate occupancy inside a SQLite `BEGIN IMMEDIATE` transaction (`services.booking_creation`). Concurrent overlapping creates keep one occupying Booking; the loser receives `409 BOOKING_SLOT_CONFLICT`. SQLite writer timeout maps to `503 BOOKING_SLOT_BUSY` with `Retry-After: 1`. `POST /api/bookings/create-with-any-master` and TemporaryBooking confirm remain outside this create boundary.
 
-Duration comes from selected service on primary public path; generic paths also accept client-supplied service snapshot fields. Working-hours and overlap behavior is route-specific; see [Scheduling](../Domain/scheduling/README.md).
+Duration comes from selected service on primary public path; generic paths also accept client-supplied service snapshot fields. Working-hours remain a pre-atomic 400 guard on create. See [Scheduling](../Domain/scheduling/README.md).
 
 ## 6. Temporary/prepayment boundary
 

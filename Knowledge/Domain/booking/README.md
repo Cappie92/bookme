@@ -23,18 +23,22 @@ Create paths не являются взаимозаменяемыми:
 
 | Путь | Текущий смысл | Initial raw status | Проверка времени |
 |------|---------------|--------------------|------------------|
-| `POST /api/public/masters/{slug}/bookings` | Основная web/mobile публичная запись `/m/{slug}`; активный client session | `created` | working hours + интервальное пересечение |
-| `POST /api/client/bookings/` | Client-cabinet compatibility path | значение схемы, default `created` | совпадение `start_time`, не полное пересечение |
-| `POST /api/bookings/` | Generic authenticated compatibility path | `created`, но отдельная auto-confirm ветка пишет `completed` | working hours + интервальное пересечение |
-| `POST /api/bookings/public` | Legacy public-by-phone path с account/bootstrap response | `created`, но отдельная auto-confirm ветка пишет `completed` | working hours + интервальное пересечение |
-| `POST /api/bookings/create-with-any-master` | Public salon allocation | `created` | выбор мастера и проверки salon path |
+| `POST /api/public/masters/{slug}/bookings` | Основная web/mobile публичная запись `/m/{slug}`; активный client session | `created` | working hours + atomic interval overlap |
+| `POST /api/client/bookings/` | Client-cabinet compatibility path | значение схемы, default `created` | тот же atomic interval overlap (не exact start) |
+| `POST /api/bookings/` | Generic authenticated compatibility path | `created`, но отдельная auto-confirm ветка пишет `completed` | working hours + atomic interval overlap |
+| `POST /api/bookings/public` | Legacy public-by-phone path с account/bootstrap response | `created`, но отдельная auto-confirm ветка пишет `completed` | working hours + atomic interval overlap; User+Booking в одной txn |
+| `POST /api/bookings/create-with-any-master` | Public salon allocation; **unauthenticated (security debt)** | `created` | racy pre-check + INSERT; не входит в atomic create |
 | `/api/client/bookings/temporary*` | Compatibility hold/prepayment path | temporary `pending`; confirmation создаёт Booking со статусом `completed` | только совпадение начала у temporary/regular rows |
 
 Основной web route — `frontend/src/App.jsx` → `MasterPublicBookingPage` → `PublicBookingWizard`; mobile использует `mobile/app/(public)/m/[slug].tsx`. Снятый web `/domain/{subdomain}` и `MasterBookingModule` не определяют основной публичный контракт.
 
 Цена создаваемой записи хранится в `payment_amount` после скидки. `loyalty_points_used` является резервом до отмены или completion; это синхронная зависимость Booking path от Loyalty, а не событие.
 
-**Source:** `backend/routers/public_master.py` — `create_public_booking`; `backend/routers/client.py` — `create_booking`, temporary routes; `backend/routers/bookings.py` — create functions; `frontend/src/App.jsx`; `frontend/src/components/booking/PublicBookingWizard.jsx`; `mobile/app/(public)/m/[slug].tsx`; `backend/utils/public_booking_loyalty.py`.
+Четыре основных create path вызывают `create_booking_atomic` после read-only orchestration. Connection владеет SQLite `BEGIN IMMEDIATE` / `commit` / `rollback`. Canonical Service для public create создаётся в той же txn, что Booking. PostgreSQL writer strategy не реализована и должна fail clearly. TemporaryBooking hold UX и `create-with-any-master` остаются вне этого atomic create boundary. Reschedule / restore / edit-accept / temp confirm не входят в этот слой.
+
+После merge verify-first коллеги `_create_specific_public_booking_after_proof` (и будущий `_create_any_master_public_booking_after_proof`) не должны делать собственный conflict SELECT → отдельный INSERT/commit; они должны вызывать atomic creation boundary.
+
+**Source:** `backend/services/booking_creation.py`; `backend/routers/public_master.py` — `create_public_booking`; `backend/routers/client.py` — `create_booking`; `backend/routers/bookings.py` — create functions; `frontend/src/App.jsx`; `frontend/src/components/booking/PublicBookingWizard.jsx`; `mobile/app/(public)/m/[slug].tsx`; `backend/utils/public_booking_loyalty.py`.
 
 ## 3. Raw и effective status
 
@@ -86,11 +90,11 @@ Runtime использует общий `cancelled` и две client cancellatio
 
 ## 6. Concurrency и транзакции
 
-Create paths выполняют conflict query до INSERT и не используют общий slot lock или DB exclusion constraint. Два параллельных request могут пройти pre-check до commit. `BookingConfirmation.booking_id` уникален и является главным DB guard повторной финализации, но `Income.booking_id` не unique.
+Четыре основных create path входят в SQLite `BEGIN IMMEDIATE` на отдельной Connection. Session только query/add/flush; Connection владеет commit/rollback. Overlap SELECT и write живут в одной txn. Конфликт интервала → `409 BOOKING_SLOT_CONFLICT`. SQLite busy → `503 BOOKING_SLOT_BUSY`. Не-SQLite dialect → `BOOKING_ATOMIC_UNSUPPORTED`. DB exclusion constraint по-прежнему отсутствует; PostgreSQL writer strategy не реализована.
 
-Temporary rows не участвуют в общем availability/conflict service. Поэтому temporary hold не является глобальной блокировкой слота для всех create paths.
+`create-with-any-master`, reschedule, status restore, edit-request accept и TemporaryBooking confirm пока не используют этот writer. `BookingConfirmation.booking_id` уникален и является главным DB guard повторной финализации, но `Income.booking_id` не unique. Temporary rows не участвуют в общем availability/conflict SELECT.
 
-**Source:** `backend/models.py` — `BookingConfirmation`, `Income`, `TemporaryBooking`; `backend/services/scheduling.py`; create routers; [completion side effects](completion-side-effects.md).
+**Source:** `backend/services/booking_atomic_txn.py`, `booking_creation.py`, `booking_occupancy.py`; `backend/models.py` — `BookingConfirmation`, `Income`, `TemporaryBooking`; [completion side effects](completion-side-effects.md).
 
 ## 7. UNKNOWN и границы
 

@@ -34,7 +34,17 @@ from schemas import (
     BookingUpdate,
     AvailableSlotOut,
 )
+from starlette.concurrency import run_in_threadpool
+
 from services.scheduling import check_booking_conflicts, get_available_slots, get_available_slots_any_master_logic, get_best_master_for_slot
+from services.booking_creation import (
+    BookingCreateSnapshot,
+    PublicClientSnapshot,
+    create_booking_atomic,
+    discount_snapshot_from_data,
+    http_exception_for_booking_create,
+    release_request_session,
+)
 from services.verification_service import VerificationService
 from services.plusofon_service import plusofon_service
 from utils.loyalty_discounts import evaluate_and_prepare_applied_discount, build_applied_discount_info
@@ -188,18 +198,6 @@ async def create_booking(
             detail="Не указан мастер, индивидуальный мастер или салон"
         )
     
-    # Проверяем конфликты
-    if check_booking_conflicts(
-        db,
-        booking.start_time,
-        booking.end_time,
-        owner_type,
-        owner_id,
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Выбранное время уже занято"
-        )
-
     # Обработка баллов лояльности (только для авторизованных клиентов)
     loyalty_points_used = 0
     if booking.use_loyalty_points and booking.master_id and current_user:
@@ -294,24 +292,39 @@ async def create_booking(
     except BookingOwnerError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
-    db_booking = Booking(**booking_data)
-    db.add(db_booking)
-    db.flush()
+    snapshot = BookingCreateSnapshot(
+        client_id=current_user.id,
+        service_id=booking_data["service_id"],
+        master_id=booking_data.get("master_id"),
+        indie_master_id=booking_data.get("indie_master_id"),
+        salon_id=booking_data.get("salon_id"),
+        branch_id=booking_data.get("branch_id"),
+        start_time=booking.start_time,
+        end_time=booking.end_time,
+        status=booking_data["status"],
+        payment_amount=float(booking_data["payment_amount"] or 0),
+        loyalty_points_used=int(loyalty_points_used or 0),
+        notes=booking_data.get("notes"),
+        payment_method=booking_data.get("payment_method"),
+        owner_type=owner_type,
+        owner_id=owner_id,
+        applied_discount=discount_snapshot_from_data(applied_discount_data),
+    )
+    try:
+        release_request_session(db)
+        result = await run_in_threadpool(create_booking_atomic, snapshot, bind=db.get_bind())
+    except Exception as exc:
+        raise http_exception_for_booking_create(exc) from exc
 
+    db_booking = db.query(Booking).filter(Booking.id == result.booking_id).one()
     if applied_discount_data:
-        applied_discount = AppliedDiscount(
-            booking_id=db_booking.id,
-            discount_id=applied_discount_data["rule_id"] if applied_discount_data["rule_type"] != "personal" else None,
-            personal_discount_id=applied_discount_data["rule_id"] if applied_discount_data["rule_type"] == "personal" else None,
-            discount_percent=applied_discount_data["discount_percent"],
-            discount_amount=applied_discount_data["discount_amount"],
+        applied_discount = (
+            db.query(AppliedDiscount)
+            .filter(AppliedDiscount.booking_id == db_booking.id)
+            .first()
         )
-        db.add(applied_discount)
-
-    db.commit()
-    db.refresh(db_booking)
-    if applied_discount_data:
-        db_booking.applied_discount = build_applied_discount_info(applied_discount)
+        if applied_discount:
+            db_booking.applied_discount = build_applied_discount_info(applied_discount)
     return db_booking
 
 
@@ -397,65 +410,15 @@ async def create_booking_public(
             detail="Не указан мастер, индивидуальный мастер или салон"
         )
     
-    if check_booking_conflicts(
-        db,
-        booking.start_time,
-        booking.end_time,
-        owner_type,
-        owner_id,
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Выбранное время уже занято"
-        )
-
-    # Ищем или создаем клиента по номеру телефона
+    # Клиент резолвится внутри atomic txn (flush, без промежуточного commit).
     client = db.query(User).filter(User.phone == client_phone).first()
-    is_new_client = False
-    needs_password_setup = False
-    needs_password_verification = False
-    needs_phone_verification = False
-    
-    if not client:
-        # Создаем нового клиента
-        client = User(
-            phone=client_phone,
-            email=f"{client_phone}@temp.com",  # Временный email для токена
-            role="client",
-            is_active=True,
-            is_verified=True,
-            is_phone_verified=False,  # Телефон не верифицирован
-            full_name=f"Клиент {client_phone}",
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow()
-        )
-        db.add(client)
-        db.commit()
-        db.refresh(client)
-        is_new_client = True
-        needs_password_setup = True
-        needs_phone_verification = True
-    elif client.role != "client":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, 
-            detail="Запись не удалась, войдите под аккаунтом клиента"
-        )
-    else:
-        # Существующий клиент - добавляем email если его нет
-        if not client.email:
-            client.email = f"{client_phone}@temp.com"
-            db.commit()
-            db.refresh(client)
-        
-        # Проверяем, нужна ли установка пароля
-        if not client.hashed_password:
-            needs_password_setup = True
-        else:
-            # Существующий пользователь с паролем - нужно проверить пароль
-            needs_password_verification = True
-        
-        # Проверяем, нужна ли верификация телефона
-        if not client.is_phone_verified:
-            needs_phone_verification = True
+    if client is not None:
+        role = getattr(client.role, "value", client.role)
+        if role != "client":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Запись не удалась, войдите под аккаунтом клиента",
+            )
 
     # Определяем начальный статус записи
     initial_status = BookingStatus.CREATED
@@ -479,8 +442,8 @@ async def create_booking_public(
 
     discounted_payment_amount, applied_discount_data = evaluate_and_prepare_applied_discount(
         master_id=effective_master_id,
-        client_id=client.id,
-        client_phone=client.phone,
+        client_id=client.id if client is not None else None,
+        client_phone=client_phone,
         booking_start=booking.start_time,
         service_id=booking.service_id,
         db=db,
@@ -502,7 +465,6 @@ async def create_booking_public(
     booking_dict['payment_amount'] = (
         discounted_payment_amount if discounted_payment_amount is not None else base_price
     )
-    booking_dict['client_id'] = client.id
 
     if effective_indie_id:
         owner_type_str = "indie"
@@ -520,24 +482,45 @@ async def create_booking_public(
     except BookingOwnerError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
-    db_booking = Booking(**booking_dict)
-    db.add(db_booking)
-    db.flush()
+    temp_email = f"{client_phone}@temp.com"
+    snapshot = BookingCreateSnapshot(
+        client_id=None,
+        service_id=booking_dict["service_id"],
+        master_id=booking_dict.get("master_id"),
+        indie_master_id=booking_dict.get("indie_master_id"),
+        salon_id=booking_dict.get("salon_id"),
+        branch_id=booking_dict.get("branch_id"),
+        start_time=booking.start_time,
+        end_time=booking.end_time,
+        status=booking_dict["status"],
+        payment_amount=float(booking_dict["payment_amount"] or 0),
+        loyalty_points_used=0,
+        notes=booking_dict.get("notes"),
+        payment_method=booking_dict.get("payment_method"),
+        owner_type=owner_type,
+        owner_id=owner_id,
+        applied_discount=discount_snapshot_from_data(applied_discount_data),
+        public_client=PublicClientSnapshot(
+            phone=client_phone,
+            email=temp_email,
+            full_name=f"Клиент {client_phone}",
+        ),
+        ensure_client_email=temp_email if (client is not None and not client.email) else None,
+    )
+    try:
+        release_request_session(db)
+        result = await run_in_threadpool(create_booking_atomic, snapshot, bind=db.get_bind())
+    except Exception as exc:
+        raise http_exception_for_booking_create(exc) from exc
 
-    if applied_discount_data:
-        applied_discount = AppliedDiscount(
-            booking_id=db_booking.id,
-            discount_id=applied_discount_data["rule_id"] if applied_discount_data["rule_type"] != "personal" else None,
-            personal_discount_id=applied_discount_data["rule_id"] if applied_discount_data["rule_type"] == "personal" else None,
-            discount_percent=applied_discount_data["discount_percent"],
-            discount_amount=applied_discount_data["discount_amount"],
-        )
-        db.add(applied_discount)
+    db_booking = db.query(Booking).filter(Booking.id == result.booking_id).one()
+    client = db.query(User).filter(User.id == result.client_id).one()
+    is_new_client = result.created_new_user
+    needs_password_setup = not bool(client.hashed_password)
+    needs_password_verification = bool(client.hashed_password)
+    needs_phone_verification = not bool(client.is_phone_verified)
 
-    db.commit()
-    db.refresh(db_booking)
-    
-    # Если нужна верификация телефона, отправляем звонок
+    # Внешние эффекты только после успешного atomic commit.
     if needs_phone_verification:
         try:
             verification_code = VerificationService.generate_verification_code()
