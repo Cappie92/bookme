@@ -115,54 +115,19 @@ def check_booking_conflicts(
     exclude_booking_id: Optional[int] = None,
 ) -> bool:
     """
-    Проверяет наличие конфликтов для нового бронирования
+    Проверяет наличие конфликтов для нового бронирования.
+    Единый predicate: services.booking_creation.has_overlapping_booking.
     """
-    # Получаем ВСЕ активные бронирования для данного владельца
-    query = db.query(Booking).filter(
-        Booking.status != "cancelled",
-        Booking.status != "rejected"
+    from services.booking_occupancy import has_overlapping_booking
+
+    return has_overlapping_booking(
+        db,
+        start_time,
+        end_time,
+        owner_type,
+        owner_id,
+        exclude_booking_id=exclude_booking_id,
     )
-
-    if owner_type == OwnerType.MASTER:
-        query = query.filter(Booking.master_id == owner_id)
-    elif owner_type == OwnerType.INDIE_MASTER:
-        query = query.filter(Booking.indie_master_id == owner_id)
-    else:
-        # Для салона учитываем как бронирования самого салона, так и всех его мастеров
-        from models import Master, salon_masters
-        master_ids = db.query(salon_masters.c.master_id).filter(salon_masters.c.salon_id == owner_id).all()
-        master_id_list = [m[0] for m in master_ids]
-        
-        if master_id_list:
-            query = query.filter(
-                or_(
-                    Booking.salon_id == owner_id,
-                    Booking.master_id.in_(master_id_list)
-                )
-            )
-        else:
-            query = query.filter(Booking.salon_id == owner_id)
-
-    if exclude_booking_id:
-        query = query.filter(Booking.id != exclude_booking_id)
-
-    existing_bookings = query.all()
-    
-    # Отладочная информация
-    logger.debug(f"sched: Проверка конфликтов для {start_time} - {end_time}")
-    logger.debug(f"sched: Владелец: {owner_type}, ID: {owner_id}")
-    logger.debug(f"sched: Найдено существующих бронирований: {len(existing_bookings)}")
-    for booking in existing_bookings:
-        logger.debug(f"sched: Бронирование {booking.id}: {booking.start_time} - {booking.end_time}, статус: {booking.status}")
-
-    # Проверяем пересечение с каждым существующим бронированием
-    for booking in existing_bookings:
-        if _check_time_overlap(start_time, end_time, booking.start_time, booking.end_time):
-            logger.debug(f"sched: КОНФЛИКТ! Новое бронирование {start_time} - {end_time} пересекается с {booking.start_time} - {booking.end_time}")
-            return True
-
-    logger.debug(f"sched: Конфликтов не найдено")
-    return False
 
 
 def get_available_slots(
@@ -350,10 +315,9 @@ def get_available_slots(
             return []
 
     # Получаем ВСЕ активные бронирования для данного владельца
-    existing_bookings_query = db.query(Booking).filter(
-        Booking.status != "cancelled",
-        Booking.status != "rejected"
-    )
+    from services.booking_occupancy import apply_occupying_filter
+
+    existing_bookings_query = apply_occupying_filter(db.query(Booking))
 
     # Фильтруем по владельцу и филиалу
     if owner_type == OwnerType.MASTER:
@@ -514,15 +478,15 @@ def get_available_slots_any_master_logic(
             continue
         
         # Получаем существующие бронирования мастера на эту дату
+        from services.booking_occupancy import apply_occupying_filter
+
         existing_bookings = (
-            db.query(Booking)
+            apply_occupying_filter(db.query(Booking))
             .filter(
                 and_(
                     Booking.master_id == master.id,
                     Booking.start_time >= date.replace(hour=0, minute=0, second=0, microsecond=0),
                     Booking.start_time < date.replace(hour=23, minute=59, second=59, microsecond=999999),
-                    Booking.status != "cancelled",
-                    Booking.status != "rejected"
                 )
             )
             .all()
@@ -684,15 +648,21 @@ def get_best_master_for_slot(
             continue
         
         # Получаем существующие бронирования мастера на эту дату
+        from services.booking_occupancy import apply_occupying_filter, has_overlapping_booking
+
+        if has_overlapping_booking(
+            db, start_time, end_time, OwnerType.MASTER, master.id
+        ):
+            logger.debug(f"sched: Мастер {master.id} занят в указанный интервал")
+            continue
+
         existing_bookings = (
-            db.query(Booking)
+            apply_occupying_filter(db.query(Booking))
             .filter(
                 and_(
                     Booking.master_id == master.id,
                     Booking.start_time >= start_time.replace(hour=0, minute=0, second=0, microsecond=0),
                     Booking.start_time < start_time.replace(hour=23, minute=59, second=59, microsecond=999999),
-                    Booking.status != "cancelled",
-                    Booking.status != "rejected"
                 )
             )
             .all()

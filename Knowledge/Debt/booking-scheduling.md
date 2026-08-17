@@ -43,10 +43,10 @@
 
 ## Slot-blocking predicate drift
 
-- **Confidence:** CONFIRMED
-- **Evidence:** common scheduling исключает только `cancelled` и строку `rejected`; schedule writers исключают все client-cancel variants; client create сравнивает только equal start.
-- **Failure scenario:** отменённые/expired rows могут скрывать slots, а partial overlaps — пройти отдельный compatibility create path.
-- **Sources:** `backend/services/scheduling.py`, `backend/routers/master.py`, `backend/routers/client.py`.
+- **Confidence:** CONFIRMED (частично закрыто для четырёх create path)
+- **Mitigated:** create и availability/`get_best_master_for_slot` используют `services.booking_occupancy`. Client exact-start create check удалён.
+- **Remaining:** reschedule/restore/edit-accept/temp-confirm и `create-with-any-master` ещё не на atomic writer. TemporaryBooking hold не входит в occupancy SELECT.
+- **Sources:** `backend/services/booking_creation.py`, `backend/services/scheduling.py`, `backend/routers/master.py`.
 
 ## Temporary hold не глобален
 
@@ -84,12 +84,12 @@
 - **Failure scenario:** status correction оставляет часть экономических side effects.
 - **Source:** `backend/routers/accounting.py::update_booking_status`.
 
-## Нет atomic overlap constraint
+## Нет DB-level exclusion constraint; PostgreSQL writer не реализован
 
-- **Confidence:** CONFIRMED
-- **Evidence:** conflict query и INSERT разделены; DB exclusion/unique interval constraint отсутствует.
-- **Failure scenario:** concurrent creates могут занять пересекающийся интервал.
-- **Unknown:** production frequency.
+- **Confidence:** CONFIRMED (частично закрыто для SQLite create)
+- **Mitigated:** четыре основных create path атомарно делают SQLite `BEGIN IMMEDIATE` → unified overlap SELECT → write на Connection-owned txn.
+- **Remaining:** `POST /api/bookings/create-with-any-master` остаётся racy и unauthenticated. Frontend test/demo callers есть (`SalonBookingModule`, `/test/any-master`). Коллега переписывает endpoint на verify-first; после их merge `_create_any_master_public_booking_after_proof` и `_create_specific_public_booking_after_proof` должны вызывать atomic writer, а не свой SELECT→INSERT/commit. P1 не закрыт до этого follow-up. DB exclusion constraint отсутствует; PostgreSQL locking strategy не реализована (`BOOKING_ATOMIC_UNSUPPORTED`).
+- **Sources:** `backend/services/booking_creation.py`; `backend/routers/bookings.py`.
 
 ## MissedRevenue не является автоматическим outcome
 

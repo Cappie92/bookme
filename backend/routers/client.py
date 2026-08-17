@@ -44,6 +44,13 @@ from schemas import (
     TemporaryBookingCreate, TemporaryBookingOut
 )
 from services.scheduling import get_available_slots
+from services.booking_creation import (
+    BookingCreateSnapshot,
+    create_booking_atomic,
+    discount_snapshot_from_data,
+    http_exception_for_booking_create,
+    release_request_session,
+)
 from utils.loyalty_discounts import evaluate_and_prepare_applied_discount, build_applied_discount_info
 from utils.master_canon import (
     LEGACY_INDIE_MODE,
@@ -894,33 +901,6 @@ def create_booking(
                     detail="Для этого мастера требуется предоплата. Используйте эндпоинт /api/client/bookings/temporary для создания временной брони."
                 )
     
-    # Проверка доступности времени.
-    # Важно: SQLAlchemy `Booking.indie_master_id == None` рендерится как `IS NULL`
-    # и матчит ВСЕ записи с null indie. Поэтому в OR подключаем только те owner-поля,
-    # которые в booking_in реально не None — иначе ложноположительный clash на
-    # любой чужой booking без indie/salon в это же время.
-    clash_filters = []
-    if booking_in.master_id is not None:
-        clash_filters.append(Booking.master_id == booking_in.master_id)
-    if booking_in.indie_master_id is not None:
-        clash_filters.append(Booking.indie_master_id == booking_in.indie_master_id)
-    if booking_in.salon_id is not None:
-        clash_filters.append(Booking.salon_id == booking_in.salon_id)
-
-    if clash_filters:
-        from sqlalchemy import or_
-        existing_booking = (
-            db.query(Booking)
-            .filter(
-                Booking.start_time == booking_in.start_time,
-                Booking.status != BookingStatus.CANCELLED,
-                or_(*clash_filters),
-            )
-            .first()
-        )
-        if existing_booking:
-            raise HTTPException(status_code=400, detail="This time slot is already booked")
-
     # Обработка баллов лояльности
     loyalty_points_used = 0
     if booking_in.use_loyalty_points and booking_in.master_id:
@@ -1009,24 +989,54 @@ def create_booking(
     except BookingOwnerError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
-    booking = Booking(**booking_data)
-    db.add(booking)
-    db.flush()
+    if booking_in.indie_master_id is not None:
+        conflict_owner_type = OwnerType.INDIE_MASTER
+        conflict_owner_id = booking_in.indie_master_id
+    elif booking_in.master_id is not None:
+        conflict_owner_type = OwnerType.MASTER
+        conflict_owner_id = booking_in.master_id
+    else:
+        raise HTTPException(status_code=400, detail="master_id or indie_master_id required")
 
+    status_val = booking_data.get("status")
+    if hasattr(status_val, "value"):
+        status_val = status_val.value
+    if not status_val:
+        status_val = BookingStatus.CREATED.value
+
+    snapshot = BookingCreateSnapshot(
+        client_id=current_user.id,
+        service_id=booking_data["service_id"],
+        master_id=booking_data.get("master_id"),
+        indie_master_id=booking_data.get("indie_master_id"),
+        salon_id=booking_data.get("salon_id"),
+        branch_id=booking_data.get("branch_id"),
+        start_time=booking_in.start_time,
+        end_time=booking_in.end_time,
+        status=str(status_val),
+        payment_amount=float(booking_data.get("payment_amount") or 0),
+        loyalty_points_used=int(loyalty_points_used or 0),
+        notes=booking_data.get("notes"),
+        payment_method=booking_data.get("payment_method"),
+        owner_type=conflict_owner_type,
+        owner_id=conflict_owner_id,
+        applied_discount=discount_snapshot_from_data(applied_discount_data),
+    )
+    try:
+        release_request_session(db)
+        result = create_booking_atomic(snapshot, bind=db.get_bind())
+    except Exception as exc:
+        raise http_exception_for_booking_create(exc) from exc
+
+    booking = db.query(Booking).filter(Booking.id == result.booking_id).one()
     if applied_discount_data:
-        applied_discount = AppliedDiscount(
-            booking_id=booking.id,
-            discount_id=applied_discount_data["rule_id"] if applied_discount_data["rule_type"] != "personal" else None,
-            personal_discount_id=applied_discount_data["rule_id"] if applied_discount_data["rule_type"] == "personal" else None,
-            discount_percent=applied_discount_data["discount_percent"],
-            discount_amount=applied_discount_data["discount_amount"],
+        applied_discount = (
+            db.query(AppliedDiscount)
+            .filter(AppliedDiscount.booking_id == booking.id)
+            .first()
         )
-        db.add(applied_discount)
-
-    db.commit()
-    db.refresh(booking)
-    if applied_discount_data:
-        booking.applied_discount = build_applied_discount_info(applied_discount)
+        if applied_discount:
+            booking.applied_discount = build_applied_discount_info(applied_discount)
     return booking
 
 

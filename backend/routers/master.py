@@ -1807,19 +1807,18 @@ def create_schedule_rules(
         # Получаем записи в диапазоне дат. В модели Booking.status — String(16), значения совпадают с BookingStatus.*.value.
         # Используем те же члены enum, что и в get_future_bookings_base_query (notin_ + tuple), без ~in_(строки):
         # иначе SQLAlchemy может обрабатывать элементы in_/notin_ несовместимо и давать AttributeError на .value.
-        cancelled_statuses = (
-            BookingStatus.CANCELLED,
-            BookingStatus.CANCELLED_BY_CLIENT_EARLY,
-            BookingStatus.CANCELLED_BY_CLIENT_LATE,
-        )
+        from services.booking_occupancy import apply_occupying_filter
+
         bookings = (
-            db.query(Booking)
-            .options(joinedload(Booking.client), joinedload(Booking.service))
+            apply_occupying_filter(
+                db.query(Booking).options(
+                    joinedload(Booking.client), joinedload(Booking.service)
+                )
+            )
             .filter(
                 Booking.master_id == master.id,
                 Booking.start_time >= datetime.combine(min_date, datetime.min.time()),
                 Booking.start_time <= datetime.combine(max_date, datetime.max.time()),
-                Booking.status.notin_(cancelled_statuses),
             )
             .all()
         )

@@ -30,7 +30,16 @@ from utils.public_booking_loyalty import (
     effective_available_points,
 )
 from utils.loyalty import get_loyalty_settings
-from services.scheduling import get_available_slots, check_master_working_hours, check_booking_conflicts
+from services.scheduling import get_available_slots, check_master_working_hours
+from services.booking_creation import (
+    BookingCreateSnapshot,
+    CanonicalServiceSnapshot,
+    create_booking_atomic,
+    discount_snapshot_from_data,
+    find_canonical_solo_service,
+    http_exception_for_booking_create,
+    release_request_session,
+)
 from utils.loyalty_discounts import (
     evaluate_and_prepare_applied_discount,
     evaluate_discount_candidates,
@@ -39,7 +48,7 @@ from utils.loyalty_discounts import (
     build_public_loyalty_visual_hints,
 )
 from utils.booking_factory import normalize_booking_fields, BookingOwnerError
-from models import Booking, BookingStatus, Service, AppliedDiscount, OwnerType
+from models import Booking, BookingStatus, Service, OwnerType
 from utils.yandex_maps_url import build_yandex_maps_url
 from utils.master_domain_lookup import get_master_by_domain_slug
 
@@ -446,7 +455,22 @@ def create_public_booking(
     if not master_svc:
         raise HTTPException(status_code=404, detail="Услуга не найдена у этого мастера")
 
-    service = _resolve_canonical_service_for_master_service(db, master, master_svc)
+    service_name = master_svc.name
+    service_duration = int(master_svc.duration or 0)
+    service_price = float(master_svc.price or 0)
+    canonical_spec = CanonicalServiceSnapshot(
+        name=service_name,
+        duration=service_duration,
+        price=service_price,
+    )
+    existing_service = find_canonical_solo_service(db, canonical_spec)
+    service = existing_service
+    if service is None:
+        class _ServiceStub:
+            salon_id = None
+            price = service_price
+
+        service = _ServiceStub()
 
     if not check_master_working_hours(
         db, master.id, body.start_time, body.end_time,
@@ -455,18 +479,15 @@ def create_public_booking(
     ):
         raise HTTPException(status_code=400, detail="Мастер не работает в указанное время")
 
-    if check_booking_conflicts(db, body.start_time, body.end_time, OwnerType.MASTER, master.id):
-        raise HTTPException(status_code=400, detail="Выбранное время уже занято")
-
     discounted_amount, applied_discount_data = evaluate_and_prepare_applied_discount(
         master_id=master.id,
         client_id=current_user.id,
         client_phone=current_user.phone or "",
         booking_start=body.start_time,
-        service_id=service.id,
+        service_id=existing_service.id if existing_service is not None else None,
         db=db,
     )
-    base_price = float(service.price or 0)
+    base_price = service_price
     payment_amount = discounted_amount if discounted_amount is not None else base_price
     loyalty_points_used = compute_public_create_loyalty_points_used(
         db,
@@ -477,7 +498,7 @@ def create_public_booking(
     )
 
     booking_data = {
-        "service_id": service.id,
+        "service_id": existing_service.id if existing_service is not None else 0,
         "master_id": master.id,
         "start_time": body.start_time,
         "end_time": body.end_time,
@@ -493,19 +514,30 @@ def create_public_booking(
     except BookingOwnerError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
-    booking = Booking(**booking_data)
-    db.add(booking)
-    db.flush()
-    if applied_discount_data:
-        db.add(AppliedDiscount(
-            booking_id=booking.id,
-            discount_id=applied_discount_data["rule_id"] if applied_discount_data["rule_type"] != "personal" else None,
-            personal_discount_id=applied_discount_data["rule_id"] if applied_discount_data["rule_type"] == "personal" else None,
-            discount_percent=applied_discount_data["discount_percent"],
-            discount_amount=applied_discount_data["discount_amount"],
-        ))
-    db.commit()
-    db.refresh(booking)
+    snapshot = BookingCreateSnapshot(
+        client_id=current_user.id,
+        service_id=existing_service.id if existing_service is not None else None,
+        master_id=booking_data.get("master_id"),
+        indie_master_id=booking_data.get("indie_master_id"),
+        salon_id=booking_data.get("salon_id"),
+        branch_id=booking_data.get("branch_id"),
+        start_time=body.start_time,
+        end_time=body.end_time,
+        status=BookingStatus.CREATED.value,
+        payment_amount=float(payment_amount),
+        loyalty_points_used=int(loyalty_points_used),
+        owner_type=OwnerType.MASTER,
+        owner_id=master.id,
+        applied_discount=discount_snapshot_from_data(applied_discount_data),
+        canonical_service=canonical_spec if existing_service is None else None,
+    )
+    try:
+        release_request_session(db)
+        result = create_booking_atomic(snapshot, bind=db.get_bind())
+    except Exception as exc:
+        raise http_exception_for_booking_create(exc) from exc
+
+    booking = db.query(Booking).filter(Booking.id == result.booking_id).one()
     status_val = getattr(booking.status, "value", str(booking.status))
     disc_amt = float(applied_discount_data.get("discount_amount") or 0) if applied_discount_data else 0.0
     disc_pct = applied_discount_data.get("discount_percent") if applied_discount_data else None
@@ -516,7 +548,7 @@ def create_public_booking(
         public_reference=booking.public_reference or "",
         start_time=body.start_time,
         end_time=body.end_time,
-        service_name=master_svc.name,
+        service_name=service_name,
         base_price=base_price,
         discount_percent=float(disc_pct) if disc_pct is not None else None,
         discount_amount=disc_amt,

@@ -55,16 +55,11 @@ Public API возвращает aware ISO timestamps в timezone мастера 
 
 ## 5. Blocking predicate и overlap
 
-Общий conflict/availability service считает blocking все Booking rows, кроме raw status `cancelled` и несуществующего в enum `rejected`. Пересечение half-open по смыслу: `start < other_end` и `end > other_start`.
+Occupancy (`services.booking_occupancy.has_overlapping_booking`) блокирует Booking, чей интервал пересекается half-open: `existing.start < requested.end AND existing.end > requested.start`. Соприкасающиеся границы разрешены. Не занимают слот: `cancelled`, `cancelled_by_client_early`, `cancelled_by_client_late`, `payment_expired`, legacy `"rejected"`. Остальные существующие `BookingStatus`, включая `completed` и `awaiting_payment`, занимают интервал: `completed` пишется и на будущие auto-confirm create. TemporaryBooking hold не входит в occupancy SELECT.
 
-Следствия текущего predicate:
+`check_booking_conflicts`, availability, `get_best_master_for_slot` и occupancy-фильтр календаря мастера используют тот же occupying-status set.
 
-- `cancelled_by_client_early/late` продолжают блокировать slots;
-- `payment_expired` продолжает блокировать;
-- temporary bookings вообще не входят в общий query;
-- completed rows на той же дате остаются занятостью своего исторического интервала.
-
-Schedule materialization routes используют другой cancelled set и исключают все три cancellation statuses. Client/temporary compatibility create paths проверяют только равенство `start_time`, поэтому могут пропустить частичное пересечение.
+Четыре основных create path сериализуют write через SQLite `BEGIN IMMEDIATE`. Конфликт интервала → `409 BOOKING_SLOT_CONFLICT`. Timeout lock → `503 BOOKING_SLOT_BUSY`. PostgreSQL locking strategy не реализована.
 
 **Source:** `backend/services/scheduling.py` — `check_booking_conflicts`, `get_available_slots`; `backend/routers/master.py` — schedule conflict filtering; `backend/routers/client.py` — create/temporary conflict queries; `backend/models.py` — `BookingStatus`.
 
@@ -78,8 +73,8 @@ Salon any-master availability объединяет weekly windows подходя
 
 ## 7. Concurrency и UNKNOWN
 
-Availability — вычисляемая проекция, не reservation. Общий DB constraint, запрещающий overlap, отсутствует; pre-check и INSERT разделены. Temporary hold не виден основному calculator.
+Availability — вычисляемая проекция, не reservation. Общий DB exclusion constraint отсутствует. Четыре основных create path больше не полагаются на racy pre-check+INSERT: SQLite writer берёт `BEGIN IMMEDIATE`, затем overlap SELECT и write в одной Connection-owned txn. `create-with-any-master` и Temporary hold по-прежнему вне этого create boundary.
 
-- **UNKNOWN:** фактическая нагрузка и частота races.
+- **UNKNOWN:** фактическая нагрузка и частота lock contention.
 - **UNKNOWN:** используются ли weekly `AvailabilitySlot` внешними clients как primary source после materialized schedule rollout.
 - **CONFIRMED debt:** predicates и create paths расходятся; см. [Debt](../../Debt/booking-scheduling.md).
