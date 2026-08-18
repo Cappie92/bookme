@@ -301,7 +301,9 @@ def _validate_manifest(manifest: dict[str, Any]) -> None:
         _fail("schedule.partial_day_offset must be 7")
 
 
-def _guard_environment(manifest: dict[str, Any], *, apply: bool) -> str:
+def _guard_environment(
+    manifest: dict[str, Any], *, apply: bool, allow_production: bool = False
+) -> str:
     explicit_environment = (os.environ.get("ENVIRONMENT") or "").strip().lower()
     if apply and not explicit_environment:
         _fail("--apply requires ENVIRONMENT to be explicitly set")
@@ -310,7 +312,13 @@ def _guard_environment(manifest: dict[str, Any], *, apply: bool) -> str:
         _fail("Explicit ENVIRONMENT does not match the loaded application settings")
     allowed = {str(x).strip().lower() for x in manifest["allowed_environments"]}
     if environment in {"prod", "production", "live"}:
-        _fail(f"Production-like ENVIRONMENT={environment!r} is always forbidden")
+        if not (environment == "production" and apply and allow_production):
+            _fail(
+                f"Production-like ENVIRONMENT={environment!r} is forbidden; "
+                "production apply requires ENVIRONMENT=production, --apply, "
+                "and --allow-production"
+            )
+        return environment
     if environment not in allowed:
         _fail(
             f"Refusing to run in ENVIRONMENT={environment!r}; allowed: "
@@ -2398,6 +2406,11 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default=None,
         help="exact SQLite database file required by --apply",
     )
+    parser.add_argument(
+        "--allow-production",
+        action="store_true",
+        help="explicitly allow --apply when ENVIRONMENT=production",
+    )
     return parser.parse_args(argv)
 
 
@@ -2408,7 +2421,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         manifest = _load_manifest(args.manifest.resolve())
         _validate_manifest(manifest)
-        environment = _guard_environment(manifest, apply=bool(args.apply))
+        environment = _guard_environment(
+            manifest,
+            apply=bool(args.apply),
+            allow_production=bool(args.allow_production),
+        )
         db = SessionLocal()
         _configure_connection_safety(db)
         database_target = _guard_database_target(

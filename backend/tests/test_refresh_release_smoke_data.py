@@ -254,8 +254,10 @@ def test_environment_and_database_target_guards(tmp_path, monkeypatch):
     monkeypatch.setattr(
         smoke, "get_settings", lambda: SimpleNamespace(ENVIRONMENT="production")
     )
-    with pytest.raises(smoke.SmokeRefreshError, match="always forbidden"):
+    with pytest.raises(smoke.SmokeRefreshError, match="--allow-production"):
         smoke._guard_environment(manifest, apply=True)
+    with pytest.raises(smoke.SmokeRefreshError, match="production apply requires"):
+        smoke._guard_environment(manifest, apply=False, allow_production=True)
 
     path, engine, factory = _database(tmp_path, "target.db")
     db = factory()
@@ -276,6 +278,78 @@ def test_environment_and_database_target_guards(tmp_path, monkeypatch):
     finally:
         db.close()
         engine.dispose()
+
+
+def test_production_apply_without_allow_production_is_rejected(
+    tmp_path, monkeypatch, capsys
+):
+    path, engine, factory = _database(tmp_path, "production-blocked.db")
+    _configure_main(monkeypatch, factory, environment="production")
+
+    assert smoke.main(["--apply", "--expected-db", str(path)]) == 1
+    assert "--allow-production" in capsys.readouterr().err
+    engine.dispose()
+
+
+def test_production_apply_with_wrong_expected_db_is_rejected(
+    tmp_path, monkeypatch, capsys
+):
+    path, engine, factory = _database(tmp_path, "production-wrong-target.db")
+    _configure_main(monkeypatch, factory, environment="production")
+
+    assert (
+        smoke.main(
+            [
+                "--apply",
+                "--allow-production",
+                "--expected-db",
+                str(tmp_path / "different.db"),
+            ]
+        )
+        == 1
+    )
+    error = capsys.readouterr().err
+    assert "does not match --expected-db" in error
+    assert str(path) in error
+    engine.dispose()
+
+
+def test_production_apply_with_allow_production_and_exact_db_is_permitted(
+    tmp_path, monkeypatch, capsys
+):
+    path, engine, factory = _database(tmp_path, "production-exact-target.db")
+    _seed_anchors_and_services(factory)
+    _configure_main(monkeypatch, factory, environment="production")
+
+    assert (
+        smoke.main(
+            [
+                "--apply",
+                "--allow-production",
+                "--expected-db",
+                str(path),
+            ]
+        )
+        == 0
+    )
+    output = capsys.readouterr().out
+    assert "Environment: production" in output
+    assert f"Database target: {path}" in output
+    engine.dispose()
+
+
+def test_allow_production_does_not_change_nonproduction_semantics(monkeypatch):
+    manifest = _manifest()
+    monkeypatch.setenv("ENVIRONMENT", "staging")
+    monkeypatch.setattr(
+        smoke, "get_settings", lambda: SimpleNamespace(ENVIRONMENT="staging")
+    )
+
+    assert smoke._guard_environment(manifest, apply=True) == "staging"
+    assert (
+        smoke._guard_environment(manifest, apply=True, allow_production=True)
+        == "staging"
+    )
 
 
 def test_apply_phone_verifies_only_exact_allowlisted_users(
