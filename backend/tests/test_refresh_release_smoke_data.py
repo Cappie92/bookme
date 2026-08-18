@@ -278,6 +278,72 @@ def test_environment_and_database_target_guards(tmp_path, monkeypatch):
         engine.dispose()
 
 
+def test_apply_phone_verifies_only_exact_allowlisted_users(
+    tmp_path, monkeypatch, capsys
+):
+    path, engine, factory = _database(tmp_path, "phone-verification.db")
+    _seed_anchors_and_services(factory)
+    manifest = _manifest()
+    allowlisted_phones = set(manifest["users"]["masters"]) | set(
+        manifest["users"]["clients"]
+    )
+
+    db = factory()
+    try:
+        allowlisted_users = (
+            db.query(User).filter(User.phone.in_(allowlisted_phones)).all()
+        )
+        assert len(allowlisted_users) == len(allowlisted_phones) == 5
+        for index, user in enumerate(allowlisted_users):
+            user.is_verified = index % 2 == 0
+            user.is_phone_verified = False
+            user.phone_verification_code = f"keep-{index}"
+            user.phone_verification_attempts = index + 1
+
+        unrelated = User(
+            email="unrelated@example.test",
+            phone="+79990000999",
+            full_name="Unrelated User",
+            hashed_password="untouched",
+            role=UserRole.CLIENT,
+            is_active=True,
+            is_verified=False,
+            is_phone_verified=False,
+            phone_verification_code="unrelated-code",
+            phone_verification_attempts=7,
+        )
+        db.add(unrelated)
+        db.commit()
+        allowlisted_ids = {int(user.id) for user in allowlisted_users}
+        unrelated_id = int(unrelated.id)
+        users_before = _snapshot_rows(db, User)
+        masters_before = _snapshot_rows(db, Master)
+    finally:
+        db.close()
+
+    assert _run_apply(monkeypatch, factory, path) == 0
+    assert "Users modified: 5" in capsys.readouterr().out
+
+    db = factory()
+    try:
+        users_after = _snapshot_rows(db, User)
+        phone_verified_index = tuple(
+            column.name for column in User.__table__.columns
+        ).index("is_phone_verified")
+        expected_users = copy.deepcopy(users_before)
+        for user_id in allowlisted_ids:
+            row = list(expected_users[user_id])
+            row[phone_verified_index] = True
+            expected_users[user_id] = tuple(row)
+
+        assert users_after == expected_users
+        assert users_after[unrelated_id] == users_before[unrelated_id]
+        assert _snapshot_rows(db, Master) == masters_before
+    finally:
+        db.close()
+        engine.dispose()
+
+
 def test_two_apply_is_exact_and_preserves_non_owned_state(
     tmp_path, monkeypatch, capsys
 ):

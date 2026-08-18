@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Safely refresh the additive Release 1.0 smoke layer.
 
-The script never creates, deletes, or edits User/Master anchors. By default it
-executes the complete refresh and verification flow inside one transaction and
-then rolls it back. Use --apply for the single final commit.
+The script never creates or deletes User/Master anchors. Its only User change is
+to mark the exact smoke allowlist as phone-verified for web login; Master rows
+remain immutable. By default it executes the complete refresh and verification
+flow inside one transaction and then rolls it back. Use --apply for the single
+final commit.
 """
 
 from __future__ import annotations
@@ -114,6 +116,10 @@ class Anchors:
     @property
     def client_ids(self) -> set[int]:
         return {user.id for user in self.clients_by_phone.values()}
+
+    @property
+    def user_ids(self) -> set[int]:
+        return self.master_user_ids | self.client_ids
 
 
 @dataclass
@@ -476,11 +482,33 @@ def _capture_protected_state(
     }
 
 
+def _assert_allowlisted_user_verification_change(
+    before: dict[int, tuple[Any, ...]],
+    after: dict[int, tuple[Any, ...]],
+    allowlist_user_ids: set[int],
+) -> None:
+    if set(after) != set(before):
+        _fail("User ID set changed")
+
+    column_names = tuple(column.name for column in User.__table__.columns)
+    phone_verified_index = column_names.index("is_phone_verified")
+    for user_id, before_row in before.items():
+        expected_row = list(before_row)
+        if user_id in allowlist_user_ids:
+            expected_row[phone_verified_index] = True
+        if after[user_id] != tuple(expected_row):
+            _fail(
+                f"User row {user_id} changed outside the scoped "
+                "is_phone_verified transition"
+            )
+
+
 def _assert_protected_state(
     before: dict[str, Any],
     after: dict[str, Any],
     created: CreatedIds,
     allowlist_master_ids: set[int],
+    allowlist_user_ids: set[int],
 ) -> None:
     allowed_new_ids = {
         "services": created.services,
@@ -491,6 +519,11 @@ def _assert_protected_state(
     }
     for name, expected in before.items():
         actual = after[name]
+        if name == "users":
+            _assert_allowlisted_user_verification_change(
+                expected, actual, allowlist_user_ids
+            )
+            continue
         if name == "service_links":
             expected_counts = Counter(expected)
             expected_counts.update(created.service_links)
@@ -519,6 +552,33 @@ def _assert_protected_state(
     for row_id in created.loyalty_settings:
         if int(after["loyalty_settings"][row_id][1]) not in allowlist_master_ids:
             _fail(f"LoyaltySettings row {row_id} is outside the allowlist")
+
+
+def _ensure_allowlisted_users_phone_verified(
+    db: Session, anchors: Anchors, counters: RefreshCounters
+) -> None:
+    users = [
+        *(user for user, _ in anchors.masters_by_phone.values()),
+        *anchors.clients_by_phone.values(),
+    ]
+    if {int(user.id) for user in users} != anchors.user_ids:
+        _fail("Resolved User allowlist is inconsistent")
+
+    for user in sorted(users, key=lambda row: int(row.id)):
+        if bool(user.is_phone_verified):
+            continue
+        result = db.execute(
+            text(
+                "UPDATE users SET is_phone_verified = :verified " "WHERE id = :user_id"
+            ),
+            {"verified": True, "user_id": int(user.id)},
+        )
+        if result.rowcount != 1:
+            _fail(f"Failed to phone-verify allowlisted User {user.id}")
+        db.expire(user, ["is_phone_verified"])
+        if not bool(user.is_phone_verified):
+            _fail(f"Allowlisted User {user.id} remains phone-unverified")
+        counters.users_modified += 1
 
 
 def _foreign_key_orphans(db: Session) -> dict[str, int]:
@@ -2187,6 +2247,8 @@ def _run_refresh(
     protected_before = _capture_protected_state(db, owned_before)
     orphans_before = _foreign_key_orphans(db)
 
+    _ensure_allowlisted_users_phone_verified(db, anchors, counters)
+
     existing_transactions = _prepare_existing_smoke_transactions(db, owned_before)
     _delete_previous_smoke_layer(db, owned_before, counters)
     services = _resolve_services(db, manifest, anchors, counters, created)
@@ -2269,12 +2331,10 @@ def _run_refresh(
         protected_after,
         created,
         anchors.master_ids,
+        anchors.user_ids,
     )
     _assert_no_new_orphans(orphans_before, _foreign_key_orphans(db))
 
-    if protected_before["users"] != protected_after["users"]:
-        counters.users_modified = 1
-        _fail("User snapshot changed")
     if protected_before["masters"] != protected_after["masters"]:
         _fail("Master snapshot changed")
 
