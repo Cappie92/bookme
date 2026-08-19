@@ -12,28 +12,34 @@ export const APPLE_IAP_DURATIONS = Object.freeze([1, 3, 6, 12]);
 /** @type {ReadonlyArray<'Basic'|'Pro'|'Premium'>} */
 export const APPLE_IAP_PAID_PLAN_NAMES = Object.freeze(['Basic', 'Pro', 'Premium']);
 
+export const APPLE_IAP_EXTERNAL_TIER_BY_PLAN = Object.freeze({
+  Basic: 'Basic',
+  Pro: 'Standard',
+  Premium: 'Premium',
+});
+
 /**
- * (planName, months) → App Store / RevenueCat product_id
+ * (planName, months) → App Store product_id
  * @type {Readonly<Record<string, Readonly<Record<number, string>>>>}
  */
 export const APPLE_IAP_PRODUCT_MAP = Object.freeze({
   Basic: Object.freeze({
-    1: 'dedato_basic_1m',
-    3: 'dedato_basic_3m',
-    6: 'dedato_basic_6m',
-    12: 'dedato_basic_12m',
+    1: 'ru.dedato.subscription.basic.monthly',
+    3: 'ru.dedato.subscription.basic.3months',
+    6: 'ru.dedato.subscription.basic.6months',
+    12: 'ru.dedato.subscription.basic.yearly',
   }),
   Pro: Object.freeze({
-    1: 'dedato_pro_1m',
-    3: 'dedato_pro_3m',
-    6: 'dedato_pro_6m',
-    12: 'dedato_pro_12m',
+    1: 'ru.dedato.subscription.standard.monthly',
+    3: 'ru.dedato.subscription.standard.3months',
+    6: 'ru.dedato.subscription.standard.6months',
+    12: 'ru.dedato.subscription.standard.yearly',
   }),
   Premium: Object.freeze({
-    1: 'dedato_premium_1m',
-    3: 'dedato_premium_3m',
-    6: 'dedato_premium_6m',
-    12: 'dedato_premium_12m',
+    1: 'dedato_premium_monthly',
+    3: 'ru.dedato.subscription.premium.3months',
+    6: 'ru.dedato.subscription.premium.6months',
+    12: 'ru.dedato.subscription.premium.yearly',
   }),
 });
 
@@ -74,6 +80,17 @@ export function resolveAppleProduct(productId) {
     }
   }
   return null;
+}
+
+export function resolveAppleProductDetails(productId) {
+  const resolved = resolveAppleProduct(productId);
+  if (!resolved) return null;
+  return {
+    productId,
+    durationMonths: resolved.months,
+    internalPlanName: resolved.planName,
+    externalTier: APPLE_IAP_EXTERNAL_TIER_BY_PLAN[resolved.planName],
+  };
 }
 
 export function isAppleIapPaidPlanName(planName) {

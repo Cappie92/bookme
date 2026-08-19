@@ -433,20 +433,58 @@ async def activate_subscription(
     db: Session = Depends(get_db)
 ):
     """Активировать подписку после оплаты"""
-    
-    subscription = db.query(Subscription).filter(
-        and_(
-            Subscription.id == subscription_id,
-            Subscription.user_id == current_user.id
+
+    locked_user = (
+        db.query(User)
+        .filter(User.id == current_user.id)
+        .populate_existing()
+        .with_for_update()
+        .one()
+    )
+    subscription = (
+        db.query(Subscription)
+        .filter(
+            and_(
+                Subscription.id == subscription_id,
+                Subscription.user_id == locked_user.id,
+            )
         )
-    ).first()
+        .with_for_update()
+        .first()
+    )
     
     if not subscription:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Подписка не найдена"
         )
-    
+    incoming_provider = subscription.billing_provider or "robokassa"
+    now = datetime.utcnow()
+    conflicting = db.query(Subscription).filter(
+        Subscription.user_id == locked_user.id,
+        Subscription.id != subscription.id,
+        Subscription.status == SubscriptionStatus.ACTIVE,
+        Subscription.is_active == True,  # noqa: E712
+        Subscription.start_date <= now,
+        Subscription.end_date > now,
+    )
+    if incoming_provider == "apple":
+        conflicting = conflicting.filter(
+            or_(
+                Subscription.billing_provider.is_(None),
+                Subscription.billing_provider != "apple",
+            )
+        )
+    else:
+        conflicting = conflicting.filter(
+            Subscription.billing_provider == "apple"
+        )
+    if conflicting.with_for_update().first() is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="provider_conflict_active_other_provider",
+        )
+
     subscription.status = SubscriptionStatus.ACTIVE
     db.commit()
     

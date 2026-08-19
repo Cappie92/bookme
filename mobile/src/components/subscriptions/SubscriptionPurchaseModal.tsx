@@ -993,10 +993,10 @@ export function SubscriptionPurchaseModal({
           if (!productId) throw new Error('Нет Apple product для выбранного тарифа');
           const identity = await fetchAppleBillingIdentity();
           await revenueCatService.configureIfNeeded();
-          await revenueCatService.login(identity.revenuecat_app_user_id);
+          await revenueCatService.login(identity.app_account_token);
           await revenueCatService.purchaseProductId(productId);
           await revenueCatService.getCustomerInfo();
-          const syncResult = await syncAppleEntitlement(identity.revenuecat_app_user_id);
+          const syncResult = await syncAppleEntitlement(identity.app_account_token);
           if (syncResult?.reason === 'blocked_by_active_non_apple_subscription') {
             const endLabel = syncResult?.blocking_end_date
               ? new Date(syncResult.blocking_end_date).toLocaleDateString('ru-RU')

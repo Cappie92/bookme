@@ -132,10 +132,10 @@ export async function getSubscriptionPaymentHistory(): Promise<SubscriptionPayme
 }
 
 /**
- * Apple / RevenueCat app user id for the current authenticated master.
+ * Stable Apple appAccountToken for the current authenticated master.
  */
-export async function fetchAppleBillingIdentity(): Promise<{ revenuecat_app_user_id: string }> {
-  const response = await apiClient.get<{ revenuecat_app_user_id: string }>(
+export async function fetchAppleBillingIdentity(): Promise<{ app_account_token: string }> {
+  const response = await apiClient.get<{ app_account_token: string }>(
     '/api/payments/apple/billing-identity'
   );
   return response.data;
@@ -156,7 +156,7 @@ export async function fetchApplePurchaseEligibility(): Promise<{
 }
 
 /**
- * Sync Apple / RevenueCat entitlement with backend after purchase or restore.
+ * Legacy RevenueCat entitlement sync kept until the StoreKit migration is complete.
  */
 export async function syncAppleEntitlement(expectedAppUserId?: string): Promise<any> {
   const response = await apiClient.post('/api/payments/apple/sync-entitlement', {

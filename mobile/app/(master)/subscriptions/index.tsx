@@ -523,9 +523,9 @@ export default function SubscriptionsScreen() {
       setRestoringPurchases(true);
       const identity = await fetchAppleBillingIdentity();
       await revenueCatService.configureIfNeeded();
-      await revenueCatService.login(identity.revenuecat_app_user_id);
+      await revenueCatService.login(identity.app_account_token);
       await revenueCatService.restore();
-      const syncResult = await syncAppleEntitlement(identity.revenuecat_app_user_id);
+      const syncResult = await syncAppleEntitlement(identity.app_account_token);
       await loadSubscription();
       await loadPaymentHistory();
       await refreshMasterFeaturesGlobally();

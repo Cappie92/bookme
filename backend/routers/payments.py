@@ -67,6 +67,47 @@ router = APIRouter(
 import logging
 logger = logging.getLogger(__name__)
 
+PROVIDER_CONFLICT_ACTIVE_APPLE = "provider_conflict_active_apple"
+
+
+def _get_active_apple_subscription(
+    db: Session,
+    user_id: int,
+    subscription_type: SubscriptionType,
+) -> Optional[Subscription]:
+    now = datetime.utcnow()
+    return (
+        db.query(Subscription)
+        .filter(
+            Subscription.user_id == user_id,
+            Subscription.subscription_type == subscription_type,
+            Subscription.billing_provider == "apple",
+            Subscription.status == SubscriptionStatus.ACTIVE,
+            Subscription.is_active == True,  # noqa: E712
+            Subscription.start_date <= now,
+            Subscription.end_date > now,
+        )
+        .order_by(Subscription.end_date.desc(), Subscription.id.desc())
+        .with_for_update()
+        .first()
+    )
+
+
+def _mark_robokassa_provider_conflict(
+    payment: Payment,
+    active_apple: Subscription,
+) -> None:
+    metadata = dict(payment.payment_metadata or {})
+    metadata["provider_conflict"] = {
+        "code": PROVIDER_CONFLICT_ACTIVE_APPLE,
+        "current_provider": "apple",
+        "incoming_provider": "robokassa",
+        "blocking_subscription_id": active_apple.id,
+    }
+    payment.payment_metadata = metadata
+    payment.subscription_apply_status = "pending"
+    payment.error_message = PROVIDER_CONFLICT_ACTIVE_APPLE
+
 
 def _payment_return_url_param(payment: Payment) -> str:
     return f"payment={payment.public_id}"
@@ -658,6 +699,44 @@ async def robokassa_result(
         payment.subscription_apply_status = 'pending'
         payment.error_message = None
 
+        user = (
+            db.query(User)
+            .filter(User.id == payment.user_id)
+            .populate_existing()
+            .with_for_update()
+            .first()
+        )
+        if not user:
+            raise RuntimeError("User not found")
+
+        # Определяем тип подписки и блокируем cross-provider activation до
+        # любых phase-2 grant/points side effects.
+        subscription_type = None
+        if user.role.value in ['salon']:
+            subscription_type = SubscriptionType.SALON
+        elif user.role.value in ['master', 'indie']:
+            subscription_type = SubscriptionType.MASTER
+        else:
+            raise RuntimeError("Invalid role for subscription")
+
+        active_apple = _get_active_apple_subscription(
+            db,
+            payment.user_id,
+            subscription_type,
+        )
+        if active_apple is not None:
+            _mark_robokassa_provider_conflict(payment, active_apple)
+            db.commit()
+            logger.warning(
+                "robokassa_result provider_conflict invoice_id=%s payment_id=%s "
+                "user_id=%s blocking_subscription_id=%s",
+                invoice_id,
+                payment.id,
+                payment.user_id,
+                active_apple.id,
+            )
+            return f"OK{invoice_id}"
+
         meta = payment.payment_metadata or {}
         calculation_id = meta.get("calculation_id")
         if not calculation_id:
@@ -694,25 +773,12 @@ async def robokassa_result(
                 payment_id=payment.id,
             )
 
-        user = db.query(User).filter(User.id == payment.user_id).first()
-        if not user:
-            raise RuntimeError("User not found")
-
         # Лочим баланс пользователя (минимизация гонок available/reserve)
         user_balance = db.query(UserBalance).filter(UserBalance.user_id == payment.user_id).with_for_update().first()
         if not user_balance:
             user_balance = UserBalance(user_id=payment.user_id, balance=0, currency="RUB")
             db.add(user_balance)
             db.flush()
-
-        # Определяем тип подписки
-        subscription_type = None
-        if user.role.value in ['salon']:
-            subscription_type = SubscriptionType.SALON
-        elif user.role.value in ['master', 'indie']:
-            subscription_type = SubscriptionType.MASTER
-        else:
-            raise RuntimeError("Invalid role for subscription")
 
         # Единый строгий селектор (и автопочинка "ACTIVE но уже expired")
         from utils.subscription_features import get_effective_subscription
@@ -1016,10 +1082,15 @@ async def activate_subscription_after_payment(
     Пользователь должен нажать кнопку активации после успешной оплаты
     """
     # Находим платеж
-    payment_row = db.query(Payment).filter(
-        Payment.public_id == payment,
-        Payment.user_id == current_user.id
-    ).first()
+    payment_row = (
+        db.query(Payment)
+        .filter(
+            Payment.public_id == payment,
+            Payment.user_id == current_user.id,
+        )
+        .with_for_update()
+        .first()
+    )
     
     if not payment_row:
         raise HTTPException(
@@ -1037,6 +1108,32 @@ async def activate_subscription_after_payment(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Этот платеж не для подписки"
+        )
+
+    locked_user = (
+        db.query(User)
+        .filter(User.id == current_user.id)
+        .populate_existing()
+        .with_for_update()
+        .one()
+    )
+    subscription_type = (
+        SubscriptionType.SALON
+        if locked_user.role.value == "salon"
+        else SubscriptionType.MASTER
+    )
+    active_apple = _get_active_apple_subscription(
+        db,
+        locked_user.id,
+        subscription_type,
+    )
+    if active_apple is not None:
+        if payment_row.subscription_apply_status != "applied":
+            _mark_robokassa_provider_conflict(payment_row, active_apple)
+            db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=PROVIDER_CONFLICT_ACTIVE_APPLE,
         )
     
     if not payment_row.subscription_id:

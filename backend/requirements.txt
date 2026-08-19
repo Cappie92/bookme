@@ -11,6 +11,7 @@ redis==5.0.1
 pytest==8.0.0
 pytest-asyncio==0.23.5
 httpx==0.26.0
+app-store-server-library==3.1.2
 pydantic-settings==2.1.0
 python-dotenv==1.0.0
 bcrypt==4.0.1

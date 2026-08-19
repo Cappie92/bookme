@@ -109,6 +109,15 @@ class Settings(BaseSettings):
     REVENUECAT_SECRET_API_KEY: str = ""
     REVENUECAT_API_BASE_URL: str = "https://api.revenuecat.com/v1"
 
+    # --- Apple IAP direct (App Store Server API / signed transaction JWS) ---
+    APPLE_IAP_ENABLED: str = "false"
+    APPLE_IAP_BUNDLE_ID: str = "com.dedato.app"
+    APPLE_IAP_APP_ID: str = ""
+    APPLE_IAP_ISSUER_ID: str = ""
+    APPLE_IAP_KEY_ID: str = ""
+    APPLE_IAP_PRIVATE_KEY: str = ""
+    APPLE_IAP_ROOT_CERTS_PATH: str = ""
+
     # --- Telephony / SMS ---
     ZVONOK_API_KEY: str = ""
     ZVONOK_MODE: str = ""
@@ -143,6 +152,35 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def validate_feature_secrets_in_production(self) -> "Settings":
         """В production при включённой фиче (режим задан и не stub) требуются секреты."""
+        if self.apple_iap_enabled:
+            missing = [
+                name
+                for name in (
+                    "APPLE_IAP_APP_ID",
+                    "APPLE_IAP_ISSUER_ID",
+                    "APPLE_IAP_KEY_ID",
+                    "APPLE_IAP_PRIVATE_KEY",
+                    "APPLE_IAP_ROOT_CERTS_PATH",
+                )
+                if not (getattr(self, name) or "").strip()
+            ]
+            if missing:
+                raise ValueError(
+                    "The following settings are required when APPLE_IAP_ENABLED=true: "
+                    + ", ".join(missing)
+                )
+            if self.APPLE_IAP_BUNDLE_ID.strip() != "com.dedato.app":
+                raise ValueError(
+                    "APPLE_IAP_BUNDLE_ID must be exactly com.dedato.app"
+                )
+            try:
+                app_id = int(self.APPLE_IAP_APP_ID.strip())
+            except (TypeError, ValueError) as exc:
+                raise ValueError("APPLE_IAP_APP_ID must be a positive integer") from exc
+            if app_id <= 0:
+                raise ValueError("APPLE_IAP_APP_ID must be a positive integer")
+            if not Path(self.APPLE_IAP_ROOT_CERTS_PATH).expanduser().is_absolute():
+                raise ValueError("APPLE_IAP_ROOT_CERTS_PATH must be an absolute path")
         if self.ENVIRONMENT.strip().lower() != "production":
             return self
         errs: list[str] = []
@@ -234,6 +272,22 @@ class Settings(BaseSettings):
         return _parse_bool(self.ROBOKASSA_ALLOW_INSECURE_PROD_PASSWORDS_IN_TEST)
 
     @property
+    def apple_iap_enabled(self) -> bool:
+        return _parse_bool(self.APPLE_IAP_ENABLED)
+
+    @property
+    def apple_iap_app_id_int(self) -> int:
+        if not self.apple_iap_enabled:
+            raise ValueError("APPLE_IAP is disabled")
+        return int(self.APPLE_IAP_APP_ID.strip())
+
+    @property
+    def apple_iap_private_key_bytes(self) -> bytes:
+        if not self.apple_iap_enabled:
+            raise ValueError("APPLE_IAP is disabled")
+        return self.APPLE_IAP_PRIVATE_KEY.replace("\\n", "\n").encode("utf-8")
+
+    @property
     def zvonok_stub(self) -> bool:
         """True — без реальных запросов к Zvonok (локальный smoke, тесты).
 
@@ -293,6 +347,7 @@ class Settings(BaseSettings):
             "SALONS_ENABLED": self.salons_enabled_env,
             "EMAIL_ENABLED": self.email_enabled,
             "EMAIL_PROVIDER": self.email_provider,
+            "APPLE_IAP_ENABLED": self.apple_iap_enabled,
         }
 
 
