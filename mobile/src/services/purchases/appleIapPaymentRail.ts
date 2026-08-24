@@ -1,6 +1,6 @@
 import { isAppleIapPaidPlanName } from './appleProductMap';
 
-/** iOS paid Apple IAP plan → use StoreKit / RevenueCat purchase path. */
+/** iOS paid Apple IAP plan → use the direct StoreKit 2 purchase path. */
 export function shouldUseAppleIapPurchase(platform: string, planName: string): boolean {
   return platform === 'ios' && isAppleIapPaidPlanName(planName);
 }

@@ -113,6 +113,8 @@ PODS:
     - AppMetricaCore (= 5.16.1)
     - AppMetricaCoreUtils (= 5.16.1)
     - AppMetricaLog (= 5.16.1)
+  - DeDatoStoreKit (1.0.0):
+    - ExpoModulesCore
   - EXConstants (18.0.13):
     - ExpoModulesCore
   - EXImageLoader (6.0.0):
@@ -2120,6 +2122,7 @@ PODS:
 
 DEPENDENCIES:
   - "appmetrica-react-native-analytics (from `../node_modules/@appmetrica/react-native-analytics`)"
+  - DeDatoStoreKit (from `../modules/dedato-storekit/ios`)
   - EXConstants (from `../node_modules/expo-constants/ios`)
   - EXImageLoader (from `../node_modules/expo-image-loader/ios`)
   - Expo (from `../node_modules/expo`)
@@ -2249,6 +2252,8 @@ SPEC REPOS:
 EXTERNAL SOURCES:
   appmetrica-react-native-analytics:
     :path: "../node_modules/@appmetrica/react-native-analytics"
+  DeDatoStoreKit:
+    :path: "../modules/dedato-storekit/ios"
   EXConstants:
     :path: "../node_modules/expo-constants/ios"
   EXImageLoader:
@@ -2457,6 +2462,7 @@ SPEC CHECKSUMS:
   AppMetricaStorageUtils: 11812b909635f3c301018433a563af86e1e9f6cb
   AppMetricaSynchronization: 4519548e7cc60ea726dd7413afad5ebf3978c71d
   AppMetricaWebKit: b02cb4a84cc492d1867d7306da4ef5d814b6e8bc
+  DeDatoStoreKit: aa6b4cc1ce8e92af36c734cd02bbe3a8252cd0fa
   EXConstants: fce59a631a06c4151602843667f7cfe35f81e271
   EXImageLoader: 189e3476581efe3ad4d1d3fb4735b7179eb26f05
   Expo: 38ef0f0082a53f9604a48cbab2ab55289c658eaf

@@ -32,8 +32,6 @@ import {
 } from '@src/services/api/subscriptions';
 import {
   initSubscriptionPayment,
-  fetchAppleBillingIdentity,
-  syncAppleEntitlement,
 } from '@src/services/api/payments';
 import { createWebHandoff } from '@src/services/api/auth';
 import { openWebHandoffMoreDetails } from '@src/services/auth/openWebHandoffMoreDetails';
@@ -60,13 +58,12 @@ import {
 import { getPromoPreviewDisplay } from '@src/utils/promoEngine';
 import { getSubscriptionPlanFeatureLabels } from '@src/utils/subscriptionPlanFeatures';
 import { getAppleProductId, isAppleIapPaidPlanName } from '@src/services/purchases/appleProductMap';
-import { revenueCatService } from '@src/services/purchases/RevenueCatService';
+import { appleIapService } from '@src/services/purchases/AppleIapService';
 import {
   shouldUseAppleIapPurchase,
   shouldBlockZeroPricePaidPlan,
   isIosPointsDisabled,
   isIosPromoDisabled,
-  shouldBlockApplePurchaseForActiveNonAppleSub,
 } from '@src/services/purchases/appleIapPaymentRail';
 
 type UpgradeType = 'immediate' | 'after_expiry';
@@ -929,9 +926,8 @@ export function SubscriptionPurchaseModal({
           if (!cancelled) setIosLocalizedPriceString(null);
           return;
         }
-        await revenueCatService.configureIfNeeded();
-        const price = await revenueCatService.getLocalizedPriceString(productId);
-        if (!cancelled) setIosLocalizedPriceString(price);
+        const product = await appleIapService.getProduct(productId);
+        if (!cancelled) setIosLocalizedPriceString(product.displayPrice || null);
       } catch {
         if (!cancelled) setIosLocalizedPriceString(null);
       }
@@ -975,35 +971,31 @@ export function SubscriptionPurchaseModal({
       }
 
       if (shouldUseAppleIapPurchase(Platform.OS, planName)) {
-        const block = shouldBlockApplePurchaseForActiveNonAppleSub(
-          Platform.OS,
-          currentSubscription
-        );
-        if (block.blocked) {
-          Alert.alert(
-            'Подписка уже активна',
-            `Текущая подписка действует до ${block.endDateLabel}. Новую покупку через App Store можно оформить после окончания текущего периода.`
-          );
-          return;
-        }
-
         try {
           setLoadingPayment(true);
           const productId = getAppleProductId(planName, selectedDuration);
           if (!productId) throw new Error('Нет Apple product для выбранного тарифа');
-          const identity = await fetchAppleBillingIdentity();
-          await revenueCatService.configureIfNeeded();
-          await revenueCatService.login(identity.app_account_token);
-          await revenueCatService.purchaseProductId(productId);
-          await revenueCatService.getCustomerInfo();
-          const syncResult = await syncAppleEntitlement(identity.app_account_token);
-          if (syncResult?.reason === 'blocked_by_active_non_apple_subscription') {
-            const endLabel = syncResult?.blocking_end_date
-              ? new Date(syncResult.blocking_end_date).toLocaleDateString('ru-RU')
-              : block.endDateLabel || '';
+          const outcome = await appleIapService.purchase(productId);
+          if (outcome.status === 'blocked') {
+            const endLabel = outcome.eligibility.blocking_end_date
+              ? new Date(outcome.eligibility.blocking_end_date).toLocaleDateString('ru-RU')
+              : '';
             Alert.alert(
               'Подписка уже активна',
-              `Текущая подписка действует до ${endLabel}. Новую покупку через App Store можно оформить после окончания текущего периода.`
+              endLabel
+                ? `Текущая подписка действует до ${endLabel}. Новую покупку через App Store можно оформить после окончания текущего периода.`
+                : 'Покупка через App Store сейчас недоступна для этого аккаунта.'
+            );
+            return;
+          }
+          if (outcome.status === 'cancelled') {
+            Alert.alert('Отменено', 'Покупка не была завершена');
+            return;
+          }
+          if (outcome.status === 'pending') {
+            Alert.alert(
+              'Ожидает подтверждения',
+              'Покупка ожидает подтверждения в App Store. Подписка обновится автоматически после завершения.'
             );
             return;
           }
@@ -1011,19 +1003,10 @@ export function SubscriptionPurchaseModal({
           await handleClose();
           Alert.alert('Готово', 'Тариф применён');
         } catch (e: any) {
-          const userCancelled =
-            e?.userCancelled === true ||
-            e?.code === '1' ||
-            e?.code === 1 ||
-            String(e?.message || '').toLowerCase().includes('cancel');
-          if (userCancelled) {
-            Alert.alert('Отменено', 'Покупка не была завершена');
-          } else {
-            Alert.alert(
-              'Ошибка',
-              e?.response?.data?.detail || e?.message || 'Не удалось выполнить покупку через App Store'
-            );
-          }
+          Alert.alert(
+            'Ошибка',
+            e?.response?.data?.detail || e?.message || 'Не удалось выполнить покупку через App Store'
+          );
         } finally {
           setLoadingPayment(false);
         }

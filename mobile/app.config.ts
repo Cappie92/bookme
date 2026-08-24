@@ -48,11 +48,6 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     process.env.APPMETRICA_API_KEY ||
     ''
   ).trim();
-  const revenueCatIosApiKey = (
-    process.env.EXPO_PUBLIC_REVENUECAT_IOS_API_KEY ||
-    ''
-  ).trim();
-
   const httpsIntentData = linkHosts.map((host) => ({
     scheme: 'https' as const,
     host,
@@ -151,9 +146,6 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       ...(webUrl ? { WEB_URL: webUrl } : {}),
       ...(yandexMobileAuthVisible ? { YANDEX_MOBILE_AUTH_VISIBLE: yandexMobileAuthVisible } : {}),
       ...(appMetricaApiKey ? { EXPO_PUBLIC_APPMETRICA_API_KEY: appMetricaApiKey } : {}),
-      ...(revenueCatIosApiKey
-        ? { EXPO_PUBLIC_REVENUECAT_IOS_API_KEY: revenueCatIosApiKey }
-        : {}),
     },
   };
 };

@@ -38,6 +38,7 @@ import { installMobileErrorDebugHandlers } from '@src/debug/mobileErrorDebugBoot
 import { MobileErrorDebugPanel } from '@src/debug/MobileErrorDebugPanel';
 import { authTrace } from '@src/debug/authRuntimeTrace';
 import { analytics, AcquisitionService, isAppMetricaTestEventEnabled } from '@src/services/analytics';
+import { AppleIapLifecycle } from '@src/components/subscriptions/AppleIapLifecycle';
 
 const FAILSAFE_MS = 8000;
 const DRAFT_TIMEOUT_MS = 2000;
@@ -559,6 +560,7 @@ export default function RootLayout() {
     <SafeAreaProvider>
       <AuthProvider>
         <PasswordResetRecoveryProvider>
+          <AppleIapLifecycle />
           <TabBarHeightProvider>
             <AuthGate rootInstanceId={rootInstanceIdRef.current}>
               <Stack screenOptions={{ headerShown: false }}>

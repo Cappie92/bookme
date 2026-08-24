@@ -39,11 +39,9 @@ import {
 import { getBalance, type Balance } from '@src/services/api/master';
 import {
   getSubscriptionPaymentHistory,
-  fetchAppleBillingIdentity,
-  syncAppleEntitlement,
   type SubscriptionPaymentHistoryItem,
 } from '@src/services/api/payments';
-import { revenueCatService } from '@src/services/purchases/RevenueCatService';
+import { appleIapService } from '@src/services/purchases/AppleIapService';
 import { SubscriptionPurchaseModal } from '@src/components/subscriptions/SubscriptionPurchaseModal';
 import { SubscriptionPaymentHistorySection } from '@src/components/subscriptions/SubscriptionPaymentHistorySection';
 import { formatMoney } from '@src/utils/money';
@@ -250,6 +248,12 @@ export default function SubscriptionsScreen() {
     loadPromoData();
     loadPaymentHistory();
     void verifyPendingSubscriptionPayment({ source: 'subscriptions_mount' });
+    if (Platform.OS === 'ios') {
+      void appleIapService
+        .runLifecycleSync()
+        .then(() => loadSubscription())
+        .catch(() => undefined);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -521,24 +525,12 @@ export default function SubscriptionsScreen() {
   const handleRestorePurchases = async () => {
     try {
       setRestoringPurchases(true);
-      const identity = await fetchAppleBillingIdentity();
-      await revenueCatService.configureIfNeeded();
-      await revenueCatService.login(identity.app_account_token);
-      await revenueCatService.restore();
-      const syncResult = await syncAppleEntitlement(identity.app_account_token);
+      const restoreResult = await appleIapService.restorePurchases();
       await loadSubscription();
       await loadPaymentHistory();
       await refreshMasterFeaturesGlobally();
-      if (syncResult?.reason === 'blocked_by_active_non_apple_subscription') {
-        const endLabel = syncResult?.blocking_end_date
-          ? new Date(syncResult.blocking_end_date).toLocaleDateString('ru-RU')
-          : '';
-        Alert.alert(
-          'Подписка уже активна',
-          endLabel
-            ? `Текущая подписка действует до ${endLabel}. Покупку через App Store можно активировать после окончания текущего периода.`
-            : 'Текущая подписка уже активна. Покупку через App Store можно активировать после окончания текущего периода.'
-        );
+      if (restoreResult.verifiedCount === 0) {
+        Alert.alert('Покупки не найдены', 'Для этого аккаунта не найдено активных покупок App Store.');
         return;
       }
       Alert.alert('Готово', 'Покупки восстановлены');

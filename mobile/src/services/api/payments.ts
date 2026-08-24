@@ -3,6 +3,50 @@ import type { SubscriptionPaymentHistoryItem } from '@src/utils/subscriptionBill
 
 export type { SubscriptionPaymentHistoryItem };
 
+export type AppleTransactionSource =
+  | 'purchase'
+  | 'restore'
+  | 'current_entitlement'
+  | 'transaction_update';
+
+export interface AppleBillingIdentityResponse {
+  app_account_token: string;
+}
+
+export interface ApplePurchaseEligibilityResponse {
+  allowed: boolean;
+  reason?: string;
+  blocking_end_date?: string | null;
+  blocking_subscription_id?: number;
+  blocking_billing_provider?: string;
+}
+
+export interface AppleTransactionVerifyRequest {
+  signed_transaction: string;
+  source: AppleTransactionSource;
+}
+
+export interface AppleTransactionVerifyResponse {
+  verified: boolean;
+  recorded: boolean;
+  finish_transaction: boolean;
+  source: AppleTransactionSource;
+  active?: boolean;
+  reason?: string;
+  conflict?: boolean;
+  subscription_id?: number;
+  product_id?: string;
+  transaction_id?: string;
+  original_transaction_id?: string;
+}
+
+export interface AppleSubscriptionRefreshResponse {
+  verified: boolean;
+  recorded: boolean;
+  refreshed: number;
+  subscriptions: unknown[];
+}
+
 export interface PaymentInitRequest {
   plan_id?: number;
   duration_months?: number;
@@ -134,8 +178,8 @@ export async function getSubscriptionPaymentHistory(): Promise<SubscriptionPayme
 /**
  * Stable Apple appAccountToken for the current authenticated master.
  */
-export async function fetchAppleBillingIdentity(): Promise<{ app_account_token: string }> {
-  const response = await apiClient.get<{ app_account_token: string }>(
+export async function fetchAppleBillingIdentity(): Promise<AppleBillingIdentityResponse> {
+  const response = await apiClient.get<AppleBillingIdentityResponse>(
     '/api/payments/apple/billing-identity'
   );
   return response.data;
@@ -144,23 +188,30 @@ export async function fetchAppleBillingIdentity(): Promise<{ app_account_token: 
 /**
  * Whether App Store purchase may proceed (no overlapping non-Apple subscription).
  */
-export async function fetchApplePurchaseEligibility(): Promise<{
-  allowed: boolean;
-  reason?: string;
-  blocking_end_date?: string | null;
-  blocking_subscription_id?: number;
-  blocking_billing_provider?: string;
-}> {
-  const response = await apiClient.get('/api/payments/apple/purchase-eligibility');
+export async function fetchApplePurchaseEligibility(): Promise<ApplePurchaseEligibilityResponse> {
+  const response = await apiClient.get<ApplePurchaseEligibilityResponse>(
+    '/api/payments/apple/purchase-eligibility'
+  );
   return response.data;
 }
 
 /**
- * Legacy RevenueCat entitlement sync kept until the StoreKit migration is complete.
+ * Verify a StoreKit 2 signed transaction with the authoritative backend.
  */
-export async function syncAppleEntitlement(expectedAppUserId?: string): Promise<any> {
-  const response = await apiClient.post('/api/payments/apple/sync-entitlement', {
-    ...(expectedAppUserId ? { expected_app_user_id: expectedAppUserId } : {}),
-  });
+export async function verifyAppleTransaction(
+  request: AppleTransactionVerifyRequest
+): Promise<AppleTransactionVerifyResponse> {
+  const response = await apiClient.post<AppleTransactionVerifyResponse>(
+    '/api/payments/apple/transactions/verify',
+    request
+  );
+  return response.data;
+}
+
+/** Refresh authoritative subscription lifecycle from App Store Server API. */
+export async function refreshAppleSubscriptions(): Promise<AppleSubscriptionRefreshResponse> {
+  const response = await apiClient.post<AppleSubscriptionRefreshResponse>(
+    '/api/payments/apple/subscriptions/refresh'
+  );
   return response.data;
 }
