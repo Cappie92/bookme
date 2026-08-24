@@ -13,7 +13,6 @@ import {
   TouchableOpacity,
   KeyboardAvoidingView,
   Keyboard,
-  Linking,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
@@ -42,6 +41,7 @@ import {
   type SubscriptionPaymentHistoryItem,
 } from '@src/services/api/payments';
 import { appleIapService } from '@src/services/purchases/AppleIapService';
+import { getAppleIapErrorPresentation } from '@src/services/purchases/appleIapUi';
 import { SubscriptionPurchaseModal } from '@src/components/subscriptions/SubscriptionPurchaseModal';
 import { SubscriptionPaymentHistorySection } from '@src/components/subscriptions/SubscriptionPaymentHistorySection';
 import { formatMoney } from '@src/utils/money';
@@ -480,7 +480,13 @@ export default function SubscriptionsScreen() {
           <View style={styles.detailRow}>
             <Text style={styles.detailLabel}>Автопродление:</Text>
             <Text style={styles.detailValue}>
-              {subscription.auto_renewal ? 'Скоро (нужна привязка карты)' : 'Выключено'}
+              {Platform.OS === 'ios'
+                ? subscription.billing_provider === 'apple'
+                  ? 'Управляется в App Store'
+                  : 'Недоступно в приложении'
+                : subscription.auto_renewal
+                  ? 'Скоро (нужна привязка карты)'
+                  : 'Выключено'}
             </Text>
           </View>
         </View>
@@ -535,18 +541,15 @@ export default function SubscriptionsScreen() {
       }
       Alert.alert('Готово', 'Покупки восстановлены');
     } catch (e: unknown) {
-      const ax = e as { response?: { data?: { detail?: string } }; message?: string };
-      Alert.alert(
-        'Ошибка',
-        ax?.response?.data?.detail || ax?.message || 'Не удалось восстановить покупки'
-      );
+      const presentation = getAppleIapErrorPresentation(e);
+      Alert.alert(presentation.title, presentation.message);
     } finally {
       setRestoringPurchases(false);
     }
   };
 
   const handleManageAppleSubscription = () => {
-    Linking.openURL('https://apps.apple.com/account/subscriptions').catch(() => {
+    appleIapService.showManageSubscriptions().catch(() => {
       Alert.alert('Ошибка', 'Не удалось открыть управление подпиской App Store');
     });
   };
@@ -557,7 +560,9 @@ export default function SubscriptionsScreen() {
       <Card style={[styles.controlsCard, styles.sectionSpacing]}>
         <Text style={styles.controlsTitle}>Тарифный план</Text>
         <Text style={styles.controlsText}>
-          Управляйте тарифом и периодом. Автопродление по карте будет добавлено позже.
+          {Platform.OS === 'ios'
+            ? 'Оплата и автопродление подписки выполняются через App Store.'
+            : 'Управляйте тарифом и периодом. Автопродление по карте будет добавлено позже.'}
         </Text>
         <PrimaryButton
           title="Управление тарифом"

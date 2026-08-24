@@ -61,10 +61,18 @@ import { getAppleProductId, isAppleIapPaidPlanName } from '@src/services/purchas
 import { appleIapService } from '@src/services/purchases/AppleIapService';
 import {
   shouldUseAppleIapPurchase,
-  shouldBlockZeroPricePaidPlan,
   isIosPointsDisabled,
   isIosPromoDisabled,
 } from '@src/services/purchases/appleIapPaymentRail';
+import {
+  getAppleIapErrorPresentation,
+  getSubscriptionPeriodLabel,
+} from '@src/services/purchases/appleIapUi';
+import {
+  openLegalDocument,
+  PERSONAL_DATA_CONSENT_PATH,
+  USER_AGREEMENT_PATH,
+} from '@src/utils/legalDocuments';
 
 type UpgradeType = 'immediate' | 'after_expiry';
 
@@ -183,6 +191,7 @@ function StepPlan({
   onSelectPlan,
   onMoreDetails,
   moreDetailsLoadingPlanId,
+  useApplePricing,
 }: {
   plans: SubscriptionPlan[];
   serviceFunctions: PricingCatalogServiceFunction[];
@@ -191,6 +200,7 @@ function StepPlan({
   onSelectPlan: (plan: SubscriptionPlan) => void;
   onMoreDetails: (plan: SubscriptionPlan) => void;
   moreDetailsLoadingPlanId: number | null;
+  useApplePricing: boolean;
 }) {
   return (
     <View>
@@ -221,7 +231,7 @@ function StepPlan({
                     ) : null}
                   </View>
                   <Text style={styles.radioSub} numberOfLines={1}>
-                    от {formatMoney(minPrice)} /мес
+                    {useApplePricing ? 'Цена будет показана App Store' : `от ${formatMoney(minPrice)} /мес`}
                   </Text>
                   {features.length > 0 ? (
                     <View style={styles.planFeaturesList}>
@@ -376,6 +386,9 @@ function StepPeriod({
   subscriptionPointsToUse,
   onToggleUsePoints,
   onChangePointsToUse,
+  useApplePricing,
+  appleProductState,
+  appleDisplayPrice,
 }: {
   selectedPlan: SubscriptionPlan | null;
   currentPlanLabel: string | null;
@@ -391,6 +404,9 @@ function StepPeriod({
   subscriptionPointsToUse: number;
   onToggleUsePoints: (enabled: boolean) => void;
   onChangePointsToUse: (value: number) => void;
+  useApplePricing: boolean;
+  appleProductState: 'idle' | 'loading' | 'ready' | 'unavailable';
+  appleDisplayPrice: string | null;
 }) {
   const selectedSavings =
     selectedPlan && selectedDuration
@@ -433,75 +449,100 @@ function StepPeriod({
         })}
       </View>
 
-      {selectedDuration && selectedDuration > 1 ? (
-        selectedSavings ? (
-          <View style={styles.savingsBanner}>
-            <Text style={styles.savingsBannerText}>
-              Выгода за период: {formatMoney(selectedSavings.savingsRub)} · {selectedSavings.savingsPercent}%
+      {useApplePricing ? (
+        <View style={styles.applePriceCard} testID="ios-storekit-period-price">
+          <Text style={styles.applePriceLabel}>Цена в App Store</Text>
+          {appleProductState === 'loading' ? (
+            <View style={styles.applePriceLoadingRow}>
+              <ActivityIndicator size="small" color={BRAND_GREEN} />
+              <Text style={styles.applePriceLoadingText}>Загрузка цены…</Text>
+            </View>
+          ) : appleProductState === 'ready' && appleDisplayPrice ? (
+            <Text style={styles.applePriceValue}>{appleDisplayPrice}</Text>
+          ) : appleProductState === 'unavailable' ? (
+            <Text style={styles.applePriceError}>
+              Выбранная подписка сейчас недоступна в App Store.
             </Text>
-          </View>
-        ) : (
-          <Text style={styles.hint}>Без скидки</Text>
-        )
+          ) : (
+            <Text style={styles.applePriceLoadingText}>Выберите период</Text>
+          )}
+          <Text style={styles.applePriceFootnote}>
+            Итоговая цена и валюта определяются App Store.
+          </Text>
+        </View>
       ) : (
-        <Text style={styles.hint}>Цена зависит от периода</Text>
+        <>
+          {selectedDuration && selectedDuration > 1 ? (
+            selectedSavings ? (
+              <View style={styles.savingsBanner}>
+                <Text style={styles.savingsBannerText}>
+                  Выгода за период: {formatMoney(selectedSavings.savingsRub)} · {selectedSavings.savingsPercent}%
+                </Text>
+              </View>
+            ) : (
+              <Text style={styles.hint}>Без скидки</Text>
+            )
+          ) : (
+            <Text style={styles.hint}>Цена зависит от периода</Text>
+          )}
+
+          <View style={styles.periodCalculationCard}>
+            <Text style={styles.periodCalculationTitle}>Расчет</Text>
+            {loadingCalculation ? (
+              <CalculationLoadingState />
+            ) : calculation ? (
+              <>
+                <SubscriptionPointsControls
+                  calculation={calculation}
+                  useSubscriptionPoints={useSubscriptionPoints}
+                  subscriptionPointsToUse={subscriptionPointsToUse}
+                  onToggleUsePoints={onToggleUsePoints}
+                  onChangePointsToUse={onChangePointsToUse}
+                />
+                <SubscriptionPointsBreakdown calculation={calculation} />
+                <View style={styles.tableRow}>
+                  <Text style={[styles.tableKey, styles.tableKeyStrong]}>К оплате</Text>
+                  <Text style={[styles.tableVal, styles.tableValStrong]} numberOfLines={1}>
+                    {formatMoney(calculation.final_price)}
+                  </Text>
+                </View>
+                <View style={styles.tableRow}>
+                  <Text style={styles.tableKey}>Стоимость</Text>
+                  <Text style={styles.tableVal} numberOfLines={1}>
+                    {formatMoney(calculation.total_price)}
+                  </Text>
+                </View>
+                {calculation.savings_percent ? (
+                  <View style={styles.tableRow}>
+                    <Text style={styles.tableKey}>Экономия</Text>
+                    <Text style={styles.tableVal}>{Math.round(calculation.savings_percent)}%</Text>
+                  </View>
+                ) : null}
+                {isIosPromoDisabled(Platform.OS) ? (
+                  <Text style={styles.muted} testID="subscription-promo-ios-disabled">
+                    Промокоды недоступны при оплате подписки через App Store.
+                  </Text>
+                ) : (
+                  <PromoPreviewBlock
+                    display={promoPreview}
+                    testID="subscription-period-promo-preview"
+                  />
+                )}
+              </>
+            ) : (
+              <Text style={styles.muted}>Выберите тариф и период, чтобы увидеть расчет</Text>
+            )}
+          </View>
+        </>
       )}
 
-      <View style={styles.periodCalculationCard}>
-        <Text style={styles.periodCalculationTitle}>Расчет</Text>
-        {loadingCalculation ? (
-          <CalculationLoadingState />
-        ) : calculation ? (
-          <>
-            <SubscriptionPointsControls
-              calculation={calculation}
-              useSubscriptionPoints={useSubscriptionPoints}
-              subscriptionPointsToUse={subscriptionPointsToUse}
-              onToggleUsePoints={onToggleUsePoints}
-              onChangePointsToUse={onChangePointsToUse}
-            />
-            <SubscriptionPointsBreakdown calculation={calculation} />
-            <View style={styles.tableRow}>
-              <Text style={[styles.tableKey, styles.tableKeyStrong]}>К оплате</Text>
-              <Text style={[styles.tableVal, styles.tableValStrong]} numberOfLines={1}>
-                {formatMoney(calculation.final_price)}
-              </Text>
-            </View>
-            <View style={styles.tableRow}>
-              <Text style={styles.tableKey}>Стоимость</Text>
-              <Text style={styles.tableVal} numberOfLines={1}>
-                {formatMoney(calculation.total_price)}
-              </Text>
-            </View>
-            {calculation.savings_percent ? (
-              <View style={styles.tableRow}>
-                <Text style={styles.tableKey}>Экономия</Text>
-                <Text style={styles.tableVal}>{Math.round(calculation.savings_percent)}%</Text>
-              </View>
-            ) : null}
-            {isIosPromoDisabled(Platform.OS) ? (
-              <Text style={styles.muted} testID="subscription-promo-ios-disabled">
-                Промокоды недоступны при оплате подписки через App Store.
-              </Text>
-            ) : (
-              <PromoPreviewBlock
-                display={promoPreview}
-                testID="subscription-period-promo-preview"
-              />
-            )}
-          </>
-        ) : (
-          <Text style={styles.muted}>Выберите тариф и период, чтобы увидеть расчет</Text>
-        )}
-      </View>
-
-      {isDowngrade ? (
+      {!useApplePricing && isDowngrade ? (
         <Text style={styles.breakdownHint}>
           Тариф будет применён после окончания текущей подписки
         </Text>
       ) : null}
 
-      {showUpgradeType ? (
+      {!useApplePricing && showUpgradeType ? (
         <View style={styles.inlineCard}>
           <Text style={styles.inlineCardTitle}>Когда применить новый тариф?</Text>
           <View style={styles.inlineSegments}>
@@ -531,7 +572,7 @@ function StepPeriod({
   );
 }
 
-function StepCheckout({
+export function StepCheckout({
   loadingCalculation,
   calculation,
   enableAutoRenewal,
@@ -539,6 +580,16 @@ function StepCheckout({
   showPaidButton,
   onPaid,
   payFromBalance,
+  useAppleCheckout,
+  selectedPlanLabel,
+  selectedDuration,
+  appleDisplayPrice,
+  appleProductState,
+  restoringPurchases,
+  onRestorePurchases,
+  onManageSubscription,
+  onOpenPrivacy,
+  onOpenTerms,
 }: {
   loadingCalculation: boolean;
   calculation: SubscriptionCalculationResponse | null;
@@ -547,6 +598,16 @@ function StepCheckout({
   showPaidButton: boolean;
   onPaid: () => void;
   payFromBalance: boolean;
+  useAppleCheckout: boolean;
+  selectedPlanLabel: string | null;
+  selectedDuration: number | null;
+  appleDisplayPrice: string | null;
+  appleProductState: 'idle' | 'loading' | 'ready' | 'unavailable';
+  restoringPurchases: boolean;
+  onRestorePurchases: () => void;
+  onManageSubscription: () => void;
+  onOpenPrivacy: () => void;
+  onOpenTerms: () => void;
 }) {
   const pointsPortion =
     typeof calculation?.points_portion === 'number'
@@ -564,6 +625,104 @@ function StepCheckout({
       : payFromBalance
         ? 0
         : Number(calculation?.final_price ?? 0);
+
+  if (useAppleCheckout) {
+    return (
+      <View testID="ios-apple-subscription-checkout">
+        <Text style={styles.sectionLabel}>Подписка App Store</Text>
+        <View style={styles.appleCheckoutCard}>
+          <View style={styles.tableRow}>
+            <Text style={styles.tableKey}>Тариф</Text>
+            <Text style={[styles.tableVal, styles.tableValStrong]} numberOfLines={1}>
+              {selectedPlanLabel || '—'}
+            </Text>
+          </View>
+          <View style={styles.tableRow}>
+            <Text style={styles.tableKey}>Период</Text>
+            <Text style={styles.tableVal}>
+              {selectedDuration ? getSubscriptionPeriodLabel(selectedDuration) : '—'}
+            </Text>
+          </View>
+          <View style={styles.tableRow}>
+            <Text style={[styles.tableKey, styles.tableKeyStrong]}>Цена</Text>
+            {appleProductState === 'loading' ? (
+              <ActivityIndicator size="small" color={BRAND_GREEN} />
+            ) : (
+              <Text
+                style={[styles.tableVal, styles.tableValStrong]}
+                testID="ios-storekit-checkout-price"
+              >
+                {appleDisplayPrice || 'Недоступно'}
+              </Text>
+            )}
+          </View>
+        </View>
+
+        <Text style={styles.appleRenewalDisclosure} testID="ios-auto-renew-disclosure">
+          Оплата спишется с Apple ID после подтверждения. Подписка продлевается автоматически,
+          если её не отменить. Управлять подпиской и отключать автопродление можно в настройках
+          Apple ID/App Store.
+        </Text>
+
+        {appleProductState === 'unavailable' ? (
+          <Text style={styles.applePriceError} testID="ios-product-unavailable">
+            Покупка недоступна: App Store не вернул выбранный продукт.
+          </Text>
+        ) : null}
+
+        <View style={styles.appleCheckoutActions}>
+          <Pressable
+            onPress={onRestorePurchases}
+            disabled={restoringPurchases}
+            style={({ pressed }) => [
+              styles.appleTextButton,
+              pressed && styles.pressed,
+              restoringPurchases && styles.appleTextButtonDisabled,
+            ]}
+            accessibilityRole="button"
+            accessibilityLabel="Восстановить покупки App Store"
+            testID="ios-checkout-restore-purchases"
+          >
+            {restoringPurchases ? (
+              <ActivityIndicator size="small" color={BRAND_GREEN} />
+            ) : (
+              <Text style={styles.appleTextButtonLabel}>Восстановить покупки</Text>
+            )}
+          </Pressable>
+          <Pressable
+            onPress={onManageSubscription}
+            style={({ pressed }) => [styles.appleTextButton, pressed && styles.pressed]}
+            accessibilityRole="button"
+            accessibilityLabel="Управлять подпиской App Store"
+            testID="ios-checkout-manage-subscription"
+          >
+            <Text style={styles.appleTextButtonLabel}>Управлять подпиской</Text>
+          </Pressable>
+        </View>
+
+        <View style={styles.appleLegalLinks}>
+          <Pressable
+            onPress={onOpenPrivacy}
+            hitSlop={8}
+            accessibilityRole="link"
+            accessibilityLabel="Политика конфиденциальности"
+            testID="ios-checkout-privacy-link"
+          >
+            <Text style={styles.appleLegalLinkText}>Политика конфиденциальности</Text>
+          </Pressable>
+          <Pressable
+            onPress={onOpenTerms}
+            hitSlop={8}
+            accessibilityRole="link"
+            accessibilityLabel="Условия использования и пользовательское соглашение"
+            testID="ios-checkout-terms-link"
+          >
+            <Text style={styles.appleLegalLinkText}>Условия использования (EULA)</Text>
+          </Pressable>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View>
@@ -677,6 +836,7 @@ export function SubscriptionPurchaseModal({
   const [serviceFunctions, setServiceFunctions] = React.useState<PricingCatalogServiceFunction[]>([]);
   const [loadingPlans, setLoadingPlans] = React.useState(false);
   const [plansError, setPlansError] = React.useState<string | null>(null);
+  const [moreDetailsLoadingPlanId, setMoreDetailsLoadingPlanId] = React.useState<number | null>(null);
 
   const [step, setStep] = React.useState<Step>(1);
   const [selectedPlan, setSelectedPlan] = React.useState<SubscriptionPlan | null>(null);
@@ -691,8 +851,16 @@ export function SubscriptionPurchaseModal({
   const [useSubscriptionPoints, setUseSubscriptionPoints] = React.useState(false);
   const [subscriptionPointsToUse, setSubscriptionPointsToUse] = React.useState(0);
   const [iosLocalizedPriceString, setIosLocalizedPriceString] = React.useState<string | null>(null);
+  const [iosProductState, setIosProductState] = React.useState<
+    'idle' | 'loading' | 'ready' | 'unavailable'
+  >('idle');
+  const [restoringApplePurchases, setRestoringApplePurchases] = React.useState(false);
   const calculationRequestSeq = React.useRef(0);
   const calculationIdRef = React.useRef<number | null>(null);
+  const isIosCheckoutPlatform = Platform.OS === 'ios';
+  const useApplePricing = Platform.OS === 'ios' && subscriptionType === SubscriptionType.MASTER;
+  const useAppleCheckout =
+    useApplePricing && !!selectedPlan && isAppleIapPaidPlanName(selectedPlan.name);
 
   const isFreePlan =
     !currentSubscription?.plan_id ||
@@ -727,10 +895,13 @@ export function SubscriptionPurchaseModal({
       setUseSubscriptionPoints(false);
       setSubscriptionPointsToUse(0);
       setIosLocalizedPriceString(null);
+      setIosProductState('idle');
+      setRestoringApplePurchases(false);
       setLoadingCalculation(false);
       setLoadingPayment(false);
       setPaymentOpened(false);
       setPlansError(null);
+      setMoreDetailsLoadingPlanId(null);
     }
   }, []);
 
@@ -752,6 +923,11 @@ export function SubscriptionPurchaseModal({
         }
         const filtered = data
           .filter((p) => p.name !== 'Free' && p.name !== 'AlwaysFree')
+          .filter(
+            (p) =>
+              !isIosCheckoutPlatform ||
+              (useApplePricing && isAppleIapPaidPlanName(p.name))
+          )
           .sort((a, b) => a.display_order - b.display_order);
         setPlans(filtered);
       } catch (e: any) {
@@ -763,7 +939,7 @@ export function SubscriptionPurchaseModal({
         setLoadingPlans(false);
       }
     })();
-  }, [visible, subscriptionType]);
+  }, [visible, subscriptionType, useApplePricing, isIosCheckoutPlatform]);
 
   const handleClose = async () => {
     await resetState();
@@ -830,6 +1006,17 @@ export function SubscriptionPurchaseModal({
 
   const calculateSelectedSubscription = React.useCallback(async () => {
     if (!visible || !selectedPlan || !selectedDuration) return;
+    if (useApplePricing && isAppleIapPaidPlanName(selectedPlan.name)) {
+      calculationRequestSeq.current += 1;
+      const previousCalculationId = calculationIdRef.current;
+      calculationIdRef.current = null;
+      setCalculation(null);
+      setLoadingCalculation(false);
+      if (previousCalculationId) {
+        deleteSubscriptionCalculationSnapshot(previousCalculationId).catch(() => undefined);
+      }
+      return;
+    }
     const plan = selectedPlan;
     const duration = selectedDuration;
     const upgradeTypeToUse = upgradeType;
@@ -870,7 +1057,7 @@ export function SubscriptionPurchaseModal({
         setLoadingCalculation(false);
       }
     }
-  }, [visible, selectedPlan, selectedDuration, upgradeType, useSubscriptionPoints, subscriptionPointsToUse]);
+  }, [visible, selectedPlan, selectedDuration, upgradeType, useSubscriptionPoints, subscriptionPointsToUse, useApplePricing]);
 
   const handleToggleUseSubscriptionPoints = React.useCallback(
     (enabled: boolean) => {
@@ -896,6 +1083,39 @@ export function SubscriptionPurchaseModal({
     setUpgradeType(nextType);
   };
 
+  const handleRestoreApplePurchases = async () => {
+    if (restoringApplePurchases) return;
+    try {
+      setRestoringApplePurchases(true);
+      const result = await appleIapService.restorePurchases();
+      await onRefreshAfterPayment?.();
+      if (result.verifiedCount === 0) {
+        Alert.alert('Покупки не найдены', 'Для этого аккаунта нет активных покупок App Store.');
+        return;
+      }
+      Alert.alert('Готово', 'Покупки восстановлены');
+    } catch (error) {
+      const presentation = getAppleIapErrorPresentation(error);
+      Alert.alert(presentation.title, presentation.message);
+    } finally {
+      setRestoringApplePurchases(false);
+    }
+  };
+
+  const handleManageAppleSubscription = async () => {
+    try {
+      await appleIapService.showManageSubscriptions();
+    } catch {
+      Alert.alert('Недоступно', 'Не удалось открыть системное управление подписками App Store.');
+    }
+  };
+
+  const handleOpenLegalDocument = (path: string) => {
+    void openLegalDocument(path, Linking.openURL).catch(() => {
+      Alert.alert('Недоступно', 'Не удалось открыть документ. Попробуйте ещё раз позже.');
+    });
+  };
+
   const payFromBalance = React.useMemo(() => {
     if (!calculation) return false;
     return shouldPaySubscriptionFromBalance({
@@ -910,63 +1130,54 @@ export function SubscriptionPurchaseModal({
 
 
   React.useEffect(() => {
-    if (!visible || step !== 3 || Platform.OS !== 'ios' || !selectedPlan || !selectedDuration) {
+    if (!visible || step < 2 || !useAppleCheckout || !selectedPlan || !selectedDuration) {
       setIosLocalizedPriceString(null);
-      return;
-    }
-    if (!isAppleIapPaidPlanName(selectedPlan.name)) {
-      setIosLocalizedPriceString(null);
+      setIosProductState('idle');
       return;
     }
     let cancelled = false;
+    setIosProductState('loading');
     (async () => {
       try {
         const productId = getAppleProductId(selectedPlan.name, selectedDuration);
         if (!productId) {
-          if (!cancelled) setIosLocalizedPriceString(null);
+          if (!cancelled) {
+            setIosLocalizedPriceString(null);
+            setIosProductState('unavailable');
+          }
           return;
         }
         const product = await appleIapService.getProduct(productId);
-        if (!cancelled) setIosLocalizedPriceString(product.displayPrice || null);
+        if (!cancelled) {
+          const displayPrice = product.displayPrice || null;
+          setIosLocalizedPriceString(displayPrice);
+          setIosProductState(displayPrice ? 'ready' : 'unavailable');
+        }
       } catch {
-        if (!cancelled) setIosLocalizedPriceString(null);
+        if (!cancelled) {
+          setIosLocalizedPriceString(null);
+          setIosProductState('unavailable');
+        }
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [visible, step, selectedPlan, selectedDuration]);
+  }, [visible, step, selectedPlan, selectedDuration, useAppleCheckout]);
 
   const handlePayment = async () => {
-    if (!selectedPlan || !selectedDuration || !calculation) return;
+    if (!selectedPlan || !selectedDuration) return;
 
-    if (Platform.OS === 'ios') {
+    if (isIosCheckoutPlatform) {
       const planName = selectedPlan.name;
 
-      if (planName === 'Free' || !isAppleIapPaidPlanName(planName)) {
-        if (Number(calculation.final_price) <= 0) {
-          try {
-            setLoadingPayment(true);
-            await applyUpgradeFree(calculation.calculation_id);
-            await onRefreshAfterPayment?.();
-            await handleClose();
-            Alert.alert('Готово', 'Тариф применён');
-          } catch (e: any) {
-            Alert.alert('Ошибка', e?.response?.data?.detail || 'Не удалось применить тариф');
-          } finally {
-            setLoadingPayment(false);
-          }
-          return;
-        }
-        Alert.alert('Ошибка', 'Этот тариф нельзя оплатить через App Store.');
+      if (!useApplePricing || !isAppleIapPaidPlanName(planName)) {
+        Alert.alert('Недоступно', 'Этот тип подписки нельзя оформить в приложении для iOS.');
         return;
       }
 
-      if (shouldBlockZeroPricePaidPlan(Platform.OS, planName, Number(calculation.final_price))) {
-        Alert.alert(
-          'Недоступно',
-          'Для оплаты через App Store требуется стандартная стоимость тарифа. Промо/нулевая цена для платного тарифа через App Store сейчас недоступны.'
-        );
+      if (iosProductState !== 'ready' || !iosLocalizedPriceString) {
+        Alert.alert('Недоступно', 'App Store не вернул цену выбранной подписки. Попробуйте позже.');
         return;
       }
 
@@ -989,7 +1200,6 @@ export function SubscriptionPurchaseModal({
             return;
           }
           if (outcome.status === 'cancelled') {
-            Alert.alert('Отменено', 'Покупка не была завершена');
             return;
           }
           if (outcome.status === 'pending') {
@@ -999,20 +1209,28 @@ export function SubscriptionPurchaseModal({
             );
             return;
           }
-          await onRefreshAfterPayment?.();
-          await handleClose();
-          Alert.alert('Готово', 'Тариф применён');
+          try {
+            await onRefreshAfterPayment?.();
+            await handleClose();
+            Alert.alert('Готово', 'Подписка активирована');
+          } catch {
+            await handleClose();
+            Alert.alert(
+              'Покупка подтверждена',
+              'App Store подтвердил покупку. Статус подписки обновится автоматически.'
+            );
+          }
         } catch (e: any) {
-          Alert.alert(
-            'Ошибка',
-            e?.response?.data?.detail || e?.message || 'Не удалось выполнить покупку через App Store'
-          );
+          const presentation = getAppleIapErrorPresentation(e);
+          Alert.alert(presentation.title, presentation.message);
         } finally {
           setLoadingPayment(false);
         }
         return;
       }
     }
+
+    if (!calculation) return;
 
     if (Number(calculation.final_price) <= 0) {
       try {
@@ -1186,20 +1404,28 @@ export function SubscriptionPurchaseModal({
   const currentPlanLabel = getPlanTitle(currentSubscription ?? undefined) || null;
 
   const canGoNextFromStep1 = !!selectedPlan;
-  const canGoNextFromStep2 = !!selectedPlan && !!selectedDuration && !!calculation && !loadingCalculation;
+  const canGoNextFromStep2 =
+    !!selectedPlan &&
+    !!selectedDuration &&
+    (useAppleCheckout
+      ? iosProductState === 'ready' && !!iosLocalizedPriceString
+      : !!calculation && !loadingCalculation);
   const canPay =
     !!selectedPlan &&
     !!selectedDuration &&
-    !!calculation &&
-    !loadingCalculation &&
-    !loadingPayment;
+    !loadingPayment &&
+    (useAppleCheckout
+      ? iosProductState === 'ready' && !!iosLocalizedPriceString
+      : !!calculation && !loadingCalculation);
 
   const paymentCtaLabel = React.useMemo(() => {
     if (loadingPayment) return 'Подождите…';
-    if (!calculation) return 'Оплатить';
-    if (Platform.OS === 'ios' && selectedPlan && isAppleIapPaidPlanName(selectedPlan.name)) {
-      return 'Оплатить';
+    if (useAppleCheckout) {
+      return iosLocalizedPriceString
+        ? `Подписаться за ${iosLocalizedPriceString}`
+        : 'Подписаться';
     }
+    if (!calculation) return 'Оплатить';
     if (calculation.final_price <= 0) return 'Применить тариф';
     if (payFromBalance) return 'Оплатить';
     const card = resolveCardPortion({
@@ -1209,7 +1435,7 @@ export function SubscriptionPurchaseModal({
     });
     if (card > 0.001) return `Оплатить ${formatMoney(card)}`;
     return 'Оплатить';
-  }, [loadingPayment, calculation, payFromBalance, selectedPlan]);
+  }, [loadingPayment, calculation, payFromBalance, useAppleCheckout, iosLocalizedPriceString]);
 
   const sheetMaxHeight = Math.round(Dimensions.get('window').height * 0.88);
   const footerPaddingBottom = 12 + Math.max(insets.bottom, 0);
@@ -1258,6 +1484,7 @@ export function SubscriptionPurchaseModal({
           onSelectPlan={handlePlanSelect}
           onMoreDetails={handleWebHandoffMoreDetails}
           moreDetailsLoadingPlanId={moreDetailsLoadingPlanId}
+          useApplePricing={useApplePricing}
         />
       );
     }
@@ -1278,6 +1505,9 @@ export function SubscriptionPurchaseModal({
           subscriptionPointsToUse={subscriptionPointsToUse}
           onToggleUsePoints={handleToggleUseSubscriptionPoints}
           onChangePointsToUse={setSubscriptionPointsToUse}
+          useApplePricing={useAppleCheckout}
+          appleProductState={iosProductState}
+          appleDisplayPrice={iosLocalizedPriceString}
         />
       );
     }
@@ -1289,6 +1519,16 @@ export function SubscriptionPurchaseModal({
         onToggleAutoRenewal={setEnableAutoRenewal}
         showPaidButton={paymentOpened}
         payFromBalance={payFromBalance}
+        useAppleCheckout={useAppleCheckout}
+        selectedPlanLabel={selectedPlan ? getPlanDisplayName(selectedPlan) : null}
+        selectedDuration={selectedDuration}
+        appleDisplayPrice={iosLocalizedPriceString}
+        appleProductState={iosProductState}
+        restoringPurchases={restoringApplePurchases}
+        onRestorePurchases={handleRestoreApplePurchases}
+        onManageSubscription={handleManageAppleSubscription}
+        onOpenPrivacy={() => handleOpenLegalDocument(PERSONAL_DATA_CONSENT_PATH)}
+        onOpenTerms={() => handleOpenLegalDocument(USER_AGREEMENT_PATH)}
         onPaid={async () => {
           try {
             await verifyPendingSubscriptionPayment({ source: 'paid_button' });
@@ -1337,11 +1577,6 @@ export function SubscriptionPurchaseModal({
 
           {/* Sticky footer */}
           <View style={[styles.footer, { paddingBottom: footerPaddingBottom }]}>
-            {step === 3 && iosLocalizedPriceString ? (
-              <Text style={styles.iosStorePriceHint} testID="ios-storekit-localized-price">
-                Цена в App Store: {iosLocalizedPriceString}
-              </Text>
-            ) : null}
             <View style={styles.footerRow}>
               <Pressable
                 onPress={goBackOrClose}
@@ -1531,6 +1766,18 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     lineHeight: 17,
   },
+  planMoreDetailsBtn: {
+    alignSelf: 'flex-start',
+    minHeight: 44,
+    justifyContent: 'center',
+    paddingRight: 12,
+  },
+  planMoreDetailsText: {
+    color: BRAND_GREEN,
+    fontSize: 12,
+    fontWeight: '800',
+    textDecorationLine: 'underline',
+  },
   badge: {
     paddingHorizontal: 8,
     paddingVertical: 2,
@@ -1586,6 +1833,51 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     color: '#111',
     marginBottom: 10,
+  },
+  applePriceCard: {
+    marginTop: 12,
+    borderWidth: 1,
+    borderColor: '#C8E6C9',
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    backgroundColor: '#F6FFF7',
+  },
+  applePriceLabel: {
+    fontSize: 12,
+    color: '#4B5563',
+    fontWeight: '700',
+  },
+  applePriceValue: {
+    marginTop: 6,
+    fontSize: 22,
+    color: '#111827',
+    fontWeight: '900',
+  },
+  applePriceLoadingRow: {
+    marginTop: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  applePriceLoadingText: {
+    marginTop: 6,
+    fontSize: 13,
+    color: '#6B7280',
+    fontWeight: '600',
+  },
+  applePriceError: {
+    marginTop: 8,
+    fontSize: 13,
+    color: '#B91C1C',
+    fontWeight: '700',
+    lineHeight: 18,
+  },
+  applePriceFootnote: {
+    marginTop: 8,
+    fontSize: 11,
+    color: '#6B7280',
+    lineHeight: 16,
   },
   segmented: {
     flexDirection: 'row',
@@ -1739,6 +2031,55 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     backgroundColor: '#fff',
   },
+  appleCheckoutCard: {
+    borderWidth: 1,
+    borderColor: '#C8E6C9',
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingTop: 12,
+    paddingBottom: 4,
+    backgroundColor: '#F6FFF7',
+  },
+  appleRenewalDisclosure: {
+    marginTop: 12,
+    fontSize: 12,
+    color: '#4B5563',
+    lineHeight: 18,
+  },
+  appleCheckoutActions: {
+    marginTop: 12,
+    gap: 8,
+  },
+  appleTextButton: {
+    minHeight: 44,
+    borderWidth: 1,
+    borderColor: '#D1D5DB',
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+    backgroundColor: '#fff',
+  },
+  appleTextButtonDisabled: {
+    opacity: 0.55,
+  },
+  appleTextButtonLabel: {
+    color: BRAND_GREEN,
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  appleLegalLinks: {
+    marginTop: 14,
+    alignItems: 'center',
+    gap: 12,
+    paddingBottom: 4,
+  },
+  appleLegalLinkText: {
+    color: '#2563EB',
+    fontSize: 12,
+    fontWeight: '700',
+    textDecorationLine: 'underline',
+  },
   tableRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -1806,12 +2147,6 @@ const styles = StyleSheet.create({
     color: '#555',
     fontWeight: '600',
     lineHeight: 17,
-  },
-  iosStorePriceHint: {
-    fontSize: 13,
-    color: '#666',
-    textAlign: 'center',
-    marginBottom: 8,
   },
   switchRowCompact: {
     marginTop: 10,
@@ -1897,5 +2232,3 @@ const styles = StyleSheet.create({
     opacity: 0.9,
   },
 });
-
-

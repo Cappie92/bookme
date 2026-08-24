@@ -46,6 +46,7 @@ export interface DeDatoStoreKitNativeModule
   purchase(productId: string, appAccountToken: string): Promise<StoreKitPurchaseResult>;
   getCurrentEntitlements(): Promise<StoreKitTransaction[]>;
   restorePurchases(): Promise<void>;
+  showManageSubscriptions(): Promise<void>;
   getUnfinishedTransactions(): Promise<StoreKitTransaction[]>;
   finishTransaction(transactionId: string): Promise<void>;
   startTransactionUpdates(): Promise<boolean>;

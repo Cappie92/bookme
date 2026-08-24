@@ -332,6 +332,11 @@ export class AppleIapService {
     return this.syncEntitlements('restore');
   }
 
+  async showManageSubscriptions(): Promise<void> {
+    const native = this.requireNative();
+    await native.showManageSubscriptions();
+  }
+
   async startTransactionUpdates(onError?: (code: string) => void): Promise<boolean> {
     if (!this.isAvailable() || this.listenerStarted) return false;
     const startGeneration = this.sessionGeneration;

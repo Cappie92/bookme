@@ -43,6 +43,7 @@ function nativeMock() {
     purchase: jest.fn(async () => ({ status: 'success', transaction: transaction() })),
     getCurrentEntitlements: jest.fn(async () => []),
     restorePurchases: jest.fn(async () => undefined),
+    showManageSubscriptions: jest.fn(async () => undefined),
     getUnfinishedTransactions: jest.fn(async () => []),
     finishTransaction: jest.fn(async () => undefined),
     startTransactionUpdates: jest.fn(async () => true),
@@ -270,6 +271,12 @@ describe('AppleIapService direct StoreKit orchestration', () => {
     expect(ctx.native.finishTransaction).not.toHaveBeenCalled();
   });
 
+  it('opens StoreKit system subscription management through the native module', async () => {
+    const ctx = service();
+    await expect(ctx.service.showManageSubscriptions()).resolves.toBeUndefined();
+    expect(ctx.native.showManageSubscriptions).toHaveBeenCalledTimes(1);
+  });
+
   it('surfaces wrong-account restore rejection without finishing', async () => {
     const ctx = service();
     ctx.native.getCurrentEntitlements.mockResolvedValueOnce([transaction('402')]);
@@ -396,6 +403,12 @@ describe('DeDatoStoreKit native transaction provenance contract', () => {
     );
     expect(swiftSource).toMatch(/case \.entitlement:\s+return false/);
     expect(swiftSource).toContain('try await AppStore.sync()');
+  });
+
+  it('uses the documented StoreKit system subscription management sheet', () => {
+    expect(swiftSource).toContain('AsyncFunction("showManageSubscriptions")');
+    expect(swiftSource).toContain('AppStore.showManageSubscriptions(in: scene)');
+    expect(swiftSource).not.toContain('apps.apple.com/account/subscriptions');
   });
 
   it.each([

@@ -8,7 +8,7 @@ import { ExpoConfig, ConfigContext } from 'expo/config';
 function universalLinkHostsForNativeConfig(): string[] {
   const explicit = (process.env.APP_UNIVERSAL_LINK_HOSTS || '').trim();
   if (explicit) {
-    return explicit.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
+    return explicit.split(',').map((s: string) => s.trim().toLowerCase()).filter(Boolean);
   }
   const webUrl = (process.env.WEB_URL || '').trim();
   if (webUrl) {
@@ -73,6 +73,9 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       bundleIdentifier: 'com.dedato.app',
       buildNumber: '2',
       associatedDomains,
+      config: {
+        usesNonExemptEncryption: false,
+      },
       infoPlist: {
         NSAppTransportSecurity: {
           NSAllowsLocalNetworking: true,
@@ -100,7 +103,10 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       predictiveBackGestureEnabled: false,
       // AppMetrica подтягивает AD_ID через analytics-identifiers / play-services-ads-identifier.
       // GAID не используем (advIdentifiersTracking=false) — убираем permission из merged manifest.
-      blockedPermissions: ['com.google.android.gms.permission.AD_ID'],
+      blockedPermissions: [
+        'com.google.android.gms.permission.AD_ID',
+        'android.permission.RECORD_AUDIO',
+      ],
       intentFilters: [
         {
           action: 'VIEW',
@@ -130,6 +136,15 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     plugins: [
       'expo-router',
       '@react-native-community/datetimepicker',
+      [
+        'expo-image-picker',
+        {
+          photosPermission:
+            'Разрешите доступ к фото, чтобы выбрать изображение профиля или сайта.',
+          cameraPermission: false,
+          microphonePermission: false,
+        },
+      ],
       [
         'expo-media-library',
         {

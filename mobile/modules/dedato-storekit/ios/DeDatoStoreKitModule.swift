@@ -1,5 +1,6 @@
 import ExpoModulesCore
 import StoreKit
+import UIKit
 
 private let transactionUpdateEvent = "onTransactionUpdate"
 private let transactionErrorEvent = "onTransactionError"
@@ -120,6 +121,20 @@ public final class DeDatoStoreKitModule: Module {
 
     AsyncFunction("restorePurchases") { () async throws in
       try await AppStore.sync()
+    }
+
+    AsyncFunction("showManageSubscriptions") { () async throws in
+      guard let scene = await MainActor.run(body: {
+        UIApplication.shared.connectedScenes
+          .compactMap { $0 as? UIWindowScene }
+          .first { $0.activationState == .foregroundActive }
+      }) else {
+        throw Exception(
+          name: "WindowSceneUnavailable",
+          description: "No active window scene is available"
+        )
+      }
+      try await AppStore.showManageSubscriptions(in: scene)
     }
 
     AsyncFunction("getUnfinishedTransactions") { () async -> [[String: Any]] in
