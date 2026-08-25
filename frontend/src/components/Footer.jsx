@@ -106,6 +106,16 @@ export default function Footer({ compact = false }) {
           >
             Обработка персональных данных
           </Link>
+          <Link
+            to="/privacy-policy"
+            className={
+              compact
+                ? 'text-xs md:text-sm text-neutral-600 hover:text-neutral-900 transition-colors'
+                : 'text-sm text-neutral-600 hover:text-neutral-900 transition-colors'
+            }
+          >
+            Политика конфиденциальности
+          </Link>
         </div>
 
         {/* Копирайт и контакты */}
@@ -137,4 +147,4 @@ export default function Footer({ compact = false }) {
       </div>
     </footer>
   )
-} 
+}

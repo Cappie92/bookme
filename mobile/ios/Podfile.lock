@@ -1,6 +1,7 @@
 PODS:
   - appmetrica-react-native-analytics (4.1.0):
-    - AppMetricaAnalytics (< 6.0, >= 5.16.0)
+    - AppMetricaCore (< 6.0, >= 5.16.0)
+    - AppMetricaCrashes (< 6.0, >= 5.16.0)
     - hermes-engine
     - RCTRequired
     - RCTTypeSafety
@@ -22,16 +23,6 @@ PODS:
     - ReactCommon/turbomodule/core
     - ReactNativeDependencies
     - Yoga
-  - AppMetricaAdSupport (5.16.1):
-    - AppMetricaCore (= 5.16.1)
-    - AppMetricaCoreExtension (= 5.16.1)
-  - AppMetricaAnalytics (5.16.1):
-    - AppMetricaAdSupport (= 5.16.1)
-    - AppMetricaCore (= 5.16.1)
-    - AppMetricaCrashes (= 5.16.1)
-    - AppMetricaIDSync (= 5.16.1)
-    - AppMetricaScreenshot (= 5.16.1)
-    - AppMetricaWebKit (= 5.16.1)
   - AppMetricaCore (5.16.1):
     - AppMetricaCoreUtils (= 5.16.1)
     - AppMetricaEncodingUtils (= 5.16.1)
@@ -75,14 +66,6 @@ PODS:
     - AppMetricaPlatform (= 5.16.1)
     - AppMetricaStorageUtils (= 5.16.1)
     - AppMetricaSynchronization (= 5.16.1)
-  - AppMetricaIDSync (5.16.1):
-    - AppMetricaCore (= 5.16.1)
-    - AppMetricaCoreExtension (= 5.16.1)
-    - AppMetricaCoreUtils (= 5.16.1)
-    - AppMetricaLog (= 5.16.1)
-    - AppMetricaNetwork (= 5.16.1)
-    - AppMetricaPlatform (= 5.16.1)
-    - AppMetricaStorageUtils (= 5.16.1)
   - AppMetricaKeychain (5.16.1):
     - AppMetricaCoreUtils (= 5.16.1)
     - AppMetricaLog (= 5.16.1)
@@ -100,19 +83,11 @@ PODS:
   - AppMetricaProtobuf (5.16.1)
   - AppMetricaProtobufUtils (5.16.1):
     - AppMetricaProtobuf (= 5.16.1)
-  - AppMetricaScreenshot (5.16.1):
-    - AppMetricaCore (= 5.16.1)
-    - AppMetricaCoreExtension (= 5.16.1)
-    - AppMetricaStorageUtils (= 5.16.1)
   - AppMetricaStorageUtils (5.16.1):
     - AppMetricaCoreUtils (= 5.16.1)
     - AppMetricaLog (= 5.16.1)
   - AppMetricaSynchronization (5.16.1):
     - AppMetricaLogSwift (= 5.16.1)
-  - AppMetricaWebKit (5.16.1):
-    - AppMetricaCore (= 5.16.1)
-    - AppMetricaCoreUtils (= 5.16.1)
-    - AppMetricaLog (= 5.16.1)
   - DeDatoStoreKit (1.0.0):
     - ExpoModulesCore
   - EXConstants (18.0.13):
@@ -2218,8 +2193,6 @@ DEPENDENCIES:
 
 SPEC REPOS:
   trunk:
-    - AppMetricaAdSupport
-    - AppMetricaAnalytics
     - AppMetricaCore
     - AppMetricaCoreExtension
     - AppMetricaCoreUtils
@@ -2228,7 +2201,6 @@ SPEC REPOS:
     - AppMetricaFMDB
     - AppMetricaHostState
     - AppMetricaIdentifiers
-    - AppMetricaIDSync
     - AppMetricaKeychain
     - AppMetricaLog
     - AppMetricaLogSwift
@@ -2236,10 +2208,8 @@ SPEC REPOS:
     - AppMetricaPlatform
     - AppMetricaProtobuf
     - AppMetricaProtobufUtils
-    - AppMetricaScreenshot
     - AppMetricaStorageUtils
     - AppMetricaSynchronization
-    - AppMetricaWebKit
     - KSCrash
     - libavif
     - libdav1d
@@ -2439,9 +2409,7 @@ EXTERNAL SOURCES:
     :path: "../node_modules/react-native/ReactCommon/yoga"
 
 SPEC CHECKSUMS:
-  appmetrica-react-native-analytics: e8b045aa6acb4a9850ca2dad000eb59098ce3ba6
-  AppMetricaAdSupport: de54aa3376d4ebcfa540861623f84e843c7dce12
-  AppMetricaAnalytics: b53239bddc143828f4fe5c63aa670eec09984f99
+  appmetrica-react-native-analytics: 078aa044085be6003cb39a7be4a93df3fa95e77b
   AppMetricaCore: 711814df28f1b75f2232ecd798a60fb0fdc826db
   AppMetricaCoreExtension: 6b5ada2b539ad31349de6d5ac15e808b17fd836c
   AppMetricaCoreUtils: 5a922f36177a944d58f8a84207efd6d6cf673e83
@@ -2450,7 +2418,6 @@ SPEC CHECKSUMS:
   AppMetricaFMDB: 005ff44f17f5b534e3c54cc7ffefbe480f37c254
   AppMetricaHostState: f7f3d6647364c8681601f27e881bf05808445eae
   AppMetricaIdentifiers: 2bde45276896ffd749017f23d8e76b0ccb14c790
-  AppMetricaIDSync: 954722f814e1bc78cde9bc1cbabb5b7bdb54786f
   AppMetricaKeychain: 0c76fbc8239f8a383418416bbc0ea52f8b25f84f
   AppMetricaLog: 1416c93d803f89a615c6b523a6d97981acd757f6
   AppMetricaLogSwift: 1f94dba530a8119cee8458501980f7cdaf1b50d8
@@ -2458,10 +2425,8 @@ SPEC CHECKSUMS:
   AppMetricaPlatform: fd1aa3684ef55817e0303327cae6201e65770ee3
   AppMetricaProtobuf: ed13c8fbc7e17a0f8385f8f676b7736322fc776a
   AppMetricaProtobufUtils: ff838fedd01329be068074e877a5e0db207d74ee
-  AppMetricaScreenshot: 34696107baca6dc13b3a2641af3bd1f194c7d31e
   AppMetricaStorageUtils: 11812b909635f3c301018433a563af86e1e9f6cb
   AppMetricaSynchronization: 4519548e7cc60ea726dd7413afad5ebf3978c71d
-  AppMetricaWebKit: b02cb4a84cc492d1867d7306da4ef5d814b6e8bc
   DeDatoStoreKit: aa6b4cc1ce8e92af36c734cd02bbe3a8252cd0fa
   EXConstants: fce59a631a06c4151602843667f7cfe35f81e271
   EXImageLoader: 189e3476581efe3ad4d1d3fb4735b7179eb26f05

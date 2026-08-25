@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "node ./scripts/assert-vite-project-root.mjs && vite",
+    "prebuild": "node ./scripts/assert-privacy-policy-publishable.mjs",
     "build": "vite build",
+    "check:privacy-policy": "node ./scripts/assert-privacy-policy-publishable.mjs",
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run",

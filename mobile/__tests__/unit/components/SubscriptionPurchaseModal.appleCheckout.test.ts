@@ -32,6 +32,14 @@ describe('SubscriptionPurchaseModal Apple checkout contract', () => {
     expect(appleBranch).toContain('ios-checkout-terms-link');
   });
 
+  it('opens the dedicated Privacy Policy and keeps Terms on the User Agreement', () => {
+    expect(source).toContain('onOpenPrivacy={() => handleOpenLegalDocument(PRIVACY_POLICY_PATH)}');
+    expect(source).toContain('onOpenTerms={() => handleOpenLegalDocument(USER_AGREEMENT_PATH)}');
+    expect(source).not.toContain(
+      'onOpenPrivacy={() => handleOpenLegalDocument(PERSONAL_DATA_CONSENT_PATH)}'
+    );
+  });
+
   it('does not use numeric plan IDs for Apple product resolution', () => {
     expect(source).toContain('getAppleProductId(selectedPlan.name, selectedDuration)');
     expect(source).not.toContain('getAppleProductId(selectedPlan.id');

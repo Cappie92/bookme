@@ -25,6 +25,7 @@ const BlogList = lazy(() => import("./pages/BlogList"))
 const BlogPost = lazy(() => import("./pages/BlogPost"))
 const UserAgreement = lazy(() => import("./pages/UserAgreement"))
 const PersonalDataConsentPage = lazy(() => import("./pages/PersonalDataConsentPage"))
+const PrivacyPolicyPage = lazy(() => import("./pages/PrivacyPolicyPage"))
 const MarketingConsent = lazy(() => import("./pages/MarketingConsent"))
 const AccountDeletionPage = lazy(() => import("./pages/AccountDeletionPage"))
 const PublicProfile = lazy(() => import("./pages/PublicProfile"))
@@ -193,6 +194,7 @@ function App() {
           <Route path="/admin/settings" element={<AdminRoute><AdminSettings/></AdminRoute>} />
           <Route path="/user-agreement" element={<UserAgreement/>} />
           <Route path="/personal-data-consent" element={<PersonalDataConsentPage />} />
+          <Route path="/privacy-policy" element={<PrivacyPolicyPage />} />
           <Route path="/marketing-consent" element={<MarketingConsent />} />
           <Route path="/account-deletion" element={<AccountDeletionPage />} />
           <Route path="/payment/success" element={<PaymentSuccess/>} />

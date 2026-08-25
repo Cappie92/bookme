@@ -2,6 +2,7 @@ import { AnalyticsEvent } from './events';
 import {
   buildCommonAnalyticsContext,
   mergeEventProperties,
+  normalizeAnalyticsUserId,
 } from './normalize';
 import { AppMetricaProvider } from './providers/AppMetricaProvider';
 import { NoOpAnalyticsProvider } from './providers/NoOpProvider';
@@ -92,7 +93,11 @@ class AnalyticsFacade {
 
   setUser(user: AnalyticsUser): void {
     try {
-      const nextId = String(user.id);
+      const nextId = normalizeAnalyticsUserId(user.id);
+      if (!nextId) {
+        this.clearUser();
+        return;
+      }
       if (this.userId && this.userId !== nextId) {
         this.clearUser();
       }

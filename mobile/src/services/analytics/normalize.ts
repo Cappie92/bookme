@@ -31,30 +31,52 @@ export function buildCommonAnalyticsContext(role: string | null): AnalyticsCommo
   };
 }
 
-/** Запрещённые ключи (PII / секреты). Только плоский слой — nested не принимаем. */
+/** Запрещённые ключи (PII / секреты). Сравнение нечувствительно к регистру/разделителям. */
 const BLOCKED_KEYS = new Set([
   'phone',
   'email',
-  'full_name',
-  'fullName',
+  'fullname',
   'name',
   'address',
   'comment',
   'comments',
   'token',
-  'access_token',
+  'accesstoken',
+  'refreshtoken',
+  'devicetoken',
+  'pushtoken',
   'jwt',
+  'jws',
   'password',
-  'promo_code',
-  'promoCode',
+  'promocode',
   'code',
-  'phone_hash',
-  'phoneHash',
+  'phonehash',
   'authorization',
   'bearer',
+  'transactionid',
+  'originaltransactionid',
+  'appaccounttoken',
+  'signedtransaction',
+  'signedrenewalinfo',
+  'receipt',
 ]);
 
 const SYSTEM_KEYS = ['platform', 'environment', 'app_version', 'build_number', 'role'] as const;
+
+function normalizeSensitiveKey(key: string): string {
+  return key.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function containsSensitiveString(value: string): boolean {
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  if (/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i.test(trimmed)) return true;
+  if (/(?:^|\D)\+?\d[\d\s().-]{8,}\d(?:\D|$)/.test(trimmed)) return true;
+  if (/\bBearer\s+\S+/i.test(trimmed)) return true;
+  if (/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/.test(trimmed)) return true;
+  if (/-----BEGIN [A-Z ]+-----/.test(trimmed)) return true;
+  return false;
+}
 
 /**
  * Fail-safe sanitization: только плоские string|number|boolean.
@@ -67,7 +89,7 @@ export function sanitizeAnalyticsProperties(
   const out: Record<string, string | number | boolean> = {};
   try {
     for (const key of Object.keys(properties)) {
-      if (BLOCKED_KEYS.has(key)) continue;
+      if (BLOCKED_KEYS.has(normalizeSensitiveKey(key))) continue;
       let value: unknown;
       try {
         value = (properties as Record<string, unknown>)[key];
@@ -77,6 +99,7 @@ export function sanitizeAnalyticsProperties(
       if (value === undefined || value === null) continue;
       if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
         if (typeof value === 'number' && !Number.isFinite(value)) continue;
+        if (typeof value === 'string' && (value.length > 512 || containsSensitiveString(value))) continue;
         out[key] = value;
       }
       // nested objects / arrays / functions — drop
@@ -119,4 +142,45 @@ export function normalizeMoneyAmount(value: unknown): number | null {
   const n = typeof value === 'number' ? value : Number(value);
   if (!Number.isFinite(n) || n < 0) return null;
   return Math.round(n * 100) / 100;
+}
+
+/** AppMetrica profile id may only be a positive backend numeric User.id. */
+export function normalizeAnalyticsUserId(value: unknown): string | null {
+  if (typeof value === 'number') {
+    return Number.isSafeInteger(value) && value > 0 ? String(value) : null;
+  }
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!/^[1-9]\d{0,19}$/.test(trimmed)) return null;
+  return trimmed;
+}
+
+export function sanitizeAnalyticsProductId(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  if (!/^[A-Za-z0-9._-]{1,120}$/.test(trimmed)) return undefined;
+  return trimmed;
+}
+
+/** Redacts common credentials/PII before an error is sent to a third-party SDK. */
+export function sanitizeAnalyticsErrorText(value: unknown): string {
+  const raw = typeof value === 'string' ? value : '';
+  const redacted = raw
+    .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, '[REDACTED_EMAIL]')
+    .replace(/(^|\D)\+?\d[\d\s().-]{8,}\d(?=\D|$)/g, '$1[REDACTED_PHONE]')
+    .replace(
+      /\b(token|access[_-]?token|refresh[_-]?token|device[_-]?token|password|authorization|app[_-]?account[_-]?token|signed[_-]?transaction|signed[_-]?renewal[_-]?info|original[_-]?transaction[_-]?id|transaction[_-]?id)\s*[:=]\s*["']?[^\s,;}"']+/gi,
+      '$1=[REDACTED_CREDENTIAL]'
+    )
+    .replace(/\bBearer\s+\S+/gi, '[REDACTED_CREDENTIAL]')
+    .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g, '[REDACTED_CREDENTIAL]')
+    .replace(/-----BEGIN [A-Z ]+-----[\s\S]*?-----END [A-Z ]+-----/g, '[REDACTED_CREDENTIAL]')
+    .trim();
+  return (redacted || 'analytics_error').slice(0, 240);
+}
+
+export function sanitizeAnalyticsErrorIdentifier(value: unknown): string {
+  if (typeof value !== 'string') return 'analytics_error';
+  const trimmed = value.trim();
+  return /^[A-Za-z0-9_.:-]{1,80}$/.test(trimmed) ? trimmed : 'analytics_error';
 }

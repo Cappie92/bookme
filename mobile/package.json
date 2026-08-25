@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "main": "index.ts",
   "scripts": {
+    "postinstall": "node ./scripts/patch-appmetrica-ios-podspec.mjs",
     "start": "LANG=en_US.UTF-8 expo start",
     "start:go": "expo start --go",
     "android": "expo run:android",

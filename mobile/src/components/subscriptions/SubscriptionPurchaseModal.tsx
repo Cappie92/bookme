@@ -70,7 +70,7 @@ import {
 } from '@src/services/purchases/appleIapUi';
 import {
   openLegalDocument,
-  PERSONAL_DATA_CONSENT_PATH,
+  PRIVACY_POLICY_PATH,
   USER_AGREEMENT_PATH,
 } from '@src/utils/legalDocuments';
 
@@ -1527,7 +1527,7 @@ export function SubscriptionPurchaseModal({
         restoringPurchases={restoringApplePurchases}
         onRestorePurchases={handleRestoreApplePurchases}
         onManageSubscription={handleManageAppleSubscription}
-        onOpenPrivacy={() => handleOpenLegalDocument(PERSONAL_DATA_CONSENT_PATH)}
+        onOpenPrivacy={() => handleOpenLegalDocument(PRIVACY_POLICY_PATH)}
         onOpenTerms={() => handleOpenLegalDocument(USER_AGREEMENT_PATH)}
         onPaid={async () => {
           try {

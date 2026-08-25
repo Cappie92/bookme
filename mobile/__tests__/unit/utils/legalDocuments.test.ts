@@ -2,6 +2,7 @@ import {
   buildLegalDocumentUrl,
   openLegalDocument,
   PERSONAL_DATA_CONSENT_PATH,
+  PRIVACY_POLICY_PATH,
   USER_AGREEMENT_PATH,
 } from '@src/utils/legalDocuments';
 
@@ -15,6 +16,18 @@ describe('legalDocuments', () => {
   it('builds personal data consent URL and strips trailing slash on base', () => {
     expect(buildLegalDocumentUrl(PERSONAL_DATA_CONSENT_PATH, 'https://dedato.ru/')).toBe(
       'https://dedato.ru/personal-data-consent'
+    );
+  });
+
+  it('builds the production privacy policy URL', () => {
+    expect(buildLegalDocumentUrl(PRIVACY_POLICY_PATH, 'https://dedato.ru')).toBe(
+      'https://dedato.ru/privacy-policy'
+    );
+  });
+
+  it('builds the privacy policy URL for a custom/staging WEB_URL', () => {
+    expect(buildLegalDocumentUrl(PRIVACY_POLICY_PATH, 'https://staging.dedato.example/')).toBe(
+      'https://staging.dedato.example/privacy-policy'
     );
   });
 

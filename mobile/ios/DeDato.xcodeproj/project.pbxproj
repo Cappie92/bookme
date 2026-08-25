@@ -254,7 +254,6 @@
 			);
 			inputPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-DeDato/Pods-DeDato-resources.sh",
-				"${PODS_CONFIGURATION_BUILD_DIR}/AppMetricaAdSupport/AppMetricaAdSupport.bundle",
 				"${PODS_CONFIGURATION_BUILD_DIR}/AppMetricaCore/AppMetricaCore.bundle",
 				"${PODS_CONFIGURATION_BUILD_DIR}/AppMetricaCoreExtension/AppMetricaCoreExtension.bundle",
 				"${PODS_CONFIGURATION_BUILD_DIR}/AppMetricaCoreUtils/AppMetricaCoreUtils.bundle",
@@ -262,7 +261,6 @@
 				"${PODS_CONFIGURATION_BUILD_DIR}/AppMetricaEncodingUtils/AppMetricaEncodingUtils.bundle",
 				"${PODS_CONFIGURATION_BUILD_DIR}/AppMetricaFMDB/AppMetricaFMDB.bundle",
 				"${PODS_CONFIGURATION_BUILD_DIR}/AppMetricaHostState/AppMetricaHostState.bundle",
-				"${PODS_CONFIGURATION_BUILD_DIR}/AppMetricaIDSync/AppMetricaIDSync.bundle",
 				"${PODS_CONFIGURATION_BUILD_DIR}/AppMetricaIdentifiers/AppMetricaIdentifiers.bundle",
 				"${PODS_CONFIGURATION_BUILD_DIR}/AppMetricaKeychain/AppMetricaKeychain.bundle",
 				"${PODS_CONFIGURATION_BUILD_DIR}/AppMetricaLog/AppMetricaLog.bundle",
@@ -271,10 +269,8 @@
 				"${PODS_CONFIGURATION_BUILD_DIR}/AppMetricaPlatform/AppMetricaPlatform.bundle",
 				"${PODS_CONFIGURATION_BUILD_DIR}/AppMetricaProtobuf/AppMetricaProtobuf.bundle",
 				"${PODS_CONFIGURATION_BUILD_DIR}/AppMetricaProtobufUtils/AppMetricaProtobufUtils.bundle",
-				"${PODS_CONFIGURATION_BUILD_DIR}/AppMetricaScreenshot/AppMetricaScreenshot.bundle",
 				"${PODS_CONFIGURATION_BUILD_DIR}/AppMetricaStorageUtils/AppMetricaStorageUtils.bundle",
 				"${PODS_CONFIGURATION_BUILD_DIR}/AppMetricaSynchronization/AppMetricaSynchronization.bundle",
-				"${PODS_CONFIGURATION_BUILD_DIR}/AppMetricaWebKit/AppMetricaWebKit.bundle",
 				"${PODS_CONFIGURATION_BUILD_DIR}/EXConstants/EXConstants.bundle",
 				"${PODS_CONFIGURATION_BUILD_DIR}/EXConstants/ExpoConstants_privacy.bundle",
 				"${PODS_CONFIGURATION_BUILD_DIR}/ExpoFileSystem/ExpoFileSystem_privacy.bundle",
@@ -290,7 +286,6 @@
 			);
 			name = "[CP] Copy Pods Resources";
 			outputPaths = (
-				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/AppMetricaAdSupport.bundle",
 				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/AppMetricaCore.bundle",
 				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/AppMetricaCoreExtension.bundle",
 				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/AppMetricaCoreUtils.bundle",
@@ -298,7 +293,6 @@
 				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/AppMetricaEncodingUtils.bundle",
 				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/AppMetricaFMDB.bundle",
 				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/AppMetricaHostState.bundle",
-				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/AppMetricaIDSync.bundle",
 				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/AppMetricaIdentifiers.bundle",
 				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/AppMetricaKeychain.bundle",
 				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/AppMetricaLog.bundle",
@@ -307,10 +301,8 @@
 				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/AppMetricaPlatform.bundle",
 				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/AppMetricaProtobuf.bundle",
 				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/AppMetricaProtobufUtils.bundle",
-				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/AppMetricaScreenshot.bundle",
 				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/AppMetricaStorageUtils.bundle",
 				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/AppMetricaSynchronization.bundle",
-				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/AppMetricaWebKit.bundle",
 				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/EXConstants.bundle",
 				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/ExpoConstants_privacy.bundle",
 				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/ExpoFileSystem_privacy.bundle",
