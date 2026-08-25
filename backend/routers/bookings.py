@@ -17,14 +17,13 @@ from models import (
     Master,
     AppliedDiscount,
     Service,
-    Salon,
-    SalonBranch,
 )
 from utils.booking_hard_delete import (
     delete_clean_booking,
     get_hard_delete_blockers,
     hard_delete_forbidden_detail,
 )
+from utils.booking_object_scope import assert_booking_object_scope
 from schemas import (
     Booking as BookingSchema,
     BookingEditRequest as BookingEditRequestSchema,
@@ -570,31 +569,8 @@ async def update_booking(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Бронирование не найдено"
         )
-    
-    # Проверка доступа по роли
-    if current_user.role == "client":
-        if db_booking.client_id != current_user.id:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Доступ запрещён")
-    elif current_user.role == "master":
-        master = db.query(Master).filter(Master.user_id == current_user.id).first()
-        if not master:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Профиль мастера не найден")
-        if db_booking.master_id != master.id:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Доступ запрещён")
-    elif current_user.role == "salon":
-        # Проверяем, является ли пользователь владельцем салона
-        salon = db.query(Salon).filter(Salon.user_id == current_user.id).first()
-        if salon:
-            if db_booking.salon_id != salon.id:
-                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Доступ запрещён")
-        else:
-            # Проверяем, является ли пользователь менеджером филиала
-            branch = db.query(SalonBranch).filter(
-                SalonBranch.manager_id == current_user.id,
-                SalonBranch.salon_id == db_booking.salon_id
-            ).first()
-            if not branch or (db_booking.branch_id and db_booking.branch_id != branch.id):
-                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Доступ запрещён")
+
+    assert_booking_object_scope(db, current_user, db_booking)
 
     # Проверяем конфликты
     if booking.start_time and booking.end_time:
@@ -690,6 +666,8 @@ async def create_edit_request(
             status_code=status.HTTP_404_NOT_FOUND, detail="Бронирование не найдено"
         )
 
+    assert_booking_object_scope(db, current_user, db_booking)
+
     # Проверяем конфликты для нового времени
     if check_booking_conflicts(
         db,
@@ -732,6 +710,13 @@ async def update_edit_request(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Запрос на изменение не найден",
         )
+
+    db_booking = db_request.booking
+    if not db_booking:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Бронирование не найдено"
+        )
+    assert_booking_object_scope(db, current_user, db_booking)
 
     if update.status == EditRequestStatus.ACCEPTED:
         # Обновляем время бронирования
@@ -884,32 +869,9 @@ async def get_booking(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Бронирование не найдено"
         )
-    
-    # Проверка доступа по роли
-    if current_user.role == "client":
-        if db_booking.client_id != current_user.id:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Доступ запрещён")
-    elif current_user.role == "master":
-        master = db.query(Master).filter(Master.user_id == current_user.id).first()
-        if not master:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Профиль мастера не найден")
-        if db_booking.master_id != master.id:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Доступ запрещён")
-    elif current_user.role == "salon":
-        # Проверяем, является ли пользователь владельцем салона
-        salon = db.query(Salon).filter(Salon.user_id == current_user.id).first()
-        if salon:
-            if db_booking.salon_id != salon.id:
-                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Доступ запрещён")
-        else:
-            # Проверяем, является ли пользователь менеджером филиала
-            branch = db.query(SalonBranch).filter(
-                SalonBranch.manager_id == current_user.id,
-                SalonBranch.salon_id == db_booking.salon_id
-            ).first()
-            if not branch or (db_booking.branch_id and db_booking.branch_id != branch.id):
-                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Доступ запрещён")
-    
+
+    assert_booking_object_scope(db, current_user, db_booking)
+
     # Загружаем AppliedDiscount с связанными правилами
     applied_discount = (
         db.query(AppliedDiscount)

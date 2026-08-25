@@ -17,7 +17,7 @@ last_runtime_check: 2026-08-04
 | `/api/client/bookings` | Client lists, create/update/cancel, calendar, temporary booking | active user + client router dependency | Client-owned records; compatibility create differs from primary public create |
 | `/api/master/*` | Master lists/schedule/settings | active user; endpoint-specific master lookup | Operational master views and schedule writes |
 | `/api/master/accounting` | Pre/post-visit status and completion | active user + booking owner filters | Completion side effects live here |
-| `/api/bookings` | Generic/legacy booking, slots, any-master and edit requests | mixed: authenticated and public endpoints; `DELETE /{id}` is admin-only clean hard-delete | Remaining edit-request authorization gaps tracked in [Debt](../Debt/booking-scheduling.md#critical-generic-booking-mutation-authorization) |
+| `/api/bookings` | Generic/legacy booking, slots, any-master and edit requests | mixed: authenticated and public endpoints; `DELETE /{id}` is admin-only clean hard-delete; generic `GET`/`PUT /{id}` and edit-request create/process use Booking object-scope (404 on deny) | Remaining edit-request identity/atomicity debt tracked in [Debt](../Debt/booking-scheduling.md#critical-generic-booking-mutation-authorization) |
 
 Router composition is explicit in `backend/main.py`; prefix text alone does not prove a role guard.
 
@@ -65,7 +65,15 @@ The current primary public create rejects a client restricted to advance payment
 
 ## 7. Authorization boundary
 
-Authentication and ownership are distinct. Client and master cancel paths filter by owner and soft-cancel. Generic `DELETE /api/bookings/{id}` is restricted to `admin` and only deletes a future clean booking (no finance/loyalty/history blockers); otherwise `409 BOOKING_HARD_DELETE_FORBIDDEN`. Other generic mutations (notably edit requests) still lack uniform object-level enforcement — sanitized residual debt is in [Debt](../Debt/booking-scheduling.md#critical-generic-booking-mutation-authorization).
+Authentication and ownership are distinct. Client and master cancel paths filter by owner and soft-cancel. Generic `DELETE /api/bookings/{id}` is restricted to `admin` and only deletes a future clean booking (no finance/loyalty/history blockers); otherwise `409 BOOKING_HARD_DELETE_FORBIDDEN`. Generic `GET /api/bookings/{id}`, `PUT /api/bookings/{id}`, `POST /api/bookings/{id}/edit-requests` and `PUT /api/bookings/edit-requests/{id}` deny by default: only client/master/salon/indie related to that Booking may proceed; admin, moderator and unknown roles receive `404`. Missing or invalid JWT remains `401`.
+
+Intentional salon/indie object-scope:
+
+- **Salon owner:** `booking.salon_id` equals the salon whose `user_id` is the current user.
+- **Salon branch manager** (no owner salon row): allow a Booking of that manager’s branch; also allow a Booking of the same salon with `branch_id` unset; another salon is `404`.
+- **Indie:** allow if `booking.indie_master_id == indie.id` **or** `booking.master_id == indie.master_id` for the current user’s `IndieMaster`; unrelated indie is `404`.
+
+Residual edit-request identity and accept-atomicity debt is in [Debt](../Debt/booking-scheduling.md#critical-generic-booking-mutation-authorization).
 
 ## 8. Compatibility and UNKNOWN
 

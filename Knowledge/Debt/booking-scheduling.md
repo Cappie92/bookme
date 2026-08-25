@@ -6,16 +6,20 @@
 
 ## Critical: generic booking mutation authorization
 
-- **Severity:** `critical` (остаточный scope)
+- **Severity:** `critical` (остаточный scope после object-scope)
 - **Confidence:** CONFIRMED
 - **Trust boundary:** authenticated identity → mutation of a Booking and its reschedule requests.
-- **Category:** missing/inconsistent object-level authorization enforcement.
-- **Mitigated:** `DELETE /api/bookings/{id}` (`delete_booking`) теперь admin-only через `require_admin` и разрешает hard delete только будущей «чистой» брони; финансовые/loyalty/исторические связи → `409 BOOKING_HARD_DELETE_FORBIDDEN`. Client/master soft-cancel paths не затронуты.
-- **Remaining confirmed scope:** generic `create_edit_request` / `update_edit_request` (и сравнение с ownership checks в `update_booking`) всё ещё без полного object-level enforcement.
-- **Potential impact (остаточный):** нарушение целостности reschedule-запросов за пределами разрешённого пользователю объекта.
-- **Sources:** `backend/main.py` — booking router composition; `backend/routers/bookings.py` — `delete_booking`, `create_edit_request`, `update_edit_request`, comparison with `update_booking`; `backend/utils/booking_hard_delete.py`.
-- **Status:** partially remediated for hard delete; remaining edit-request authorization debt is active.
-- **Required action:** отдельный authorization remediation track для оставшихся generic edit-request mutations.
+- **Category:** missing requester/decider identity and non-atomic accept.
+- **Mitigated:**
+  - `DELETE /api/bookings/{id}` (`delete_booking`) admin-only через `require_admin`; hard delete только будущей «чистой» брони; финансовые/loyalty/исторические связи → `409 BOOKING_HARD_DELETE_FORBIDDEN`. Client/master soft-cancel paths не затронуты.
+  - Generic `GET /api/bookings/{id}`, `PUT /api/bookings/{id}`, `POST /api/bookings/{id}/edit-requests` и `PUT /api/bookings/edit-requests/{id}` используют deny-by-default object-scope (`utils.booking_object_scope`). Разрешены только client/master/salon/indie, связанные с конкретной Booking; admin/moderator/unknown → `404`. Object-scope denial не возвращает `403`.
+- **Remaining confirmed scope:**
+  - `BookingEditRequest` не хранит requester/decider; сторона Booking может обработать request независимо от автора (self-accept не запрещён).
+  - accept edit-request пока не atomic и может создать overlap (отдельный mutation/concurrency track).
+- **Potential impact (остаточный):** сторона объекта может принять/отклонить чужой по смыслу request; accept может записать пересекающийся интервал.
+- **Sources:** `backend/routers/bookings.py` — `get_booking`, `update_booking`, `create_edit_request`, `update_edit_request`, `delete_booking`; `backend/utils/booking_object_scope.py`; `backend/utils/booking_hard_delete.py`; `backend/tests/test_booking_object_scope.py`.
+- **Status:** object-scope remediated for the four generic GET/PUT/edit-request endpoints; requester identity and accept atomicity remain open.
+- **Required action:** отдельный track для requester/decider persistence и atomic accept (не этот object-scope PR).
 
 Эксплуатационные шаги и углублённый exploitability analysis намеренно не входят в Knowledge.
 
