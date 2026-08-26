@@ -41,9 +41,10 @@ describe('Privacy Policy legal architecture', () => {
     expect(html).toContain('href="/user-agreement"')
   })
 
-  it('keeps unresolved owner/legal inputs visibly marked in the local source', () => {
-    expect(policySource).toContain('[ЛОКАЛЬНЫЙ DRAFT — НЕ ПУБЛИКОВАТЬ]')
-    expect(policySource).toContain('[ТРЕБУЕТ ПОДТВЕРЖДЕНИЯ ВЛАДЕЛЬЦА ПЕРЕД ПУБЛИКАЦИЕЙ')
+  it('contains no unresolved publication markers', () => {
+    for (const source of [policySource, agreementSource]) {
+      expect(source).not.toMatch(/\[(?:ЛОКАЛЬНЫЙ|ТРЕБУЕТ)[^\]]+\]/)
+    }
   })
 
   it('keeps the approved operator identity consistent across legal documents', () => {
@@ -64,11 +65,16 @@ describe('Privacy Policy legal architecture', () => {
     expect(agreementSource).toContain('https://dedato.ru/marketing-consent')
   })
 
-  it('adds the approved 18+ rule and factual Apple deletion disclosure', () => {
-    expect(policySource).toContain('только для пользователей, достигших 18 лет')
-    expect(agreementSource).toContain('только для пользователей, достигших 18 лет')
+  it('omits a general 18+ restriction and keeps factual Apple deletion disclosure', () => {
+    expect(policySource).not.toContain('только для пользователей, достигших 18 лет')
+    expect(agreementSource).not.toContain('только для пользователей, достигших 18 лет')
     expect(agreementSource).toContain('Restore Purchases')
     expect(agreementSource).toContain('Standard Apple EULA')
     expect(deletionSource).toContain('аккаунта DeDato не отменяет Apple auto-renewal')
+  })
+
+  it('uses the approved revision date in changed legal documents', () => {
+    expect(policySource).toContain('Дата вступления в силу: 26 августа 2026 г.')
+    expect(agreementSource).toContain('Дата последнего обновления: 26 августа 2026 г.')
   })
 })
