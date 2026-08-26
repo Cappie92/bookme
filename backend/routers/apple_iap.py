@@ -1,10 +1,8 @@
-"""Apple IAP identity, direct transaction verification, and legacy RC sync."""
+"""Apple IAP identity and direct StoreKit transaction verification."""
 
 from __future__ import annotations
 
 from enum import Enum
-from typing import Optional
-
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -23,7 +21,6 @@ from services.apple_store_verification import (
 from services.apple_subscription_sync import (
     ensure_app_account_token,
     get_active_non_apple_subscription,
-    sync_apple_entitlement_for_user,
     upsert_verified_apple_subscription,
 )
 
@@ -32,10 +29,6 @@ router = APIRouter(
     tags=["apple-iap"],
     responses={401: {"description": "Требуется авторизация"}},
 )
-
-
-class SyncEntitlementBody(BaseModel):
-    expected_app_user_id: Optional[str] = Field(default=None)
 
 
 class AppleTransactionSource(str, Enum):
@@ -88,22 +81,6 @@ async def apple_purchase_eligibility(
             "blocking_billing_provider": non_apple.billing_provider or "robokassa",
         }
     return {"allowed": True}
-
-
-@router.post("/sync-entitlement")
-async def apple_sync_entitlement(
-    body: Optional[SyncEntitlementBody] = None,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """Pull RevenueCat subscriber state and upsert local Subscription (SSOT)."""
-    _require_master_or_indie(current_user)
-    expected = body.expected_app_user_id if body else None
-    return sync_apple_entitlement_for_user(
-        db,
-        current_user,
-        expected_app_user_id=expected,
-    )
 
 
 @router.post("/transactions/verify")

@@ -105,10 +105,6 @@ class Settings(BaseSettings):
     # Только осознанный opt-in: при ROBOKASSA_IS_TEST=true и пустых тестовых паролях в stub разрешить подпись боевыми паролями (небезопасно)
     ROBOKASSA_ALLOW_INSECURE_PROD_PASSWORDS_IN_TEST: str = "false"
 
-    # --- Apple IAP / RevenueCat (server secret; never ship to mobile) ---
-    REVENUECAT_SECRET_API_KEY: str = ""
-    REVENUECAT_API_BASE_URL: str = "https://api.revenuecat.com/v1"
-
     # --- Apple IAP direct (App Store Server API / signed transaction JWS) ---
     APPLE_IAP_ENABLED: str = "false"
     APPLE_IAP_BUNDLE_ID: str = "com.dedato.app"

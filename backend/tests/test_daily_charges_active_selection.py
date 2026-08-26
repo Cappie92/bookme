@@ -21,7 +21,9 @@ from services.daily_charges import (
 )
 
 
-def _seed_active_master_sub(db, *, status_value: str = "active"):
+def _seed_active_master_sub(
+    db, *, status_value: str = "active", billing_provider: str = "robokassa"
+):
     user = User(
         email=f"dc_sel_{status_value}@test.com",
         hashed_password=get_password_hash("test123"),
@@ -51,6 +53,7 @@ def _seed_active_master_sub(db, *, status_value: str = "active"):
         salon_branches=0,
         salon_employees=0,
         master_bookings=0,
+        billing_provider=billing_provider,
     )
     db.add(sub)
     db.flush()
@@ -78,6 +81,12 @@ def test_get_active_subscription_ids_with_ACTIVE_uppercase_in_db(db):
     sub = _seed_active_master_sub(db, status_value="ACTIVE")
     ids = get_active_subscription_ids_for_date(db, datetime.utcnow().date())
     assert sub.id in ids
+
+
+def test_apple_subscription_is_excluded_from_daily_charges(db):
+    sub = _seed_active_master_sub(db, billing_provider="apple")
+    ids = get_active_subscription_ids_for_date(db, datetime.utcnow().date())
+    assert sub.id not in ids
 
 
 def test_process_all_daily_charges_does_not_raise_on_uppercase_status(db):

@@ -1,4 +1,4 @@
-"""apple iap subscription fields and revenuecat app user id
+"""Apple IAP subscription fields and stable app account token storage.
 
 Revision ID: 20260809_apple_iap_fields
 Revises: 20260721_account_deletion_fields

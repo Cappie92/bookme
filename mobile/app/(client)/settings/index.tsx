@@ -16,6 +16,8 @@ import { updateClientProfile, changePassword, deleteAccount } from '@src/service
 import { getContactPreferences, updateContactPreference } from '@src/services/contactPreferences';
 import { PasswordInput } from '@src/components/ui/PasswordInput';
 import { completePasswordMutationLogout } from '@src/auth/passwordMutationLogout';
+import { AppleSubscriptionDeletionWarningModal } from '@src/components/AppleSubscriptionDeletionWarningModal';
+import { checkAppleSubscriptionBeforeAccountDeletion } from '@src/services/accountDeletionAppleSubscription';
 
 export default function SettingsScreen() {
   const pathname = usePathname();
@@ -37,6 +39,7 @@ export default function SettingsScreen() {
   
   // Состояния для удаления аккаунта
   const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [showAppleDeleteWarning, setShowAppleDeleteWarning] = useState(false);
   const [deletePassword, setDeletePassword] = useState('');
   const [deletingAccount, setDeletingAccount] = useState(false);
   const [showNotificationsModal, setShowNotificationsModal] = useState(false);
@@ -276,8 +279,13 @@ export default function SettingsScreen() {
   };
 
   // Открытие модального окна удаления аккаунта
-  const handleDeleteAccount = () => {
+  const handleDeleteAccount = async () => {
     setDeletePassword('');
+    const outcome = await checkAppleSubscriptionBeforeAccountDeletion();
+    if (outcome === 'warn_active_apple') {
+      setShowAppleDeleteWarning(true);
+      return;
+    }
     setShowDeleteModal(true);
   };
 
@@ -541,6 +549,15 @@ export default function SettingsScreen() {
           </View>
         </View>
       </Modal>
+
+      <AppleSubscriptionDeletionWarningModal
+        visible={showAppleDeleteWarning}
+        onCancel={() => setShowAppleDeleteWarning(false)}
+        onContinueDeletion={() => {
+          setShowAppleDeleteWarning(false);
+          setShowDeleteModal(true);
+        }}
+      />
 
       {/* Модальное окно удаления аккаунта */}
       <Modal

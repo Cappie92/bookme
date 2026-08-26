@@ -42,7 +42,7 @@ last_verified: 2026-08-04
 
 - оплата клиентом записи/услуги (отдельный booking/loyalty money path);
 - пополнение баланса «просто так» через deposit API (endpoints возвращают **410 Gone**);
-- IAP / RevenueCat (в mobile-стеке не используются).
+- direct StoreKit-покупки App Store (отдельный Apple IAP path; не относятся к Robokassa split).
 
 ## 3. Высокоуровневый путь
 

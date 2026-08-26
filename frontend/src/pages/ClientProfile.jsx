@@ -7,6 +7,8 @@ import {
   getClientNotificationPreferences,
   saveClientNotificationPreferences,
 } from '../services/clientNotificationPreferences'
+import AppleSubscriptionDeletionWarning from '../components/AppleSubscriptionDeletionWarning'
+import { checkAppleSubscriptionBeforeAccountDeletion } from '../utils/accountDeletionApple'
 
 /** Значение для input type="date" из ответа API (ISO или date). */
 function birthDateToInputValue(value) {
@@ -69,6 +71,7 @@ export default function ClientProfile() {
   
   // Состояния для удаления аккаунта
   const [showDeleteModal, setShowDeleteModal] = useState(false)
+  const [showAppleDeleteWarning, setShowAppleDeleteWarning] = useState(false)
   const [deletePassword, setDeletePassword] = useState('')
   const [showDeletePassword, setShowDeletePassword] = useState(false)
   const [clientNotif, setClientNotif] = useState({
@@ -261,6 +264,16 @@ export default function ClientProfile() {
   }
 
   // Удаление аккаунта
+  const openDeleteAccountModal = async () => {
+    setDeletePassword('')
+    const outcome = await checkAppleSubscriptionBeforeAccountDeletion()
+    if (outcome === 'warn_active_apple') {
+      setShowAppleDeleteWarning(true)
+      return
+    }
+    setShowDeleteModal(true)
+  }
+
   const handleDeleteAccount = async () => {
     try {
       setError('')
@@ -665,7 +678,7 @@ export default function ClientProfile() {
             </button>
             <button
               type="button"
-              onClick={() => setShowDeleteModal(true)}
+              onClick={openDeleteAccountModal}
               className="w-full flex items-center justify-between gap-3 px-4 py-3.5 text-left hover:bg-red-50/80 active:bg-red-50 min-h-[52px]"
             >
               <span className="text-sm font-medium text-red-700">Удалить аккаунт</span>
@@ -777,6 +790,16 @@ export default function ClientProfile() {
             </div>
           </div>
         </div>
+      )}
+
+      {showAppleDeleteWarning && (
+        <AppleSubscriptionDeletionWarning
+          onCancel={() => setShowAppleDeleteWarning(false)}
+          onContinueDeletion={() => {
+            setShowAppleDeleteWarning(false)
+            setShowDeleteModal(true)
+          }}
+        />
       )}
 
       {showDeleteModal && (

@@ -1,18 +1,12 @@
-"""
-Server-side Apple IAP entitlement sync via RevenueCat REST API.
-
-Backend remains SSOT for Subscription / feature gates.
-"""
+"""Shared direct StoreKit subscription identity and persistence helpers."""
 
 from __future__ import annotations
 
-import logging
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any, Dict, Optional, Tuple
 from uuid import UUID
 
-import httpx
 from fastapi import HTTPException
 from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
@@ -26,15 +20,6 @@ from models import (
     User,
 )
 from services.apple_store_verification import VerifiedAppleTransaction
-from settings import get_settings
-from utils.apple_iap_products import (
-    list_apple_iap_product_ids,
-    resolve_apple_product_details,
-)
-
-logger = logging.getLogger(__name__)
-
-KNOWN_PRODUCT_IDS = set(list_apple_iap_product_ids())
 
 _PRICE_FIELDS = {
     1: "price_1month",
@@ -103,107 +88,6 @@ def ensure_app_account_token(db: Session, user: User) -> str:
         status_code=500,
         detail="Failed to initialize Apple app account token",
     )
-
-
-# Temporary compatibility alias until the RevenueCat mobile path is removed.
-ensure_revenuecat_app_user_id = ensure_app_account_token
-
-
-def _parse_rc_datetime(value: Optional[str]) -> Optional[datetime]:
-    if not value:
-        return None
-    try:
-        # RevenueCat uses ISO8601 with Z
-        return datetime.fromisoformat(value.replace("Z", "+00:00")).replace(tzinfo=None)
-    except Exception:
-        return None
-
-
-def fetch_revenuecat_subscriber(app_user_id: str) -> Dict[str, Any]:
-    settings = get_settings()
-    secret = (settings.REVENUECAT_SECRET_API_KEY or "").strip()
-    if not secret:
-        raise HTTPException(
-            status_code=503,
-            detail="RevenueCat secret API key is not configured",
-        )
-    base = (settings.REVENUECAT_API_BASE_URL or "https://api.revenuecat.com/v1").rstrip(
-        "/"
-    )
-    url = f"{base}/subscribers/{app_user_id}"
-    try:
-        with httpx.Client(timeout=25.0) as client:
-            resp = client.get(
-                url,
-                headers={
-                    "Authorization": f"Bearer {secret}",
-                    "Accept": "application/json",
-                },
-            )
-    except httpx.HTTPError as exc:
-        logger.error("RevenueCat request failed: %s", exc)
-        raise HTTPException(
-            status_code=502, detail="Failed to reach RevenueCat"
-        ) from exc
-
-    if resp.status_code == 404:
-        raise HTTPException(status_code=404, detail="RevenueCat subscriber not found")
-    if resp.status_code >= 400:
-        logger.error("RevenueCat error %s: %s", resp.status_code, resp.text[:500])
-        raise HTTPException(status_code=502, detail="RevenueCat returned an error")
-
-    data = resp.json()
-    if not isinstance(data, dict):
-        raise HTTPException(status_code=502, detail="Invalid RevenueCat response")
-    return data
-
-
-def _pick_active_known_subscription(
-    subscriber: Dict[str, Any],
-) -> Optional[Tuple[str, Dict[str, Any]]]:
-    """Return (product_id, sub_payload) for the best active known product."""
-    subs = (subscriber.get("subscriber") or {}).get("subscriptions") or {}
-    if not isinstance(subs, dict):
-        return None
-
-    now = datetime.utcnow()
-    best: Optional[Tuple[str, Dict[str, Any], datetime]] = None
-
-    for product_id, payload in subs.items():
-        if product_id not in KNOWN_PRODUCT_IDS:
-            continue
-        if not isinstance(payload, dict):
-            continue
-        expires = _parse_rc_datetime(payload.get("expires_date"))
-        if expires is None or expires <= now:
-            continue
-        if payload.get("unsubscribe_detected_at") and expires <= now:
-            continue
-        if best is None or expires > best[2]:
-            best = (product_id, payload, expires)
-
-    if best is None:
-        return None
-    return best[0], best[1]
-
-
-def _environment_from_payload(payload: Dict[str, Any]) -> str:
-    if payload.get("is_sandbox") is True:
-        return "sandbox"
-    return "production"
-
-
-def _idempotency_key(product_id: str, payload: Dict[str, Any]) -> str:
-    store_tx = payload.get("store_transaction_id") or payload.get(
-        "original_transaction_id"
-    )
-    if store_tx:
-        return str(store_tx)[:128]
-    # Fallback stable key when RC omits store transaction id
-    original_purchase = (
-        payload.get("original_purchase_date") or payload.get("purchase_date") or ""
-    )
-    return f"{product_id}:{original_purchase}"[:128]
 
 
 def _resolve_plan(db: Session, plan_name: str) -> SubscriptionPlan:
@@ -470,84 +354,3 @@ def upsert_verified_apple_subscription(
             }
         )
     return result
-
-
-def sync_apple_entitlement_for_user(
-    db: Session,
-    user: User,
-    *,
-    expected_app_user_id: Optional[str] = None,
-) -> Dict[str, Any]:
-    """
-    Fetch RevenueCat subscriber state and upsert DeDato Subscription.
-
-    Idempotent on apple_original_transaction_id.
-    """
-    if user.role.value not in ("master", "indie"):
-        raise HTTPException(
-            status_code=403, detail="Only masters can sync Apple entitlements"
-        )
-
-    app_user_id = ensure_revenuecat_app_user_id(db, user)
-    if expected_app_user_id and str(expected_app_user_id).strip() != app_user_id:
-        raise HTTPException(
-            status_code=403,
-            detail="RevenueCat identity mismatch",
-        )
-
-    rc_data = fetch_revenuecat_subscriber(app_user_id)
-    picked = _pick_active_known_subscription(rc_data)
-
-    if picked is None:
-        # Expire local Apple actives when no known product is active.
-        # Robokassa remains untouched.
-        _expire_other_active_apple_subs(db, user.id, keep_subscription_id=None)
-        db.commit()
-        return {
-            "ok": True,
-            "active": False,
-            "reason": "no_active_apple_entitlement",
-            "revenuecat_app_user_id": app_user_id,
-            "subscription": None,
-        }
-
-    product_id, payload = picked
-    product = resolve_apple_product_details(product_id)
-    if product is None:
-        raise HTTPException(
-            status_code=400, detail=f"Unknown Apple product: {product_id}"
-        )
-
-    expires = _parse_rc_datetime(payload.get("expires_date"))
-    purchase = _parse_rc_datetime(payload.get("purchase_date")) or datetime.utcnow()
-    if expires is None:
-        expires = purchase + timedelta(days=30 * int(product.duration_months))
-
-    original_tx = _idempotency_key(product_id, payload)
-    store_tx = payload.get("store_transaction_id") or original_tx
-    environment = _environment_from_payload(payload)
-    transaction = VerifiedAppleTransaction(
-        transaction_id=str(store_tx),
-        original_transaction_id=original_tx,
-        product_id=product.product_id,
-        internal_plan_name=product.internal_plan_name,
-        external_tier=product.external_tier,
-        duration_months=product.duration_months,
-        app_account_token=app_user_id,
-        purchase_date=purchase,
-        expires_date=expires,
-        revocation_date=None,
-        revocation_reason=None,
-        environment=environment,
-    )
-    try:
-        result = upsert_verified_apple_subscription(db, user, transaction)
-        db.commit()
-    except Exception:
-        db.rollback()
-        raise
-    return {
-        "ok": True,
-        "revenuecat_app_user_id": app_user_id,
-        **result,
-    }

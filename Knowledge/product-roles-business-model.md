@@ -308,7 +308,7 @@ Source: `subscriptions-billing.md`.
 | Indie master | **Legacy compatibility**, выключен default-настройкой |
 | Reviews | **Флаг без доменной модели Review** |
 | Произвольный deposit balance API | **Отключён** (410) |
-| IAP / RevenueCat | **Не используется** |
+| Direct StoreKit / Apple IAP | **Реализовано для iOS-подписок мастера** |
 | Оплата услуги клиентом через Robokassa end-to-end как основной путь | **UNKNOWN / не канонизировать** без отдельного Domain — поля на Booking есть |
 
 ### Mobile Yandex Auth configuration (не бизнес-инвариант)

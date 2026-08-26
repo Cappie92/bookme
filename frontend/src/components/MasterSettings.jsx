@@ -9,6 +9,8 @@ import FreeSlotsShareCardModal from './FreeSlotsShareCardModal'
 import YandexAccountLinkPanel from './auth/YandexAccountLinkPanel'
 import { isSalonFeaturesEnabled } from '../config/features'
 import { Link, useNavigate } from 'react-router-dom'
+import AppleSubscriptionDeletionWarning from './AppleSubscriptionDeletionWarning'
+import { checkAppleSubscriptionBeforeAccountDeletion } from '../utils/accountDeletionApple'
 
 const getFrontendBaseUrl = () => {
   // Приоритетно используем явный адрес из env, если он задан
@@ -104,6 +106,7 @@ export default function MasterSettings({
   const [editPublicPageMode, setEditPublicPageMode] = useState(false)
   const [showFreeSlotsCardModal, setShowFreeSlotsCardModal] = useState(false)
   const [showDeleteAccountModal, setShowDeleteAccountModal] = useState(false)
+  const [showAppleDeleteWarning, setShowAppleDeleteWarning] = useState(false)
   const [deleteAccountPhase, setDeleteAccountPhase] = useState('call')
   const [deleteAccountCode, setDeleteAccountCode] = useState('')
 
@@ -553,7 +556,7 @@ export default function MasterSettings({
   }
 
   /** Существующий backend: DELETE /api/auth/delete-account → звонок с кодом → POST /api/auth/confirm-delete-account */
-  const openDeleteAccountModal = () => {
+  const openDeleteAccountModal = async () => {
     if (isDemoMode) {
       setError('В демо-режиме удаление аккаунта недоступно')
       setTimeout(() => setError(''), 4000)
@@ -561,6 +564,11 @@ export default function MasterSettings({
     }
     setDeleteAccountPhase('call')
     setDeleteAccountCode('')
+    const outcome = await checkAppleSubscriptionBeforeAccountDeletion()
+    if (outcome === 'warn_active_apple') {
+      setShowAppleDeleteWarning(true)
+      return
+    }
     setShowDeleteAccountModal(true)
   }
 
@@ -1700,6 +1708,16 @@ export default function MasterSettings({
         )}
 
       </div>
+
+      {showAppleDeleteWarning && (
+        <AppleSubscriptionDeletionWarning
+          onCancel={() => setShowAppleDeleteWarning(false)}
+          onContinueDeletion={() => {
+            setShowAppleDeleteWarning(false)
+            setShowDeleteAccountModal(true)
+          }}
+        />
+      )}
 
       {showDeleteAccountModal && (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-0 sm:items-center sm:p-4">

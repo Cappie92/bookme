@@ -129,6 +129,15 @@ def test_billing_identity_is_stable_neutral_and_unique(
     assert ensure_app_account_token(db, other) != first
 
 
+def test_legacy_entitlement_sync_route_is_removed(client, master_auth_headers):
+    response = client.post(
+        "/api/payments/apple/sync-entitlement",
+        headers=master_auth_headers,
+        json={},
+    )
+    assert response.status_code == 404
+
+
 def test_first_purchase_repeat_restore_and_renewal_are_idempotent(
     client, db, test_master, master_auth_headers
 ):

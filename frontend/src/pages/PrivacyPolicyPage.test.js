@@ -13,6 +13,16 @@ const policySource = readFileSync(
   path.join(here, '../content/legal/privacy-policy.source.txt'),
   'utf8'
 )
+const agreementSource = readFileSync(path.join(here, './UserAgreement.jsx'), 'utf8')
+const consentSource = readFileSync(
+  path.join(here, '../content/legal/personal-data-consent.source.txt'),
+  'utf8'
+)
+const marketingSource = readFileSync(
+  path.join(here, '../content/legal/marketing-consent.source.txt'),
+  'utf8'
+)
+const deletionSource = readFileSync(path.join(here, './AccountDeletionPage.jsx'), 'utf8')
 
 describe('Privacy Policy legal architecture', () => {
   it('adds the dedicated route while retaining agreement and consent routes', () => {
@@ -34,5 +44,31 @@ describe('Privacy Policy legal architecture', () => {
   it('keeps unresolved owner/legal inputs visibly marked in the local source', () => {
     expect(policySource).toContain('[ЛОКАЛЬНЫЙ DRAFT — НЕ ПУБЛИКОВАТЬ]')
     expect(policySource).toContain('[ТРЕБУЕТ ПОДТВЕРЖДЕНИЯ ВЛАДЕЛЬЦА ПЕРЕД ПУБЛИКАЦИЕЙ')
+  })
+
+  it('keeps the approved operator identity consistent across legal documents', () => {
+    for (const source of [policySource, agreementSource, consentSource, marketingSource]) {
+      expect(source).toContain('325774600117850')
+      expect(source).toContain('770171594527')
+      expect(source).toContain('105005, Москва, ул. Ладожская, д. 13')
+      expect(source).toContain('support@dedato.ru')
+      expect(source).toContain('admin@dedato.ru')
+      expect(source).toContain('+7 (985) 319-73-73')
+    }
+  })
+
+  it('separates policy, agreement, personal-data consent and marketing consent', () => {
+    expect(agreementSource).not.toContain('Политикой (Согласием)')
+    expect(agreementSource).toContain('https://dedato.ru/privacy-policy')
+    expect(agreementSource).toContain('https://dedato.ru/personal-data-consent')
+    expect(agreementSource).toContain('https://dedato.ru/marketing-consent')
+  })
+
+  it('adds the approved 18+ rule and factual Apple deletion disclosure', () => {
+    expect(policySource).toContain('только для пользователей, достигших 18 лет')
+    expect(agreementSource).toContain('только для пользователей, достигших 18 лет')
+    expect(agreementSource).toContain('Restore Purchases')
+    expect(agreementSource).toContain('Standard Apple EULA')
+    expect(deletionSource).toContain('аккаунта DeDato не отменяет Apple auto-renewal')
   })
 })

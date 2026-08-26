@@ -29,6 +29,8 @@ import { isSalonFeaturesEnabled as getSalonFeaturesEnabled } from '@src/config/f
 import { useTabBarHeight } from '@src/contexts/TabBarHeightContext';
 import { BOTTOM_NAV_CONTENT_FALLBACK_HEIGHT } from '@src/constants/bottomNavLayout';
 import { completePasswordMutationLogout } from '@src/auth/passwordMutationLogout';
+import { AppleSubscriptionDeletionWarningModal } from '@src/components/AppleSubscriptionDeletionWarningModal';
+import { checkAppleSubscriptionBeforeAccountDeletion } from '@src/services/accountDeletionAppleSubscription';
 
 export default function MasterSettingsScreen() {
   const pathname = usePathname();
@@ -61,6 +63,7 @@ export default function MasterSettingsScreen() {
 
   // Удаление аккаунта мастера
   const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [showAppleDeleteWarning, setShowAppleDeleteWarning] = useState(false);
   const [deletePhase, setDeletePhase] = useState<'warn' | 'code'>('warn');
   const [deleteCode, setDeleteCode] = useState('');
   const [deletingAccount, setDeletingAccount] = useState(false);
@@ -199,9 +202,14 @@ export default function MasterSettingsScreen() {
     );
   };
 
-  const openDeleteAccountModal = () => {
+  const openDeleteAccountModal = async () => {
     setDeletePhase('warn');
     setDeleteCode('');
+    const outcome = await checkAppleSubscriptionBeforeAccountDeletion();
+    if (outcome === 'warn_active_apple') {
+      setShowAppleDeleteWarning(true);
+      return;
+    }
     setShowDeleteModal(true);
   };
 
@@ -503,6 +511,15 @@ export default function MasterSettingsScreen() {
       </View>
 
       {/* Модальное окно смены пароля */}
+      <AppleSubscriptionDeletionWarningModal
+        visible={showAppleDeleteWarning}
+        onCancel={() => setShowAppleDeleteWarning(false)}
+        onContinueDeletion={() => {
+          setShowAppleDeleteWarning(false);
+          setShowDeleteModal(true);
+        }}
+      />
+
       <Modal
         visible={showPasswordModal}
         animationType="slide"
