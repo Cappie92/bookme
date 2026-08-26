@@ -21,6 +21,7 @@ services:
       - dedato_data:/data
       - dedato_uploads:/app/uploads
       - dedato_logs:/app/logs
+      - ./deploy/prod/apple-root-certificates:/run/secrets/apple-root-certificates:ro
     depends_on:
       - redis
 
