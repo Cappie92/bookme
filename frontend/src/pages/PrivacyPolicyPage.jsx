@@ -19,7 +19,7 @@ export default function PrivacyPolicyPage() {
       title="Политика конфиденциальности"
       documentTitle={heading}
       description="Политика конфиденциальности сервиса DeDato."
-      robots="noindex, nofollow"
+      robots="index, follow"
     >
       <LegalPlainBody text={body} />
     </LegalDocumentLayout>

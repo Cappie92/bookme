@@ -129,7 +129,11 @@ export default function UserAgreement() {
   const { heading, body } = splitHeadingAndBody(`ПОЛЬЗОВАТЕЛЬСКОЕ СОГЛАШЕНИЕ\n${content}`)
 
   return (
-    <LegalDocumentLayout title="Пользовательское соглашение" documentTitle={heading}>
+    <LegalDocumentLayout
+      title="Пользовательское соглашение"
+      documentTitle={heading}
+      robots="index, follow"
+    >
       <LegalPlainBody text={body} />
     </LegalDocumentLayout>
   )

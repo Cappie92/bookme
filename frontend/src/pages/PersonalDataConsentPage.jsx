@@ -15,7 +15,11 @@ function splitHeadingAndBody(raw) {
 export default function PersonalDataConsentPage() {
   const { heading, body } = splitHeadingAndBody(source)
   return (
-    <LegalDocumentLayout title="Согласие на обработку персональных данных" documentTitle={heading}>
+    <LegalDocumentLayout
+      title="Согласие на обработку персональных данных"
+      documentTitle={heading}
+      robots="index, follow"
+    >
       <LegalPlainBody text={body} />
     </LegalDocumentLayout>
   )
