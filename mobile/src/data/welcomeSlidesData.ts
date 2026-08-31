@@ -155,6 +155,14 @@ function withRole(slides: Omit<WelcomeSlide, 'role'>[], role: WelcomeRole): Welc
   return slides.map((slide) => ({ ...slide, role }));
 }
 
-export function getWelcomeSlidesForRole(role: WelcomeRole): WelcomeSlide[] {
-  return role === 'master' ? withRole(MASTER_FEATURE_SLIDES, 'master') : withRole(CLIENT_SLIDES, 'client');
+export function getWelcomeSlidesForRole(
+  role: WelcomeRole,
+  options: { includePricing?: boolean } = {}
+): WelcomeSlide[] {
+  const slides = role === 'master'
+    ? withRole(MASTER_FEATURE_SLIDES, 'master')
+    : withRole(CLIENT_SLIDES, 'client');
+  return options.includePricing === false
+    ? slides.filter((slide) => slide.type !== 'pricing')
+    : slides;
 }

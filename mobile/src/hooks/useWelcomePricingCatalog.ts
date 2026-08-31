@@ -10,7 +10,8 @@ import {
 import { mapPricingCatalogToWelcomePlans } from '@src/utils/welcomePricingMapper';
 
 export function useWelcomePricingCatalog(
-  subscriptionType: SubscriptionType = SubscriptionType.MASTER
+  subscriptionType: SubscriptionType = SubscriptionType.MASTER,
+  enabled = true
 ) {
   const [plans, setPlans] = useState<WelcomePricingPlan[]>(WELCOME_PRICING_FALLBACK_PLANS);
   const [loading, setLoading] = useState(true);
@@ -18,6 +19,13 @@ export function useWelcomePricingCatalog(
   const [fallbackUsed, setFallbackUsed] = useState(false);
 
   const refetch = useCallback(async () => {
+    if (!enabled) {
+      setPlans([]);
+      setLoading(false);
+      setError(null);
+      setFallbackUsed(false);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -39,7 +47,7 @@ export function useWelcomePricingCatalog(
     } finally {
       setLoading(false);
     }
-  }, [subscriptionType]);
+  }, [enabled, subscriptionType]);
 
   useEffect(() => {
     refetch();

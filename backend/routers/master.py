@@ -898,15 +898,25 @@ def get_master_bookings_limit(
             limits = plan.limits or {}
             max_future_bookings = limits.get("max_future_bookings")
             
-            # Если план Free и лимит не установлен, используем значение по умолчанию 30
-            # (не обновляем базу данных здесь, это должно делаться через скрипт)
-            if plan_name == "Free" and (max_future_bookings is None or max_future_bookings == 0):
-                max_future_bookings = 30
-                logger.warning(f"План Free не имеет установленного лимита, используем значение по умолчанию: 30")
+            # Free всегда использует canonical release policy; миграция отдельно
+            # синхронизирует сохранённый JSON product data.
+            if plan_name == "Free":
+                if max_future_bookings != 20:
+                    logger.warning(
+                        "План Free имеет устаревший лимит %s; используем canonical 20",
+                        max_future_bookings,
+                    )
+                max_future_bookings = 20
             
             # Проверяем, превышен ли лимит (только если лимит установлен)
             if max_future_bookings is not None and max_future_bookings > 0:
                 is_limit_exceeded = active_bookings_count >= max_future_bookings
+
+    # Отсутствие paid entitlement — это canonical Free baseline.
+    if not subscription:
+        plan_name = "Free"
+        max_future_bookings = 20
+        is_limit_exceeded = active_bookings_count >= max_future_bookings
     
     # Если пользователь is_always_free, лимит не применяется
     if current_user.is_always_free:
@@ -1804,22 +1814,18 @@ def create_schedule_rules(
         min_date = min(slot['date'] for slot in slots_to_create)
         max_date = max(slot['date'] for slot in slots_to_create)
         
-        # Получаем записи в диапазоне дат. В модели Booking.status — String(16), значения совпадают с BookingStatus.*.value.
-        # Используем те же члены enum, что и в get_future_bookings_base_query (notin_ + tuple), без ~in_(строки):
-        # иначе SQLAlchemy может обрабатывать элементы in_/notin_ несовместимо и давать AttributeError на .value.
-        cancelled_statuses = (
-            BookingStatus.CANCELLED,
-            BookingStatus.CANCELLED_BY_CLIENT_EARLY,
-            BookingStatus.CANCELLED_BY_CLIENT_LATE,
-        )
+        from utils.booking_occupancy import apply_occupying_filter
+
         bookings = (
-            db.query(Booking)
-            .options(joinedload(Booking.client), joinedload(Booking.service))
+            apply_occupying_filter(
+                db.query(Booking).options(
+                    joinedload(Booking.client), joinedload(Booking.service)
+                )
+            )
             .filter(
                 Booking.master_id == master.id,
                 Booking.start_time >= datetime.combine(min_date, datetime.min.time()),
                 Booking.start_time <= datetime.combine(max_date, datetime.max.time()),
-                Booking.status.notin_(cancelled_statuses),
             )
             .all()
         )
@@ -4531,6 +4537,3 @@ def bulk_delete_schedule(
             status_code=500,
             detail=f"Ошибка при удалении расписания: {str(e)}"
         )
-
-
-

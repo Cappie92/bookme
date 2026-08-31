@@ -1,7 +1,8 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
+import { isIosFreeCompanion } from '@src/config/iosProductModel';
 
 interface DemoAccessBannerProps {
   title?: string;
@@ -15,10 +16,12 @@ interface DemoAccessBannerProps {
  * Показывается фиксированно сверху при отсутствии доступа.
  */
 export function DemoAccessBanner({
+  title,
   description,
   ctaText = 'Перейти к тарифам',
   onCtaPress,
 }: DemoAccessBannerProps) {
+  const iosFreeCompanion = isIosFreeCompanion(Platform.OS);
   const handlePress = () => {
     if (onCtaPress) {
       onCtaPress();
@@ -32,15 +35,15 @@ export function DemoAccessBanner({
       <View style={styles.content}>
         <Ionicons name="information-circle" size={22} color="#B45309" style={styles.icon} />
         <View style={styles.textContainer}>
-          <Text style={styles.title}>Демонстрационный доступ</Text>
+          <Text style={styles.title}>{iosFreeCompanion ? 'Ограниченный доступ' : (title || 'Демонстрационный доступ')}</Text>
           <Text style={styles.description} numberOfLines={2}>
-            {description}
+            {iosFreeCompanion ? 'Недоступно для текущего уровня доступа' : description}
           </Text>
         </View>
       </View>
-      <TouchableOpacity style={styles.cta} onPress={handlePress}>
+      {!iosFreeCompanion ? <TouchableOpacity style={styles.cta} onPress={handlePress}>
         <Text style={styles.ctaText}>{ctaText}</Text>
-      </TouchableOpacity>
+      </TouchableOpacity> : null}
     </View>
   );
 }

@@ -44,7 +44,7 @@ def create_subscription_plans():
             limits={
                 "bookings_per_month": 0,  # Безлимит (0 означает безлимит)
                 "services_count": 0,
-                "max_future_bookings": 30  # Лимит на 30 активных записей (все будущие записи)
+                "max_future_bookings": 20  # Лимит на 20 активных будущих записей
             },
             is_active=True,
             display_order=1
@@ -154,4 +154,3 @@ def create_subscription_plans():
 
 if __name__ == "__main__":
     create_subscription_plans()
-

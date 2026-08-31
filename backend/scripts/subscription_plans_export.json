@@ -24,7 +24,7 @@
       "limits": {
         "bookings_per_month": 30,
         "services_count": 0,
-        "max_future_bookings": 30
+        "max_future_bookings": 20
       },
       "is_active": true,
       "display_order": 1

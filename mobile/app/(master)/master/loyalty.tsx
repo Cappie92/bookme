@@ -25,6 +25,7 @@ import { useAuth } from '@src/auth/AuthContext';
 import { fetchAvailableSubscriptions, SubscriptionType } from '@src/services/api/subscriptions';
 import { getCheapestPlanForFeature } from '@src/utils/featureAccess';
 import { router } from 'expo-router';
+import { isIosFreeCompanion } from '@src/config/iosProductModel';
 import {
   getLoyaltySettings,
   updateLoyaltySettings,
@@ -82,6 +83,7 @@ type MainTabType = 'discounts' | 'points';
 type DiscountTabType = 'quick' | 'complex' | 'personal';
 
 export default function MasterLoyaltyScreen() {
+  const iosFreeCompanion = isIosFreeCompanion(Platform.OS);
   const scrollPaddingBottom = useScrollBottomPadding(24);
   const { features, loading: featuresLoading } = useMasterFeatures();
   const { token, isAuthenticated, isLoading: authLoading } = useAuth();
@@ -172,14 +174,14 @@ export default function MasterLoyaltyScreen() {
 
   // Загружаем планы для получения названий тарифов
   useEffect(() => {
-    if (features) {
+    if (features && !iosFreeCompanion) {
       fetchAvailableSubscriptions(SubscriptionType.MASTER)
         .then(setPlans)
         .catch(err => {
           if (__DEV__) console.error('[LOYALTY] Error loading plans:', err);
         });
     }
-  }, [features]);
+  }, [features, iosFreeCompanion]);
 
   // ============================================================================
   // ЗАГРУЗКА СКИДОК (только если есть токен и доступ)
@@ -844,13 +846,13 @@ export default function MasterLoyaltyScreen() {
             {subscriptionRequired && (
               <Card style={styles.warningCard}>
                 <Text style={styles.warningText}>
-                  Доступ к разделу «Лояльность» доступен в подписке. Обновите тариф, чтобы пользоваться скидками.
+                  {iosFreeCompanion ? 'Недоступно для текущего уровня доступа.' : 'Доступ к разделу «Лояльность» доступен в подписке. Обновите тариф, чтобы пользоваться скидками.'}
                 </Text>
-                <PrimaryButton
+                {!iosFreeCompanion ? <PrimaryButton
                   title="Управление подпиской"
                   onPress={() => router.push('/subscriptions')}
                   style={styles.subscriptionButton}
-                />
+                /> : null}
               </Card>
             )}
 

@@ -40,6 +40,33 @@ export interface Subscription {
   is_active?: boolean | null;
 }
 
+export type SubscriptionAccessLevel = 'free' | 'paid' | 'always_free';
+
+export interface SubscriptionAccessSummary {
+  access_level: SubscriptionAccessLevel;
+  plan_name: string;
+  plan_display_name?: string | null;
+  status: string;
+  is_active: boolean;
+  end_date?: string | null;
+  is_always_free: boolean;
+  features: {
+    has_booking_page: boolean;
+    has_unlimited_bookings: boolean;
+    has_extended_stats: boolean;
+    has_loyalty_access: boolean;
+    has_finance_access: boolean;
+    has_client_restrictions: boolean;
+    can_customize_domain: boolean;
+    has_clients_access: boolean;
+    max_page_modules: number;
+    stats_retention_days: number;
+  };
+  current_active_bookings: number;
+  max_future_bookings: number | null;
+  is_unlimited: boolean;
+}
+
 // Интерфейс плана подписки (соответствует backend SubscriptionPlanOut)
 export interface SubscriptionPlan {
   id: number;
@@ -182,6 +209,12 @@ export async function fetchCurrentSubscription(): Promise<Subscription | null> {
     }
     throw err;
   }
+}
+
+/** Минимальная access-only сводка без purchase/billing metadata для iOS companion. */
+export async function fetchSubscriptionAccessSummary(): Promise<SubscriptionAccessSummary> {
+  const response = await apiClient.get<SubscriptionAccessSummary>('/api/subscriptions/access-summary');
+  return response.data;
 }
 
 /**
@@ -348,4 +381,3 @@ export async function fetchPricingCatalog(
   );
   return response.data;
 }
-

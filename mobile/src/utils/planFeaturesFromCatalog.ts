@@ -79,7 +79,7 @@ function bookingsRow(plan: PlanLike): WelcomePlanFeatureRow {
     const maxBookings =
       typeof limits.max_future_bookings === 'number' && limits.max_future_bookings > 0
         ? limits.max_future_bookings
-        : 30;
+        : 20;
     return { available: true, text: `${maxBookings} активных записей`, display_order: 0, id: 0 };
   }
   return { available: true, text: 'Запись без ограничений', display_order: 0, id: 0 };

@@ -1,4 +1,5 @@
 import type { WebHandoffOrigin, WebHandoffResponse } from '@src/services/api/auth';
+import { isIosFreeCompanion } from '@src/config/iosProductModel';
 
 export type OpenWebHandoffMoreDetailsDeps = {
   platformOS: string;
@@ -15,6 +16,9 @@ export async function openWebHandoffMoreDetails(
   deps: OpenWebHandoffMoreDetailsDeps
 ): Promise<'opened' | 'error'> {
   try {
+    if (isIosFreeCompanion(deps.platformOS)) {
+      throw new Error('Переход к тарифам недоступен в приложении для iOS');
+    }
     const origin: WebHandoffOrigin = deps.platformOS === 'ios' ? 'ios_app' : 'android_app';
     const data = await deps.createWebHandoff(origin);
     if (!data?.url) {

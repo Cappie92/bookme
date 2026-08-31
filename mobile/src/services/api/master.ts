@@ -174,6 +174,8 @@ export interface BookingsLimit {
   current_bookings: number;
   limit: number;
   is_unlimited: boolean;
+  plan_name?: string | null;
+  is_limit_exceeded?: boolean;
 }
 
 export interface Balance {
@@ -452,8 +454,19 @@ export async function getMasterExtendedStats(
  * Получить лимит бронирований
  */
 export async function getBookingsLimit(): Promise<BookingsLimit> {
-  const response = await apiClient.get<BookingsLimit>('/api/master/bookings/limit');
-  return response.data;
+  const response = await apiClient.get<BookingsLimit & {
+    current_active_bookings?: number;
+    max_future_bookings?: number | null;
+    has_limit?: boolean;
+  }>('/api/master/bookings/limit');
+  const data = response.data;
+  const limit = data.max_future_bookings ?? data.limit ?? 0;
+  return {
+    ...data,
+    current_bookings: data.current_active_bookings ?? data.current_bookings ?? 0,
+    limit,
+    is_unlimited: data.has_limit === false || limit <= 0,
+  };
 }
 
 /**

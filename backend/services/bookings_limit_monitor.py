@@ -75,8 +75,7 @@ def check_masters_bookings_limits() -> dict:
                     .scalar() or 0
                 )
                 
-                limits = free_plan.limits or {}
-                max_future_bookings = limits.get("max_future_bookings", 30)
+                max_future_bookings = 20
                 
                 is_at_limit = active_bookings_count >= max_future_bookings
                 is_over_limit = active_bookings_count > max_future_bookings
@@ -160,5 +159,3 @@ if __name__ == "__main__":
     # Для тестирования
     result = check_masters_bookings_limits()
     print(f"Результат: {result}")
-
-

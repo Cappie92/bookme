@@ -1,7 +1,8 @@
 import React from 'react';
-import { View, StyleSheet, TouchableOpacity, Alert } from 'react-native';
+import { View, StyleSheet, TouchableOpacity, Alert, Platform } from 'react-native';
 import { useFeatureAccess } from '@src/hooks/useFeatureAccess';
 import { router } from 'expo-router';
+import { isIosFreeCompanion } from '@src/config/iosProductModel';
 
 interface FeatureLockProps {
   feature: string; // Ключ функции (например, 'has_finance_access')
@@ -22,9 +23,16 @@ export function FeatureLock({
   onPress,
   disabled = false,
 }: FeatureLockProps) {
-  const { allowed, reasonText, cheapestPlanName } = useFeatureAccess(feature);
+  const { allowed, reasonText } = useFeatureAccess(feature);
+  const iosFreeCompanion = isIosFreeCompanion(Platform.OS);
 
   const handlePress = () => {
+    if (iosFreeCompanion) {
+      Alert.alert('Функция недоступна', 'Недоступно для текущего уровня доступа', [
+        { text: 'Понятно' },
+      ]);
+      return;
+    }
     if (onPress) {
       onPress();
       return;
@@ -79,4 +87,3 @@ const styles = StyleSheet.create({
     opacity: 0.5,
   },
 });
-

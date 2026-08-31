@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, ActivityIndicator, Alert, TouchableOpacity, Modal, TextInput, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, ActivityIndicator, Alert, TouchableOpacity, Modal, TextInput, ScrollView, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Constants from 'expo-constants';
 import { useAuth } from '@src/auth/AuthContext';
@@ -18,8 +18,10 @@ import { PasswordInput } from '@src/components/ui/PasswordInput';
 import { completePasswordMutationLogout } from '@src/auth/passwordMutationLogout';
 import { AppleSubscriptionDeletionWarningModal } from '@src/components/AppleSubscriptionDeletionWarningModal';
 import { checkAppleSubscriptionBeforeAccountDeletion } from '@src/services/accountDeletionAppleSubscription';
+import { isIosFreeCompanion } from '@src/config/iosProductModel';
 
 export default function SettingsScreen() {
+  const iosFreeCompanion = isIosFreeCompanion(Platform.OS);
   const pathname = usePathname();
   const { user, logout, isLoading, refreshUser } = useAuth();
   const [loggingOut, setLoggingOut] = useState(false);
@@ -550,14 +552,14 @@ export default function SettingsScreen() {
         </View>
       </Modal>
 
-      <AppleSubscriptionDeletionWarningModal
+      {!iosFreeCompanion ? <AppleSubscriptionDeletionWarningModal
         visible={showAppleDeleteWarning}
         onCancel={() => setShowAppleDeleteWarning(false)}
         onContinueDeletion={() => {
           setShowAppleDeleteWarning(false);
           setShowDeleteModal(true);
         }}
-      />
+      /> : null}
 
       {/* Модальное окно удаления аккаунта */}
       <Modal

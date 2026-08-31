@@ -39,6 +39,7 @@ from utils.loyalty_discounts import (
     build_public_loyalty_visual_hints,
 )
 from utils.booking_factory import normalize_booking_fields, BookingOwnerError
+from utils.booking_occupancy import booking_slot_conflict
 from models import Booking, BookingStatus, Service, AppliedDiscount, OwnerType
 from utils.yandex_maps_url import build_yandex_maps_url
 from utils.master_domain_lookup import get_master_by_domain_slug
@@ -416,6 +417,8 @@ def create_public_booking(
     current_user: User = Depends(get_current_active_user),
 ) -> Any:
     """Создать бронирование. Требует авторизации клиента."""
+    from utils.booking_limit_guard import begin_booking_creation_transaction
+    begin_booking_creation_transaction(db)
     master = _get_master_by_slug(db, slug)
     if not master:
         raise HTTPException(status_code=404, detail="Мастер не найден")
@@ -456,7 +459,7 @@ def create_public_booking(
         raise HTTPException(status_code=400, detail="Мастер не работает в указанное время")
 
     if check_booking_conflicts(db, body.start_time, body.end_time, OwnerType.MASTER, master.id):
-        raise HTTPException(status_code=400, detail="Выбранное время уже занято")
+        raise booking_slot_conflict()
 
     discounted_amount, applied_discount_data = evaluate_and_prepare_applied_discount(
         master_id=master.id,
@@ -493,6 +496,8 @@ def create_public_booking(
     except BookingOwnerError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
+    from utils.booking_limit_guard import enforce_booking_creation_limit
+    enforce_booking_creation_limit(db, booking_data)
     booking = Booking(**booking_data)
     db.add(booking)
     db.flush()

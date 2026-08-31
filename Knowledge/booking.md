@@ -4,7 +4,7 @@ project: DeDato
 knowledge_class: living
 environment: common
 status: active
-last_verified: 2026-08-04
+last_verified: 2026-08-31
 ---
 
 # Booking
@@ -26,11 +26,11 @@ Create paths не являются взаимозаменяемыми:
 | Путь | Текущий смысл | Initial raw status | Проверка времени |
 |------|---------------|--------------------|------------------|
 | `POST /api/public/masters/{slug}/bookings` | Основная web/mobile публичная запись `/m/{slug}`; активный client session | `created` | working hours + интервальное пересечение |
-| `POST /api/client/bookings/` | Client-cabinet compatibility path | значение схемы, default `created` | совпадение `start_time`, не полное пересечение |
+| `POST /api/client/bookings/` | Client-cabinet compatibility path | значение схемы, default `created` | canonical интервальное пересечение |
 | `POST /api/bookings/` | Generic authenticated compatibility path | `created`, но отдельная auto-confirm ветка пишет `completed` | working hours + интервальное пересечение |
-| `POST /api/bookings/public` | Legacy public-by-phone path с account/bootstrap response | `created`, но отдельная auto-confirm ветка пишет `completed` | working hours + интервальное пересечение |
+| `POST /api/bookings/public` | Verify-first public path: до purpose-bound proof хранится только expiring pending ticket | `created`, но отдельная auto-confirm ветка пишет `completed` | working hours + canonical интервальное пересечение после proof |
 | `POST /api/bookings/create-with-any-master` | Public salon allocation | `created` | выбор мастера и проверки salon path |
-| `/api/client/bookings/temporary*` | Compatibility hold/prepayment path | temporary `pending`; confirmation создаёт Booking со статусом `completed` | только совпадение начала у temporary/regular rows |
+| `/api/client/bookings/temporary*` | Compatibility hold/prepayment path | temporary `pending`; confirmation создаёт Booking со статусом `completed` | canonical интервальное пересечение при confirmation |
 
 Основной web route — `frontend/src/App.jsx` → `MasterPublicBookingPage` → `PublicBookingWizard`; mobile использует `mobile/app/(public)/m/[slug].tsx`. Снятый web `/domain/{subdomain}` и `MasterBookingModule` не определяют основной публичный контракт.
 
@@ -88,7 +88,7 @@ Runtime использует общий `cancelled` и две client cancellatio
 
 ## 6. Concurrency и транзакции
 
-Create paths выполняют conflict query до INSERT и не используют общий slot lock или DB exclusion constraint. Два параллельных request могут пройти pre-check до commit. `BookingConfirmation.booking_id` уникален и является главным DB guard повторной финализации, но `Income.booking_id` не unique.
+Актуальные SQLite create paths используют один request-owned `BEGIN IMMEDIATE`: внутри одной transaction находятся canonical occupancy check, Free/paid limit check, связанные client/service/discount изменения и Booking insert. Same-slot writers сериализуются; конфликт возвращает `409`/`BOOKING_SLOT_CONFLICT`, contention — `503`/`BOOKING_SLOT_BUSY` с `Retry-After: 1`. Отдельной connection-owned transaction и DB exclusion constraint нет. `BookingConfirmation.booking_id` уникален и остаётся главным DB guard повторной финализации, но `Income.booking_id` не unique.
 
 Temporary rows не участвуют в общем availability/conflict service. Поэтому temporary hold не является глобальной блокировкой слота для всех create paths.
 

@@ -17,7 +17,7 @@ export const SUBSCRIPTION_FEATURES_CONFIG = [
     labelFreeUnavailable: 'безлимитные записи',
     checkFunction: (plan) => {
       if (plan.name === 'Free') {
-        const maxBookings = plan.limits?.max_future_bookings || 30
+        const maxBookings = plan.limits?.max_future_bookings || 20
         return { available: true, text: `${maxBookings} активных записей` }
       }
       return { available: true, text: 'Без ограничений на запись' }

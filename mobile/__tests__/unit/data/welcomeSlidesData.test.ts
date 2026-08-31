@@ -14,6 +14,13 @@ describe('welcomeSlidesData', () => {
     expect(slides.find((s) => s.type === 'registration')?.illustration).toBe('client-dashboard');
   });
 
+  it('removes pricing while retaining registration for the iOS companion presentation', () => {
+    const slides = getWelcomeSlidesForRole('master', { includePricing: false });
+    expect(slides).toHaveLength(6);
+    expect(slides.some((s) => s.type === 'pricing')).toBe(false);
+    expect(slides.some((s) => s.type === 'registration')).toBe(true);
+  });
+
   it('does not use mock-form illustration types', () => {
     const all = [...getWelcomeSlidesForRole('master'), ...getWelcomeSlidesForRole('client')];
     const types = all.map((s) => s.illustration);

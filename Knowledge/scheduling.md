@@ -4,7 +4,7 @@ project: DeDato
 knowledge_class: living
 environment: common
 status: active
-last_verified: 2026-08-04
+last_verified: 2026-08-31
 ---
 
 # Scheduling and availability
@@ -57,16 +57,15 @@ Public API возвращает aware ISO timestamps в timezone мастера 
 
 ## 5. Blocking predicate и overlap
 
-Общий conflict/availability service считает blocking все Booking rows, кроме raw status `cancelled` и несуществующего в enum `rejected`. Пересечение half-open по смыслу: `start < other_end` и `end > other_start`.
+Общий helper `backend/utils/booking_occupancy.py` задаёт один predicate для conflict и availability: пересечение half-open `existing.start < requested.end AND existing.end > requested.start`. Соприкасающиеся границы разрешены.
 
 Следствия текущего predicate:
 
-- `cancelled_by_client_early/late` продолжают блокировать slots;
-- `payment_expired` продолжает блокировать;
+- `cancelled`, `cancelled_by_client_early/late`, `payment_expired` и compatibility status `rejected` не блокируют slots;
 - temporary bookings вообще не входят в общий query;
-- completed rows на той же дате остаются занятостью своего исторического интервала.
+- `completed` остаётся занимающим статусом, включая future auto-confirm rows.
 
-Schedule materialization routes используют другой cancelled set и исключают все три cancellation statuses. Client/temporary compatibility create paths проверяют только равенство `start_time`, поэтому могут пропустить частичное пересечение.
+Schedule materialization, client create, temporary payment confirmation, public/subdomain create и any-master selection используют тот же occupancy helper. Поэтому availability и create одинаково трактуют overlap и non-occupying statuses.
 
 **Source:** `backend/services/scheduling.py` — `check_booking_conflicts`, `get_available_slots`; `backend/routers/master.py` — schedule conflict filtering; `backend/routers/client.py` — create/temporary conflict queries; `backend/models.py` — `BookingStatus`.
 
@@ -80,8 +79,8 @@ Salon any-master availability объединяет weekly windows подходя
 
 ## 7. Concurrency и UNKNOWN
 
-Availability — вычисляемая проекция, не reservation. Общий DB constraint, запрещающий overlap, отсутствует; pre-check и INSERT разделены. Temporary hold не виден основному calculator.
+Availability — вычисляемая проекция, не reservation. DB constraint, запрещающий overlap, отсутствует, но актуальные SQLite create paths начинают одну request-owned `BEGIN IMMEDIATE` transaction до conflict/limit reads и сохраняют side effects вместе с Booking. Writer serialization закрывает same-slot race; busy contention возвращает retryable `503`. Temporary hold по-прежнему не виден основному calculator до payment confirmation.
 
 - **UNKNOWN:** фактическая нагрузка и частота races.
 - **UNKNOWN:** используются ли weekly `AvailabilitySlot` внешними clients как primary source после materialized schedule rollout.
-- **CONFIRMED debt:** predicates и create paths расходятся; см. [Debt](booking-scheduling.md).
+- **CONFIRMED debt:** на уровне схемы всё ещё нет overlap constraint; гарантия сериализации относится к актуальным SQLite create paths. См. [Debt](booking-scheduling.md).

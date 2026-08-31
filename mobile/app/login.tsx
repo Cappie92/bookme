@@ -30,6 +30,7 @@ import {
 } from '@src/utils/registrationPromo';
 import { analytics, AnalyticsEvent } from '@src/services/analytics';
 import { RegistrationAgreementRow } from '@src/components/auth/RegistrationAgreementRow';
+import { isIosFreeCompanion } from '@src/config/iosProductModel';
 
 type TabType = 'login' | 'register';
 const yandexLogo = require('../assets/YaLogo.webp');
@@ -86,6 +87,7 @@ function RegistrationLabel({ field }: { field: RegistrationFieldKey }) {
 }
 
 export default function LoginScreen() {
+  const iosFreeCompanion = isIosFreeCompanion(Platform.OS);
   const { login, register } = useAuth();
   const insets = useSafeAreaInsets();
   const params = useLocalSearchParams<{ tab?: string; role?: string; promo_code?: string; ref?: string }>();
@@ -134,10 +136,10 @@ export default function LoginScreen() {
   }, [params.tab, params.role]);
 
   useEffect(() => {
-    if (activeTab !== 'register' || !shouldShowRegistrationPromoField(userRole)) return;
+    if (iosFreeCompanion || activeTab !== 'register' || !shouldShowRegistrationPromoField(userRole)) return;
     const code = getRegistrationPromoCodeFromParams(params);
     if (code) setPromoCode(code);
-  }, [activeTab, userRole, params.promo_code, params.ref]);
+  }, [iosFreeCompanion, activeTab, userRole, params.promo_code, params.ref]);
 
   // Валидация формы входа (как на web: проверяем канонический номер после normalizeRussianPhoneForApi)
   const validateLoginForm = () => {
@@ -385,7 +387,7 @@ export default function LoginScreen() {
         payload.city = city.trim();
         payload.timezone = (timezone || getTimezoneByCity(city)).trim();
       }
-      if (userRole === 'master' && promoCode.trim()) {
+      if (!iosFreeCompanion && userRole === 'master' && promoCode.trim()) {
         payload.promo_code = normalizeRegistrationPromoCode(promoCode);
       }
       const result = await register(payload);
@@ -713,7 +715,7 @@ export default function LoginScreen() {
               </View>
             )}
 
-            {shouldShowRegistrationPromoField(userRole) && (
+            {!iosFreeCompanion && shouldShowRegistrationPromoField(userRole) && (
               <View style={styles.inputGroup}>
                 <RegistrationLabel field="promoCode" />
                 <TextInput

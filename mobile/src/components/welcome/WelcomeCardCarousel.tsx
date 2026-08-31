@@ -25,7 +25,7 @@ type WelcomeCardCarouselProps = {
   onPeriodChange: (months: WelcomePeriodMonths) => void;
   selectedPlanId: string;
   onSelectPlan: (planId: string) => void;
-  onPricingPress: () => void;
+  onPricingPress?: () => void;
   resetKey?: string;
 };
 

@@ -86,18 +86,6 @@ export default function AccountDeletionPage() {
         <li>отменить удаление и восстановить прежний аккаунт невозможно.</li>
       </ul>
 
-      <h2 className={sectionTitleClass}>Подписка App Store</h2>
-      <p className={paragraphClass}>
-        Если у вас есть активная подписка, приобретённая через Apple In-App Purchase, удаление
-        аккаунта DeDato не отменяет Apple auto-renewal. Управление списаниями выполняется отдельно
-        в настройках подписок Apple. Если вы не хотите последующих списаний, отключите
-        автопродление через «Manage Subscription».
-      </p>
-      <p className={paragraphClass}>
-        Вы можете продолжить немедленное удаление аккаунта, не дожидаясь окончания подписки.
-        Запрос возврата платежа Apple и удаление аккаунта DeDato являются разными процессами.
-      </p>
-
       <h2 className={sectionTitleClass}>Срок обработки</h2>
       <p className={paragraphClass}>
         При самостоятельном удалении изменения применяются после подтверждения операции.

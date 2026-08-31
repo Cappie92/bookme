@@ -65,3 +65,20 @@ def active_future_bookings_sql_filter(master: Any, now_utc: datetime | None = No
     """Только неотменённые будущие без completed — дашборд, лимиты."""
     owner = or_(Booking.master_id == master.id, Booking.indie_master_id == master.id)
     return and_(owner, active_future_core(now_utc))
+
+
+def active_future_bookings_owner_filter(
+    *,
+    master_id: int | None = None,
+    indie_master_id: int | None = None,
+    now_utc: datetime | None = None,
+) -> Any:
+    """Canonical active-future filter for an explicitly resolved booking owner."""
+    owner_terms = []
+    if master_id is not None:
+        owner_terms.append(Booking.master_id == master_id)
+    if indie_master_id is not None:
+        owner_terms.append(Booking.indie_master_id == indie_master_id)
+    if not owner_terms:
+        raise ValueError("master_id or indie_master_id is required")
+    return and_(or_(*owner_terms), active_future_core(now_utc))

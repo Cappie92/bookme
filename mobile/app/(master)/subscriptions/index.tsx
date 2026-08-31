@@ -67,6 +67,8 @@ import {
   getSubscriptionPointsHistoryTitle,
   isPromoAlreadyAppliedError,
 } from '@src/utils/promoEngine';
+import { isIosFreeCompanion } from '@src/config/iosProductModel';
+import { IosAccessScreen } from '@src/components/subscriptions/IosAccessScreen';
 import {
   getMasterTariffComparisonRows,
   splitTariffComparisonColumns,
@@ -118,6 +120,11 @@ function getTotalBalanceAmount(balance: Balance | null): number | null {
 }
 
 export default function SubscriptionsScreen() {
+  if (isIosFreeCompanion(Platform.OS)) return <IosAccessScreen />;
+  return <CommerceSubscriptionsScreen />;
+}
+
+export function CommerceSubscriptionsScreen() {
   const { user } = useAuth();
   const insets = useSafeAreaInsets();
   const { tabBarHeight } = useTabBarHeight();

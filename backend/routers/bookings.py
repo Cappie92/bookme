@@ -26,6 +26,7 @@ from utils.booking_hard_delete import (
     get_hard_delete_blockers,
     hard_delete_forbidden_detail,
 )
+from utils.booking_occupancy import booking_slot_conflict
 from schemas import (
     Booking as BookingSchema,
     BookingEditRequest as BookingEditRequestSchema,
@@ -155,6 +156,8 @@ async def create_booking(
     """
     Создать новое бронирование (требует авторизации)
     """
+    from utils.booking_limit_guard import begin_booking_creation_transaction
+    begin_booking_creation_transaction(db)
     # Проверяем обязательные поля
     if not booking.client_name or not booking.client_name.strip():
         raise HTTPException(
@@ -265,9 +268,7 @@ async def create_booking(
         owner_type,
         owner_id,
     ):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Выбранное время уже занято"
-        )
+        raise booking_slot_conflict()
 
     # Обработка баллов лояльности (только для авторизованных клиентов)
     loyalty_points_used = 0
@@ -363,6 +364,8 @@ async def create_booking(
     except BookingOwnerError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
+    from utils.booking_limit_guard import enforce_booking_creation_limit
+    enforce_booking_creation_limit(db, booking_data)
     db_booking = Booking(**booking_data)
     db.add(db_booking)
     db.flush()
@@ -477,7 +480,7 @@ def _validate_specific_public_booking(
     if check_booking_conflicts(
         db, booking.start_time, booking.end_time, owner_type, owner_id
     ):
-        raise HTTPException(conflict_status, "Выбранное время уже занято")
+        raise booking_slot_conflict(conflict_status)
     return effective_master_id, effective_indie_id
 
 
@@ -561,6 +564,8 @@ def _create_specific_public_booking_after_proof(
         data = normalize_booking_fields(data, service, owner_type, owner_id, db=db)
     except BookingOwnerError as exc:
         raise HTTPException(400, str(exc)) from exc
+    from utils.booking_limit_guard import enforce_booking_creation_limit
+    enforce_booking_creation_limit(db, data)
     created = Booking(**data)
     db.add(created)
     db.flush()
@@ -620,6 +625,8 @@ async def confirm_public_booking_phone_verification(
     creds: HTTPAuthorizationCredentials = Depends(public_booking_verification_bearer),
     db: Session = Depends(get_db),
 ):
+    from utils.booking_limit_guard import begin_booking_creation_transaction
+    begin_booking_creation_transaction(db)
     ticket = creds.credentials
     state = _get_public_booking_ticket(ticket)
     if not state:
@@ -1107,6 +1114,9 @@ async def create_booking_with_any_master(
     current_user: Optional[User] = Depends(get_current_user_optional),
 ):
     """Validate any-master selection and persist no permanent rows before proof."""
+    if current_user:
+        from utils.booking_limit_guard import begin_booking_creation_transaction
+        begin_booking_creation_transaction(db)
     if current_user and (
         str(getattr(current_user.role, "value", current_user.role)) != "client"
         or not current_user.is_active
@@ -1139,7 +1149,7 @@ async def create_booking_with_any_master(
     if check_booking_conflicts(
         db, start_time, end_time, OwnerType.MASTER, best_master["id"]
     ):
-        raise HTTPException(400, "Выбранное время уже занято")
+        raise booking_slot_conflict(status.HTTP_400_BAD_REQUEST)
     pending = {
         "flow": "any_master",
         "phone": phone,
@@ -1198,7 +1208,7 @@ def _create_any_master_public_booking_after_proof(
         db, start_time, end_time, OwnerType.MASTER,
         best_master["id"] if best_master else 0,
     ):
-        raise HTTPException(409, "Выбранное время уже занято")
+        raise booking_slot_conflict()
     locked_master = (
         db.query(Master)
         .filter(Master.id == best_master["id"])
@@ -1208,7 +1218,7 @@ def _create_any_master_public_booking_after_proof(
     if not locked_master or check_booking_conflicts(
         db, start_time, end_time, OwnerType.MASTER, best_master["id"]
     ):
-        raise HTTPException(409, "Выбранное время уже занято")
+        raise booking_slot_conflict()
     client, is_new_client = _resolve_or_create_verified_public_client(
         pending["phone"], None, db
     )
@@ -1228,6 +1238,8 @@ def _create_any_master_public_booking_after_proof(
         )
     except BookingOwnerError as exc:
         raise HTTPException(400, str(exc)) from exc
+    from utils.booking_limit_guard import enforce_booking_creation_limit
+    enforce_booking_creation_limit(db, data)
     created = Booking(**data, created_at=datetime.utcnow())
     db.add(created)
     db.flush()

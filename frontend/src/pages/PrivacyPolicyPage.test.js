@@ -65,16 +65,21 @@ describe('Privacy Policy legal architecture', () => {
     expect(agreementSource).toContain('https://dedato.ru/marketing-consent')
   })
 
-  it('omits a general 18+ restriction and keeps factual Apple deletion disclosure', () => {
+  it('omits a general 18+ restriction and describes the iOS free-companion model', () => {
     expect(policySource).not.toContain('только для пользователей, достигших 18 лет')
     expect(agreementSource).not.toContain('только для пользователей, достигших 18 лет')
-    expect(agreementSource).toContain('Restore Purchases')
+    expect(agreementSource).not.toContain('Restore Purchases')
+    expect(agreementSource).not.toContain('Apple In-App Purchase')
+    expect(agreementSource).toContain('бесплатным companion-приложением')
     expect(agreementSource).toContain('Standard Apple EULA')
-    expect(deletionSource).toContain('аккаунта DeDato не отменяет Apple auto-renewal')
+    expect(deletionSource).not.toContain('Apple auto-renewal')
+    expect(policySource).not.toContain('Apple (подписки App Store)')
+    expect(policySource).toContain('лимите активных будущих записей')
+    expect(policySource).toContain('В этот ответ не включаются стоимость подписки')
   })
 
   it('uses the approved revision date in changed legal documents', () => {
-    expect(policySource).toContain('Дата вступления в силу: 26 августа 2026 г.')
-    expect(agreementSource).toContain('Дата последнего обновления: 26 августа 2026 г.')
+    expect(policySource).toContain('Дата вступления в силу: 30 августа 2026 г.')
+    expect(agreementSource).toContain('Дата последнего обновления: 30 августа 2026 г.')
   })
 })

@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { AppState, Platform, type AppStateStatus } from 'react-native';
 import { useAuth } from '@src/auth/AuthContext';
 import { appleIapService } from '@src/services/purchases/AppleIapService';
+import { IOS_IAP_ENABLED } from '@src/config/iosProductModel';
 
 export function shouldEnableAppleIapLifecycle(
   platform: string,
@@ -10,6 +11,7 @@ export function shouldEnableAppleIapLifecycle(
 ): boolean {
   const normalizedRole = String(role || '').toLowerCase();
   return (
+    IOS_IAP_ENABLED === true &&
     platform === 'ios' &&
     isAuthenticated &&
     (normalizedRole === 'master' || normalizedRole === 'indie')

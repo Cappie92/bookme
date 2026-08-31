@@ -24,6 +24,7 @@ import {
   toIncomeBarLinePoint,
 } from '@src/utils/masterDashboardChartPoints';
 import { logger } from '@src/utils/logger';
+import { isIosFreeCompanion } from '@src/config/iosProductModel';
 
 const SCROLL_EXTRA_BOTTOM = 40;
 
@@ -133,6 +134,7 @@ function EmptyState({
 }
 
 export default function MasterStatsScreen() {
+  const iosFreeCompanion = isIosFreeCompanion(Platform.OS);
   const insets = useSafeAreaInsets();
   const { tabBarHeight } = useTabBarHeight();
   const measuredTabBarHeight = tabBarHeight > 0 ? tabBarHeight : BOTTOM_NAV_CONTENT_FALLBACK_HEIGHT;
@@ -566,10 +568,10 @@ export default function MasterStatsScreen() {
             />
             {!isPro && (
               <View style={styles.proGateRow}>
-                <Text style={styles.proHint}>Доступно в Pro</Text>
-                <TouchableOpacity onPress={() => router.push('/subscriptions')} activeOpacity={0.7}>
+                <Text style={styles.proHint}>{iosFreeCompanion ? 'Недоступно для текущего уровня доступа' : 'Доступно в Pro'}</Text>
+                {!iosFreeCompanion ? <TouchableOpacity onPress={() => router.push('/subscriptions')} activeOpacity={0.7}>
                   <Text style={styles.proCtaText}>Управление подпиской</Text>
-                </TouchableOpacity>
+                </TouchableOpacity> : null}
               </View>
             )}
           </>
@@ -694,9 +696,9 @@ export default function MasterStatsScreen() {
 
             {extendedForbidden && (
               <Card style={[styles.softCard, styles.paywall]}>
-                <Text style={styles.paywallTitle}>Доступно в Pro</Text>
-                <Text style={styles.paywallText}>Обновите подписку для доступа к расширенной статистике</Text>
-                <PrimaryButton title="Управление подпиской" onPress={() => router.push('/subscriptions')} />
+                <Text style={styles.paywallTitle}>{iosFreeCompanion ? 'Функция недоступна' : 'Доступно в Pro'}</Text>
+                <Text style={styles.paywallText}>{iosFreeCompanion ? 'Недоступно для текущего уровня доступа' : 'Обновите подписку для доступа к расширенной статистике'}</Text>
+                {!iosFreeCompanion ? <PrimaryButton title="Управление подпиской" onPress={() => router.push('/subscriptions')} /> : null}
               </Card>
             )}
 
@@ -1292,4 +1294,3 @@ const styles = StyleSheet.create({
     color: '#d1d5db',
   },
 });
-

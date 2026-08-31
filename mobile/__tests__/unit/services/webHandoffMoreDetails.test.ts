@@ -1,10 +1,10 @@
 import { openWebHandoffMoreDetails } from '@src/services/auth/openWebHandoffMoreDetails';
 
-describe('openWebHandoffMoreDetails (iOS Подробнее)', () => {
+describe('openWebHandoffMoreDetails platform contract', () => {
   const handoffUrl =
     'https://dedato.ru/auth/mobile-handoff?code=opaque-handoff-code-abc';
 
-  it('calls createWebHandoff with ios_app and opens backend URL', async () => {
+  it('blocks iOS pricing handoff before creating or opening a URL', async () => {
     const createWebHandoff = jest.fn().mockResolvedValue({
       code: 'opaque-handoff-code-abc',
       url: handoffUrl,
@@ -21,12 +21,10 @@ describe('openWebHandoffMoreDetails (iOS Подробнее)', () => {
       showError,
     });
 
-    expect(result).toBe('opened');
-    expect(createWebHandoff).toHaveBeenCalledTimes(1);
-    expect(createWebHandoff).toHaveBeenCalledWith('ios_app');
-    expect(openURL).toHaveBeenCalledTimes(1);
-    expect(openURL).toHaveBeenCalledWith(handoffUrl);
-    expect(showError).not.toHaveBeenCalled();
+    expect(result).toBe('error');
+    expect(createWebHandoff).not.toHaveBeenCalled();
+    expect(openURL).not.toHaveBeenCalled();
+    expect(showError).toHaveBeenCalledWith('Ошибка', expect.stringContaining('iOS'));
     expect(logout).not.toHaveBeenCalled();
   });
 
@@ -43,7 +41,7 @@ describe('openWebHandoffMoreDetails (iOS Подробнее)', () => {
     const logout = jest.fn();
 
     const result = await openWebHandoffMoreDetails({
-      platformOS: 'ios',
+      platformOS: 'android',
       createWebHandoff,
       openURL,
       showError,
@@ -64,7 +62,7 @@ describe('openWebHandoffMoreDetails (iOS Подробнее)', () => {
     const logout = jest.fn();
 
     const result = await openWebHandoffMoreDetails({
-      platformOS: 'ios',
+      platformOS: 'android',
       createWebHandoff,
       openURL,
       showError,
@@ -87,7 +85,7 @@ describe('openWebHandoffMoreDetails (iOS Подробнее)', () => {
     const logout = jest.fn();
 
     const result = await openWebHandoffMoreDetails({
-      platformOS: 'ios',
+      platformOS: 'android',
       createWebHandoff,
       openURL,
       showError,
@@ -107,7 +105,7 @@ describe('openWebHandoffMoreDetails (iOS Подробнее)', () => {
     const openURL = jest.fn().mockResolvedValue(undefined);
 
     await openWebHandoffMoreDetails({
-      platformOS: 'ios',
+      platformOS: 'android',
       createWebHandoff,
       openURL,
       showError: jest.fn(),
@@ -116,5 +114,6 @@ describe('openWebHandoffMoreDetails (iOS Подробнее)', () => {
     const opened = openURL.mock.calls[0][0] as string;
     expect(opened).not.toMatch(/access_token/i);
     expect(opened).not.toMatch(/refresh_token/i);
+    expect(createWebHandoff).toHaveBeenCalledWith('android_app');
   });
 });

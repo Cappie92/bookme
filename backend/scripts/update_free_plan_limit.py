@@ -1,6 +1,6 @@
 """
 Скрипт для обновления лимита активных записей для плана Free.
-Добавляет max_future_bookings: 30 в limits плана Free.
+Устанавливает max_future_bookings: 20 в limits плана Free.
 """
 import sys
 import os
@@ -28,13 +28,13 @@ def update_free_plan_limit():
         # Обновляем limits
         from sqlalchemy.orm.attributes import flag_modified
         limits = dict(free_plan.limits or {})
-        limits["max_future_bookings"] = 30
+        limits["max_future_bookings"] = 20
         
         free_plan.limits = limits
         flag_modified(free_plan, 'limits')  # Важно для JSON полей в SQLAlchemy
         db.commit()
         
-        print(f"✅ Лимит активных записей для плана Free обновлен: max_future_bookings = 30")
+        print("✅ Лимит активных записей для плана Free обновлен: max_future_bookings = 20")
         
         # Обновляем другие планы (устанавливаем None для безлимита)
         other_plans = db.query(SubscriptionPlan).filter(
@@ -62,4 +62,3 @@ def update_free_plan_limit():
 
 if __name__ == "__main__":
     update_free_plan_limit()
-

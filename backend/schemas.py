@@ -1258,6 +1258,22 @@ class SubscriptionOut(BaseModel):
         from_attributes = True
 
 
+class SubscriptionAccessSummaryOut(BaseModel):
+    """Минимальный access-only contract для iOS free companion."""
+
+    access_level: Literal["free", "paid", "always_free"]
+    plan_name: str
+    plan_display_name: Optional[str] = None
+    status: str
+    is_active: bool
+    end_date: Optional[datetime] = None
+    is_always_free: bool
+    features: Dict[str, Any]
+    current_active_bookings: int
+    max_future_bookings: Optional[int] = None
+    is_unlimited: bool
+
+
 class SubscriptionPaymentHistoryItem(BaseModel):
     payment_id: int
     public_id: str

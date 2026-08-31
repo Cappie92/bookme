@@ -4,7 +4,7 @@ project: DeDato
 knowledge_class: living
 environment: common
 status: active
-last_verified: 2026-08-14
+last_verified: 2026-08-31
 ---
 
 # Debt — booking and scheduling
@@ -93,12 +93,12 @@ last_verified: 2026-08-14
 - **Failure scenario:** status correction оставляет часть экономических side effects.
 - **Source:** `backend/routers/accounting.py::update_booking_status`.
 
-## Нет atomic overlap constraint
+## Нет schema-level overlap constraint
 
 - **Confidence:** CONFIRMED
-- **Evidence:** conflict query и INSERT разделены; DB exclusion/unique interval constraint отсутствует.
-- **Failure scenario:** concurrent creates могут занять пересекающийся интервал.
-- **Unknown:** production frequency.
+- **Evidence:** DB exclusion/unique interval constraint отсутствует; актуальные SQLite create paths сериализованы одним request-owned `BEGIN IMMEDIATE` и используют общий occupancy predicate до INSERT.
+- **Failure scenario:** обход guarded production create matrix не получает application-level serialization.
+- **Existing protection:** real-SQLite same-slot и Free 19→20 concurrency tests.
 
 ## MissedRevenue не является автоматическим outcome
 

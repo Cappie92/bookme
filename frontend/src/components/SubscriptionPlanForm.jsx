@@ -585,10 +585,10 @@ export default function SubscriptionPlanForm({
                     }}
                     min="0"
                     className="w-full border rounded px-3 py-2"
-                    placeholder="30 (для Free плана) или оставьте пустым для безлимита"
+                    placeholder="20 (для Free плана) или оставьте пустым для безлимита"
                   />
                   <p className="text-xs text-gray-500 mt-1">
-                    Лимит на количество будущих записей. Используется для Free плана (например, 30). 
+                    Лимит на количество будущих записей. Используется для Free плана (например, 20).
                     Для платных планов оставьте пустым или 0.
                   </p>
                 </div>

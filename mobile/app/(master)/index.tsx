@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
-import { View, Text, StyleSheet, ActivityIndicator, ScrollView, TouchableOpacity, Alert, RefreshControl } from 'react-native';
+import { View, Text, StyleSheet, ActivityIndicator, ScrollView, TouchableOpacity, Alert, RefreshControl, Platform } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTabBarHeight } from '@src/contexts/TabBarHeightContext';
@@ -15,7 +15,7 @@ import { WeeklyStatsCharts } from '@src/components/dashboard/WeeklyStatsCharts';
 import { getUserBookings, getPastBookings, Booking, getStatusLabel, getStatusColor } from '@src/services/api/bookings';
 import { getFutureBookingsPaged, getPastAppointmentsPaged } from '@src/services/api/master';
 import { getPastBookingStatusLabel, getPastBookingStatusColor } from '@src/utils/bookingStatusDisplay';
-import { fetchCurrentSubscription, Subscription, getStatusLabel as getSubscriptionStatusLabel, getStatusColor as getSubscriptionStatusColor, getDaysRemaining } from '@src/services/api/subscriptions';
+import { fetchCurrentSubscription, fetchSubscriptionAccessSummary, Subscription, SubscriptionStatus, type SubscriptionAccessSummary, getStatusLabel as getSubscriptionStatusLabel, getStatusColor as getSubscriptionStatusColor, getDaysRemaining } from '@src/services/api/subscriptions';
 import { getBalance, getBookingsLimit, getMasterSettings, getMasterServices, getWeeklySchedule, confirmBooking, confirmPreVisitBooking, cancelBookingConfirmation, getDashboardStats, Balance, BookingsLimit, MasterSettings, ScheduleWeek, DashboardStats } from '@src/services/api/master';
 import { refreshMasterFeaturesGlobally } from '@src/utils/masterFeaturesRefresh';
 import { formatMoney } from '@src/utils/money';
@@ -34,6 +34,7 @@ import { MasterFreeSlotsShareHost } from '@src/components/master/MasterFreeSlots
 import { NotificationsSheet } from '@src/components/master/notifications/NotificationsSheet';
 import { useMasterQuickActions } from '@src/hooks/useMasterQuickActions';
 import { useMasterNotifications } from '@src/hooks/useMasterNotifications';
+import { isIosFreeCompanion } from '@src/config/iosProductModel';
 
 interface AttentionItem {
   id: string;
@@ -52,6 +53,7 @@ function isFutureCancelled(status: string | undefined): boolean {
 }
 
 export default function HomeScreen() {
+  const iosFreeCompanion = isIosFreeCompanion(Platform.OS);
   const { user } = useAuth();
   const insets = useSafeAreaInsets();
   const { tabBarHeight } = useTabBarHeight();
@@ -74,6 +76,7 @@ export default function HomeScreen() {
   const [balance, setBalance] = useState<Balance | null>(null);
   const [bookingsLimit, setBookingsLimit] = useState<BookingsLimit | null>(null);
   const [subscription, setSubscription] = useState<Subscription | null>(null);
+  const [iosAccessSummary, setIosAccessSummary] = useState<SubscriptionAccessSummary | null>(null);
   
   // Требует внимания
   const [attentionItems, setAttentionItems] = useState<AttentionItem[]>([]);
@@ -225,6 +228,22 @@ export default function HomeScreen() {
 
   const loadFinanceData = async () => {
     try {
+      if (iosFreeCompanion) {
+        const access = await fetchSubscriptionAccessSummary();
+        setIosAccessSummary(access);
+        setBalance(null);
+        setSubscription(null);
+        setBookingsLimit({
+          current_bookings: access.current_active_bookings,
+          limit: access.max_future_bookings ?? 0,
+          is_unlimited: access.is_unlimited,
+          plan_name: access.plan_name,
+          is_limit_exceeded:
+            access.max_future_bookings != null
+            && access.current_active_bookings >= access.max_future_bookings,
+        });
+        return;
+      }
       const [balanceData, limitData, subscriptionData] = await Promise.all([
         getBalance().catch(() => null),
         getBookingsLimit().catch(() => null),
@@ -549,17 +568,52 @@ export default function HomeScreen() {
         )}
 
         {/* Карточка "Подписка" - только для мастеров */}
-        {isMaster && (balance || subscription || bookingsLimit) && (
+        {isMaster && (iosFreeCompanion ? iosAccessSummary : (balance || subscription || bookingsLimit)) && (
           <Card style={styles.card}>
-            <Text style={styles.cardTitle}>Подписка</Text>
+            <Text style={styles.cardTitle}>{iosFreeCompanion ? 'Мой доступ' : 'Подписка'}</Text>
             <View style={styles.financeContent}>
-              {balance && (
+              {iosFreeCompanion && iosAccessSummary ? (
+                <>
+                  {iosAccessSummary.end_date ? (
+                    <View style={styles.financeRow}>
+                      <Text style={styles.financeLabel}>Дней осталось</Text>
+                      <Text style={styles.financeValue}>{getDaysRemaining(iosAccessSummary.end_date)}</Text>
+                    </View>
+                  ) : null}
+                  <View style={styles.financeRow}>
+                    <Text style={styles.financeLabel}>Уровень доступа</Text>
+                    <View style={styles.subscriptionRow}>
+                      <Text style={styles.subscriptionName}>
+                        {getPlanTitle({
+                          plan_display_name: iosAccessSummary.plan_display_name,
+                          plan_name: iosAccessSummary.plan_name,
+                        }) || iosAccessSummary.plan_name}
+                      </Text>
+                      <StatusBadge
+                        label={iosAccessSummary.access_level === 'always_free' ? 'Постоянный доступ' : iosAccessSummary.access_level === 'free' ? 'Бесплатный доступ' : getSubscriptionStatusLabel(iosAccessSummary.status as SubscriptionStatus)}
+                        color={iosAccessSummary.access_level === 'paid' ? getSubscriptionStatusColor(iosAccessSummary.status as SubscriptionStatus) : '#4CAF50'}
+                      />
+                    </View>
+                  </View>
+                  {bookingsLimit ? (
+                    <View style={styles.financeRow}>
+                      <Text style={styles.financeLabel}>Активные записи</Text>
+                      <Text style={styles.financeValue}>
+                        {bookingsLimit.is_unlimited
+                          ? `${bookingsLimit.current_bookings} · без лимита`
+                          : `${bookingsLimit.current_bookings} / ${bookingsLimit.limit}`}
+                      </Text>
+                    </View>
+                  ) : null}
+                </>
+              ) : null}
+              {!iosFreeCompanion && balance && (
                 <View style={styles.financeRow}>
                   <Text style={styles.financeLabel}>Баланс</Text>
                   <Text style={styles.financeValue}>{formatMoney(balance.available_balance ?? 0)}</Text>
                 </View>
               )}
-              {subscription?.end_date != null && (
+              {!iosFreeCompanion && subscription?.end_date != null && (
                 <View style={styles.financeRow}>
                   <Text style={styles.financeLabel}>Дней осталось</Text>
                   <View style={styles.daysRemainingCol}>
@@ -581,13 +635,13 @@ export default function HomeScreen() {
                     (subscription.daily_rate ?? 0) > 0 &&
                     (subscription.plan_name ?? '').toLowerCase() !== 'free' && (
                       <Text style={styles.zeroDaysHint}>
-                        Пополните баланс, чтобы подписка не отключилась
+                        {iosFreeCompanion ? 'Срок доступа скоро завершится' : 'Пополните баланс, чтобы подписка не отключилась'}
                       </Text>
                     )}
                   </View>
                 </View>
               )}
-              {subscription && (
+              {!iosFreeCompanion && subscription && (
                 <View style={styles.financeRow}>
                   <Text style={styles.financeLabel}>Подписка</Text>
                   <View style={styles.subscriptionRow}>
@@ -604,7 +658,7 @@ export default function HomeScreen() {
                   </View>
                 </View>
               )}
-              {bookingsLimit && !bookingsLimit.is_unlimited && bookingsLimit.plan_name === 'Free' && (
+              {!iosFreeCompanion && bookingsLimit && !bookingsLimit.is_unlimited && bookingsLimit.plan_name === 'Free' && (
                 <View style={styles.financeRow}>
                   <Text style={styles.financeLabel}>Активные записи</Text>
                   <Text style={styles.financeValue}>
@@ -614,7 +668,7 @@ export default function HomeScreen() {
               )}
             </View>
             <SecondaryButton
-              title="Управление подпиской"
+              title={iosFreeCompanion ? 'Мой доступ' : 'Управление подпиской'}
               onPress={() => router.push('/subscriptions')}
               style={styles.secondaryButton}
             />

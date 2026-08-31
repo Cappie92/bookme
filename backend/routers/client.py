@@ -43,7 +43,8 @@ from schemas import (
     ClientNoteCreate, ClientNoteUpdate, ClientNoteResponse, ClientFavoriteCreate, ClientFavorite as ClientFavoriteSchema,
     TemporaryBookingCreate, TemporaryBookingOut
 )
-from services.scheduling import get_available_slots
+from services.scheduling import check_booking_conflicts, get_available_slots
+from utils.booking_occupancy import booking_slot_conflict
 from utils.loyalty_discounts import evaluate_and_prepare_applied_discount, build_applied_discount_info
 from utils.master_canon import (
     LEGACY_INDIE_MODE,
@@ -851,6 +852,8 @@ def create_booking(
     Создание нового бронирования.
     Перед созданием проверяются ограничения клиента.
     """
+    from utils.booking_limit_guard import begin_booking_creation_transaction
+    begin_booking_creation_transaction(db)
     from utils.client_restrictions import check_client_restrictions
     
     # Guard: мастер без timezone не может принимать записи
@@ -894,32 +897,25 @@ def create_booking(
                     detail="Для этого мастера требуется предоплата. Используйте эндпоинт /api/client/bookings/temporary для создания временной брони."
                 )
     
-    # Проверка доступности времени.
-    # Важно: SQLAlchemy `Booking.indie_master_id == None` рендерится как `IS NULL`
-    # и матчит ВСЕ записи с null indie. Поэтому в OR подключаем только те owner-поля,
-    # которые в booking_in реально не None — иначе ложноположительный clash на
-    # любой чужой booking без indie/salon в это же время.
-    clash_filters = []
     if booking_in.master_id is not None:
-        clash_filters.append(Booking.master_id == booking_in.master_id)
-    if booking_in.indie_master_id is not None:
-        clash_filters.append(Booking.indie_master_id == booking_in.indie_master_id)
-    if booking_in.salon_id is not None:
-        clash_filters.append(Booking.salon_id == booking_in.salon_id)
-
-    if clash_filters:
-        from sqlalchemy import or_
-        existing_booking = (
-            db.query(Booking)
-            .filter(
-                Booking.start_time == booking_in.start_time,
-                Booking.status != BookingStatus.CANCELLED,
-                or_(*clash_filters),
-            )
-            .first()
+        conflict_owner_type, conflict_owner_id = OwnerType.MASTER, booking_in.master_id
+    elif booking_in.indie_master_id is not None:
+        conflict_owner_type, conflict_owner_id = (
+            OwnerType.INDIE_MASTER,
+            booking_in.indie_master_id,
         )
-        if existing_booking:
-            raise HTTPException(status_code=400, detail="This time slot is already booked")
+    elif booking_in.salon_id is not None:
+        conflict_owner_type, conflict_owner_id = OwnerType.SALON, booking_in.salon_id
+    else:
+        raise HTTPException(status_code=400, detail="master_id or indie_master_id required")
+    if check_booking_conflicts(
+        db,
+        booking_in.start_time,
+        booking_in.end_time,
+        conflict_owner_type,
+        conflict_owner_id,
+    ):
+        raise booking_slot_conflict()
 
     # Обработка баллов лояльности
     loyalty_points_used = 0
@@ -1009,6 +1005,8 @@ def create_booking(
     except BookingOwnerError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
+    from utils.booking_limit_guard import enforce_booking_creation_limit
+    enforce_booking_creation_limit(db, booking_data)
     booking = Booking(**booking_data)
     db.add(booking)
     db.flush()
@@ -1266,6 +1264,8 @@ def confirm_temporary_booking_payment(
     Подтверждение оплаты временной брони.
     Создает реальное бронирование и удаляет временную бронь.
     """
+    from utils.booking_limit_guard import begin_booking_creation_transaction
+    begin_booking_creation_transaction(db)
     temporary_booking = db.query(TemporaryBooking).filter(
         TemporaryBooking.id == temporary_booking_id,
         TemporaryBooking.client_id == current_user.id,
@@ -1313,6 +1313,16 @@ def confirm_temporary_booking_payment(
         )
     except BookingOwnerError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+    if check_booking_conflicts(
+        db,
+        booking_data["start_time"],
+        booking_data["end_time"],
+        OwnerType.MASTER,
+        temporary_booking.master_id,
+    ):
+        raise booking_slot_conflict()
+    from utils.booking_limit_guard import enforce_booking_creation_limit
+    enforce_booking_creation_limit(db, booking_data)
     booking = Booking(**booking_data)
     db.add(booking)
     db.flush()

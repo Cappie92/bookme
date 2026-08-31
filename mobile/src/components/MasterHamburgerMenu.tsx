@@ -1,5 +1,5 @@
 import React, { type ComponentProps } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Modal, ScrollView, ActivityIndicator, Dimensions } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Modal, ScrollView, ActivityIndicator, Dimensions, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
@@ -12,6 +12,7 @@ import { getMasterSettings } from '@src/services/api/master';
 import { isSalonFeaturesEnabled as getSalonFeaturesEnabled } from '@src/config/features';
 import { logger } from '@src/utils/logger';
 import { PLANS_PREFIX, SETTINGS_PREFIX } from '@src/utils/subscriptionCache';
+import { isIosFreeCompanion } from '@src/config/iosProductModel';
 
 const CACHE_TTL = 15 * 60 * 1000; // 15 минут
 
@@ -49,6 +50,7 @@ interface MasterHamburgerMenuProps {
 }
 
 export function MasterHamburgerMenu({ visible, onClose }: MasterHamburgerMenuProps) {
+  const iosFreeCompanion = isIosFreeCompanion(Platform.OS);
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const { features, loading } = useMasterFeatures();
@@ -63,6 +65,7 @@ export function MasterHamburgerMenu({ visible, onClose }: MasterHamburgerMenuPro
   const userId = user?.id ?? null;
 
   const loadPlans = React.useCallback(async () => {
+    if (iosFreeCompanion) return;
     if (userId == null) return;
     const role = (user as { role?: string })?.role;
     if (role !== 'master' && role !== 'MASTER' && role !== 'indie') return;
@@ -85,7 +88,7 @@ export function MasterHamburgerMenu({ visible, onClose }: MasterHamburgerMenuPro
     } finally {
       setPlansLoading(false);
     }
-  }, [userId, user]);
+  }, [iosFreeCompanion, userId, user]);
 
   const loadMasterSettings = React.useCallback(async () => {
     if (userId == null) return;
@@ -121,8 +124,8 @@ export function MasterHamburgerMenu({ visible, onClose }: MasterHamburgerMenuPro
     if (loading || !features) return;
     if (plansLoading) return;
     if (plans.length > 0) return;
-    loadPlans();
-  }, [visible, loading, features, plansLoading, plans.length, loadPlans]);
+    if (!iosFreeCompanion) loadPlans();
+  }, [iosFreeCompanion, visible, loading, features, plansLoading, plans.length, loadPlans]);
 
   // Подгружаем настройки мастера (can_work_in_salon) при открытии меню
   React.useEffect(() => {
@@ -247,13 +250,13 @@ export function MasterHamburgerMenu({ visible, onClose }: MasterHamburgerMenuPro
               const isLoadingAccessState = hasFeature && (loading || !features);
               const isDenied = hasFeature && !isLoadingAccessState && disabledByFeature;
 
-              const showChip = isDenied && !plansLoading && plans.length > 0;
+      const showChip = !iosFreeCompanion && isDenied && !plansLoading && plans.length > 0;
               const cheapestPlanName =
                 showChip && item.feature ? getCheapestPlanForFeature(plans, item.feature) : null;
 
               const onPress =
                 isLoadingAccessState ? undefined :
-                isDenied ? handleChipPress :
+                isDenied ? (iosFreeCompanion ? undefined : handleChipPress) :
                 () => handleItemPress(item, false);
 
               const visuallyDisabled = isLoadingAccessState || isDenied;
@@ -274,7 +277,7 @@ export function MasterHamburgerMenu({ visible, onClose }: MasterHamburgerMenuPro
                       style={[styles.menuLabel, visuallyDisabled && styles.menuLabelDisabled]}
                       numberOfLines={1}
                     >
-                      {item.label}
+                      {item.id === 'my_tariff' && iosFreeCompanion ? 'Мой доступ' : item.label}
                     </Text>
 
                     {showChip && cheapestPlanName ? (
@@ -285,7 +288,7 @@ export function MasterHamburgerMenu({ visible, onClose }: MasterHamburgerMenuPro
                       </View>
                     ) : null}
 
-                    {plansLoading && isDenied && !cheapestPlanName ? (
+                    {!iosFreeCompanion && plansLoading && isDenied && !cheapestPlanName ? (
                       <View style={styles.planChipInline} pointerEvents="none">
                         <ActivityIndicator size="small" color="#999" />
                       </View>
@@ -397,4 +400,3 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 });
-

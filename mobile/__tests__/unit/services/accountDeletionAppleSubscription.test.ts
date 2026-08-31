@@ -30,7 +30,7 @@ function subscription(overrides: Partial<Subscription> = {}): Subscription {
 describe('Apple subscription account-deletion guard', () => {
   it('shows the warning for an active Apple subscription', async () => {
     const load = jest.fn(async () => subscription());
-    await expect(checkAppleSubscriptionBeforeAccountDeletion(load)).resolves.toBe(
+    await expect(checkAppleSubscriptionBeforeAccountDeletion(load, true)).resolves.toBe(
       'warn_active_apple'
     );
     expect(hasActiveAppleSubscription(await load())).toBe(true);
@@ -42,7 +42,7 @@ describe('Apple subscription account-deletion guard', () => {
     subscription({ status: SubscriptionStatus.EXPIRED, is_active: false }),
   ])('does not add an Apple blocker for %p', async (value) => {
     await expect(
-      checkAppleSubscriptionBeforeAccountDeletion(async () => value)
+      checkAppleSubscriptionBeforeAccountDeletion(async () => value, true)
     ).resolves.toBe('continue_deletion');
   });
 
@@ -50,8 +50,16 @@ describe('Apple subscription account-deletion guard', () => {
     await expect(
       checkAppleSubscriptionBeforeAccountDeletion(async () => {
         throw new Error('network unavailable');
-      })
+      }, true)
     ).resolves.toBe('continue_deletion');
+  });
+
+  it('does not load Apple subscription state in the iOS free-companion model', async () => {
+    const load = jest.fn(async () => subscription());
+    await expect(checkAppleSubscriptionBeforeAccountDeletion(load)).resolves.toBe(
+      'continue_deletion'
+    );
+    expect(load).not.toHaveBeenCalled();
   });
 
   it('is wired into both mobile deletion settings flows', () => {

@@ -79,7 +79,7 @@ function service() {
   const { native, listeners } = nativeMock();
   const backend = backendMock();
   return {
-    service: new AppleIapService(native, backend as any, 'ios'),
+    service: new AppleIapService(native, backend as any, 'ios', true),
     native: native as any,
     backend,
     listeners,
@@ -92,8 +92,29 @@ async function flushAsyncWork() {
 }
 
 describe('AppleIapService direct StoreKit orchestration', () => {
+  it('makes zero native and backend calls when the product model is disabled', async () => {
+    const { native } = nativeMock();
+    const backend = backendMock();
+    const instance = new AppleIapService(native, backend as any, 'ios', false);
+
+    instance.beginSession(7);
+    expect(instance.isAvailable()).toBe(false);
+    await expect(instance.startTransactionUpdates()).resolves.toBe(false);
+    await expect(instance.recoverUnfinishedTransactions()).resolves.toEqual({ recovered: 0, failed: 0 });
+    await expect(instance.runLifecycleSync()).resolves.toMatchObject({ verifiedCount: 0, ignoredCount: 0 });
+    await expect(instance.getProducts()).rejects.toMatchObject({ code: 'apple_iap_disabled' });
+    await expect(instance.purchase(productId)).rejects.toMatchObject({ code: 'apple_iap_disabled' });
+    await expect(instance.restorePurchases()).rejects.toMatchObject({ code: 'apple_iap_disabled' });
+    await expect(instance.showManageSubscriptions()).rejects.toMatchObject({ code: 'apple_iap_disabled' });
+
+    for (const mock of Object.values(native as any)) {
+      if (typeof mock === 'function' && 'mock' in mock) expect(mock).not.toHaveBeenCalled();
+    }
+    for (const mock of Object.values(backend)) expect(mock).not.toHaveBeenCalled();
+  });
+
   it('fails safely when the native module is unavailable', async () => {
-    const instance = new AppleIapService(null, backendMock() as any, 'ios');
+    const instance = new AppleIapService(null, backendMock() as any, 'ios', true);
     expect(instance.isAvailable()).toBe(false);
     await expect(instance.getProducts()).rejects.toMatchObject({
       code: 'apple_iap_native_module_unavailable',
@@ -102,7 +123,7 @@ describe('AppleIapService direct StoreKit orchestration', () => {
 
   it('does not invoke the Apple module on Android', async () => {
     const { native } = nativeMock();
-    const instance = new AppleIapService(native, backendMock() as any, 'android');
+    const instance = new AppleIapService(native, backendMock() as any, 'android', true);
     expect(await instance.recoverUnfinishedTransactions()).toEqual({ recovered: 0, failed: 0 });
     await expect(instance.purchase(productId)).rejects.toBeInstanceOf(AppleIapError);
     expect((native as any).purchase).not.toHaveBeenCalled();

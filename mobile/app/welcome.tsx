@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
-import { View, StyleSheet } from 'react-native';
+import { Platform, View, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { WelcomeTopNav } from '@src/components/welcome/WelcomeTopNav';
 import { WelcomeRoleSelector } from '@src/components/welcome/WelcomeRoleSelector';
@@ -13,8 +13,10 @@ import { useWelcomePricingCatalog } from '@src/hooks/useWelcomePricingCatalog';
 import { ensureWelcomeSelectedPlanId } from '@src/utils/welcomePricingMapper';
 import { SubscriptionType } from '@src/services/api/subscriptions';
 import { analytics, AnalyticsEvent } from '@src/services/analytics';
+import { isIosFreeCompanion } from '@src/config/iosProductModel';
 
 export default function WelcomeScreen() {
+  const iosFreeCompanion = isIosFreeCompanion(Platform.OS);
   const [role, setRole] = useState<WelcomeRole>('master');
   const [pricingVisible, setPricingVisible] = useState(false);
   const [authVisible, setAuthVisible] = useState(false);
@@ -25,9 +27,9 @@ export default function WelcomeScreen() {
     plans: pricingPlans,
     loading: pricingLoading,
     fallbackUsed: pricingFallbackUsed,
-  } = useWelcomePricingCatalog(SubscriptionType.MASTER);
+  } = useWelcomePricingCatalog(SubscriptionType.MASTER, !iosFreeCompanion);
 
-  const slides = getWelcomeSlidesForRole(role);
+  const slides = getWelcomeSlidesForRole(role, { includePricing: !iosFreeCompanion });
 
   useEffect(() => {
     if (pricingLoading) return;
@@ -50,6 +52,7 @@ export default function WelcomeScreen() {
           onHomePress={() => {}}
           onPricingPress={() => setPricingVisible(true)}
           onAuthPress={() => setAuthVisible(true)}
+          showPricing={!iosFreeCompanion}
         />
         <WelcomeRoleSelector role={role} onRoleChange={handleRoleChange} />
       </View>
@@ -63,9 +66,9 @@ export default function WelcomeScreen() {
         onPeriodChange={setSelectedPeriodMonths}
         selectedPlanId={selectedPlanId}
         onSelectPlan={setSelectedPlanId}
-        onPricingPress={() => setPricingVisible(true)}
+        onPricingPress={iosFreeCompanion ? undefined : () => setPricingVisible(true)}
       />
-      <WelcomePricingModal
+      {!iosFreeCompanion ? <WelcomePricingModal
         visible={pricingVisible}
         onClose={() => setPricingVisible(false)}
         pricingPlans={pricingPlans}
@@ -75,7 +78,7 @@ export default function WelcomeScreen() {
         onPeriodChange={setSelectedPeriodMonths}
         selectedPlanId={selectedPlanId}
         onSelectPlan={setSelectedPlanId}
-      />
+      /> : null}
       <WelcomeAuthSheet visible={authVisible} onClose={() => setAuthVisible(false)} />
     </SafeAreaView>
   );

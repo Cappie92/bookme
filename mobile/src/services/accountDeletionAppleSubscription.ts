@@ -3,6 +3,7 @@ import {
   SubscriptionStatus,
   type Subscription,
 } from '@src/services/api/subscriptions';
+import { IOS_IAP_ENABLED } from '@src/config/iosProductModel';
 
 export type AccountDeletionSubscriptionCheck = 'warn_active_apple' | 'continue_deletion';
 
@@ -19,8 +20,10 @@ export function hasActiveAppleSubscription(
  * failure falls through to the existing deletion confirmation.
  */
 export async function checkAppleSubscriptionBeforeAccountDeletion(
-  loadSubscription: () => Promise<Subscription | null> = fetchCurrentSubscription
+  loadSubscription: () => Promise<Subscription | null> = fetchCurrentSubscription,
+  iapEnabled: boolean = IOS_IAP_ENABLED
 ): Promise<AccountDeletionSubscriptionCheck> {
+  if (!iapEnabled) return 'continue_deletion';
   try {
     const subscription = await loadSubscription();
     return hasActiveAppleSubscription(subscription)

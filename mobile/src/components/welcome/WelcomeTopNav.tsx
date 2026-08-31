@@ -4,9 +4,10 @@ type WelcomeTopNavProps = {
   onHomePress: () => void;
   onPricingPress: () => void;
   onAuthPress: () => void;
+  showPricing?: boolean;
 };
 
-export function WelcomeTopNav({ onHomePress, onPricingPress, onAuthPress }: WelcomeTopNavProps) {
+export function WelcomeTopNav({ onHomePress, onPricingPress, onAuthPress, showPricing = true }: WelcomeTopNavProps) {
   return (
     <View style={styles.container}>
       <View style={styles.brandRow}>
@@ -29,16 +30,18 @@ export function WelcomeTopNav({ onHomePress, onPricingPress, onAuthPress }: Welc
             Главная
           </Text>
         </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.navItem}
-          onPress={onPricingPress}
-          testID="welcome-nav-pricing"
-          accessibilityRole="button"
-        >
-          <Text style={styles.navText} numberOfLines={1}>
-            Цены
-          </Text>
-        </TouchableOpacity>
+        {showPricing ? (
+          <TouchableOpacity
+            style={styles.navItem}
+            onPress={onPricingPress}
+            testID="welcome-nav-pricing"
+            accessibilityRole="button"
+          >
+            <Text style={styles.navText} numberOfLines={1}>
+              Цены
+            </Text>
+          </TouchableOpacity>
+        ) : null}
         <TouchableOpacity
           style={styles.navItem}
           onPress={onAuthPress}

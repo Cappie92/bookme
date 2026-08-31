@@ -32,7 +32,8 @@ from schemas import (
     SubscriptionFreezeOut,
     SubscriptionFreezeInfo,
     SubscriptionCalculationRequest,
-    SubscriptionCalculationResponse
+    SubscriptionCalculationResponse,
+    SubscriptionAccessSummaryOut,
 )
 from auth import get_current_user
 from constants import duration_months_to_days
@@ -234,6 +235,164 @@ async def get_my_subscription(
         "is_active": bool(getattr(subscription, "is_active", False)),
         **billing_fields,
     }
+
+
+_ACCESS_FEATURE_KEYS = (
+    "has_booking_page",
+    "has_unlimited_bookings",
+    "has_extended_stats",
+    "has_loyalty_access",
+    "has_finance_access",
+    "has_client_restrictions",
+    "can_customize_domain",
+    "has_clients_access",
+    "max_page_modules",
+    "stats_retention_days",
+)
+
+
+def _access_features_for_plan(plan: Optional[SubscriptionPlan], *, always_free: bool) -> dict:
+    if plan:
+        raw_features = plan.features or {}
+        limits = plan.limits or {}
+        service_function_ids = set(raw_features.get("service_functions") or [])
+        max_future_bookings = limits.get("max_future_bookings")
+        return {
+            "has_booking_page": 1 in service_function_ids,
+            "has_unlimited_bookings": max_future_bookings in (None, 0),
+            "has_extended_stats": 2 in service_function_ids,
+            "has_loyalty_access": 3 in service_function_ids,
+            "has_finance_access": 4 in service_function_ids,
+            "has_client_restrictions": 5 in service_function_ids,
+            "can_customize_domain": 6 in service_function_ids,
+            "has_clients_access": 7 in service_function_ids,
+            "max_page_modules": int(raw_features.get("max_page_modules") or 0),
+            "stats_retention_days": int(raw_features.get("stats_retention_days") or 0),
+        }
+    if always_free:
+        return {
+            "has_booking_page": True,
+            "has_unlimited_bookings": True,
+            "has_extended_stats": True,
+            "has_loyalty_access": True,
+            "has_finance_access": True,
+            "has_client_restrictions": True,
+            "can_customize_domain": True,
+            "has_clients_access": True,
+            "max_page_modules": 999999,
+            "stats_retention_days": 0,
+        }
+    return {
+        "has_booking_page": True,
+        "has_unlimited_bookings": False,
+        "has_extended_stats": False,
+        "has_loyalty_access": False,
+        "has_finance_access": False,
+        "has_client_restrictions": False,
+        "can_customize_domain": False,
+        "has_clients_access": False,
+        "max_page_modules": 0,
+        "stats_retention_days": 30,
+    }
+
+
+@router.get(
+    "/access-summary",
+    response_model=SubscriptionAccessSummaryOut,
+    summary="Минимальная сводка текущего доступа для iOS companion",
+)
+def get_subscription_access_summary(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> SubscriptionAccessSummaryOut:
+    """Возвращает entitlement/features/limit без purchase и billing metadata."""
+    role = str(getattr(current_user.role, "value", current_user.role)).lower()
+    if role not in ("master", "indie"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Access summary is available only for masters",
+        )
+
+    from models import Booking, IndieMaster
+    from utils.booking_limit_guard import FREE_ACTIVE_FUTURE_BOOKINGS_LIMIT
+    from utils.master_future_bookings_query import active_future_bookings_owner_filter
+    from utils.subscription_features import get_active_subscription_readonly
+
+    now_utc = datetime.utcnow()
+    master = db.query(Master).filter(Master.user_id == current_user.id).first()
+    if not master:
+        raise HTTPException(status_code=404, detail="Master profile not found")
+    indie = db.query(IndieMaster).filter(IndieMaster.master_id == master.id).first()
+    current_active_bookings = (
+        db.query(func.count(Booking.id))
+        .filter(
+            active_future_bookings_owner_filter(
+                master_id=master.id,
+                indie_master_id=indie.id if indie else None,
+                now_utc=now_utc,
+            )
+        )
+        .scalar()
+        or 0
+    )
+
+    subscription = get_active_subscription_readonly(
+        db, current_user.id, SubscriptionType.MASTER, now_utc=now_utc
+    )
+    subscription_plan = (
+        db.query(SubscriptionPlan).filter(SubscriptionPlan.id == subscription.plan_id).first()
+        if subscription and subscription.plan_id
+        else None
+    )
+    is_always_free = bool(current_user.is_always_free)
+
+    if is_always_free:
+        access_level = "always_free"
+        plan = (
+            db.query(SubscriptionPlan)
+            .filter(
+                SubscriptionPlan.name == "AlwaysFree",
+                SubscriptionPlan.subscription_type == SubscriptionType.MASTER,
+            )
+            .first()
+        )
+        plan_name = "AlwaysFree"
+        plan_display_name = plan.display_name if plan else "AlwaysFree"
+        max_future_bookings = None
+        end_date = None
+    elif subscription_plan and subscription_plan.name != "Free":
+        access_level = "paid"
+        plan = subscription_plan
+        plan_name = plan.name
+        plan_display_name = plan.display_name
+        raw_limit = (plan.limits or {}).get("max_future_bookings")
+        max_future_bookings = (
+            int(raw_limit) if isinstance(raw_limit, (int, float)) and raw_limit > 0 else None
+        )
+        end_date = subscription.end_date if subscription else None
+    else:
+        access_level = "free"
+        plan = subscription_plan if subscription_plan and subscription_plan.name == "Free" else None
+        plan_name = "Free"
+        plan_display_name = plan.display_name if plan else "Free"
+        max_future_bookings = FREE_ACTIVE_FUTURE_BOOKINGS_LIMIT
+        end_date = None
+
+    raw_features = _access_features_for_plan(plan, always_free=is_always_free)
+    features = {key: raw_features[key] for key in _ACCESS_FEATURE_KEYS}
+    return SubscriptionAccessSummaryOut(
+        access_level=access_level,
+        plan_name=plan_name,
+        plan_display_name=plan_display_name,
+        status=(subscription.status.value if access_level == "paid" and subscription else "active"),
+        is_active=True,
+        end_date=end_date,
+        is_always_free=is_always_free,
+        features=features,
+        current_active_bookings=current_active_bookings,
+        max_future_bookings=max_future_bookings,
+        is_unlimited=max_future_bookings is None,
+    )
 
 
 @router.post("/upgrade", response_model=SubscriptionOut)
@@ -1709,4 +1868,4 @@ def cleanup_expired_snapshots(db: Session):
         db.delete(snapshot)
     
     db.commit()
-    return len(expired) 
+    return len(expired)

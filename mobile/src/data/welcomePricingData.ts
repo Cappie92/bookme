@@ -32,7 +32,7 @@ export const WELCOME_PRICING_FALLBACK_PLANS: WelcomePricingPlan[] = [
     price6Months: 0,
     price12Months: 0,
     featuresIncluded: [
-      '30 активных записей',
+      '20 активных записей',
       'Онлайн-запись',
       'Базовая публичная страница',
     ],

@@ -9,9 +9,9 @@ import { shouldEnableAppleIapLifecycle } from '@src/components/subscriptions/App
 
 describe('Apple IAP lifecycle gating', () => {
   it.each(['master', 'MASTER', 'indie'])(
-    'enables authenticated iOS subscription lifecycle for %s',
+    'keeps authenticated iOS subscription lifecycle disabled for %s',
     (role) => {
-      expect(shouldEnableAppleIapLifecycle('ios', true, role)).toBe(true);
+      expect(shouldEnableAppleIapLifecycle('ios', true, role)).toBe(false);
     }
   );
 

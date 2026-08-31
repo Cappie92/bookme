@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert, Modal, TextInput, ScrollView, RefreshControl } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert, Modal, TextInput, ScrollView, RefreshControl, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Clipboard from 'expo-clipboard';
@@ -31,8 +31,10 @@ import { BOTTOM_NAV_CONTENT_FALLBACK_HEIGHT } from '@src/constants/bottomNavLayo
 import { completePasswordMutationLogout } from '@src/auth/passwordMutationLogout';
 import { AppleSubscriptionDeletionWarningModal } from '@src/components/AppleSubscriptionDeletionWarningModal';
 import { checkAppleSubscriptionBeforeAccountDeletion } from '@src/services/accountDeletionAppleSubscription';
+import { isIosFreeCompanion } from '@src/config/iosProductModel';
 
 export default function MasterSettingsScreen() {
+  const iosFreeCompanion = isIosFreeCompanion(Platform.OS);
   const pathname = usePathname();
   const { logout } = useAuth();
   const insets = useSafeAreaInsets();
@@ -511,14 +513,14 @@ export default function MasterSettingsScreen() {
       </View>
 
       {/* Модальное окно смены пароля */}
-      <AppleSubscriptionDeletionWarningModal
+      {!iosFreeCompanion ? <AppleSubscriptionDeletionWarningModal
         visible={showAppleDeleteWarning}
         onCancel={() => setShowAppleDeleteWarning(false)}
         onContinueDeletion={() => {
           setShowAppleDeleteWarning(false);
           setShowDeleteModal(true);
         }}
-      />
+      /> : null}
 
       <Modal
         visible={showPasswordModal}

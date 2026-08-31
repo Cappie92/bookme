@@ -38,6 +38,7 @@ import {
   type ProfitChartPoint,
 } from '@src/utils/accountingChartPoint';
 import { useAuth } from '@src/auth/AuthContext';
+import { isIosFreeCompanion } from '@src/config/iosProductModel';
 import {
   FINANCE_DIAG_ENABLED,
   logFinanceDiag,
@@ -1945,6 +1946,7 @@ function SectionHeader({ title, showDemo }: { title: string; showDemo: boolean }
 }
 
 export default function MasterFinanceScreen() {
+  const iosFreeCompanion = isIosFreeCompanion(Platform.OS);
   const { features, loading: featuresLoading } = useMasterFeatures();
   const { user, logout } = useAuth();
   const insets = useSafeAreaInsets();
@@ -1995,12 +1997,12 @@ export default function MasterFinanceScreen() {
   const cheapestPlanName = getCheapestPlanForFeature(plans, 'has_finance_access');
 
   useEffect(() => {
-    if (features) {
+    if (features && !iosFreeCompanion) {
       fetchAvailableSubscriptions(SubscriptionType.MASTER)
         .then(setPlans)
         .catch((err) => console.error('Error loading plans:', err));
     }
-  }, [features]);
+  }, [features, iosFreeCompanion]);
 
   useEffect(() => {
     if (startDate && endDate) {
@@ -2847,7 +2849,7 @@ export default function MasterFinanceScreen() {
                 style={[styles.headerButtonBase, styles.headerButtonPrimary]}
                 onPress={() => {
                   if (!hasFinanceAccess) {
-                    router.push('/subscriptions');
+                    if (!iosFreeCompanion) router.push('/subscriptions');
                     return;
                   }
                   setEditingExpense(null);
@@ -3382,12 +3384,12 @@ export default function MasterFinanceScreen() {
       {effectiveDemoMode && (
         <View style={[styles.demoFloatingBar, { bottom: floatingBarBottom, height: FLOATING_BAR_HEIGHT }]}>
           <Text style={styles.demoFloatingText}>Показан пример данных</Text>
-          <TouchableOpacity
+          {!iosFreeCompanion ? <TouchableOpacity
             style={styles.demoFloatingPrimary}
             onPress={() => router.push('/subscriptions')}
           >
             <Text style={styles.demoFloatingPrimaryText}>Перейти к тарифам</Text>
-          </TouchableOpacity>
+          </TouchableOpacity> : null}
         </View>
       )}
       <TaxRateModal

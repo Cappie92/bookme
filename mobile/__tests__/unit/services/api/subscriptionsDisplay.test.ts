@@ -1,5 +1,6 @@
 import {
   calculateSubscription,
+  fetchSubscriptionAccessSummary,
   getDisplayDaysRemaining,
   getDaysRemaining,
   Subscription,
@@ -32,6 +33,37 @@ function baseSub(overrides: Partial<Subscription> = {}): Subscription {
 describe('getDisplayDaysRemaining', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+  });
+
+  it('loads the minimal iOS access-only contract', async () => {
+    const data = {
+      access_level: 'free',
+      plan_name: 'Free',
+      plan_display_name: 'Free',
+      status: 'active',
+      is_active: true,
+      end_date: null,
+      is_always_free: false,
+      features: {
+        has_booking_page: true,
+        has_unlimited_bookings: false,
+        has_extended_stats: false,
+        has_loyalty_access: false,
+        has_finance_access: false,
+        has_client_restrictions: false,
+        can_customize_domain: false,
+        has_clients_access: false,
+        max_page_modules: 0,
+        stats_retention_days: 30,
+      },
+      current_active_bookings: 3,
+      max_future_bookings: 20,
+      is_unlimited: false,
+    };
+    (apiClient.get as jest.Mock).mockResolvedValueOnce({ data });
+
+    await expect(fetchSubscriptionAccessSummary()).resolves.toEqual(data);
+    expect(apiClient.get).toHaveBeenCalledWith('/api/subscriptions/access-summary');
   });
 
   it('prefers API days_remaining over local calendar', () => {

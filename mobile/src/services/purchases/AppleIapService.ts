@@ -16,6 +16,7 @@ import {
   type AppleTransactionVerifyResponse,
 } from '@src/services/api/payments';
 import { listAppleIapProductIds } from './appleProductMap';
+import { IOS_IAP_ENABLED } from '@src/config/iosProductModel';
 
 const MAX_RECOVERY_TRANSACTIONS = 20;
 
@@ -76,20 +77,31 @@ export class AppleIapService {
   constructor(
     private readonly nativeModule: DeDatoStoreKitNativeModule | null = DeDatoStoreKit,
     private readonly backend: AppleBackendApi = defaultBackend,
-    private readonly platform: string = Platform.OS
+    private readonly platform: string = Platform.OS,
+    private readonly iapEnabled: boolean = IOS_IAP_ENABLED
   ) {}
 
   isAvailable(): boolean {
-    return this.platform === 'ios' && this.nativeModule != null;
+    return this.iapEnabled && this.platform === 'ios' && this.nativeModule != null;
   }
 
   beginSession(userId: number): void {
+    if (!this.iapEnabled) {
+      this.stopAndReset();
+      return;
+    }
     if (this.sessionUserId === userId) return;
     this.stopAndReset();
     this.sessionUserId = userId;
   }
 
   private requireNative(): DeDatoStoreKitNativeModule {
+    if (!this.iapEnabled) {
+      throw new AppleIapError(
+        'apple_iap_disabled',
+        'Apple IAP отключён для текущей продуктовой модели'
+      );
+    }
     if (this.platform !== 'ios') {
       throw new AppleIapError('apple_iap_ios_only', 'Apple IAP доступен только на iOS');
     }
