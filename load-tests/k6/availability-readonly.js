@@ -10,6 +10,7 @@
  */
 import http from 'k6/http';
 import { check, sleep } from 'k6';
+import exec from 'k6/execution';
 import { Counter, Rate, Trend } from 'k6/metrics';
 
 const UA = 'DeDato-LoadTest/read-only-availability';
@@ -145,9 +146,14 @@ function buildOptions() {
   parseOptionalServiceId();
 
   const profile = envTrim('PROFILE') || 'smoke';
-  if (profile !== 'smoke' && profile !== 'baseline' && profile !== 'staircase') {
+  if (
+    profile !== 'smoke' &&
+    profile !== 'baseline' &&
+    profile !== 'staircase' &&
+    profile !== 'ramp'
+  ) {
     throw new Error(
-      `PROFILE must be "smoke", "baseline" or "staircase" (got ${JSON.stringify(profile)})`,
+      `PROFILE must be "smoke", "baseline", "staircase" or "ramp" (got ${JSON.stringify(profile)})`,
     );
   }
 
@@ -157,6 +163,14 @@ function buildOptions() {
 
   if (profile === 'staircase') {
     requireEnvExact('CONFIRM_STAIRCASE', 'YES');
+  }
+
+  if (profile === 'ramp') {
+    requireEnvExact('CONFIRM_RAMP', 'YES');
+  } else if (envTrim('CONFIRM_RAMP')) {
+    throw new Error(
+      `CONFIRM_RAMP is only allowed with PROFILE=ramp (got PROFILE=${JSON.stringify(profile)})`,
+    );
   }
 
   const observeRaw = envTrim('CONFIRM_STAIRCASE_OBSERVE');
@@ -211,6 +225,57 @@ function buildOptions() {
         },
       },
       thresholds: smokeBaselineThresholds,
+    };
+  }
+
+  if (profile === 'ramp') {
+    // delayAbortEval is from test start. Hold error delays = hold start + 30s:
+    // hold_10 at 30s → 1m; hold_20 at 165s → 3m15s;
+    // hold_30 at 300s → 5m30s; hold_40 at 435s → 7m45s.
+    const rampHoldThresholds = (stepName, delayAbortEval) => ({
+      [`availability_duration{load_step:${stepName}}`]: [
+        { threshold: 'p(95)<1000', abortOnFail: false },
+        { threshold: 'p(99)<2000', abortOnFail: false },
+      ],
+      [`availability_errors{load_step:${stepName}}`]: [
+        { threshold: 'rate<0.01', abortOnFail: true, delayAbortEval },
+      ],
+      [`availability_5xx{load_step:${stepName}}`]: [
+        { threshold: 'count==0', abortOnFail: true },
+      ],
+    });
+
+    return {
+      scenarios: {
+        availability_ramp: {
+          executor: 'ramping-vus',
+          exec: 'availability_ramp',
+          startVUs: 0,
+          gracefulRampDown: '15s',
+          gracefulStop: '15s',
+          stages: [
+            { duration: '30s', target: 10 },
+            { duration: '2m', target: 10 },
+            { duration: '15s', target: 20 },
+            { duration: '2m', target: 20 },
+            { duration: '15s', target: 30 },
+            { duration: '2m', target: 30 },
+            { duration: '15s', target: 40 },
+            { duration: '2m', target: 40 },
+            { duration: '15s', target: 0 },
+          ],
+        },
+      },
+      thresholds: {
+        ...rampHoldThresholds('availability_hold_10', '1m'),
+        ...rampHoldThresholds('availability_hold_20', '3m15s'),
+        ...rampHoldThresholds('availability_hold_30', '5m30s'),
+        ...rampHoldThresholds('availability_hold_40', '7m45s'),
+        availability_5xx: [{ threshold: 'count==0', abortOnFail: true }],
+        availability_errors: [
+          { threshold: 'rate<0.01', abortOnFail: true, delayAbortEval: '30s' },
+        ],
+      },
     };
   }
 
@@ -362,6 +427,30 @@ export function setup() {
   };
 }
 
+/**
+ * Ramp phase from elapsed time since exec.scenario.startTime (VU context only).
+ * Boundaries are half-open except the final [555s, 570s] mapped to ramp_down;
+ * later graceful leftover also stays on ramp_down so hold thresholds stay clean.
+ */
+function currentRampLoadStep() {
+  const startMs = exec.scenario.startTime;
+  if (typeof startMs !== 'number' || !Number.isFinite(startMs)) {
+    throw new Error(
+      `exec.scenario.startTime must be a finite number of milliseconds (got ${typeof startMs})`,
+    );
+  }
+  const elapsedS = (Date.now() - startMs) / 1000;
+  if (elapsedS < 30) return 'ramp_to_10';
+  if (elapsedS < 150) return 'availability_hold_10';
+  if (elapsedS < 165) return 'ramp_to_20';
+  if (elapsedS < 285) return 'availability_hold_20';
+  if (elapsedS < 300) return 'ramp_to_30';
+  if (elapsedS < 420) return 'availability_hold_30';
+  if (elapsedS < 435) return 'ramp_to_40';
+  if (elapsedS < 555) return 'availability_hold_40';
+  return 'ramp_down';
+}
+
 function runAvailabilityIteration(data, loadStep) {
   const url =
     `${data.baseUrl}/api/public/masters/${encodeURIComponent(data.slug)}/availability` +
@@ -369,9 +458,12 @@ function runAvailabilityIteration(data, loadStep) {
     `&from_date=${encodeURIComponent(data.fromDate)}` +
     `&to_date=${encodeURIComponent(data.toDate)}`;
 
+  // Tag immediately before the HTTP request (not after the response, not before sleep).
+  const step = PROFILE === 'ramp' ? currentRampLoadStep() : loadStep;
+
   const requestTags = { name: 'availability' };
-  if (loadStep) {
-    requestTags.load_step = loadStep;
+  if (step) {
+    requestTags.load_step = step;
   }
 
   const res = http.get(url, {
@@ -380,7 +472,7 @@ function runAvailabilityIteration(data, loadStep) {
   });
 
   const is5xx = res.status >= 500 && res.status <= 599;
-  const metricTags = loadStep ? { load_step: loadStep } : undefined;
+  const metricTags = step ? { load_step: step } : undefined;
 
   // setup() requests must not feed this trend — only VU availability calls do.
   if (metricTags) {
@@ -389,7 +481,7 @@ function runAvailabilityIteration(data, loadStep) {
     availabilityDuration.add(res.timings.duration);
   }
 
-  if (loadStep) {
+  if (step) {
     // Always sample tagged Counter (including 0) so each step submetric exists.
     availability5xx.add(is5xx ? 1 : 0, metricTags);
   } else if (is5xx) {
@@ -419,7 +511,7 @@ function runAvailabilityIteration(data, loadStep) {
     availabilityErrors.add(ok ? 0 : 1);
   }
 
-  if (PROFILE === 'baseline' || PROFILE === 'staircase') {
+  if (PROFILE === 'baseline' || PROFILE === 'staircase' || PROFILE === 'ramp') {
     // Client-like think time for availability step: 4–12 seconds.
     sleep(4 + Math.random() * 8);
   }
@@ -443,4 +535,8 @@ export function availability_step_30(data) {
 
 export function availability_step_40(data) {
   runAvailabilityIteration(data, 'availability_step_40');
+}
+
+export function availability_ramp(data) {
+  runAvailabilityIteration(data, null);
 }

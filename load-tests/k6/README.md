@@ -50,10 +50,11 @@
 | `BASE_URL` | да | Только `https://test.dedato.ru` (path `/` или пустой). Любой другой host/protocol/port/path/query/credentials → ошибка до HTTP. |
 | `MASTER_SLUG` | да | Публичный slug мастера (`masters.domain`). Не захардкожен. |
 | `CONFIRM_STAGING` | да | Должно быть ровно `YES`. |
-| `PROFILE` | нет (default `smoke`) | `smoke`, `baseline` или `staircase`. Иное значение → ошибка. |
-| `CONFIRM_BASELINE` | для `baseline` | Должно быть ровно `YES`, иначе baseline не стартует (до любых HTTP). Для `staircase` не требуется. |
+| `PROFILE` | нет (default `smoke`) | `smoke`, `baseline`, `staircase` или `ramp`. Иное значение → ошибка. |
+| `CONFIRM_BASELINE` | для `baseline` | Должно быть ровно `YES`, иначе baseline не стартует (до любых HTTP). Для `staircase`/`ramp` не требуется. |
 | `CONFIRM_STAIRCASE` | для `staircase` | Должно быть ровно `YES`, иначе staircase не стартует (до любых HTTP). |
-| `CONFIRM_STAIRCASE_OBSERVE` | только `staircase` | Если задана — только ровно `YES`. Наблюдательный режим: latency SLO не abort'ит. Для smoke/baseline запрещена. |
+| `CONFIRM_STAIRCASE_OBSERVE` | только `staircase` | Если задана — только ровно `YES`. Наблюдательный режим: latency SLO не abort'ит. Для smoke/baseline/`ramp` запрещена. |
+| `CONFIRM_RAMP` | для `ramp` | Должно быть ровно `YES`, иначе ramp не стартует (до любых HTTP). Для smoke/baseline/staircase запрещена. |
 | `SERVICE_ID` | нет | Положительный id услуги из карточки. Если не задан — берётся первая услуга с валидным `id`. |
 | `FROM_DATE` | нет | `YYYY-MM-DD`. Если не задан — текущая **UTC**-дата. Несуществующие даты отклоняются. |
 | `TO_DATE` | запрещена | `to_date` всегда считается скриптом как `from_date + 14 дней`. |
@@ -65,6 +66,7 @@
 * **smoke** (по умолчанию): `shared-iterations`, 1 VU, 1 iteration, `maxDuration` 1m. Без think-time.
 * **baseline**: `constant-vus`, ровно 10 VU, ровно 5 минут, `gracefulStop` 15s; случайная пауза **4–12 с** после availability.
 * **staircase**: четыре последовательных `constant-vus` ступени 10 → 20 → 30 → 40 VU. Требует `CONFIRM_STAIRCASE=YES`. Не запускать без отдельного разрешения после ревью.
+* **ramp**: один непрерывный `ramping-vus` scenario `availability_ramp` до 40 VU. Требует `CONFIRM_RAMP=YES`. Контроль устойчивых плато без синхронного перезапуска всех VU на каждой ступени. Это **не** утверждение, что 40 VU — предел системы; потолок тот же, что уже смотрели наблюдательным staircase. Не запускать без отдельного разрешения после ревью.
 
 Точное расписание staircase:
 
@@ -80,6 +82,38 @@
 Каждая staircase-итерация явно ставит тег `load_step=<имя scenario>` на HTTP availability и на custom metrics `availability_duration`, `availability_errors`, `availability_5xx`. Thresholds считаются **отдельно по каждой ступени**. Любой 5xx останавливает весь запуск (tagged `count==0` без delay плюс общий untagged `availability_5xx`). Для latency/error rate в обычном staircase `abortOnFail` с `delayAbortEval` от начала теста: 10 VU → `30s`, 20 VU → `2m45s`, 30 VU → `5m`, 40 VU → `7m15s`.
 
 **Наблюдательный staircase** (`CONFIRM_STAIRCASE=YES` и `CONFIRM_STAIRCASE_OBSERVE=YES`): те же ступени, HTTP, паузы и теги. Tagged latency `p(95)<1000` / `p(99)<2000` остаются, но `abortOnFail` выключен — превышение latency фиксируется как failed threshold и **не** рвёт ступени. Итоговый exit code k6 может быть ненулевым после полного прогона из‑за latency SLO — это ожидаемо. Thresholds `availability_5xx count==0` по-прежнему с немедленным `abortOnFail`; `availability_errors rate<0.01` сохраняет `abortOnFail` и те же `delayAbortEval`. Без `CONFIRM_STAIRCASE_OBSERVE=YES` поведение обычного staircase не меняется.
+
+Точные stages ramp (сумма **9m30s**), `startVUs: 0`, `gracefulRampDown: 15s`, `gracefulStop: 15s`:
+
+| Фаза | duration | target |
+| ---- | -------: | -----: |
+| плавный старт | `30s` | 10 |
+| удержание 10 VU | `2m` | 10 |
+| рост | `15s` | 20 |
+| удержание 20 VU | `2m` | 20 |
+| рост | `15s` | 30 |
+| удержание 30 VU | `2m` | 30 |
+| рост | `15s` | 40 |
+| удержание 40 VU | `2m` | 40 |
+| плавная остановка | `15s` | 0 |
+
+`gracefulRampDown: 15s` совпадает с длительностью последней стадии и покрывает think-time 4–12 с плюс типичный запрос: при снижении VU уже начатая итерация может завершиться, не меняя таблицу stages. `gracefulStop: 15s` начинается **после** 9m30s stages и тоже не сдвигает stages.
+
+`load_step` для ramp считается **непосредственно перед** GET availability по `Date.now() - exec.scenario.startTime` (`k6/execution`). Фазы роста и остановки **не** входят в latency SLO.
+
+| От начала scenario | `load_step` |
+| ------------------ | ----------- |
+| `[0s,30s)` | `ramp_to_10` |
+| `[30s,150s)` | `availability_hold_10` |
+| `[150s,165s)` | `ramp_to_20` |
+| `[165s,285s)` | `availability_hold_20` |
+| `[285s,300s)` | `ramp_to_30` |
+| `[300s,420s)` | `availability_hold_30` |
+| `[420s,435s)` | `ramp_to_40` |
+| `[435s,555s)` | `availability_hold_40` |
+| `[555s,570s]` (и leftover graceful) | `ramp_down` |
+
+Официальный SLO (`p(95)<1000`, `p(99)<2000`, errors `rate<0.01`, 5xx `count==0`) для ramp считается **только на плато** `availability_hold_*`. Latency плато — `abortOnFail=false`: прогон должен пройти все плато; итоговый exit code может быть `99`. Tagged errors плато сохраняют `abortOnFail` с `delayAbortEval` = старт плато + 30s (`1m` / `3m15s` / `5m30s` / `7m45s`). Tagged и общий untagged 5xx — немедленный abort. Общий untagged `availability_errors` — abort с `delayAbortEval: 30s` на весь ramp, включая переходные фазы. Пауза **4–12 с**. `setup()` один раз.
 
 ### Окно дат
 
@@ -120,6 +154,8 @@ Custom metrics (запросы `setup()` в них **не** входят):
 
 Для `staircase` те же SLO применяются к каждой ступени через tagged thresholds `metric{load_step:availability_step_N}`; общий `availability_5xx count==0` без delay остаётся страховкой на весь запуск.
 
+Для `ramp` latency SLO применяется только к `availability_hold_10/20/30/40` и не abort'ит. Samples `ramp_to_*` / `ramp_down` в эти thresholds не входят. Errors/5xx abort сохраняются как выше.
+
 ## Примеры команд (НЕ ЗАПУСКАТЬ СЕЙЧАС)
 
 > **Крупное предупреждение**
@@ -129,6 +165,7 @@ Custom metrics (запросы `setup()` в них **не** входят):
 > * **Baseline** и **staircase** разрешены только отдельным явным решением после ревью и проверки стенда.
 > * Не запускайте `PROFILE=staircase` без отдельного разрешения.
 > * Наблюдательный staircase (`CONFIRM_STAIRCASE_OBSERVE=YES`) тоже только по отдельному разрешению.
+> * `PROFILE=ramp` (`CONFIRM_RAMP=YES`) только по отдельному разрешению после ревью.
 
 Smoke (пример):
 
@@ -175,6 +212,18 @@ k6 run --out json=/tmp/dedato-staircase-observe.json \
   load-tests/k6/availability-readonly.js
 ```
 
+Ramp (пример; **не запускать без отдельного разрешения**). Один `ramping-vus` scenario; SLO по плато; latency не abort'ит (возможен exit `99`); 5xx/errors abort. JSON только во **временный** путь вне репозитория (не коммитить). `--out json` не добавляйте к smoke или baseline.
+
+```bash
+CONFIRM_STAGING=YES \
+CONFIRM_RAMP=YES \
+BASE_URL='https://test.dedato.ru' \
+MASTER_SLUG='YOUR_TEST_MASTER_SLUG' \
+PROFILE=ramp \
+k6 run --out json=/tmp/dedato-ramp.json \
+  load-tests/k6/availability-readonly.js
+```
+
 Опционально: `SERVICE_ID=…`, `FROM_DATE=YYYY-MM-DD`.
 
 ## Секреты
@@ -187,7 +236,7 @@ k6 run --out json=/tmp/dedato-staircase-observe.json \
 * UTC-время старта/финиша;
 * локальный git commit (ветка сценария);
 * deployed commit стенда;
-* профиль (`smoke` / `baseline` / `staircase`);
+* профиль (`smoke` / `baseline` / `staircase` / `ramp`);
 * использованные `MASTER_SLUG` и `service_id`;
 * версию k6;
 * p50 / p95 / p99 availability (для staircase — отдельно по каждому `load_step`);
