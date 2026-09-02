@@ -13,7 +13,7 @@ import { check, sleep } from 'k6';
 import { Counter, Rate, Trend } from 'k6/metrics';
 
 const UA = 'DeDato-LoadTest/read-only-availability';
-const STAGING_HOST = 'test.dedato.ru';
+const CANONICAL_BASE_URL = 'https://test.dedato.ru';
 
 const availabilityDuration = new Trend('availability_duration', true);
 const availabilityErrors = new Rate('availability_errors');
@@ -46,40 +46,19 @@ function requireNonEmpty(name) {
 }
 
 /**
- * Strict staging gate: https://test.dedato.ru only (path / or empty).
- * Rejects production, localhost, IPs, credentials, ports, query, hash, extra paths.
+ * Strict staging gate: after trim, only exact
+ *   https://test.dedato.ru
+ *   https://test.dedato.ru/
+ * are accepted. No URL parser — k6 init has no global URL.
  */
 function assertStagingBaseUrl(raw) {
-  let u;
-  try {
-    u = new URL(raw);
-  } catch (e) {
-    throw new Error(`BASE_URL is not a valid URL: ${String(e)}`);
+  const trimmed = String(raw == null ? '' : raw).trim();
+  if (trimmed !== CANONICAL_BASE_URL && trimmed !== `${CANONICAL_BASE_URL}/`) {
+    throw new Error(
+      `BASE_URL must be exactly "${CANONICAL_BASE_URL}" or "${CANONICAL_BASE_URL}/" (got ${JSON.stringify(trimmed || '(empty)')})`,
+    );
   }
-
-  if (u.protocol !== 'https:') {
-    throw new Error(`BASE_URL protocol must be https: (got ${u.protocol})`);
-  }
-  if (u.hostname !== STAGING_HOST) {
-    throw new Error(`BASE_URL hostname must be exactly ${STAGING_HOST} (got ${u.hostname})`);
-  }
-  if (u.port !== '') {
-    throw new Error(`BASE_URL must not use a non-default port (got :${u.port})`);
-  }
-  if (u.username !== '' || u.password !== '') {
-    throw new Error('BASE_URL must not contain username or password');
-  }
-  if (u.search !== '') {
-    throw new Error('BASE_URL must not contain a query string');
-  }
-  if (u.hash !== '') {
-    throw new Error('BASE_URL must not contain a hash fragment');
-  }
-  if (u.pathname !== '/' && u.pathname !== '') {
-    throw new Error(`BASE_URL path must be empty or "/" (got ${JSON.stringify(u.pathname)})`);
-  }
-
-  return `https://${STAGING_HOST}`;
+  return CANONICAL_BASE_URL;
 }
 
 function parseStrictYmd(value, label) {
@@ -166,16 +145,22 @@ function buildOptions() {
   parseOptionalServiceId();
 
   const profile = envTrim('PROFILE') || 'smoke';
-  if (profile !== 'smoke' && profile !== 'baseline') {
-    throw new Error(`PROFILE must be "smoke" or "baseline" (got ${JSON.stringify(profile)})`);
+  if (profile !== 'smoke' && profile !== 'baseline' && profile !== 'staircase') {
+    throw new Error(
+      `PROFILE must be "smoke", "baseline" or "staircase" (got ${JSON.stringify(profile)})`,
+    );
   }
 
   if (profile === 'baseline') {
     requireEnvExact('CONFIRM_BASELINE', 'YES');
   }
 
-  // SLO thresholds: 5xx aborts immediately; latency/error-rate wait for a stable sample.
-  const thresholds = {
+  if (profile === 'staircase') {
+    requireEnvExact('CONFIRM_STAIRCASE', 'YES');
+  }
+
+  // Untagged SLO for smoke/baseline. 5xx aborts immediately; latency/error-rate wait 30s.
+  const smokeBaselineThresholds = {
     availability_duration: [
       { threshold: 'p(95)<1000', abortOnFail: true, delayAbortEval: '30s' },
       { threshold: 'p(99)<2000', abortOnFail: true, delayAbortEval: '30s' },
@@ -196,20 +181,83 @@ function buildOptions() {
           maxDuration: '1m',
         },
       },
-      thresholds,
+      thresholds: smokeBaselineThresholds,
     };
   }
 
+  if (profile === 'baseline') {
+    return {
+      scenarios: {
+        availability_baseline: {
+          executor: 'constant-vus',
+          vus: 10,
+          duration: '5m',
+          gracefulStop: '15s',
+        },
+      },
+      thresholds: smokeBaselineThresholds,
+    };
+  }
+
+  // delayAbortEval is from test start, not scenario start.
+  // Step 10: 0s+30s → 30s; step 20: 2m15s+30s → 2m45s;
+  // step 30: 4m30s+30s → 5m; step 40: 6m45s+30s → 7m15s.
+  const stepThresholds = (stepName, delayAbortEval) => ({
+    [`availability_duration{load_step:${stepName}}`]: [
+      { threshold: 'p(95)<1000', abortOnFail: true, delayAbortEval },
+      { threshold: 'p(99)<2000', abortOnFail: true, delayAbortEval },
+    ],
+    [`availability_errors{load_step:${stepName}}`]: [
+      { threshold: 'rate<0.01', abortOnFail: true, delayAbortEval },
+    ],
+    [`availability_5xx{load_step:${stepName}}`]: [
+      { threshold: 'count==0', abortOnFail: true },
+    ],
+  });
+
   return {
     scenarios: {
-      availability_baseline: {
+      availability_step_10: {
         executor: 'constant-vus',
+        exec: 'availability_step_10',
+        startTime: '0s',
         vus: 10,
-        duration: '5m',
-        gracefulStop: '15s',
+        duration: '2m',
+        gracefulStop: '10s',
+      },
+      availability_step_20: {
+        executor: 'constant-vus',
+        exec: 'availability_step_20',
+        startTime: '2m15s',
+        vus: 20,
+        duration: '2m',
+        gracefulStop: '10s',
+      },
+      availability_step_30: {
+        executor: 'constant-vus',
+        exec: 'availability_step_30',
+        startTime: '4m30s',
+        vus: 30,
+        duration: '2m',
+        gracefulStop: '10s',
+      },
+      availability_step_40: {
+        executor: 'constant-vus',
+        exec: 'availability_step_40',
+        startTime: '6m45s',
+        vus: 40,
+        duration: '2m',
+        gracefulStop: '10s',
       },
     },
-    thresholds,
+    thresholds: {
+      ...stepThresholds('availability_step_10', '30s'),
+      ...stepThresholds('availability_step_20', '2m45s'),
+      ...stepThresholds('availability_step_30', '5m'),
+      ...stepThresholds('availability_step_40', '7m15s'),
+      // Untagged safety: any 5xx aborts the whole run immediately.
+      availability_5xx: [{ threshold: 'count==0', abortOnFail: true }],
+    },
   };
 }
 
@@ -298,22 +346,37 @@ export function setup() {
   };
 }
 
-export default function (data) {
+function runAvailabilityIteration(data, loadStep) {
   const url =
     `${data.baseUrl}/api/public/masters/${encodeURIComponent(data.slug)}/availability` +
     `?service_id=${encodeURIComponent(String(data.serviceId))}` +
     `&from_date=${encodeURIComponent(data.fromDate)}` +
     `&to_date=${encodeURIComponent(data.toDate)}`;
 
+  const requestTags = { name: 'availability' };
+  if (loadStep) {
+    requestTags.load_step = loadStep;
+  }
+
   const res = http.get(url, {
     headers: commonHeaders(),
-    tags: { name: 'availability' },
+    tags: requestTags,
   });
 
-  // setup() requests must not feed this trend — only VU availability calls do.
-  availabilityDuration.add(res.timings.duration);
+  const is5xx = res.status >= 500 && res.status <= 599;
+  const metricTags = loadStep ? { load_step: loadStep } : undefined;
 
-  if (res.status >= 500 && res.status <= 599) {
+  // setup() requests must not feed this trend — only VU availability calls do.
+  if (metricTags) {
+    availabilityDuration.add(res.timings.duration, metricTags);
+  } else {
+    availabilityDuration.add(res.timings.duration);
+  }
+
+  if (loadStep) {
+    // Always sample tagged Counter (including 0) so each step submetric exists.
+    availability5xx.add(is5xx ? 1 : 0, metricTags);
+  } else if (is5xx) {
     availability5xx.add(1);
   }
 
@@ -334,10 +397,34 @@ export default function (data) {
     'availability is not 5xx': (r) => r.status < 500 || r.status > 599,
   });
 
-  availabilityErrors.add(ok ? 0 : 1);
+  if (metricTags) {
+    availabilityErrors.add(ok ? 0 : 1, metricTags);
+  } else {
+    availabilityErrors.add(ok ? 0 : 1);
+  }
 
-  if (PROFILE === 'baseline') {
+  if (PROFILE === 'baseline' || PROFILE === 'staircase') {
     // Client-like think time for availability step: 4–12 seconds.
     sleep(4 + Math.random() * 8);
   }
+}
+
+export default function (data) {
+  runAvailabilityIteration(data, null);
+}
+
+export function availability_step_10(data) {
+  runAvailabilityIteration(data, 'availability_step_10');
+}
+
+export function availability_step_20(data) {
+  runAvailabilityIteration(data, 'availability_step_20');
+}
+
+export function availability_step_30(data) {
+  runAvailabilityIteration(data, 'availability_step_30');
+}
+
+export function availability_step_40(data) {
+  runAvailabilityIteration(data, 'availability_step_40');
 }

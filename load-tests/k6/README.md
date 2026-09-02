@@ -50,8 +50,9 @@
 | `BASE_URL` | да | Только `https://test.dedato.ru` (path `/` или пустой). Любой другой host/protocol/port/path/query/credentials → ошибка до HTTP. |
 | `MASTER_SLUG` | да | Публичный slug мастера (`masters.domain`). Не захардкожен. |
 | `CONFIRM_STAGING` | да | Должно быть ровно `YES`. |
-| `PROFILE` | нет (default `smoke`) | `smoke` или `baseline`. Иное значение → ошибка. |
-| `CONFIRM_BASELINE` | для `baseline` | Должно быть ровно `YES`, иначе baseline не стартует (до любых HTTP). |
+| `PROFILE` | нет (default `smoke`) | `smoke`, `baseline` или `staircase`. Иное значение → ошибка. |
+| `CONFIRM_BASELINE` | для `baseline` | Должно быть ровно `YES`, иначе baseline не стартует (до любых HTTP). Для `staircase` не требуется. |
+| `CONFIRM_STAIRCASE` | для `staircase` | Должно быть ровно `YES`, иначе staircase не стартует (до любых HTTP). |
 | `SERVICE_ID` | нет | Положительный id услуги из карточки. Если не задан — берётся первая услуга с валидным `id`. |
 | `FROM_DATE` | нет | `YYYY-MM-DD`. Если не задан — текущая **UTC**-дата. Несуществующие даты отклоняются. |
 | `TO_DATE` | запрещена | `to_date` всегда считается скриптом как `from_date + 14 дней`. |
@@ -61,7 +62,21 @@
 ### Режимы
 
 * **smoke** (по умолчанию): `shared-iterations`, 1 VU, 1 iteration, `maxDuration` 1m. Без think-time.
-* **baseline**: `constant-vus`, ровно 10 VU, ровно 5 минут, `gracefulStop` 15s; случайная пауза **4–12 с** после availability. Лестница 25/50/100/200 VU не предусмотрена.
+* **baseline**: `constant-vus`, ровно 10 VU, ровно 5 минут, `gracefulStop` 15s; случайная пауза **4–12 с** после availability.
+* **staircase**: четыре последовательных `constant-vus` ступени 10 → 20 → 30 → 40 VU. Требует `CONFIRM_STAIRCASE=YES`. Не запускать без отдельного разрешения после ревью.
+
+Точное расписание staircase:
+
+| Scenario | startTime | VU | duration | gracefulStop |
+| -------- | --------: | -: | -------: | -----------: |
+| `availability_step_10` | `0s` | 10 | `2m` | `10s` |
+| `availability_step_20` | `2m15s` | 20 | `2m` | `10s` |
+| `availability_step_30` | `4m30s` | 30 | `2m` | `10s` |
+| `availability_step_40` | `6m45s` | 40 | `2m` | `10s` |
+
+Между концом `duration + gracefulStop` предыдущей ступени и `startTime` следующей остаётся **5 секунд**, поэтому ступени не пересекаются даже при полном gracefulStop. Максимальная длительность всего запуска — около **8m55s** (`6m45s + 2m + 10s`). Ориентировочно **1400–1600** availability-запросов (не фиксированное обязательное число). Пауза **4–12 с** после каждого availability. `setup()` выполняется один раз.
+
+Каждая staircase-итерация явно ставит тег `load_step=<имя scenario>` на HTTP availability и на custom metrics `availability_duration`, `availability_errors`, `availability_5xx`. Thresholds считаются **отдельно по каждой ступени**. Любой 5xx останавливает весь запуск (tagged `count==0` без delay плюс общий untagged `availability_5xx`). Для latency/error rate `abortOnFail` с `delayAbortEval` от начала теста: 10 VU → `30s`, 20 VU → `2m45s`, 30 VU → `5m`, 40 VU → `7m15s`.
 
 ### Окно дат
 
@@ -98,7 +113,9 @@ Custom metrics (запросы `setup()` в них **не** входят):
 * error rate `< 1%`
 * число `5xx` строго `0` (немедленный abort)
 
-Для latency и error rate включён `abortOnFail` с `delayAbortEval: 30s`, чтобы baseline не рвался из-за одного стартового замера; `5xx` останавливает сразу.
+Для `smoke` и `baseline`: latency и error rate — `abortOnFail` с `delayAbortEval: 30s`, чтобы прогон не рвался из-за одного стартового замера; `5xx` (`count==0`) без delay.
+
+Для `staircase` те же SLO применяются к каждой ступени через tagged thresholds `metric{load_step:availability_step_N}`; общий `availability_5xx count==0` без delay остаётся страховкой на весь запуск.
 
 ## Примеры команд (НЕ ЗАПУСКАТЬ СЕЙЧАС)
 
@@ -106,8 +123,8 @@ Custom metrics (запросы `setup()` в них **не** входят):
 >
 > * Эти команды приведены как черновик на будущее — **сейчас не запускать**.
 > * Перед любым прогоном отдельно подтвердить: deployed commit стенда, тип БД, nginx/Uvicorn topology и серверный мониторинг.
-> * **Baseline** разрешён только отдельным явным решением после smoke и проверки стенда.
-> * Не устанавливайте k6 в рамках этого этапа — установка будет отдельным шагом.
+> * **Baseline** и **staircase** разрешены только отдельным явным решением после ревью и проверки стенда.
+> * Не запускайте `PROFILE=staircase` без отдельного разрешения.
 
 Smoke (пример):
 
@@ -130,6 +147,17 @@ PROFILE=baseline \
 k6 run load-tests/k6/availability-readonly.js
 ```
 
+Staircase (пример; **не запускать без отдельного разрешения**):
+
+```bash
+CONFIRM_STAGING=YES \
+CONFIRM_STAIRCASE=YES \
+BASE_URL='https://test.dedato.ru' \
+MASTER_SLUG='YOUR_TEST_MASTER_SLUG' \
+PROFILE=staircase \
+k6 run load-tests/k6/availability-readonly.js
+```
+
 Опционально: `SERVICE_ID=…`, `FROM_DATE=YYYY-MM-DD`.
 
 ## Секреты
@@ -142,11 +170,11 @@ k6 run load-tests/k6/availability-readonly.js
 * UTC-время старта/финиша;
 * локальный git commit (ветка сценария);
 * deployed commit стенда;
-* профиль (`smoke` / `baseline`);
+* профиль (`smoke` / `baseline` / `staircase`);
 * использованные `MASTER_SLUG` и `service_id`;
 * версию k6;
-* p50 / p95 / p99 availability;
-* error rate и число `5xx`;
+* p50 / p95 / p99 availability (для staircase — отдельно по каждому `load_step`);
+* error rate и число `5xx` (для staircase — отдельно по ступени и общий);
 * при наличии SSH: CPU / RAM / SQLite (или иная БД) / server logs за окно прогона.
 
 ## Файлы
