@@ -53,6 +53,7 @@
 | `PROFILE` | нет (default `smoke`) | `smoke`, `baseline` или `staircase`. Иное значение → ошибка. |
 | `CONFIRM_BASELINE` | для `baseline` | Должно быть ровно `YES`, иначе baseline не стартует (до любых HTTP). Для `staircase` не требуется. |
 | `CONFIRM_STAIRCASE` | для `staircase` | Должно быть ровно `YES`, иначе staircase не стартует (до любых HTTP). |
+| `CONFIRM_STAIRCASE_OBSERVE` | только `staircase` | Если задана — только ровно `YES`. Наблюдательный режим: latency SLO не abort'ит. Для smoke/baseline запрещена. |
 | `SERVICE_ID` | нет | Положительный id услуги из карточки. Если не задан — берётся первая услуга с валидным `id`. |
 | `FROM_DATE` | нет | `YYYY-MM-DD`. Если не задан — текущая **UTC**-дата. Несуществующие даты отклоняются. |
 | `TO_DATE` | запрещена | `to_date` всегда считается скриптом как `from_date + 14 дней`. |
@@ -76,7 +77,9 @@
 
 Между концом `duration + gracefulStop` предыдущей ступени и `startTime` следующей остаётся **5 секунд**, поэтому ступени не пересекаются даже при полном gracefulStop. Максимальная длительность всего запуска — около **8m55s** (`6m45s + 2m + 10s`). Ориентировочно **1400–1600** availability-запросов (не фиксированное обязательное число). Пауза **4–12 с** после каждого availability. `setup()` выполняется один раз.
 
-Каждая staircase-итерация явно ставит тег `load_step=<имя scenario>` на HTTP availability и на custom metrics `availability_duration`, `availability_errors`, `availability_5xx`. Thresholds считаются **отдельно по каждой ступени**. Любой 5xx останавливает весь запуск (tagged `count==0` без delay плюс общий untagged `availability_5xx`). Для latency/error rate `abortOnFail` с `delayAbortEval` от начала теста: 10 VU → `30s`, 20 VU → `2m45s`, 30 VU → `5m`, 40 VU → `7m15s`.
+Каждая staircase-итерация явно ставит тег `load_step=<имя scenario>` на HTTP availability и на custom metrics `availability_duration`, `availability_errors`, `availability_5xx`. Thresholds считаются **отдельно по каждой ступени**. Любой 5xx останавливает весь запуск (tagged `count==0` без delay плюс общий untagged `availability_5xx`). Для latency/error rate в обычном staircase `abortOnFail` с `delayAbortEval` от начала теста: 10 VU → `30s`, 20 VU → `2m45s`, 30 VU → `5m`, 40 VU → `7m15s`.
+
+**Наблюдательный staircase** (`CONFIRM_STAIRCASE=YES` и `CONFIRM_STAIRCASE_OBSERVE=YES`): те же ступени, HTTP, паузы и теги. Tagged latency `p(95)<1000` / `p(99)<2000` остаются, но `abortOnFail` выключен — превышение latency фиксируется как failed threshold и **не** рвёт ступени. Итоговый exit code k6 может быть ненулевым после полного прогона из‑за latency SLO — это ожидаемо. Thresholds `availability_5xx count==0` по-прежнему с немедленным `abortOnFail`; `availability_errors rate<0.01` сохраняет `abortOnFail` и те же `delayAbortEval`. Без `CONFIRM_STAIRCASE_OBSERVE=YES` поведение обычного staircase не меняется.
 
 ### Окно дат
 
@@ -125,6 +128,7 @@ Custom metrics (запросы `setup()` в них **не** входят):
 > * Перед любым прогоном отдельно подтвердить: deployed commit стенда, тип БД, nginx/Uvicorn topology и серверный мониторинг.
 > * **Baseline** и **staircase** разрешены только отдельным явным решением после ревью и проверки стенда.
 > * Не запускайте `PROFILE=staircase` без отдельного разрешения.
+> * Наблюдательный staircase (`CONFIRM_STAIRCASE_OBSERVE=YES`) тоже только по отдельному разрешению.
 
 Smoke (пример):
 
@@ -156,6 +160,19 @@ BASE_URL='https://test.dedato.ru' \
 MASTER_SLUG='YOUR_TEST_MASTER_SLUG' \
 PROFILE=staircase \
 k6 run load-tests/k6/availability-readonly.js
+```
+
+Наблюдательный staircase (пример; **не запускать без отдельного разрешения**). Latency SLO не abort'ит; 5xx и error rate по-прежнему abort. После полного прогона exit code может быть ненулевым из‑за failed `p(95)`/`p(99)`. Для точечных samples используйте `--out json` только во **временный** путь вне репозитория (не коммитить). JSON нужен для времени каждого metric sample, сопоставления задержек с `load_step`, поиска отдельных медленных запросов и последующей корреляции с серверными событиями. Этот `--out` не добавляйте к smoke или baseline.
+
+```bash
+CONFIRM_STAGING=YES \
+CONFIRM_STAIRCASE=YES \
+CONFIRM_STAIRCASE_OBSERVE=YES \
+BASE_URL='https://test.dedato.ru' \
+MASTER_SLUG='YOUR_TEST_MASTER_SLUG' \
+PROFILE=staircase \
+k6 run --out json=/tmp/dedato-staircase-observe.json \
+  load-tests/k6/availability-readonly.js
 ```
 
 Опционально: `SERVICE_ID=…`, `FROM_DATE=YYYY-MM-DD`.

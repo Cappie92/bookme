@@ -159,6 +159,21 @@ function buildOptions() {
     requireEnvExact('CONFIRM_STAIRCASE', 'YES');
   }
 
+  const observeRaw = envTrim('CONFIRM_STAIRCASE_OBSERVE');
+  if (observeRaw) {
+    if (observeRaw !== 'YES') {
+      throw new Error(
+        `CONFIRM_STAIRCASE_OBSERVE must be exactly "YES" when set (got ${JSON.stringify(observeRaw)})`,
+      );
+    }
+    if (profile !== 'staircase') {
+      throw new Error(
+        `CONFIRM_STAIRCASE_OBSERVE=YES is only allowed with PROFILE=staircase (got ${JSON.stringify(profile)})`,
+      );
+    }
+  }
+  const staircaseObserve = observeRaw === 'YES';
+
   // Untagged SLO for smoke/baseline. 5xx aborts immediately; latency/error-rate wait 30s.
   const smokeBaselineThresholds = {
     availability_duration: [
@@ -202,10 +217,11 @@ function buildOptions() {
   // delayAbortEval is from test start, not scenario start.
   // Step 10: 0s+30s → 30s; step 20: 2m15s+30s → 2m45s;
   // step 30: 4m30s+30s → 5m; step 40: 6m45s+30s → 7m15s.
+  const durationAbortOnFail = !staircaseObserve;
   const stepThresholds = (stepName, delayAbortEval) => ({
     [`availability_duration{load_step:${stepName}}`]: [
-      { threshold: 'p(95)<1000', abortOnFail: true, delayAbortEval },
-      { threshold: 'p(99)<2000', abortOnFail: true, delayAbortEval },
+      { threshold: 'p(95)<1000', abortOnFail: durationAbortOnFail, delayAbortEval },
+      { threshold: 'p(99)<2000', abortOnFail: durationAbortOnFail, delayAbortEval },
     ],
     [`availability_errors{load_step:${stepName}}`]: [
       { threshold: 'rate<0.01', abortOnFail: true, delayAbortEval },
