@@ -38,8 +38,7 @@ import { installMobileErrorDebugHandlers } from '@src/debug/mobileErrorDebugBoot
 import { MobileErrorDebugPanel } from '@src/debug/MobileErrorDebugPanel';
 import { authTrace } from '@src/debug/authRuntimeTrace';
 import { analytics, AcquisitionService, isAppMetricaTestEventEnabled } from '@src/services/analytics';
-import { AppleIapLifecycle } from '@src/components/subscriptions/AppleIapLifecycle';
-import { IOS_IAP_ENABLED } from '@src/config/iosProductModel';
+import { AppleIapLifecycleHost } from '@src/components/subscriptions/AppleIapLifecycleHost';
 
 const FAILSAFE_MS = 8000;
 const DRAFT_TIMEOUT_MS = 2000;
@@ -55,11 +54,12 @@ let lastDeeplinkAtMs: number = 0;
 const WARM_PRIORITY_MS = 10000;
 
 function navigateToSubscriptionsRoute(source: string) {
+  const target = appInternalRouteToPath('subscriptions');
   try {
     if (__DEV__ && (env.DEBUG_AUTH || env.DEBUG_LOGS)) {
-      logger.debug('auth', `[DEEPLINK] navigate -> /subscriptions (${source})`);
+      logger.debug('auth', `[DEEPLINK] internal route navigate (${source})`);
     }
-    router.replace('/subscriptions' as any);
+    router.replace(target as any);
   } catch (e) {
     if (__DEV__ && env.DEBUG_AUTH) logger.debug('auth', '[DEEPLINK] subscriptions replace error', e);
   }
@@ -184,7 +184,7 @@ function AuthGate({ children, rootInstanceId }: { children: React.ReactNode; roo
         if (initialUrlResult !== null) return;
         const internalRoute = parseAppInternalRouteFromUrl(url);
         if (internalRoute) {
-          setPendingMasterRoute(appInternalRouteToPath(internalRoute) as '/subscriptions');
+          setPendingMasterRoute(appInternalRouteToPath(internalRoute) as '/' | '/subscriptions');
           initialUrlResult = { isPublic: false, slug: null, url: url ?? undefined, source: 'initial' };
           setInitialUrlIsPublic(false);
           void AcquisitionService.recordTouchFromUrl(url);
@@ -251,7 +251,7 @@ function AuthGate({ children, rootInstanceId }: { children: React.ReactNode; roo
       void AcquisitionService.recordTouchFromUrl(url);
       const internalRoute = parseAppInternalRouteFromUrl(url);
       if (internalRoute) {
-        setPendingMasterRoute(appInternalRouteToPath(internalRoute) as '/subscriptions');
+        setPendingMasterRoute(appInternalRouteToPath(internalRoute) as '/' | '/subscriptions');
         navigateToSubscriptionsRoute('event');
         return;
       }
@@ -561,7 +561,7 @@ export default function RootLayout() {
     <SafeAreaProvider>
       <AuthProvider>
         <PasswordResetRecoveryProvider>
-          {IOS_IAP_ENABLED === true ? <AppleIapLifecycle /> : null}
+          <AppleIapLifecycleHost />
           <TabBarHeightProvider>
             <AuthGate rootInstanceId={rootInstanceIdRef.current}>
               <Stack screenOptions={{ headerShown: false }}>

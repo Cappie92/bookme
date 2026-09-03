@@ -62,14 +62,25 @@ describe('Apple subscription account-deletion guard', () => {
     expect(load).not.toHaveBeenCalled();
   });
 
-  it('is wired into both mobile deletion settings flows', () => {
+  it('keeps the client warning and isolates the master warning behind a platform boundary', () => {
     const root = path.resolve(__dirname, '../../..');
     const client = readFileSync(path.join(root, 'app/(client)/settings/index.tsx'), 'utf8');
     const master = readFileSync(path.join(root, 'app/(master)/master/settings.tsx'), 'utf8');
-    for (const source of [client, master]) {
-      expect(source).toContain('checkAppleSubscriptionBeforeAccountDeletion')
-      expect(source).toContain('AppleSubscriptionDeletionWarningModal')
-      expect(source).toContain('setShowDeleteModal(true)')
-    }
+    const iosGuard = readFileSync(
+      path.join(root, 'src/services/accountDeletionSubscriptionGuard.ios.ts'),
+      'utf8'
+    );
+    const iosWarningHost = readFileSync(
+      path.join(root, 'src/components/AccountDeletionSubscriptionWarningHost.ios.tsx'),
+      'utf8'
+    );
+
+    expect(client).toContain('checkSubscriptionBeforeAccountDeletion');
+    expect(client).toContain('AccountDeletionSubscriptionWarningHost');
+    expect(master).toContain('checkSubscriptionBeforeAccountDeletion');
+    expect(master).toContain('AccountDeletionSubscriptionWarningHost');
+    expect(master).toContain('setShowDeleteModal(true)');
+    expect(iosGuard).not.toContain('checkAppleSubscriptionBeforeAccountDeletion');
+    expect(iosWarningHost).not.toContain('AppleSubscriptionDeletionWarningModal');
   });
 });

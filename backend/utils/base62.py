@@ -3,6 +3,7 @@
 Base62 использует символы: 0-9, a-z, A-Z (62 символа)
 """
 import random
+import re
 import string
 from sqlalchemy.orm import Session
 from models import Master
@@ -10,6 +11,32 @@ from models import Master
 
 # Base62 алфавит: 0-9, a-z, A-Z
 BASE62_ALPHABET = string.digits + string.ascii_lowercase + string.ascii_uppercase
+RESERVED_MASTER_DOMAINS = {
+    "admin", "api", "auth", "master", "client", "salon", "pricing", "payment",
+    "blog", "about", "register", "account-deletion", "privacy-policy",
+    "user-agreement", "personal-data-consent",
+}
+
+
+def normalize_custom_master_domain(raw: str) -> str:
+    return re.sub(r"\s+", "-", str(raw or "").strip().lower())
+
+
+def validate_custom_master_domain(raw: str) -> str:
+    domain = normalize_custom_master_domain(raw)
+    if not domain:
+        raise ValueError("Укажите адрес страницы")
+    if len(domain) < 2:
+        raise ValueError("Минимум 2 символа")
+    if len(domain) > 64:
+        raise ValueError("Максимум 64 символа")
+    if not re.fullmatch(r"[a-z0-9-]+", domain):
+        raise ValueError("Только латиница, цифры и дефис")
+    if domain.startswith("-") or domain.endswith("-"):
+        raise ValueError("Адрес не может начинаться или заканчиваться дефисом")
+    if domain in RESERVED_MASTER_DOMAINS:
+        raise ValueError("Этот адрес зарезервирован")
+    return domain
 
 
 def generate_base62_id(length: int = 8) -> str:
@@ -77,4 +104,3 @@ def generate_unique_domain(master_id: int, db: Session, max_attempts: int = 10) 
     
     # В крайнем случае используем ID мастера (fallback)
     return f"m-{master_id}"
-

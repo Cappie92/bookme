@@ -1,6 +1,7 @@
 import { buildAbsoluteApiUrl } from '@src/utils/buildAbsoluteApiUrl';
 import { fieldErrorsFromApiDetail, messageFromApiDetail } from '@src/utils/apiErrorMessage';
 import { apiClient } from './client';
+import { Platform } from 'react-native';
 
 export class ProfileSaveApiError extends Error {
   readonly fieldErrors: Record<string, string>;
@@ -286,7 +287,8 @@ export interface ScheduleRule {
  * Получить настройки мастера.
  */
 export async function getMasterSettings(): Promise<MasterSettings> {
-  const response = await apiClient.get<MasterSettings>('/api/master/settings');
+  const suffix = Platform.OS === 'ios' ? '?client_surface=ios_fixed' : '';
+  const response = await apiClient.get<MasterSettings>(`/api/master/settings${suffix}`);
   return response.data;
 }
 
@@ -424,6 +426,7 @@ export async function getDashboardStats(
   if (params?.anchor_date) search.set('anchor_date', params.anchor_date);
   if (params?.window_before != null) search.set('window_before', String(params.window_before));
   if (params?.window_after != null) search.set('window_after', String(params.window_after));
+  if (Platform.OS === 'ios') search.set('client_surface', 'ios_fixed');
   const response = await apiClient.get<DashboardStats>(`/api/master/dashboard/stats?${search.toString()}`);
   return response.data;
 }

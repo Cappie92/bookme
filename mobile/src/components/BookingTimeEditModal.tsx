@@ -12,6 +12,7 @@ interface BookingTimeEditModalProps {
   currentStartTime: string;
   serviceDuration: number;
   onBookingUpdated: () => void;
+  actor?: 'client' | 'master';
 }
 
 // Получить понедельник недели для указанной даты
@@ -58,6 +59,7 @@ export function BookingTimeEditModal({
   currentStartTime,
   serviceDuration,
   onBookingUpdated,
+  actor = 'client',
 }: BookingTimeEditModalProps) {
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [selectedSlot, setSelectedSlot] = useState<AvailableSlot | null>(null);
@@ -105,7 +107,7 @@ export function BookingTimeEditModal({
             return { dateStr, hasSlots: false };
           }
           try {
-            const data = await getAvailableSlots(bookingId, dateStr);
+            const data = await getAvailableSlots(bookingId, dateStr, actor);
             const hasSlots = !!(data.available_slots && data.available_slots.length > 0);
             return { dateStr, hasSlots };
           } catch {
@@ -133,7 +135,7 @@ export function BookingTimeEditModal({
     
     try {
       const dateStr = formatDate(date);
-      const data = await getAvailableSlots(bookingId, dateStr);
+      const data = await getAvailableSlots(bookingId, dateStr, actor);
       setSlotsData(data);
       setAvailableSlots(data.available_slots);
     } catch (error: any) {
@@ -164,7 +166,7 @@ export function BookingTimeEditModal({
       await updateBooking(bookingId, {
         start_time: selectedSlot.start_time,
         end_time: selectedSlot.end_time,
-      });
+      }, actor);
       
       Alert.alert('Успешно', 'Время бронирования изменено');
       onBookingUpdated();
@@ -488,4 +490,3 @@ const styles = StyleSheet.create({
     flex: 1,
   },
 });
-

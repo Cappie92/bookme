@@ -111,6 +111,11 @@ WEB_HANDOFF_TTL_SECONDS = 60
 WEB_SESSION_ORIGIN_IOS_APP = "ios_app"
 WEB_SESSION_ORIGIN_ANDROID_APP = "android_app"
 WEB_HANDOFF_ALLOWED_ORIGINS = {WEB_SESSION_ORIGIN_IOS_APP, WEB_SESSION_ORIGIN_ANDROID_APP}
+WEB_HANDOFF_IOS_DESTINATIONS = {
+    "schedule": "/master?tab=schedule",
+    "services": "/master?tab=services",
+    "settings": "/master?tab=settings&section=public-page",
+}
 PASSWORD_RESET_TOKEN_TTL_MINUTES = 15
 PASSWORD_RESET_GENERIC_MESSAGE = (
     "Если аккаунт с таким номером существует, звонок для восстановления будет отправлен."
@@ -148,6 +153,7 @@ class OAuthOnboardingCompleteRequest(BaseModel):
 
 class WebHandoffCreateRequest(BaseModel):
     origin: Optional[str] = None
+    destination: Optional[str] = None
 
 
 class WebHandoffExchangeRequest(BaseModel):
@@ -467,13 +473,19 @@ def _cleanup_memory_web_handoff() -> None:
             _web_handoff_memory_store.pop(key, None)
 
 
-def _store_web_handoff(user_id: int, origin: str, source_session_version: int) -> str:
+def _store_web_handoff(
+    user_id: int,
+    origin: str,
+    source_session_version: int,
+    destination: Optional[str] = None,
+) -> str:
     code = secrets.token_urlsafe(32)
     payload_dict = {
         "user_id": int(user_id),
         "origin": origin,
         "purpose": "web_handoff",
         "source_session_version": int(source_session_version),
+        "destination": destination,
     }
     payload = json.dumps(payload_dict, separators=(",", ":"))
     settings = get_settings()
@@ -504,13 +516,21 @@ def _consume_web_handoff(code: str) -> dict:
     try:
         from sms import redis_client
         key = _web_handoff_key(normalized)
-        raw = redis_client.get(key)
+        getdel = getattr(redis_client, "getdel", None)
+        if callable(getdel):
+            raw = getdel(key)
+        else:
+            raw = redis_client.eval(
+                "local v = redis.call('GET', KEYS[1]); "
+                "if v then redis.call('DEL', KEYS[1]); end; return v",
+                1,
+                key,
+            )
         if not raw:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Недействительный или истекший handoff code",
             )
-        redis_client.delete(key)
         data = json.loads(raw)
         data["user_id"] = int(data["user_id"])
         data.setdefault("purpose", "web_handoff")
@@ -1432,6 +1452,14 @@ def create_web_handoff(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Unsupported handoff origin",
         )
+    destination = None
+    if body is not None and body.destination is not None:
+        destination = str(body.destination).strip()
+    if origin == WEB_SESSION_ORIGIN_IOS_APP and destination not in WEB_HANDOFF_IOS_DESTINATIONS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Unsupported iOS handoff destination",
+        )
     if not current_user.is_active or getattr(current_user, "deleted_at", None) is not None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Inactive user")
 
@@ -1439,6 +1467,7 @@ def create_web_handoff(
         current_user.id,
         origin,
         current_user.session_version,
+        destination,
     )
     frontend = get_settings().FRONTEND_URL.rstrip("/")
     url = f"{frontend}/auth/mobile-handoff?code={code}"
@@ -1486,7 +1515,12 @@ def exchange_web_handoff(
         "phone_verified": user.phone_verified,
         "web_session_origin": web_session_origin,
     }
-    tokens["redirect_to"] = WEB_HANDOFF_REDIRECT_TO
+    destination = str(ticket_data.get("destination") or "").strip()
+    tokens["redirect_to"] = (
+        WEB_HANDOFF_IOS_DESTINATIONS.get(destination, "/master")
+        if origin == WEB_SESSION_ORIGIN_IOS_APP
+        else WEB_HANDOFF_REDIRECT_TO
+    )
     tokens["web_session_origin"] = web_session_origin
     return tokens
 

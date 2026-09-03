@@ -11,6 +11,7 @@ import { isSalonFeaturesEnabled } from '../config/features'
 import { Link, useNavigate } from 'react-router-dom'
 import AppleSubscriptionDeletionWarning from './AppleSubscriptionDeletionWarning'
 import { checkAppleSubscriptionBeforeAccountDeletion } from '../utils/accountDeletionApple'
+import { useAuth } from '../contexts/AuthContext'
 
 const getFrontendBaseUrl = () => {
   // Приоритетно используем явный адрес из env, если он задан
@@ -76,8 +77,9 @@ export default function MasterSettings({
   planName,
   subscriptionStatus = null,
 }) {
+  const { isIosAppWebSession } = useAuth()
   const isDemoMode = typeof window !== 'undefined' && localStorage.getItem('demo_mode') === '1'
-  const canCustomizeDomainEffective = isDemoMode || canCustomizeDomain
+  const canCustomizeDomainEffective = isDemoMode || canCustomizeDomain || isIosAppWebSession
   const hasExtendedStatsEffective = isDemoMode || hasExtendedStats
   
   const [profile, setProfile] = useState(null)
@@ -564,6 +566,10 @@ export default function MasterSettings({
     }
     setDeleteAccountPhase('call')
     setDeleteAccountCode('')
+    if (isIosAppWebSession) {
+      setShowDeleteAccountModal(true)
+      return
+    }
     const outcome = await checkAppleSubscriptionBeforeAccountDeletion()
     if (outcome === 'warn_active_apple') {
       setShowAppleDeleteWarning(true)
@@ -646,17 +652,24 @@ export default function MasterSettings({
     setError('')
     setSuccess('')
     try {
-            const formData = new FormData()
-            formData.append('background_color', websiteSettings.background_color || '#ffffff')
-            formData.append('site_description', websiteSettings.site_description || '')
-            if (websiteSettings.domain !== undefined && websiteSettings.domain !== '') {
-              formData.append('domain', websiteSettings.domain)
-            }
-      
-      const res = await apiFetch('/api/master/profile', {
-        method: 'PUT',
-        body: formData
-      })
+      let res
+      if (isIosAppWebSession) {
+        res = await apiFetch('/api/master/ios-web/domain', {
+          method: 'PUT',
+          body: JSON.stringify({ domain: websiteSettings.domain || '' }),
+        })
+      } else {
+        const formData = new FormData()
+        formData.append('background_color', websiteSettings.background_color || '#ffffff')
+        formData.append('site_description', websiteSettings.site_description || '')
+        if (websiteSettings.domain !== undefined && websiteSettings.domain !== '') {
+          formData.append('domain', websiteSettings.domain)
+        }
+        res = await apiFetch('/api/master/profile', {
+          method: 'PUT',
+          body: formData
+        })
+      }
       if (res.ok) {
         setSuccess('Сохранено')
         setWebsiteSettingsChanged(false)
@@ -1058,7 +1071,7 @@ export default function MasterSettings({
 
           <YandexAccountLinkPanel />
 
-          {!featuresLoading && (
+          {!isIosAppWebSession && !featuresLoading && (
             <div className="relative overflow-hidden rounded-[16px] bg-gradient-to-br from-[#1F2B23] via-[#2D4732] to-[#4CAF50] p-3.5 text-white shadow-[0_14px_36px_-16px_rgba(61,139,66,0.42)] sm:p-4">
               <div
                 className="pointer-events-none absolute -right-6 -top-6 h-32 w-32 rounded-full bg-[radial-gradient(circle,rgba(255,255,255,0.18),transparent_68%)]"
@@ -1709,7 +1722,7 @@ export default function MasterSettings({
 
       </div>
 
-      {showAppleDeleteWarning && (
+      {!isIosAppWebSession && showAppleDeleteWarning && (
         <AppleSubscriptionDeletionWarning
           onCancel={() => setShowAppleDeleteWarning(false)}
           onContinueDeletion={() => {

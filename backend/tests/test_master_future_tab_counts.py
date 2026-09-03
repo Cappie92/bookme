@@ -177,3 +177,9 @@ def test_hub_cancelled_statuses_exclude_completed():
     assert BookingStatus.COMPLETED.value not in statuses
     assert BookingStatus.PAYMENT_EXPIRED.value in statuses
     assert BookingStatus.CANCELLED.value in statuses
+
+
+def test_rejected_booking_is_not_active_future_occupancy():
+    from utils.master_future_bookings_query import inactive_future_statuses_tuple
+
+    assert "rejected" in inactive_future_statuses_tuple()

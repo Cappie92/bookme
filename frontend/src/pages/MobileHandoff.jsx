@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
+import { safeHandoffRedirect } from '../utils/webHandoffRedirect'
 
 const SESSION_ORIGIN_KEY = 'dedato_web_session_origin'
-
 export default function MobileHandoff() {
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
@@ -50,7 +50,7 @@ export default function MobileHandoff() {
           web_session_origin: data.web_session_origin || null,
         })
 
-        navigate('/pricing', { replace: true })
+        navigate(safeHandoffRedirect(data), { replace: true })
       } catch (e) {
         setError(e?.message || 'Не удалось выполнить вход')
       }
@@ -63,8 +63,8 @@ export default function MobileHandoff() {
         <div className="max-w-md w-full text-center space-y-4">
           <h1 className="text-xl font-bold text-[#1C1917]">Не удалось открыть сессию</h1>
           <p className="text-sm text-neutral-600">{error}</p>
-          <Link to="/pricing" className="inline-block text-[#4CAF50] font-medium hover:underline">
-            Перейти к тарифам
+          <Link to="/master" className="inline-block text-[#4CAF50] font-medium hover:underline">
+            Перейти в кабинет
           </Link>
         </div>
       </div>

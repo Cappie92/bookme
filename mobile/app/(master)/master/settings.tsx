@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert, Modal, TextInput, ScrollView, RefreshControl, Platform } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert, Modal, TextInput, ScrollView, RefreshControl } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Clipboard from 'expo-clipboard';
@@ -29,17 +29,16 @@ import { isSalonFeaturesEnabled as getSalonFeaturesEnabled } from '@src/config/f
 import { useTabBarHeight } from '@src/contexts/TabBarHeightContext';
 import { BOTTOM_NAV_CONTENT_FALLBACK_HEIGHT } from '@src/constants/bottomNavLayout';
 import { completePasswordMutationLogout } from '@src/auth/passwordMutationLogout';
-import { AppleSubscriptionDeletionWarningModal } from '@src/components/AppleSubscriptionDeletionWarningModal';
-import { checkAppleSubscriptionBeforeAccountDeletion } from '@src/services/accountDeletionAppleSubscription';
-import { isIosFreeCompanion } from '@src/config/iosProductModel';
+import { AccountDeletionSubscriptionWarningHost } from '@src/components/AccountDeletionSubscriptionWarningHost';
+import { checkSubscriptionBeforeAccountDeletion } from '@src/services/accountDeletionSubscriptionGuard';
+import { WebEditorButton } from '@src/components/WebEditorButton';
 
 export default function MasterSettingsScreen() {
-  const iosFreeCompanion = isIosFreeCompanion(Platform.OS);
   const pathname = usePathname();
   const { logout } = useAuth();
   const insets = useSafeAreaInsets();
   const { tabBarHeight } = useTabBarHeight();
-  const measuredTabBarHeight = tabBarHeight > 0 ? tabBarHeight : BOTTOM_NAV_CONTENT_FALLBACK_HEIGHT;
+  const measuredTabBarHeight = (tabBarHeight ?? 0) > 0 ? (tabBarHeight ?? 0) : BOTTOM_NAV_CONTENT_FALLBACK_HEIGHT;
   const scrollPaddingBottom = Math.max(insets.bottom, 8) + measuredTabBarHeight + 16;
   const [settings, setSettings] = useState<MasterSettings | null>(null);
   const [loading, setLoading] = useState(true);
@@ -207,7 +206,7 @@ export default function MasterSettingsScreen() {
   const openDeleteAccountModal = async () => {
     setDeletePhase('warn');
     setDeleteCode('');
-    const outcome = await checkAppleSubscriptionBeforeAccountDeletion();
+    const outcome = await checkSubscriptionBeforeAccountDeletion();
     if (outcome === 'warn_active_apple') {
       setShowAppleDeleteWarning(true);
       return;
@@ -416,6 +415,11 @@ export default function MasterSettingsScreen() {
             title="Управление сайтом"
             onEdit={() => setEditWebsiteVisible(true)}
           >
+            <WebEditorButton
+              destination="settings"
+              title="Настроить адрес страницы в браузере"
+              testID="ios-web-editor-settings"
+            />
             <View style={styles.infoBlock}>
               {settings.master.domain && (
                 <View style={styles.infoRow}>
@@ -513,14 +517,14 @@ export default function MasterSettingsScreen() {
       </View>
 
       {/* Модальное окно смены пароля */}
-      {!iosFreeCompanion ? <AppleSubscriptionDeletionWarningModal
+      <AccountDeletionSubscriptionWarningHost
         visible={showAppleDeleteWarning}
         onCancel={() => setShowAppleDeleteWarning(false)}
         onContinueDeletion={() => {
           setShowAppleDeleteWarning(false);
           setShowDeleteModal(true);
         }}
-      /> : null}
+      />
 
       <Modal
         visible={showPasswordModal}

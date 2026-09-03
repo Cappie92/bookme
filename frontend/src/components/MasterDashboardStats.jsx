@@ -229,7 +229,7 @@ export default function MasterDashboardStats({
 
   useEffect(() => {
     loadDashboardStats();
-    loadBookingsLimit();
+    if (!isIosAppWebSession) loadBookingsLimit();
     loadPastBookings();
     loadDesktopFutureBookings();
     loadDesktopPastPendingBookings();
@@ -352,7 +352,7 @@ export default function MasterDashboardStats({
       setConfirmLoading(true);
       await apiPost(`/api/master/accounting/update-booking-status/${bookingId}?new_status=confirmed`);
       await loadDashboardStats();
-      await loadBookingsLimit();
+      if (!isIosAppWebSession) await loadBookingsLimit();
       showToast('Принято', 'success', { quiet: true });
     } catch (err) {
       showToast(err?.response?.data?.detail || 'Ошибка при принятии записи', 'error');
@@ -431,7 +431,7 @@ export default function MasterDashboardStats({
         setLoading(false);
         return;
       }
-      const url = `/api/master/dashboard/stats?period=week&offset=0`;
+      const url = `/api/master/dashboard/stats?period=week&offset=0${isIosAppWebSession ? '&client_surface=ios_fixed' : ''}`;
       const response = await fetch(url, {
         headers: {
           'Authorization': `Bearer ${token}`,

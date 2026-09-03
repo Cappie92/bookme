@@ -1,12 +1,12 @@
-import { SUBSCRIPTIONS_APP_ROUTE } from './parseAppInternalRoute';
+export type PendingMasterRoute = '/' | '/subscriptions';
 
-let pendingMasterRoute: typeof SUBSCRIPTIONS_APP_ROUTE | null = null;
+let pendingMasterRoute: PendingMasterRoute | null = null;
 
-export function setPendingMasterRoute(route: typeof SUBSCRIPTIONS_APP_ROUTE | null): void {
+export function setPendingMasterRoute(route: PendingMasterRoute | null): void {
   pendingMasterRoute = route;
 }
 
-export function peekPendingMasterRoute(): typeof SUBSCRIPTIONS_APP_ROUTE | null {
+export function peekPendingMasterRoute(): PendingMasterRoute | null {
   return pendingMasterRoute;
 }
 

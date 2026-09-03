@@ -2,9 +2,19 @@
 from datetime import date, datetime, timedelta, time
 
 import pytest
+from sqlalchemy import inspect
 
 from auth import get_password_hash
-from models import Booking, BookingStatus, Master, Service, User, UserRole
+from models import (
+    Booking,
+    BookingStatus,
+    Master,
+    MasterSchedule,
+    MasterScheduleSettings,
+    Service,
+    User,
+    UserRole,
+)
 
 
 @pytest.fixture
@@ -118,3 +128,70 @@ def test_schedule_day_post_same_as_put(client, db, master_user_and_profile):
     )
     assert r.status_code == 200, r.text
     assert r.json().get("open_slots_count") == 1
+
+
+def test_recurring_rule_create_read_replace_and_day_override_is_independent(
+    client, db, master_user_and_profile
+):
+    """The existing recurring contract is create/read/replace; day edits stay local."""
+    mu, master = master_user_and_profile
+    master_id = inspect(master).identity[0]
+    login = client.post("/api/auth/login", json={"phone": mu.phone, "password": "testpassword"})
+    headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+    start = date.today() + timedelta(days=40)
+    end = start + timedelta(days=6)
+    weekday_key = str(start.weekday() + 1)
+
+    first_rule = {
+        "type": "weekdays",
+        "effective_start_date": start.isoformat(),
+        "valid_until": end.isoformat(),
+        "weekdays": {weekday_key: {"start": "09:00", "end": "10:00"}},
+    }
+    created = client.post("/api/master/schedule/rules", headers=headers, json=first_rule)
+    assert created.status_code == 200, created.text
+    assert created.json()["fixed_schedule"]["weekdays"][weekday_key] == {
+        "start": "09:00",
+        "end": "10:00",
+    }
+
+    read = client.get("/api/master/schedule/rules", headers=headers)
+    assert read.status_code == 200, read.text
+    assert read.json()["has_settings"] is True
+    assert read.json()["fixed_schedule"]["type"] == "weekdays"
+
+    replacement = {
+        **first_rule,
+        "weekdays": {weekday_key: {"start": "11:00", "end": "12:00"}},
+    }
+    replaced = client.post("/api/master/schedule/rules", headers=headers, json=replacement)
+    assert replaced.status_code == 200, replaced.text
+    settings_rows = db.query(MasterScheduleSettings).filter(
+        MasterScheduleSettings.master_id == master_id,
+        MasterScheduleSettings.salon_id.is_(None),
+    ).all()
+    assert len(settings_rows) == 1
+    assert settings_rows[0].fixed_schedule["weekdays"][weekday_key] == {
+        "start": "11:00",
+        "end": "12:00",
+    }
+    replaced_slots = db.query(MasterSchedule).filter(
+        MasterSchedule.master_id == master_id,
+        MasterSchedule.date == start,
+    ).order_by(MasterSchedule.start_time).all()
+    assert [slot.start_time for slot in replaced_slots] == [time(11, 0), time(11, 30)]
+
+    day_override = client.post(
+        "/api/master/schedule/day",
+        headers=headers,
+        json={"schedule_date": start.isoformat(), "open_slots": [{"hour": 14, "minute": 0}]},
+    )
+    assert day_override.status_code == 200, day_override.text
+    persisted_settings = db.query(MasterScheduleSettings).filter(
+        MasterScheduleSettings.master_id == master_id,
+        MasterScheduleSettings.salon_id.is_(None),
+    ).one()
+    assert persisted_settings.fixed_schedule["weekdays"][weekday_key] == {
+        "start": "11:00",
+        "end": "12:00",
+    }

@@ -56,11 +56,12 @@ export default function MasterMobileMenu({
   subscriptionPlans,
   scheduleConflicts,
   refreshKey,
+  isIosAppWebSession = false,
 }) {
   const [pendingInvitations, setPendingInvitations] = useState(0)
 
   useEffect(() => {
-    if (!isOpen) return
+    if (!isOpen || isIosAppWebSession) return
     const token = localStorage.getItem('access_token')
     if (!token) return
     let cancelled = false
@@ -75,7 +76,7 @@ export default function MasterMobileMenu({
     return () => {
       cancelled = true
     }
-  }, [isOpen, refreshKey])
+  }, [isOpen, refreshKey, isIosAppWebSession])
 
   useMasterOverlayScrollLock(isOpen)
 
@@ -105,7 +106,7 @@ export default function MasterMobileMenu({
   const catalogRows = getMasterNavCatalogRows(accessFlags, isSalonFeaturesEnabled(), {
     scheduleConflicts,
     pendingInvitations,
-  })
+  }).filter((row) => !isIosAppWebSession || ['schedule', 'services'].includes(row.tab))
 
   return (
     <div

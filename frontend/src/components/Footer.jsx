@@ -1,6 +1,8 @@
 import { Link } from 'react-router-dom'
+import { useAuth } from '../contexts/AuthContext'
 
 export default function Footer({ compact = false }) {
+  const { isIosAppWebSession } = useAuth()
   return (
     <footer
       className={
@@ -56,7 +58,7 @@ export default function Footer({ compact = false }) {
           >
             Главная
           </Link>
-          <Link
+          {!isIosAppWebSession ? <Link
             to="/pricing"
             className={
               compact
@@ -65,7 +67,7 @@ export default function Footer({ compact = false }) {
             }
           >
             Тарифы
-          </Link>
+          </Link> : null}
           <Link
             to="/blog"
             className={

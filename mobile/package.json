@@ -50,6 +50,11 @@
     "zustand": "^5.0.11"
   },
   "expo": {
+    "autolinking": {
+      "exclude": [
+        "dedato-storekit"
+      ]
+    },
     "install": {
       "exclude": [
         "jest",

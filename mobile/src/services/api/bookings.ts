@@ -184,9 +184,14 @@ export interface AvailableSlotsResponse {
 /**
  * Получить доступные слоты времени для изменения бронирования
  */
-export async function getAvailableSlots(bookingId: number, date: string): Promise<AvailableSlotsResponse> {
+export async function getAvailableSlots(
+  bookingId: number,
+  date: string,
+  actor: 'client' | 'master' = 'client'
+): Promise<AvailableSlotsResponse> {
+  const base = actor === 'master' ? '/api/master/bookings' : '/api/client/bookings';
   const response = await apiClient.get<AvailableSlotsResponse>(
-    `/api/client/bookings/${bookingId}/available-slots?date=${date}`
+    `${base}/${bookingId}/available-slots?date=${date}`
   );
   return response.data;
 }
@@ -203,8 +208,15 @@ export interface BookingUpdate {
 /**
  * Обновить бронирование
  */
-export async function updateBooking(bookingId: number, update: BookingUpdate): Promise<Booking> {
-  const response = await apiClient.put<Booking>(`/api/client/bookings/${bookingId}`, update);
+export async function updateBooking(
+  bookingId: number,
+  update: BookingUpdate,
+  actor: 'client' | 'master' = 'client'
+): Promise<Booking> {
+  const path = actor === 'master'
+    ? `/api/master/bookings/${bookingId}/time`
+    : `/api/client/bookings/${bookingId}`;
+  const response = await apiClient.put<Booking>(path, update);
   return response.data;
 }
 
@@ -324,4 +336,3 @@ export function getStatusColor(status: BookingStatus): string {
   
   return statusColors[status] || '#757575';
 }
-

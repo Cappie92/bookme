@@ -145,6 +145,13 @@ function AdminRoute({ children }) {
   return <AdminLayout>{children}</AdminLayout>
 }
 
+function IosCommerceRouteGuard({ children }) {
+  const { loading, isIosAppWebSession } = useAuth()
+  if (loading) return <PageLoader />
+  if (isIosAppWebSession) return <Navigate to="/master" replace />
+  return children
+}
+
 function App() {
 
   return (
@@ -169,7 +176,7 @@ function App() {
 
           {/* Основные роуты */}
           <Route path="/" element={<MainLayout><Home/></MainLayout>} />
-          <Route path="/pricing" element={<MainLayout><Pricing/></MainLayout>} />
+          <Route path="/pricing" element={<IosCommerceRouteGuard><MainLayout><Pricing/></MainLayout></IosCommerceRouteGuard>} />
           <Route path="/about" element={<MainLayout><About/></MainLayout>} />
           <Route path="/register" element={<MainLayout><Home/></MainLayout>} />
           <Route path="/verify-email" element={<MainLayout><VerifyEmail/></MainLayout>} />
@@ -197,8 +204,8 @@ function App() {
           <Route path="/privacy-policy" element={<PrivacyPolicyPage />} />
           <Route path="/marketing-consent" element={<MarketingConsent />} />
           <Route path="/account-deletion" element={<AccountDeletionPage />} />
-          <Route path="/payment/success" element={<PaymentSuccess/>} />
-          <Route path="/payment/failed" element={<PaymentFailed/>} />
+          <Route path="/payment/success" element={<IosCommerceRouteGuard><PaymentSuccess/></IosCommerceRouteGuard>} />
+          <Route path="/payment/failed" element={<IosCommerceRouteGuard><PaymentFailed/></IosCommerceRouteGuard>} />
           <Route path="/client" element={<ClientLayout><ClientDashboard/></ClientLayout>} />
           <Route path="/client/" element={<ClientLayout><ClientDashboard/></ClientLayout>} />
           <Route path="/client/dashboard" element={<ClientLayout><ClientDashboard/></ClientLayout>} />
@@ -207,8 +214,8 @@ function App() {
           <Route path="/client/master-notes" element={<ClientLayout><ClientMasterNotes/></ClientLayout>} />
           <Route path="/master" element={<MasterDashboard/>} />
           <Route path="/demo/master" element={<MainLayout><DemoMasterEntry/></MainLayout>} />
-          <Route path="/master/tariff" element={<Navigate to="/master?tab=tariff" replace />} />
-          <Route path="/master/subscription/plans" element={<MasterSubscriptionPlans/>} />
+          <Route path="/master/tariff" element={<IosCommerceRouteGuard><Navigate to="/master?tab=tariff" replace /></IosCommerceRouteGuard>} />
+          <Route path="/master/subscription/plans" element={<IosCommerceRouteGuard><MasterSubscriptionPlans/></IosCommerceRouteGuard>} />
           <Route path="/salon" element={<ServiceDashboard/>} />
           <Route path="/test/booking" element={<MainLayout><BookingForm/></MainLayout>} />
           <Route path="/test/auth" element={<MainLayout><AuthTest/></MainLayout>} />

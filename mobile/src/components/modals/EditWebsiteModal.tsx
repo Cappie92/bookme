@@ -165,7 +165,7 @@ export function EditWebsiteModal({
 
   const handleSave = async () => {
     const slug = normalizeMasterDomainSlug(form.domain);
-    const slugValidation = validateMasterDomainSlug(slug);
+    const slugValidation = Platform.OS === 'ios' ? null : validateMasterDomainSlug(slug);
     if (slugValidation) {
       setDomainError(slugValidation);
       return;
@@ -175,7 +175,7 @@ export function EditWebsiteModal({
     setSaving(true);
     try {
       const formData = new FormData();
-      formData.append('domain', slug);
+      if (Platform.OS !== 'ios') formData.append('domain', slug);
       formData.append('site_description', form.site_description);
       // Цвет фона убран из web UI; не пересылаем — чтобы не затирать значение в БД пустым/устаревшим полем
       formData.append('use_photo_as_logo', String(form.use_photo_as_logo));
@@ -311,7 +311,7 @@ export function EditWebsiteModal({
             showsVerticalScrollIndicator={true}
           >
             <View style={styles.form}>
-              <View style={styles.field}>
+              {Platform.OS !== 'ios' ? <View style={styles.field}>
                 <Text style={styles.label}>Короткий адрес страницы</Text>
                 <View style={styles.domainInputRow}>
                   <Text style={styles.domainPrefix}>/m/</Text>
@@ -334,7 +334,7 @@ export function EditWebsiteModal({
                     Публичная ссылка: {publicBookingUrl}
                   </Text>
                 ) : null}
-              </View>
+              </View> : null}
 
               {publicBookingUrl && (
                 <View style={styles.field}>
@@ -882,4 +882,3 @@ const styles = StyleSheet.create({
     flex: 1,
   },
 });
-

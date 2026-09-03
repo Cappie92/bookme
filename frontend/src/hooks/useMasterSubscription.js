@@ -2,13 +2,19 @@ import { useState, useEffect } from 'react'
 import { apiGet } from '../utils/api'
 import { useAuth } from '../contexts/AuthContext'
 
-export function useMasterSubscription() {
+export function useMasterSubscription({ enabled = true } = {}) {
   const { isAuthenticated, loading: authLoading } = useAuth()
   const [features, setFeatures] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
   useEffect(() => {
+    if (!enabled) {
+      setFeatures(null)
+      setLoading(false)
+      setError(null)
+      return
+    }
     // Пока auth загружается — ничего не делаем
     if (authLoading) {
       return
@@ -24,9 +30,10 @@ export function useMasterSubscription() {
 
     // Если пользователь авторизован — загружаем features
     loadFeatures()
-  }, [authLoading, isAuthenticated])
+  }, [authLoading, isAuthenticated, enabled])
 
   const loadFeatures = async () => {
+    if (!enabled) return
     const token = localStorage.getItem('access_token')
     if (!token) {
       setLoading(false)
@@ -88,4 +95,3 @@ export function useMasterSubscription() {
     canAddPageModules: false
   }
 }
-

@@ -17,7 +17,7 @@ def _ios_app_tokens(client, user, monkeypatch):
         "get_settings",
         lambda: type("S", (), {"FRONTEND_URL": "https://dedato.ru", "is_production": False})(),
     )
-    code = auth_router._store_web_handoff(user.id, "ios_app", user.session_version)
+    code = auth_router._store_web_handoff(user.id, "ios_app", user.session_version, "settings")
     return client.post("/api/auth/web-handoff/exchange", json={"code": code}).json()
 
 
@@ -98,3 +98,26 @@ def test_legacy_subscription_upgrade_forbidden_for_ios_app_no_side_effects(
             headers=_auth_headers(test_master_token),
         )
     assert normal.status_code != 403
+
+
+def test_subscription_apply_endpoints_forbidden_for_ios_app_no_side_effects(
+    client, db, test_master, monkeypatch
+):
+    tokens = _ios_app_tokens(client, test_master, monkeypatch)
+    payments_before = db.query(Payment).count()
+    subs_before = db.query(Subscription).count()
+
+    for endpoint in (
+        "/api/subscriptions/apply-upgrade-free",
+        "/api/subscriptions/apply-upgrade-balance",
+    ):
+        blocked = client.post(
+            endpoint,
+            json={"calculation_id": 1},
+            headers=_auth_headers(tokens),
+        )
+        assert blocked.status_code == 403, (endpoint, blocked.text)
+
+    db.expire_all()
+    assert db.query(Payment).count() == payments_before
+    assert db.query(Subscription).count() == subs_before

@@ -446,6 +446,7 @@ export default function BookingDetailScreen() {
           bookingId={booking.id}
           currentStartTime={booking.start_time}
           serviceDuration={booking.service_duration || booking.duration || 60}
+          actor="master"
           onBookingUpdated={handleBookingUpdated}
         />
       )}
@@ -631,4 +632,3 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 });
-

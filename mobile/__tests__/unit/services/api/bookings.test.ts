@@ -184,6 +184,16 @@ describe('Bookings API', () => {
       );
       expect(result).toEqual(mockSlots);
     });
+
+    it('uses the ownership-checked master endpoint for master reschedule', async () => {
+      (apiClient.get as jest.Mock).mockResolvedValue({ data: { available_slots: [] } });
+
+      await getAvailableSlots(7, '2026-09-10', 'master');
+
+      expect(apiClient.get).toHaveBeenCalledWith(
+        '/api/master/bookings/7/available-slots?date=2026-09-10'
+      );
+    });
   });
 
   describe('updateBooking', () => {
@@ -210,6 +220,18 @@ describe('Bookings API', () => {
         notes: 'New notes',
       });
       expect(result.notes).toBe('New notes');
+    });
+
+    it('uses the time-only master endpoint for master reschedule', async () => {
+      const update = {
+        start_time: '2026-09-10T10:00:00',
+        end_time: '2026-09-10T11:00:00',
+      };
+      (apiClient.put as jest.Mock).mockResolvedValue({ data: { ...mockBookings[0], ...update } });
+
+      await updateBooking(7, update, 'master');
+
+      expect(apiClient.put).toHaveBeenCalledWith('/api/master/bookings/7/time', update);
     });
   });
 
@@ -255,4 +277,3 @@ describe('Bookings API', () => {
     });
   });
 });
-

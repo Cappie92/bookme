@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, ActivityIndicator, Alert, TouchableOpacity, Modal, TextInput, ScrollView, Platform } from 'react-native';
+import { View, Text, StyleSheet, ActivityIndicator, Alert, TouchableOpacity, Modal, TextInput, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Constants from 'expo-constants';
 import { useAuth } from '@src/auth/AuthContext';
@@ -16,12 +16,10 @@ import { updateClientProfile, changePassword, deleteAccount } from '@src/service
 import { getContactPreferences, updateContactPreference } from '@src/services/contactPreferences';
 import { PasswordInput } from '@src/components/ui/PasswordInput';
 import { completePasswordMutationLogout } from '@src/auth/passwordMutationLogout';
-import { AppleSubscriptionDeletionWarningModal } from '@src/components/AppleSubscriptionDeletionWarningModal';
-import { checkAppleSubscriptionBeforeAccountDeletion } from '@src/services/accountDeletionAppleSubscription';
-import { isIosFreeCompanion } from '@src/config/iosProductModel';
+import { AccountDeletionSubscriptionWarningHost } from '@src/components/AccountDeletionSubscriptionWarningHost';
+import { checkSubscriptionBeforeAccountDeletion } from '@src/services/accountDeletionSubscriptionGuard';
 
 export default function SettingsScreen() {
-  const iosFreeCompanion = isIosFreeCompanion(Platform.OS);
   const pathname = usePathname();
   const { user, logout, isLoading, refreshUser } = useAuth();
   const [loggingOut, setLoggingOut] = useState(false);
@@ -283,7 +281,7 @@ export default function SettingsScreen() {
   // Открытие модального окна удаления аккаунта
   const handleDeleteAccount = async () => {
     setDeletePassword('');
-    const outcome = await checkAppleSubscriptionBeforeAccountDeletion();
+    const outcome = await checkSubscriptionBeforeAccountDeletion();
     if (outcome === 'warn_active_apple') {
       setShowAppleDeleteWarning(true);
       return;
@@ -552,14 +550,14 @@ export default function SettingsScreen() {
         </View>
       </Modal>
 
-      {!iosFreeCompanion ? <AppleSubscriptionDeletionWarningModal
+      <AccountDeletionSubscriptionWarningHost
         visible={showAppleDeleteWarning}
         onCancel={() => setShowAppleDeleteWarning(false)}
         onContinueDeletion={() => {
           setShowAppleDeleteWarning(false);
           setShowDeleteModal(true);
         }}
-      /> : null}
+      />
 
       {/* Модальное окно удаления аккаунта */}
       <Modal

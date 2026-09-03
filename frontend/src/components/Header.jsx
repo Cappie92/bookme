@@ -9,7 +9,7 @@ export default function Header({ compactPublicBooking = false, clientManagedBran
   const [clientCabinetMenuOpen, setClientCabinetMenuOpen] = useState(false)
   const clientCabinetMenuDesktopRef = useRef(null)
   const clientCabinetMenuMobileRef = useRef(null)
-  const { isAuthenticated, logout, openAuthModal, user } = useAuth()
+  const { isAuthenticated, logout, openAuthModal, user, isIosAppWebSession } = useAuth()
   const navigate = useNavigate()
   const { pathname } = useLocation()
   const isPublicBooking = pathname.startsWith('/m/')
@@ -103,14 +103,14 @@ export default function Header({ compactPublicBooking = false, clientManagedBran
         {/* Десктоп версия */}
         <div className="hidden md:flex items-center justify-between h-24">
           {/* Логотип */}
-          <Link to="/" className="flex items-center h-full">
+          <Link to={isIosAppWebSession ? '/master' : '/'} className="flex items-center h-full">
             <div className="h-24 flex items-center">
               <Logo size="3xl" />
             </div>
           </Link>
 
           {/* Навигация для десктопа — якоря главной (см. design ref в docs/archive/design-references/) */}
-          <nav className="flex items-center gap-4 lg:gap-6 xl:gap-8 flex-wrap justify-end">
+          <nav className={`${isIosAppWebSession ? 'hidden' : 'flex'} items-center gap-4 lg:gap-6 xl:gap-8 flex-wrap justify-end`}>
             {pathname === '/' ? (
               <>
                 <a href="#features" className="nav-link">
@@ -136,9 +136,11 @@ export default function Header({ compactPublicBooking = false, clientManagedBran
                 </Link>
               </>
             )}
-            <Link to="/pricing" className="nav-link">
-              Тарифы
-            </Link>
+            {!isIosAppWebSession ? (
+              <Link to="/pricing" className="nav-link">
+                Тарифы
+              </Link>
+            ) : null}
             <Link to="/blog" className="nav-link">
               Блог
             </Link>
@@ -293,7 +295,7 @@ export default function Header({ compactPublicBooking = false, clientManagedBran
           </div>
 
           <div className="flex min-w-0 justify-center justify-self-center">
-            <Link to="/" className="flex items-center justify-center" aria-label="На главную">
+            <Link to={isIosAppWebSession ? '/master' : '/'} className="flex items-center justify-center" aria-label="На главную">
               <Logo size={compactPublicBooking ? 'lg' : '2xl'} />
             </Link>
           </div>
@@ -424,7 +426,7 @@ export default function Header({ compactPublicBooking = false, clientManagedBran
         {/* Мобильное меню */}
         {isMenuOpen && (
           <div className="md:hidden border-t border-neutral-200 py-4 animate-slide-down" style={{zIndex: 999}}>
-            <nav className="flex flex-col space-y-4">
+            <nav className={`${isIosAppWebSession ? 'hidden' : 'flex'} flex-col space-y-4`}>
               {pathname === '/' ? (
                 <>
                   <a
@@ -474,13 +476,13 @@ export default function Header({ compactPublicBooking = false, clientManagedBran
                   </Link>
                 </>
               )}
-              <Link 
-                to="/pricing" 
+              {!isIosAppWebSession ? <Link
+                to="/pricing"
                 className="nav-link px-4 py-2 rounded-lg hover:bg-neutral-100"
                 onClick={() => setIsMenuOpen(false)}
               >
                 Тарифы
-              </Link>
+              </Link> : null}
               <Link 
                 to="/blog" 
                 className="nav-link px-4 py-2 rounded-lg hover:bg-neutral-100"
@@ -525,4 +527,4 @@ export default function Header({ compactPublicBooking = false, clientManagedBran
       </div>
     </header>
   )
-} 
+}

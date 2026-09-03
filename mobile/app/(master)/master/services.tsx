@@ -34,10 +34,11 @@ import {
   MasterServiceCategory,
 } from '@src/services/api/master';
 import { formatMoney } from '@src/utils/money';
-import { FeatureLock } from '@src/components/FeatureLock';
+import { PlatformFeatureLock } from '@src/components/PlatformFeatureLock';
 import { CategoryAccordion } from '@src/components/services/CategoryAccordion';
 import { ServiceRow } from '@src/components/services/ServiceRow';
 import { EntityActionSheet } from '@src/components/services/EntityActionSheet';
+import { WebEditorButton } from '@src/components/WebEditorButton';
 const PLACEHOLDER_COLOR = '#999';
 const INPUT_TEXT_COLOR = '#333';
 const WINDOW_HEIGHT = Dimensions.get('window').height;
@@ -562,19 +563,24 @@ export default function MasterServicesScreen() {
 
   return (
     <ScreenContainer scrollable>
+      <WebEditorButton
+        destination="services"
+        title="Редактировать услуги в браузере"
+        testID="ios-web-editor-services"
+      />
       <View style={styles.header}>
         <Text style={styles.title}>Мои услуги</Text>
         <View style={styles.actions}>
-          <FeatureLock feature="has_booking_page">
+          <PlatformFeatureLock feature="has_booking_page">
             <TouchableOpacity onPress={handleCreateService} style={[styles.actionButton, styles.primaryAction]}>
               <Text style={[styles.actionButtonText, styles.primaryActionText]}>+ Услуга</Text>
             </TouchableOpacity>
-          </FeatureLock>
-          <FeatureLock feature="has_booking_page">
+          </PlatformFeatureLock>
+          <PlatformFeatureLock feature="has_booking_page">
             <TouchableOpacity onPress={handleCreateCategory} style={[styles.actionButton, styles.secondaryAction]}>
               <Text style={[styles.actionButtonText, styles.secondaryActionText]}>+ Категория</Text>
             </TouchableOpacity>
-          </FeatureLock>
+          </PlatformFeatureLock>
         </View>
         <View style={styles.expandControls}>
           <TouchableOpacity onPress={expandAllCategories} style={styles.expandButton}>
@@ -1607,4 +1613,3 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
 });
-

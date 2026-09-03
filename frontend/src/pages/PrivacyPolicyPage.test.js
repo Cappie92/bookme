@@ -6,6 +6,7 @@ import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { MemoryRouter } from 'react-router-dom'
 import Footer from '../components/Footer.jsx'
+import { AuthProvider } from '../contexts/AuthContext.jsx'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const appSource = readFileSync(path.join(here, '../App.jsx'), 'utf8')
@@ -33,7 +34,11 @@ describe('Privacy Policy legal architecture', () => {
 
   it('links all three distinct legal documents in the footer', () => {
     const html = renderToStaticMarkup(
-      React.createElement(MemoryRouter, null, React.createElement(Footer))
+      React.createElement(
+        MemoryRouter,
+        null,
+        React.createElement(AuthProvider, null, React.createElement(Footer)),
+      )
     )
     expect(html).toContain('href="/privacy-policy"')
     expect(html).toContain('Политика конфиденциальности')
@@ -65,21 +70,22 @@ describe('Privacy Policy legal architecture', () => {
     expect(agreementSource).toContain('https://dedato.ru/marketing-consent')
   })
 
-  it('omits a general 18+ restriction and describes the iOS free-companion model', () => {
+  it('omits a general 18+ restriction and describes the fixed iOS model', () => {
     expect(policySource).not.toContain('только для пользователей, достигших 18 лет')
     expect(agreementSource).not.toContain('только для пользователей, достигших 18 лет')
     expect(agreementSource).not.toContain('Restore Purchases')
     expect(agreementSource).not.toContain('Apple In-App Purchase')
-    expect(agreementSource).toContain('бесплатным companion-приложением')
+    expect(agreementSource).toContain('фиксированный набор функций мастера')
+    expect(agreementSource).toContain('наличие платного статуса не открывает дополнительные функции')
     expect(agreementSource).toContain('Standard Apple EULA')
     expect(deletionSource).not.toContain('Apple auto-renewal')
     expect(policySource).not.toContain('Apple (подписки App Store)')
-    expect(policySource).toContain('лимите активных будущих записей')
-    expect(policySource).toContain('В этот ответ не включаются стоимость подписки')
+    expect(policySource).toContain('не запрашивает сведения о тарифе')
+    expect(policySource).toContain('короткоживущий одноразовый код')
   })
 
   it('uses the approved revision date in changed legal documents', () => {
-    expect(policySource).toContain('Дата вступления в силу: 30 августа 2026 г.')
-    expect(agreementSource).toContain('Дата последнего обновления: 30 августа 2026 г.')
+    expect(policySource).toContain('Дата вступления в силу: 3 сентября 2026 г.')
+    expect(agreementSource).toContain('Дата последнего обновления: 3 сентября 2026 г.')
   })
 })

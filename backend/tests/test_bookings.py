@@ -1,9 +1,11 @@
 from datetime import datetime, timedelta, time, date
 import pytest
 from jose import jwt
+from sqlalchemy import inspect
 
 from auth import ALGORITHM, SECRET_KEY, get_password_hash
 from models import (
+    Booking,
     Master,
     MasterSchedule,
     Service,
@@ -331,3 +333,102 @@ def test_get_available_slots(client, master_headers):
     )
     assert response.status_code == 200
     assert isinstance(response.json(), list)
+
+
+def test_master_reschedule_uses_owned_booking_and_canonical_conflicts(
+    client, db, test_user, test_master, test_service, master_headers
+):
+    client_id = inspect(test_user).identity[0]
+    master_id = inspect(test_master).identity[0]
+    service_id = inspect(test_service).identity[0]
+    target_date = date.today() + timedelta(days=1)
+    original_start = datetime.combine(target_date, time(9, 0))
+    booking = Booking(
+        client_id=client_id,
+        service_id=service_id,
+        master_id=master_id,
+        start_time=original_start,
+        end_time=original_start + timedelta(hours=1),
+        status="created",
+    )
+    conflict = Booking(
+        client_id=client_id,
+        service_id=service_id,
+        master_id=master_id,
+        start_time=datetime.combine(target_date, time(12, 0)),
+        end_time=datetime.combine(target_date, time(13, 0)),
+        status="confirmed",
+    )
+    db.add_all([booking, conflict])
+    db.commit()
+    booking_id = inspect(booking).identity[0]
+
+    slots = client.get(
+        f"/api/master/bookings/{booking_id}/available-slots",
+        params={"date": target_date.isoformat()},
+        headers=master_headers,
+    )
+    assert slots.status_code == 200, slots.text
+
+    moved_start = datetime.combine(target_date, time(10, 0))
+    moved = client.put(
+        f"/api/master/bookings/{booking_id}/time",
+        json={
+            "start_time": moved_start.isoformat(),
+            "end_time": (moved_start + timedelta(hours=1)).isoformat(),
+        },
+        headers=master_headers,
+    )
+    assert moved.status_code == 200, moved.text
+
+    overlapping_start = datetime.combine(target_date, time(11, 30))
+    rejected = client.put(
+        f"/api/master/bookings/{booking_id}/time",
+        json={
+            "start_time": overlapping_start.isoformat(),
+            "end_time": (overlapping_start + timedelta(hours=1)).isoformat(),
+        },
+        headers=master_headers,
+    )
+    assert rejected.status_code == 400
+    assert db.get(Booking, booking_id).start_time == moved_start
+
+
+def test_master_reschedule_rejects_foreign_booking(
+    client, db, test_user, test_master, test_service, master_headers
+):
+    client_id = inspect(test_user).identity[0]
+    service_id = inspect(test_service).identity[0]
+    other_user = User(
+        email="other-master@example.com",
+        hashed_password=get_password_hash("testpassword"),
+        phone="+79007654329",
+        full_name="Other Master",
+        role=UserRole.MASTER,
+        is_active=True,
+        is_verified=True,
+    )
+    db.add(other_user)
+    db.flush()
+    other_master = Master(user_id=other_user.id, bio="", experience_years=0)
+    db.add(other_master)
+    db.flush()
+    start = datetime.combine(date.today() + timedelta(days=1), time(10, 0))
+    foreign = Booking(
+        client_id=client_id,
+        service_id=service_id,
+        master_id=other_master.id,
+        start_time=start,
+        end_time=start + timedelta(hours=1),
+        status="created",
+    )
+    db.add(foreign)
+    db.commit()
+    foreign_id = inspect(foreign).identity[0]
+
+    response = client.put(
+        f"/api/master/bookings/{foreign_id}/time",
+        json={"start_time": start.isoformat(), "end_time": (start + timedelta(hours=1)).isoformat()},
+        headers=master_headers,
+    )
+    assert response.status_code == 404

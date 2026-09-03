@@ -857,7 +857,7 @@ function SalonWorkSection({ onInvitationUpdate }) {
 }
 
 export default function MasterDashboard() {
-  const { isIosAppWebSession } = useAuth()
+  const { isIosAppWebSession, loading: authLoading } = useAuth()
   const { showToast } = useToast()
   const {
     hasFinanceAccess,
@@ -869,7 +869,7 @@ export default function MasterDashboard() {
     canCustomizeDomain,
     planName: subscriptionPlanName,
     refresh: refreshSubscriptionFeatures,
-  } = useMasterSubscription()
+  } = useMasterSubscription({ enabled: !isIosAppWebSession })
   const { search } = useLocation()
   const navigate = useNavigate()
   const isDemoMode = localStorage.getItem('demo_mode') === '1' || new URLSearchParams(search).get('demo') === '1'
@@ -883,7 +883,10 @@ export default function MasterDashboard() {
   const getTabFromUrl = () => {
     const params = new URLSearchParams(search)
     const tab = params.get('tab')
-    return tab || 'dashboard'
+    const requested = tab || 'dashboard'
+    return isIosAppWebSession && !['dashboard', 'schedule', 'services', 'settings'].includes(requested)
+      ? 'dashboard'
+      : requested
   }
   
   const [activeTab, setActiveTab] = useState(getTabFromUrl())
@@ -895,12 +898,15 @@ export default function MasterDashboard() {
       setActiveTab(tabFromUrl)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search])
+  }, [search, isIosAppWebSession])
   
   // Обновляем URL при изменении activeTab
   const handleTabChange = (tab) => {
-    setActiveTab(tab)
-    navigate(`/master?tab=${encodeURIComponent(tab)}`, { replace: true })
+    const next = isIosAppWebSession && !['dashboard', 'schedule', 'services', 'settings'].includes(tab)
+      ? 'dashboard'
+      : tab
+    setActiveTab(next)
+    navigate(`/master?tab=${encodeURIComponent(next)}`, { replace: true })
   }
   const [schedule, setSchedule] = useState({})
   const [scheduleLoading, setScheduleLoading] = useState(false)
@@ -1035,6 +1041,7 @@ export default function MasterDashboard() {
     const [pendingInvitations, setPendingInvitations] = useState(0)
 
     useEffect(() => {
+      if (isIosAppWebSession) return
       loadPendingInvitations()
     }, [refreshKey])
 
@@ -1060,7 +1067,7 @@ export default function MasterDashboard() {
     const catalogRows = getMasterNavCatalogRows(accessFlags, isSalonFeaturesEnabled(), {
       scheduleConflicts,
       pendingInvitations,
-    })
+    }).filter((row) => !isIosAppWebSession || ['schedule', 'services'].includes(row.tab))
 
     const navItemBase =
       'group flex w-full items-center gap-2.5 rounded-[10px] px-3 py-[9px] text-left text-[13px] font-medium leading-snug tracking-tight transition-[background-color,color,box-shadow] duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4CAF50]/30 focus-visible:ring-offset-2 focus-visible:ring-offset-white'
@@ -1411,6 +1418,7 @@ export default function MasterDashboard() {
   }
 
   useEffect(() => {
+    if (authLoading) return undefined
     // Проверяем авторизацию при загрузке компонента
     const token = localStorage.getItem('access_token')
     if (!token) {
@@ -1425,15 +1433,17 @@ export default function MasterDashboard() {
         if (settingsData) {
           await checkProfileCompleteness(settingsData)
         }
-      loadBalanceAndSubscription()
-      loadBookingsLimit()
+        if (!isIosAppWebSession) {
+          loadBalanceAndSubscription()
+          loadBookingsLimit()
+        }
         loadScheduleConflicts()
       })()
     }, 100)
     
     return () => clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [authLoading, isIosAppWebSession])
 
   // Перезагружаем расписание при изменении недели
   useEffect(() => {
@@ -1559,7 +1569,7 @@ export default function MasterDashboard() {
     )
   }
 
-  if (settingsLoading) {
+  if (authLoading || settingsLoading) {
     return (
       <div className="min-h-screen bg-white">
         <Header />
@@ -1650,7 +1660,7 @@ export default function MasterDashboard() {
 
               {/* Баланс / Подписка / Внимание — единый блок (rollback late layout experiments) */}
               <div>
-                {(balance ||
+                {!isIosAppWebSession && (balance ||
                   subscriptionStatus ||
                   (profileWarnings.length > 0 && !dashboardAttentionDismissed)) && (
                   <div className="mb-0 flex flex-col gap-3">
@@ -1818,18 +1828,18 @@ export default function MasterDashboard() {
                 refreshTrigger={clientsUpdateTrigger}
                 dashboardOverlayResetKey={dashboardOverlayResetKey}
                 settingsPayload={masterSettingsPayload}
-                onNavigateToStats={() => handleTabChange('stats')} 
+                onNavigateToStats={isIosAppWebSession ? null : () => handleTabChange('stats')}
                 subscriptionStatus={subscriptionStatus}
                 balance={balance}
-                hasExtendedStats={canUseExtendedStats}
+                hasExtendedStats={isIosAppWebSession ? true : canUseExtendedStats}
                 onConfirmSuccess={() => {
                   setRefreshKey((prev) => prev + 1);
                   setClientsUpdateTrigger((t) => t + 1);
                 }}
-                onOpenSubscriptionModal={isIosAppWebSession ? () => handleTabChange('tariff') : () => setShowSubscriptionModal(true)}
+                onOpenSubscriptionModal={isIosAppWebSession ? null : () => setShowSubscriptionModal(true)}
                 onOpenSchedule={handleCopyPublicLink}
                 onOpenServices={() => handleTabChange('services')}
-                onOpenTariff={() => handleTabChange('tariff')}
+                onOpenTariff={isIosAppWebSession ? null : () => handleTabChange('tariff')}
                 onOpenStoryImage={() => setIsStoryModalOpen(true)}
                 onOpenSettings={() => handleTabChange('settings')}
               />
@@ -2047,6 +2057,7 @@ export default function MasterDashboard() {
             />
           )}
           {activeTab === 'tariff' && (
+            !isIosAppWebSession &&
             <MasterTariff
               canCustomizeDomain={canCustomizeDomain}
               onRefreshSubscriptionFeatures={refreshSubscriptionFeatures}
@@ -2104,6 +2115,7 @@ export default function MasterDashboard() {
         subscriptionPlans={subscriptionPlans}
         scheduleConflicts={scheduleConflicts}
         refreshKey={refreshInvitations}
+        isIosAppWebSession={isIosAppWebSession}
       />
     </div>
   )

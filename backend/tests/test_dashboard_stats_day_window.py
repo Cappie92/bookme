@@ -29,7 +29,7 @@ def master_user(db):
     db.add(user)
     db.commit()
     db.refresh(user)
-    db.add(Master(user_id=user.id, bio="", experience_years=0))
+    db.add(Master(user_id=user.id, bio="", experience_years=0, auto_confirm_bookings=False))
     db.commit()
     return user
 
@@ -97,3 +97,24 @@ def test_day_backward_compat(client, db, master_user):
     weeks = data.get("weeks_data", [])
     assert len(weeks) == 5
     assert "anchor_date" not in data or data.get("anchor_date") is None
+
+
+def test_ios_fixed_dashboard_omits_subscription_info(client, db, master_user):
+    headers = _auth_headers(client, master_user.phone, "test123")
+    ios = client.get(
+        "/api/master/dashboard/stats?period=week&offset=0&client_surface=ios_fixed",
+        headers=headers,
+    )
+    normal = client.get("/api/master/dashboard/stats?period=week&offset=0", headers=headers)
+    assert ios.status_code == normal.status_code == 200
+    assert "subscription_info" not in ios.json()
+    assert "subscription_info" in normal.json()
+
+
+def test_ios_fixed_previsit_uses_operational_confirmation_mode(client, db, master_user):
+    headers = _auth_headers(client, master_user.phone, "test123")
+    ios = client.get("/api/master/settings?client_surface=ios_fixed", headers=headers)
+    normal = client.get("/api/master/settings", headers=headers)
+    assert ios.status_code == normal.status_code == 200
+    assert ios.json()["master"]["pre_visit_confirmations_effective"] is True
+    assert normal.json()["master"]["pre_visit_confirmations_effective"] is False

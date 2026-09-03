@@ -6,6 +6,7 @@ from datetime import datetime, time, timedelta, date
 from typing import Any, List, Optional, Dict, Set
 
 from fastapi import APIRouter, Depends, HTTPException, Body, File, Form, UploadFile, Query
+from pydantic import BaseModel
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import case, desc, or_
 
@@ -78,6 +79,15 @@ from schemas import MasterDayScheduleUpdate
 from utils.schedule_conflicts import get_schedule_with_conflicts, create_schedule_from_settings
 from schemas import Service as ServiceSchema, ServiceCreate, ServiceUpdate, ServiceOut
 from schemas import ServiceCategoryCreate, ServiceCategoryOut
+
+
+class IosWebDomainUpdate(BaseModel):
+    domain: str
+
+
+class MasterBookingTimeUpdate(BaseModel):
+    start_time: datetime
+    end_time: datetime
 from schemas import MasterServiceCategoryCreate, MasterServiceCategoryOut, MasterServiceCreate, MasterServiceUpdate, MasterServiceOut, MasterProfileUpdate, InvitationResponse, InvitationOut, ClientRestrictionCreate, ClientRestrictionUpdate, ClientRestriction, ClientRestrictionOut, ClientRestrictionList, ClientRestrictionRuleCreate, ClientRestrictionRuleUpdate, ClientRestrictionRuleOut, MasterPaymentSettingsUpdate, MasterPaymentSettingsOut, BookingCheckResponse
 from utils.loyalty_discounts import build_applied_discount_info
 from utils.master_canon import LEGACY_INDIE_MODE
@@ -401,6 +411,113 @@ def get_future_bookings_paginated(
     }
 
 
+def _owned_master_booking(db: Session, current_user: User, booking_id: int) -> tuple[Master, Booking]:
+    master = db.query(Master).filter(Master.user_id == current_user.id).with_for_update().first()
+    if not master:
+        raise HTTPException(status_code=404, detail="Профиль мастера не найден")
+    booking = db.query(Booking).filter(
+        Booking.id == booking_id,
+        Booking.master_id == master.id,
+    ).first()
+    if not booking:
+        raise HTTPException(status_code=404, detail="Запись не найдена")
+    return master, booking
+
+
+@router.get("/bookings/{booking_id}/available-slots")
+def get_master_booking_available_slots(
+    booking_id: int,
+    date: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> Any:
+    master, booking = _owned_master_booking(db, current_user, booking_id)
+    service = booking.service or db.query(Service).filter(Service.id == booking.service_id).first()
+    if not service:
+        raise HTTPException(status_code=400, detail="У записи нет услуги")
+    try:
+        target_date = datetime.strptime(date, "%Y-%m-%d")
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail="Неверный формат даты. Используйте YYYY-MM-DD") from error
+
+    from services.scheduling import get_available_slots
+
+    slots = get_available_slots(
+        db=db,
+        owner_type=models.OwnerType.MASTER,
+        owner_id=master.id,
+        date=target_date,
+        service_duration=service.duration,
+        branch_id=booking.branch_id,
+    )
+    return {
+        "booking_id": booking.id,
+        "service_name": service.name,
+        "service_duration": service.duration,
+        "current_start_time": booking.start_time.isoformat(),
+        "available_slots": [
+            {
+                "start_time": slot["start_time"].isoformat(),
+                "end_time": slot["end_time"].isoformat(),
+                "formatted_time": slot["start_time"].strftime("%H:%M"),
+            }
+            for slot in slots
+            if abs((slot["start_time"] - booking.start_time).total_seconds()) > 300
+        ],
+    }
+
+
+@router.put("/bookings/{booking_id}/time", response_model=BookingSchema)
+def update_master_booking_time(
+    booking_id: int,
+    body: MasterBookingTimeUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> Any:
+    master, booking = _owned_master_booking(db, current_user, booking_id)
+    if booking.status in {
+        BookingStatus.CANCELLED.value,
+        BookingStatus.COMPLETED.value,
+    }:
+        raise HTTPException(status_code=400, detail="Эту запись нельзя перенести")
+    if body.end_time <= body.start_time:
+        raise HTTPException(status_code=400, detail="Время окончания должно быть позже времени начала")
+
+    service = booking.service or db.query(Service).filter(Service.id == booking.service_id).first()
+    if not service:
+        raise HTTPException(status_code=400, detail="У записи нет услуги")
+    duration = (body.end_time - body.start_time).total_seconds() / 60
+    if service.duration and abs(duration - service.duration) > 1:
+        raise HTTPException(status_code=400, detail="Продолжительность услуги не соответствует времени записи")
+
+    from services.scheduling import check_booking_conflicts, check_master_working_hours
+
+    if not check_master_working_hours(
+        db,
+        master.id,
+        body.start_time,
+        body.end_time,
+        is_salon_work=booking.salon_id is not None,
+        salon_id=booking.salon_id,
+    ):
+        raise HTTPException(status_code=400, detail="Мастер не работает в указанное время")
+    if check_booking_conflicts(
+        db,
+        body.start_time,
+        body.end_time,
+        models.OwnerType.MASTER,
+        master.id,
+        exclude_booking_id=booking.id,
+    ):
+        raise HTTPException(status_code=400, detail="Выбранное время уже занято")
+
+    booking.start_time = body.start_time
+    booking.end_time = body.end_time
+    db.commit()
+    db.refresh(booking)
+    return booking
+
+
 @router.get("/past-appointments")
 def get_past_appointments(
     start_date: Optional[str] = Query(None, description="Начальная дата в формате YYYY-MM-DD"),
@@ -665,6 +782,7 @@ def get_master_profile(
 
 @router.get("/settings")
 def get_master_settings(
+    client_surface: Optional[str] = Query(None),
     db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)
 ) -> Any:
     """
@@ -676,6 +794,8 @@ def get_master_settings(
     from utils.pre_visit_effective import effective_pre_visit_confirmations_allowed
 
     pre_visit_effective = effective_pre_visit_confirmations_allowed(db, current_user.id, master)
+    if client_surface == "ios_fixed" or getattr(current_user, "web_session_origin", None) == "ios_app":
+        pre_visit_effective = not bool(master.auto_confirm_bookings)
     return {
         "user": {
             "id": current_user.id,
@@ -708,6 +828,40 @@ def get_master_settings(
             "site_description": master.site_description,
         }
     }
+
+
+@router.put("/ios-web/domain")
+def update_ios_web_master_domain(
+    body: IosWebDomainUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> Any:
+    """Operational domain editor available only to a server-trusted iOS handoff session."""
+    if getattr(current_user, "web_session_origin", None) != "ios_app":
+        raise HTTPException(status_code=403, detail="iOS web handoff session required")
+
+    master = db.query(Master).filter(Master.user_id == current_user.id).first()
+    if not master:
+        raise HTTPException(status_code=404, detail="Профиль мастера не найден")
+    if not master.can_work_independently:
+        raise HTTPException(status_code=400, detail="Публичная страница мастера не активна")
+
+    from utils.base62 import (
+        is_domain_unique,
+        validate_custom_master_domain,
+    )
+
+    try:
+        domain = validate_custom_master_domain(body.domain)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+    if not is_domain_unique(domain, db, exclude_master_id=master.id):
+        raise HTTPException(status_code=400, detail="Домен уже занят другим мастером")
+
+    master.domain = domain
+    db.commit()
+    return {"domain": master.domain}
 
 
 @router.get("/subscription/features")
@@ -3464,6 +3618,7 @@ def get_master_dashboard_stats(
     anchor_date: Optional[str] = Query(None, description="YYYY-MM-DD, for day period window"),
     window_before: Optional[int] = Query(None, ge=0, le=31, description="Days before anchor for day period"),
     window_after: Optional[int] = Query(None, ge=0, le=31, description="Days after anchor for day period"),
+    client_surface: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ) -> Any:
@@ -3488,7 +3643,7 @@ def get_master_dashboard_stats(
         
         # Получаем информацию о подписке (если мастер индивидуал)
         subscription_info = None
-        if is_indie_master:
+        if is_indie_master and client_surface != "ios_fixed":
             # Получаем реальную информацию о подписке
             from models import SubscriptionType
             subscription = db.query(Subscription).filter(
@@ -4094,7 +4249,6 @@ def get_master_dashboard_stats(
             # Формируем ответ с проверкой каждого поля
             response_data = {
                 "is_indie_master": bool(is_indie_master),
-                "subscription_info": subscription_info,
                 "next_working_info": next_working_info,
                 "next_bookings_list": next_bookings_list,
                 "current_week_income": float(current_income or 0),
@@ -4111,6 +4265,8 @@ def get_master_dashboard_stats(
                 "top_period_label": str(top_period_label) if top_period_label else "",
                 "top_period_range": str(top_period_range) if top_period_range else ""
             }
+            if client_surface != "ios_fixed":
+                response_data["subscription_info"] = subscription_info
             if day_window_meta:
                 response_data.update(day_window_meta)
             logger.debug("dashboard/stats: response ready")

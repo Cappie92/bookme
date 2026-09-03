@@ -10,6 +10,8 @@ interface SecondaryButtonProps {
   textStyle?: TextStyle;
   icon?: ReactNode;
   testID?: string;
+  accessibilityLabel?: string;
+  accessibilityHint?: string;
 }
 
 export function SecondaryButton({
@@ -21,10 +23,15 @@ export function SecondaryButton({
   textStyle,
   icon,
   testID,
+  accessibilityLabel,
+  accessibilityHint,
 }: SecondaryButtonProps) {
   return (
     <TouchableOpacity
       testID={testID}
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel || title}
+      accessibilityHint={accessibilityHint}
       style={[
         styles.button,
         (disabled || loading) && styles.buttonDisabled,
@@ -71,4 +78,3 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
 });
-

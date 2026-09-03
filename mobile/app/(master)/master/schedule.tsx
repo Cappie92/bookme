@@ -8,17 +8,15 @@ import { WeekView } from '@src/components/schedule/WeekView';
 import { DayView } from '@src/components/schedule/DayView';
 import { RulesView } from '@src/components/schedule/RulesView';
 import { getWeeklySchedule, getDetailedBookings, getMasterSettings, ScheduleWeek, Booking, MasterSettings } from '@src/services/api/master';
-import { useMasterFeatures } from '@src/hooks/useMasterFeatures';
+import { WebEditorButton } from '@src/components/WebEditorButton';
 
 type TabIndex = 0 | 1 | 2;
 
 export default function MasterScheduleScreen() {
-  const { features } = useMasterFeatures();
-  const hasExtendedStats = features?.has_extended_stats === true;
   const insets = useSafeAreaInsets();
   const { tabBarHeight } = useTabBarHeight();
   const tabBarClearance =
-    (tabBarHeight > 0 ? tabBarHeight : BOTTOM_NAV_CONTENT_FALLBACK_HEIGHT) + Math.max(insets.bottom, 0);
+    ((tabBarHeight ?? 0) > 0 ? (tabBarHeight ?? 0) : BOTTOM_NAV_CONTENT_FALLBACK_HEIGHT) + Math.max(insets.bottom, 0);
   const [selectedTab, setSelectedTab] = useState<TabIndex>(0);
   const [schedule, setSchedule] = useState<ScheduleWeek | null>(null);
   const [bookings, setBookings] = useState<Booking[]>([]);
@@ -107,6 +105,11 @@ export default function MasterScheduleScreen() {
 
   return (
     <View style={[styles.container, { paddingTop: Math.max(insets.top, 8) }]}>
+      <WebEditorButton
+        destination="schedule"
+        title="Редактировать расписание в браузере"
+        testID="ios-web-editor-schedule"
+      />
       <View style={styles.tabsContainer}>
         <SegmentedControl
           segments={tabs}
@@ -125,7 +128,7 @@ export default function MasterScheduleScreen() {
             onScheduleUpdated={() => loadData({ silent: true })}
             masterSettings={masterSettings}
             refreshControl={scheduleRefreshControl}
-            hasExtendedStats={hasExtendedStats}
+            hasExtendedStats={false}
           />
         )}
         {selectedTab === 1 && schedule && (
@@ -137,7 +140,7 @@ export default function MasterScheduleScreen() {
             masterSettings={masterSettings}
             onScheduleUpdated={() => loadData({ silent: true })}
             refreshControl={scheduleRefreshControl}
-            hasExtendedStats={hasExtendedStats}
+            hasExtendedStats={false}
           />
         )}
         {selectedTab === 2 && (

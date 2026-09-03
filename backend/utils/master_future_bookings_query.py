@@ -25,11 +25,14 @@ def cancelled_statuses_tuple() -> tuple[BookingStatus, ...]:
     )
 
 
-def inactive_future_statuses_tuple() -> tuple[BookingStatus, ...]:
+def inactive_future_statuses_tuple() -> tuple[Any, ...]:
     """Не входят во вкладку «Будущие» (бейдж и основной список дашборда)."""
     return cancelled_statuses_tuple() + (
         BookingStatus.COMPLETED,
         BookingStatus.PAYMENT_EXPIRED,
+        # Legacy/imported rows can carry this string even though BookingStatus
+        # never modeled it. Such rows must not consume active occupancy.
+        "rejected",
     )
 
 
