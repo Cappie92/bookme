@@ -62,7 +62,14 @@ def test_top_services_consistent_status_filter(client, db, master_user):
     db.execute(insert(master_services).values(master_id=master.id, service_id=svc_cancel_id))
     db.commit()
 
-    now = datetime.utcnow()
+    # Production top-services uses datetime.now().date() and calendar-week bounds.
+    # Anchor every fixture row inside that same week so the status assertion is
+    # deterministic regardless of which weekday the test runs on.
+    today = datetime.now().date()
+    week_start = datetime.combine(
+        today - timedelta(days=today.weekday()),
+        datetime.min.time(),
+    )
     # OK service: 4 записи в разных "живых" статусах
     ok_statuses = [
         BookingStatus.CREATED.value,
@@ -71,13 +78,14 @@ def test_top_services_consistent_status_filter(client, db, master_user):
         BookingStatus.COMPLETED.value,
     ]
     for i, st in enumerate(ok_statuses):
+        start_time = week_start + timedelta(days=i + 1, hours=10)
         db.add(
             Booking(
                 client_id=None,
                     service_id=svc_ok_id,
                 master_id=master.id,
-                start_time=now + timedelta(days=i + 1),
-                end_time=now + timedelta(days=i + 1, minutes=30),
+                start_time=start_time,
+                end_time=start_time + timedelta(minutes=30),
                 status=st,
                 payment_amount=1000.0,
             )
@@ -90,13 +98,14 @@ def test_top_services_consistent_status_filter(client, db, master_user):
         BookingStatus.CANCELLED_BY_CLIENT_LATE.value,
     ]
     for i, st in enumerate(cancel_statuses):
+        start_time = week_start + timedelta(days=i + 1, hours=14)
         db.add(
             Booking(
                 client_id=None,
                     service_id=svc_cancel_id,
                 master_id=master.id,
-                start_time=now + timedelta(days=10 + i),
-                end_time=now + timedelta(days=10 + i, minutes=30),
+                start_time=start_time,
+                end_time=start_time + timedelta(minutes=30),
                 status=st,
                 payment_amount=9999.0,
             )
@@ -121,4 +130,3 @@ def test_top_services_consistent_status_filter(client, db, master_user):
     # CANCEL service не должен попасть
     assert all(x.get("service_id") != svc_cancel_id for x in top_b)
     assert all(x.get("service_id") != svc_cancel_id for x in top_e)
-
