@@ -18,8 +18,8 @@ export function WebEditorButton({ destination, title, testID }: Props) {
       await openWebHandoffDestination(destination, {
         platformOS: 'ios',
         createWebHandoff,
-        openURL: Linking.openURL,
-        showError: Alert.alert,
+        openURL: (url) => Linking.openURL(url),
+        showError: (title, message) => Alert.alert(title, message),
       });
     } finally {
       setLoading(false);
