@@ -54,9 +54,15 @@ describe('fixed-feature iOS master contract', () => {
   });
 
   it('uses operational iOS handoff buttons without native domain mutation', () => {
-    expect(source('app/(master)/master/schedule.tsx')).toContain('destination="schedule"');
-    expect(source('app/(master)/master/services.tsx')).toContain('destination="services"');
+    const schedule = source('app/(master)/master/schedule.tsx');
+    const services = source('app/(master)/master/services.tsx');
+    expect(schedule).toContain('destination="schedule"');
+    expect(services).toContain('destination="services"');
     expect(source('app/(master)/master/settings.tsx')).toContain('destination="settings"');
+    expect(schedule).toContain("from '@src/components/WebEditorButton'");
+    expect(services).toContain("from '@src/components/WebEditorButton'");
+    expect(services).toContain('parentHasPagePadding');
+    expect(services).not.toMatch(/margin(?:Left|Right|Top):\s*-\d+/);
     const website = source('src/components/modals/EditWebsiteModal.tsx');
     expect(website).toContain("Platform.OS !== 'ios' ? <View");
     expect(website).toContain("if (Platform.OS !== 'ios') formData.append('domain', slug)");

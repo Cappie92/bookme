@@ -8,9 +8,15 @@ type Props = {
   destination: WebHandoffDestination;
   title: string;
   testID: string;
+  parentHasPagePadding?: boolean;
 };
 
-export function WebEditorButton({ destination, title, testID }: Props) {
+export function WebEditorButton({
+  destination,
+  title,
+  testID,
+  parentHasPagePadding = false,
+}: Props) {
   const [loading, setLoading] = useState(false);
   const openEditor = async () => {
     setLoading(true);
@@ -33,11 +39,12 @@ export function WebEditorButton({ destination, title, testID }: Props) {
       loading={loading}
       testID={testID}
       accessibilityHint="Откроет защищённый редактор в браузере"
-      style={styles.button}
+      style={parentHasPagePadding ? styles.buttonInPaddedParent : styles.button}
     />
   );
 }
 
 const styles = StyleSheet.create({
   button: { marginHorizontal: 16, marginBottom: 12 },
+  buttonInPaddedParent: { marginHorizontal: 0, marginBottom: 12 },
 });

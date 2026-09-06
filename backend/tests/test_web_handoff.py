@@ -72,7 +72,12 @@ def test_ios_handoff_destinations_are_server_mapped(client, test_user, test_user
             json={"code": created.json()["code"]},
         )
         assert exchanged.status_code == 200
-        assert exchanged.json()["redirect_to"] == redirect_to
+        actual_redirect = exchanged.json()["redirect_to"]
+        assert actual_redirect == redirect_to
+        assert not any(
+            commerce_marker in actual_redirect.lower()
+            for commerce_marker in ("pricing", "tariff", "subscription", "checkout", "payment")
+        )
 
 
 def test_ios_handoff_rejects_invalid_or_arbitrary_destination(client, test_user_token):

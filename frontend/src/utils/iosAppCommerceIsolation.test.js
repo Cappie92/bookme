@@ -24,6 +24,13 @@ describe('ios_app operational web isolation', () => {
     expect(safeHandoffRedirect({ redirect_to: '/pricing' })).toBe('/pricing')
   })
 
+  it('uses the server redirect in MobileHandoff with no legacy Pricing navigation', () => {
+    const handoff = source('../pages/MobileHandoff.jsx')
+    expect(handoff).toContain('navigate(safeHandoffRedirect(data), { replace: true })')
+    expect(handoff).not.toContain("navigate('/pricing'")
+    expect(handoff).not.toContain('navigate("/pricing"')
+  })
+
   it('guards commerce routes and hides commerce navigation for ios_app', () => {
     const app = source('../App.jsx')
     const header = source('../components/Header.jsx')
@@ -34,6 +41,12 @@ describe('ios_app operational web isolation', () => {
     expect(footer).toContain('!isIosAppWebSession ? <Link')
     expect(dashboard).toContain('enabled: !isIosAppWebSession')
     expect(dashboard).toContain("['dashboard', 'schedule', 'services', 'settings']")
+    expect(dashboard).toContain("requestedSettingsSection === 'public-page'")
+    expect(dashboard).toContain('initialPublicPageEditor=')
+    const settings = source('../components/MasterSettings.jsx')
+    expect(settings).toContain('if (!initialPublicPageEditor) return')
+    expect(settings).toContain('setEditPublicPageMode(true)')
+    expect(settings).toContain("scrollIntoView({ block: 'start' })")
   })
 
   it('uses the narrow trusted-origin endpoint for iOS domain changes', () => {

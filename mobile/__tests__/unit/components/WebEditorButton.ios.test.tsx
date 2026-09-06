@@ -76,4 +76,41 @@ describe('WebEditorButton iOS browser boundary', () => {
       expect(mockAlert).not.toHaveBeenCalled();
     }
   );
+
+  it('keeps one button contract while avoiding a double inset in padded parents', () => {
+    let scheduleTree: any;
+    let servicesTree: any;
+    TestRenderer.act(() => {
+      scheduleTree = TestRenderer.create(
+        React.createElement(WebEditorButton, {
+          destination: 'schedule',
+          title: 'Редактировать расписание в браузере',
+          testID: 'schedule-button',
+        })
+      );
+      servicesTree = TestRenderer.create(
+        React.createElement(WebEditorButton, {
+          destination: 'services',
+          title: 'Редактировать услуги в браузере',
+          testID: 'services-button',
+          parentHasPagePadding: true,
+        })
+      );
+    });
+
+    const scheduleButton = scheduleTree.root
+      .findAllByProps({ testID: 'schedule-button' })
+      .find((node: any) => typeof node.props.onPress === 'function');
+    const servicesButton = servicesTree.root
+      .findAllByProps({ testID: 'services-button' })
+      .find((node: any) => typeof node.props.onPress === 'function');
+    expect(scheduleButton.props.style).toEqual({
+      marginHorizontal: 16,
+      marginBottom: 12,
+    });
+    expect(servicesButton.props.style).toEqual({
+      marginHorizontal: 0,
+      marginBottom: 12,
+    });
+  });
 });

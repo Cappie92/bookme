@@ -873,6 +873,7 @@ export default function MasterDashboard() {
   const { search } = useLocation()
   const navigate = useNavigate()
   const isDemoMode = localStorage.getItem('demo_mode') === '1' || new URLSearchParams(search).get('demo') === '1'
+  const requestedSettingsSection = new URLSearchParams(search).get('section')
   const canUseFinance = isDemoMode || hasFinanceAccess
   const canUseExtendedStats = isDemoMode || hasExtendedStats
   const canUseLoyalty = isDemoMode || hasLoyaltyAccess
@@ -2054,6 +2055,9 @@ export default function MasterDashboard() {
               hasExtendedStats={hasExtendedStats}
               planName={subscriptionPlanName}
               subscriptionStatus={subscriptionStatus}
+              initialPublicPageEditor={
+                isIosAppWebSession && requestedSettingsSection === 'public-page'
+              }
             />
           )}
           {activeTab === 'tariff' && (

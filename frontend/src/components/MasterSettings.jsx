@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react'
+import React, { useState, useEffect, useMemo, useRef } from 'react'
 import { ArrowTopRightOnSquareIcon, ClipboardDocumentIcon, UserCircleIcon } from '@heroicons/react/24/outline'
 import { cities, getTimezoneByCity } from '../utils/cities'
 import { getImageUrl, API_BASE_URL } from '../utils/config'
@@ -76,6 +76,7 @@ export default function MasterSettings({
   hasExtendedStats = false,
   planName,
   subscriptionStatus = null,
+  initialPublicPageEditor = false,
 }) {
   const { isIosAppWebSession } = useAuth()
   const isDemoMode = typeof window !== 'undefined' && localStorage.getItem('demo_mode') === '1'
@@ -118,6 +119,15 @@ export default function MasterSettings({
   const [phoneChangeDigits, setPhoneChangeDigits] = useState('')
   const [phoneChangeError, setPhoneChangeError] = useState('')
   const [emailChangeInfo, setEmailChangeInfo] = useState('')
+  const publicPageSectionRef = useRef(null)
+
+  useEffect(() => {
+    if (!initialPublicPageEditor) return
+    setEditPublicPageMode(true)
+    if (profile) {
+      publicPageSectionRef.current?.scrollIntoView({ block: 'start' })
+    }
+  }, [initialPublicPageEditor, profile])
 
   const navigate = useNavigate()
   const frontendBaseUrl = getFrontendBaseUrl()
@@ -1340,7 +1350,7 @@ export default function MasterSettings({
 
         {profile.master.can_work_independently && (
           <div className="flex min-w-0 flex-col gap-3">
-            <section className={panelShell}>
+            <section ref={publicPageSectionRef} className={panelShell}>
               <div className="mb-3">
                 <h2 className="m-0 text-base font-semibold tracking-tight text-[#2D2D2D]">Личная страница</h2>
               </div>

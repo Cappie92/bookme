@@ -567,6 +567,7 @@ export default function MasterServicesScreen() {
         destination="services"
         title="Редактировать услуги в браузере"
         testID="ios-web-editor-services"
+        parentHasPagePadding
       />
       <View style={styles.header}>
         <Text style={styles.title}>Мои услуги</Text>
@@ -1153,16 +1154,11 @@ const styles = StyleSheet.create({
     color: '#666',
   },
   header: {
-    padding: 16,
+    paddingTop: 8,
+    paddingBottom: 16,
     backgroundColor: '#fff',
     borderBottomWidth: 1,
     borderBottomColor: '#e0e0e0',
-    marginLeft: -16,
-    marginRight: -16,
-    marginTop: -16,
-    paddingLeft: 16,
-    paddingRight: 16,
-    paddingTop: 16,
   },
   title: {
     fontSize: 24,

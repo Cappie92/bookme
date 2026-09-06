@@ -4,6 +4,7 @@ type Props = {
   destination: WebHandoffDestination;
   title: string;
   testID: string;
+  parentHasPagePadding?: boolean;
 };
 
 /** Android keeps its existing native screens unchanged. */
