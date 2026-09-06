@@ -7,7 +7,20 @@ import pytest
 from sqlalchemy.orm import Session
 
 from auth import get_password_hash
-from models import Master, Payment, Subscription, SubscriptionPlan, SubscriptionType, User, UserRole
+from models import (
+    BalanceTransaction,
+    Master,
+    Payment,
+    PromoRewardGrant,
+    Subscription,
+    SubscriptionPlan,
+    SubscriptionPointsLedger,
+    SubscriptionReservation,
+    SubscriptionType,
+    User,
+    UserBalance,
+    UserRole,
+)
 from utils.robokassa import (
     compute_result_signature,
     parse_robokassa_result_callback,
@@ -88,6 +101,30 @@ def _pending_payment(db: Session, user: User, amount: float = 1160.0) -> Payment
     return persist_new_robokassa_payment(db, payment)
 
 
+def _assert_result_ack(response, invoice_id: str) -> None:
+    assert response.status_code == 200
+    assert response.text == f"OK{invoice_id}"
+    assert response.headers["content-type"] == "text/plain; charset=utf-8"
+
+
+def _payment_effects_snapshot(db: Session) -> dict:
+    """Compare persisted payment effects before and after a duplicate callback."""
+    return {
+        model.__tablename__: db.execute(
+            model.__table__.select().order_by(model.id)
+        ).all()
+        for model in (
+            Payment,
+            Subscription,
+            UserBalance,
+            BalanceTransaction,
+            SubscriptionReservation,
+            SubscriptionPointsLedger,
+            PromoRewardGrant,
+        )
+    }
+
+
 def test_compute_result_signature_uses_raw_out_sum():
     pwd = "secret_p2"
     assert compute_result_signature("1160", "15", pwd) == hashlib.md5(
@@ -152,8 +189,7 @@ def test_result_callback_outsum_1160_integer(client, db: Session, robokassa_stub
         "/api/payments/robokassa/result",
         data={"OutSum": "1160", "InvId": invoice_id, "SignatureValue": sig},
     )
-    assert resp.status_code == 200
-    assert f"OK{invoice_id}" in resp.text
+    _assert_result_ack(resp, invoice_id)
 
     db.expire_all()
     payment = db.query(Payment).filter(Payment.public_id == public_id).first()
@@ -164,6 +200,15 @@ def test_result_callback_outsum_1160_integer(client, db: Session, robokassa_stub
     sub = db.query(Subscription).filter(Subscription.id == payment.subscription_id).first()
     assert sub is not None
     assert sub.is_active is True
+
+    effects_before = _payment_effects_snapshot(db)
+    duplicate = client.post(
+        "/api/payments/robokassa/result",
+        data={"OutSum": "1160", "InvId": invoice_id, "SignatureValue": sig},
+    )
+    _assert_result_ack(duplicate, invoice_id)
+    db.expire_all()
+    assert _payment_effects_snapshot(db) == effects_before
 
 
 def test_result_callback_outsum_1160_00(client, db: Session, robokassa_stub):
@@ -196,8 +241,7 @@ def test_result_callback_outsum_1160_00(client, db: Session, robokassa_stub):
         "/api/payments/robokassa/result",
         data={"OutSum": "1160.00", "InvId": invoice_id, "SignatureValue": sig},
     )
-    assert resp.status_code == 200
-    assert f"OK{invoice_id}" in resp.text
+    _assert_result_ack(resp, invoice_id)
 
 
 def test_result_callback_fallback_field_names(client, db: Session, robokassa_stub):
@@ -230,8 +274,7 @@ def test_result_callback_fallback_field_names(client, db: Session, robokassa_stu
         "/api/payments/robokassa/result",
         data={"out_summ": "1160", "inv_id": invoice_id, "crc": sig},
     )
-    assert resp.status_code == 200
-    assert f"OK{invoice_id}" in resp.text
+    _assert_result_ack(resp, invoice_id)
 
 
 def test_result_callback_rejects_wrong_amount(client, db: Session, robokassa_stub):
@@ -245,7 +288,9 @@ def test_result_callback_rejects_wrong_amount(client, db: Session, robokassa_stu
         "/api/payments/robokassa/result",
         data={"OutSum": "999", "InvId": invoice_id, "SignatureValue": sig},
     )
-    assert "Amount mismatch" in resp.text
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "application/json"
+    assert resp.text == f'"ERROR: Amount mismatch for invoice {invoice_id}"'
     db.expire_all()
     payment = db.query(Payment).filter(Payment.id == payment_id).first()
     assert payment.status == "failed"
@@ -260,7 +305,60 @@ def test_result_callback_rejects_invalid_signature(client, db: Session, robokass
         "/api/payments/robokassa/result",
         data={"OutSum": "1160", "InvId": invoice_id, "SignatureValue": "deadbeef"},
     )
-    assert "Invalid signature" in resp.text
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "application/json"
+    assert resp.text == '"ERROR: Invalid signature"'
     db.expire_all()
     payment = db.query(Payment).filter(Payment.id == payment_id).first()
     assert payment.status == "pending"
+
+
+def test_result_callback_unknown_payment_preserves_error(client, db, robokassa_stub):
+    invoice_id = "999999"
+    signature = compute_result_signature("1160", invoice_id, "p2")
+    response = client.post(
+        "/api/payments/robokassa/result",
+        data={"OutSum": "1160", "InvId": invoice_id, "SignatureValue": signature},
+    )
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/json"
+    assert response.text == f'"ERROR: Payment not found for invoice {invoice_id}"'
+    assert db.query(Payment).count() == 0
+    assert db.query(Subscription).count() == 0
+
+
+@pytest.mark.parametrize(
+    ("form", "message"),
+    [({}, "Missing InvId"), ({"InvId": "1"}, "Missing OutSum")],
+)
+def test_result_callback_missing_fields_preserves_error(client, form, message):
+    response = client.post("/api/payments/robokassa/result", data=form)
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/json"
+    assert response.text == f'"ERROR: {message}"'
+
+
+def test_result_callback_deposit_ack_and_duplicate(client, db, robokassa_stub):
+    user = _create_master_user(db)
+    payment = _pending_payment(db, user)
+    payment.payment_type = "deposit"
+    db.commit()
+    invoice_id = payment.robokassa_invoice_id
+    user_id = user.id
+    signature = compute_result_signature("1160", invoice_id, "p2")
+    form = {"OutSum": "1160", "InvId": invoice_id, "SignatureValue": signature}
+
+    response = client.post("/api/payments/robokassa/result", data=form)
+    _assert_result_ack(response, invoice_id)
+    db.expire_all()
+    payment = db.query(Payment).filter_by(robokassa_invoice_id=invoice_id).one()
+    assert payment.status == "paid"
+    assert payment.payment_metadata["deposit_applied"] is True
+    assert db.query(UserBalance).filter_by(user_id=user_id).one().balance == 1160
+    assert db.query(BalanceTransaction).filter_by(user_id=user_id).count() == 1
+
+    effects_before = _payment_effects_snapshot(db)
+    duplicate = client.post("/api/payments/robokassa/result", data=form)
+    _assert_result_ack(duplicate, invoice_id)
+    db.expire_all()
+    assert _payment_effects_snapshot(db) == effects_before

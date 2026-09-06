@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from typing import List, Optional
 from urllib.parse import urlparse
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Form, Query
-from fastapi.responses import RedirectResponse
+from fastapi.responses import PlainTextResponse, RedirectResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
 
@@ -569,7 +569,7 @@ async def robokassa_result(
             payment.id,
             payment.user_id,
         )
-        return f"OK{invoice_id}"
+        return PlainTextResponse(f"OK{invoice_id}")
 
     now = datetime.utcnow()
 
@@ -651,7 +651,7 @@ async def robokassa_result(
             meta = p.payment_metadata or {}
             if meta.get("deposit_applied") is True:
                 db.commit()
-                return f"OK{invoice_id}"
+                return PlainTextResponse(f"OK{invoice_id}")
             # Лочим баланс пользователя
             user_balance = db.query(UserBalance).filter(UserBalance.user_id == p.user_id).with_for_update().first()
             if not user_balance:
@@ -674,15 +674,15 @@ async def robokassa_result(
             logger.exception("robokassa_result deposit apply failed invoice_id=%s", invoice_id)
             # депозит можно безопасно ретраить (Robokassa повторит callback)
             return f"ERROR: Deposit apply failed: {e}"
-        return f"OK{invoice_id}"
+        return PlainTextResponse(f"OK{invoice_id}")
 
     if payment.payment_type != 'subscription':
-        return f"OK{invoice_id}"
+        return PlainTextResponse(f"OK{invoice_id}")
 
     # Идемпотентность: если apply уже успешно сделан — ничего не делаем
     if payment.subscription_apply_status == 'applied' and payment.subscription_id:
         _apply_promo_rewards_best_effort(db, payment.id, context="robokassa_pre_phase2_applied")
-        return f"OK{invoice_id}"
+        return PlainTextResponse(f"OK{invoice_id}")
 
     # ------------------------
     # Фаза 2: apply подписки (атомарно, можно ретраить)
@@ -694,7 +694,7 @@ async def robokassa_result(
 
         if payment.subscription_apply_status == 'applied' and payment.subscription_id:
             db.commit()
-            return f"OK{invoice_id}"
+            return PlainTextResponse(f"OK{invoice_id}")
 
         payment.subscription_apply_status = 'pending'
         payment.error_message = None
@@ -735,7 +735,7 @@ async def robokassa_result(
                 payment.user_id,
                 active_apple.id,
             )
-            return f"OK{invoice_id}"
+            return PlainTextResponse(f"OK{invoice_id}")
 
         meta = payment.payment_metadata or {}
         calculation_id = meta.get("calculation_id")
@@ -963,10 +963,10 @@ async def robokassa_result(
         except Exception:
             db.rollback()
             logger.exception("robokassa_result phase2 mark failed failed invoice_id=%s", invoice_id)
-        return f"OK{invoice_id}"
+        return PlainTextResponse(f"OK{invoice_id}")
 
     _apply_promo_rewards_best_effort(db, payment.id, context="robokassa_after_apply")
-    return f"OK{invoice_id}"
+    return PlainTextResponse(f"OK{invoice_id}")
 
 
 @router.get("/public-status", response_model=PaymentPublicStatusOut)
