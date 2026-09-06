@@ -20,9 +20,9 @@ GitHub Actions discovers the four workflow files under the repository-root `.git
 | `gitleaks.yml` | pull request; push to `main`/`master` | Downloads gitleaks and scans the commit range selected for the event |
 | `mkdocs.yml` | every push; pull request | Prepares and builds MkDocs in strict mode, then uploads the generated site artifact |
 | `arch-overview.yml` | daily schedule; manual `workflow_dispatch` | Regenerates architecture overview and commits selected generated outputs when they differ |
-| `deploy.yml` | push to `main`; manual `workflow_dispatch` | Transfers the checkout, rebuilds/recreates Compose application services, runs the migration helper and performs an external HTTP health check |
+| `deploy.yml` | manual `workflow_dispatch` only | Transfers the checkout, rebuilds/recreates Compose application services, runs the migration helper and performs an external HTTP health check |
 
-Only the deploy job declares concurrency: one run per workflow/ref group, with `cancel-in-progress: false`. Branch protection, required-check selection, environment approvals and external CI remain `UNKNOWN`.
+Only the deploy job declares concurrency: one active run in the fixed `production` group across refs, with `cancel-in-progress: false`. The deploy workflow explicitly grants only `contents: read` to its repository token. Branch protection, required-check selection, environment approvals and external CI remain `UNKNOWN` without external access.
 
 **Sources:** `.github/workflows/gitleaks.yml`; `.github/workflows/mkdocs.yml`; `.github/workflows/arch-overview.yml`; `.github/workflows/deploy.yml`.
 
@@ -49,7 +49,8 @@ feature / integration branch
 → manual functional smoke
 → explicit APPROVE
 → user-managed merge to main
-→ production workflow
+→ CI only (no automatic production deploy)
+→ separately authorized manual workflow_dispatch for production
 ```
 
 Проверенный staging baseline — `9dcd4ed`. Repository подтверждает, что `deploy/staging/deploy-staging.sh` принимает уже выбранный clean commit, может проверить expected SHA, не fetch/checkout Git и не выполняет production actions. Сам manual smoke, approval и provider checks не являются GitHub Actions gates.
@@ -59,6 +60,8 @@ feature / integration branch
 **Sources:** `deploy/staging/deploy-staging.sh`; Git baseline `9dcd4ed`; release handoff dated 2026-08-17.
 
 ## Deployment
+
+Production deployment is manual-only: push (including tags), pull requests and completion of another workflow do not trigger `deploy.yml`. This safety change does not alter the manual deployment steps or configure a GitHub Environment or secrets. Exact-SHA selection, backup orchestration, deployment receipts, server locking, rollback, environment-scoped secrets and migration redesign are deferred to a separate post-release infrastructure stage.
 
 The production workflow has one `deploy` job and no `needs` dependency on a separately isolated validation job. It does not run backend or client test suites. Its repository-defined order is:
 

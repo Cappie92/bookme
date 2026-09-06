@@ -1,17 +1,17 @@
 name: Deploy to Production
 
 on:
-  push:
-    branches: [ main ]
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    # Один активный деплой на ref: параллельные push не должны перезаписывать друг друга
-    # (миграции, health).
+    # Один активный production deploy независимо от выбранного ref.
     concurrency:
-      group: deploy-${{ github.workflow }}-${{ github.ref }}
+      group: production
       cancel-in-progress: false
 
     steps:
@@ -75,4 +75,4 @@ jobs:
     - name: Health check
       run: |
         sleep 30
-        curl -f http://${{ secrets.SERVER_HOST }}/health || exit 1 
+        curl -f http://${{ secrets.SERVER_HOST }}/health || exit 1
