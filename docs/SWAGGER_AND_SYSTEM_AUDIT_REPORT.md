@@ -9,7 +9,6 @@
 
 - **OpenAPI:** Приложение экспортирует `/openapi.json`, `/docs` (Swagger UI), `/redoc`. В `main.py` заданы только `title`, `description`, `version`; кастомных тегов на уровне приложения нет — теги задаются в роутерах. Всего **273 path** в OpenAPI.
 - **Swagger:** Многие эндпоинты не имеют `response_model`; часть возвращает `dict`/сырой JSON вместо Pydantic-схем; описание 4xx/5xx часто отсутствует; единого перечня тегов в корне нет (теги разбросаны по роутерам).
-- **Конфиг-документы:** Соответствуют коду (settings, prod-валидация, legacy). Исключение: fallback `PLUSOFON_USER_ID = "3545"` в `plusofon_service.py` активен при пустом env; в prod при non-stub режиме валидатор требует переменную, поэтому fallback в prod не срабатывает — но в доках это можно явно оговорить.
 - **Система:** Backend — модульная (routers, services, auth, payments, telephony, subscriptions). Web использует относительные пути и префиксы `/api/master/`, `/api/loyalty/` для auth. Mobile дергает те же пути; public booking — `/api/public/masters/{slug}/bookings`. Техдолг: множество эндпоинтов без типизированного ответа, возврат dict в нескольких роутерах.
 
 ---
@@ -73,7 +72,6 @@
 - **salon.py:** множество GET/POST/PUT/DELETE без response_model (например `GET /masters`, `POST /masters/invite`, `GET /branches/{branch_id}/working-hours`, `GET /dashboard/stats`, и др.).
 - **loyalty.py:** `GET /applicable-discounts`, `GET /check-discount/{client_phone}` — без response_model.
 - **dev_testdata.py**, **dev_e2e.py:** все эндпоинты без response_model (допустимо для dev).
-- **yandex_geocoder.py**, **address_extraction.py:** возвращают dict, response_model не задан.
 
 ### 2. Эндпоинты без summary/description
 
@@ -108,7 +106,6 @@
 - **accounting.py:** множество `return {"message": ..., "booking_id": ...}` и т.п.
 - **client_loyalty.py:** возврат dict в части эндпоинтов.
 - **blog.py:** возврат dict для постов/навигации.
-- **yandex_geocoder.py**, **address_extraction.py:** возврат dict.
 
 ---
 
@@ -117,13 +114,13 @@
 ### Backend
 
 - **Архитектура:** FastAPI, SQLAlchemy, Pydantic. Роутеры подключаются в `main.py` с префиксами `/api` для большей части; исключения: blog, domain, accounting, tax_rates, subscription_plans, subscription_plans_public, master_page_modules, service_functions, public_master — часть с полным путём в prefix (например `/api/domain`), часть без дополнительного `/api` в main (уже в prefix роутера).
-- **Settings:** `backend/settings.py` — pydantic-settings, `get_settings()`, prod-валидация JWT и фичевых секретов (Robokassa, Zvonok, Plusofon). Соответствует CONFIG_AUDIT.
-- **Routers:** auth, client, master, salon, admin, bookings, blog, moderator, domain, subscriptions, balance, loyalty, expenses, promo_codes, accounting, tax_rates, subscription_plans, subscription_plans_public, master_page_modules, service_functions, payments, address_extraction, yandex_geocoder, public_master, master_loyalty, client_loyalty, master_clients; в dev — dev_testdata, dev_e2e.
-- **Services:** scheduling, verification_service, zvonok_service, plusofon_service, email_service, daily_charges, recurring_expenses, bookings_limit_monitor, temporary_bookings_cleanup и др.
+- **Settings:** `backend/settings.py` — pydantic-settings, `get_settings()`, prod-валидация JWT и фичевых секретов (Robokassa, Zvonok). Соответствует CONFIG_AUDIT.
+- **Routers:** auth, client, master, salon, admin, bookings, blog, moderator, domain, subscriptions, balance, loyalty, expenses, promo_codes, accounting, tax_rates, subscription_plans, subscription_plans_public, master_page_modules, service_functions, payments, public_master, master_loyalty, client_loyalty, master_clients; в dev — dev_testdata, dev_e2e.
+- **Services:** scheduling, verification_service, zvonok_service, email_service, daily_charges, recurring_expenses, bookings_limit_monitor, temporary_bookings_cleanup и др.
 - **DB:** database.py, models.py, alembic. DATABASE_URL в settings и в alembic/env.py.
 - **Auth:** JWT (auth.py), get_current_user, role-based (require_salon, require_admin и т.д.).
 - **Payments:** Robokassa (stub/test/prod), payments router, balance, subscriptions.
-- **Telephony:** Zvonok, Plusofon (режимы stub/non-stub).
+- **Telephony:** Zvonok (режимы stub/non-stub).
 - **Subscriptions:** подписки мастеров, планы, заморозка, расчёт — отдельные роутеры и сервисы.
 
 **Production-ready:** Конфиг через settings, валидация секретов в prod, CORS по окружению, health endpoint, фоновые задачи с корректным shutdown.
@@ -152,7 +149,7 @@
 
 - **Источник правды:** Конфиг в `backend/settings.py`, приложение использует `get_settings()`. Alembic читает DATABASE_URL из env в env.py — в доках указано.
 - **JWT в prod:** В settings есть `validate_jwt_secret_in_production` — запрет дефолтного JWT в production — совпадает.
-- **Фичевые секреты в prod:** `validate_feature_secrets_in_production` проверяет Robokassa, Zvonok, Plusofon при не-stub режимах — совпадает.
+- **Фичевые секреты в prod:** `validate_feature_secrets_in_production` проверяет Robokassa, Zvonok при не-stub режимах — совпадает.
 - **SALON_ROLE_ENABLED:** В settings есть legacy alias и WARNING при старте (used_legacy_salon_alias) — совпадает.
 - **MASTER_CANON_MODE:** В runtime из os.environ не читается; в `utils/master_canon.py` только переданный dict env — совпадает.
 - **Runbook/DoD:** Команды (1)–(3), скрипт runbook_config_check.sh, ожидание 3 PASS и тело /health — зафиксированы в доках и соответствуют коду (main.py /health возвращает нужное тело; скрипт выполняет 3 проверки).
@@ -161,26 +158,12 @@
 
 - Нет явных расхождений: код ведёт себя в соответствии с описанием в CONFIG_AUDIT и CONFIG_CLEANUP_PLAN.
 
-### PLUSOFON_USER_ID fallback "3545"
-
-- **Где есть:** `backend/services/plusofon_service.py`, строка 14:  
-  `self.user_id = s.PLUSOFON_USER_ID or "3545"`.
-- **Активен ли в production:**  
-  - В production при `PLUSOFON_MODE` не stub валидатор в settings требует непустые `PLUSOFON_USER_ID` и `PLUSOFON_ACCESS_TOKEN`. Если они пустые, приложение не стартует (ValueError).  
-  - Fallback "3545" используется только когда settings уже загружены (т.е. валидация пройдена). В prod с non-stub Plusofon переменная обязательна, поэтому в типичном prod fallback не срабатывает.  
-  - В dev или при PLUSOFON_MODE=stub переменная не обязательна — тогда fallback активен.
-- **Противоречит ли правилу “в prod non-stub secrets required”:** Нет. Правило обеспечивается валидатором до использования сервиса; fallback — только для случаев, когда Plusofon не обязателен (stub/dev).
-- **Рекомендация для доков:** В CONFIG_AUDIT в комментарии к PLUSOFON_USER_ID уже указано: "В коде fallback '3545' если пусто". Имеет смысл добавить одну фразу: "В production при non-stub Plusofon переменная обязательна (валидатор), fallback не используется."
-
----
-
 ## F. Concrete next actions
 
 1. **OpenAPI:** Задать в `main.py` `openapi_tags` с перечнем групп (auth, bookings, master, client, admin, payments, loyalty, subscriptions, …) и при необходимости унифицировать имена тегов в роутерах.
-2. **Response models:** Ввести Pydantic-схемы для ответов, которые сейчас возвращаются как dict (tax_rates, domain subdomain info, blog, moderator delete, master_clients restrictions, accounting messages, client_loyalty частично, geocoder/address_extraction), и проставить `response_model` у соответствующих эндпоинтов.
+2. **Response models:** Ввести Pydantic-схемы для ответов, которые сейчас возвращаются как dict (tax_rates, domain subdomain info, blog, moderator delete, master_clients restrictions, accounting messages, client_loyalty частично), и проставить `response_model` у соответствующих эндпоинтов.
 3. **Ошибки в OpenAPI:** Добавить для критичных эндпоинтов `responses={401: ..., 404: ..., 500: ...}` или общий шаблон для защищённых роутеров.
 4. **Summary:** Добавить `summary="..."` для эндпоинтов без краткого описания (по приоритету: auth, bookings, master, payments, public_master).
-5. **Конфиг-документы:** Добавить в CONFIG_AUDIT уточнение про PLUSOFON_USER_ID fallback и prod (одна фраза в таблицу или выводы).
 6. **Перед релизом:** Прогнать Runbook (1)–(3) и make config-runbook; smoke-проверка публичных и основных защищённых API; при необходимости экспорт openapi.json и проверка клиентов (web/mobile) по схеме.
 
 ---
@@ -220,8 +203,6 @@ backend/
 │   ├── master_page_modules.py
 │   ├── service_functions.py
 │   ├── payments.py
-│   ├── address_extraction.py
-│   ├── yandex_geocoder.py
 │   ├── public_master.py
 │   ├── master_loyalty.py
 │   ├── client_loyalty.py
@@ -229,7 +210,6 @@ backend/
 │   ├── dev_testdata.py
 │   └── dev_e2e.py
 ├── services/
-│   ├── plusofon_service.py
 │   ├── zvonok_service.py
 │   ├── scheduling.py
 │   ├── verification_service.py
@@ -269,8 +249,6 @@ backend/
 | master_page_modules | /api/master/page-modules | — | /api/master/page-modules |
 | service_functions | /api/admin/service-functions | — | /api/admin/service-functions |
 | payments | /payments | /api | /api/payments |
-| address_router | (пусто в файле) | /api | /api/... |
-| geocoder_router | (пусто) | /api/geocoder | /api/geocoder/... |
 | public_master | /api/public/masters | — | /api/public/masters |
 | dev_testdata | /dev/testdata | /api | /api/dev/testdata (только при enable_dev_testdata) |
 | dev_e2e | /dev/e2e | /api | /api/dev/e2e (только при dev_e2e) |
@@ -281,7 +259,7 @@ UserBase, UserCreate, UserUpdate, User, SalonBase, SalonCreate, SalonUpdate, Sal
 
 ### Env vars, реально используемые в коде (по CONFIG_AUDIT и settings.py)
 
-JWT_SECRET_KEY, DATABASE_URL, ENVIRONMENT, ACCESS_TOKEN_EXPIRE_DAYS, REFRESH_TOKEN_EXPIRE_DAYS, ENABLE_DEV_TESTDATA, DEV_E2E, SALONS_ENABLED, LEGACY_INDIE_MODE, MASTER_CANON_DEBUG, TZ, DEBUG_FUTURE_BOOKING_ID, SUBSCRIPTION_*_DEBUG, PAYMENT_URL_DEBUG, DAILY_CHARGE_DEBUG, FRONTEND_URL, API_BASE_URL, ROBOKASSA_MODE, ROBOKASSA_MERCHANT_LOGIN, ROBOKASSA_PASSWORD_1, ROBOKASSA_PASSWORD_2, ROBOKASSA_IS_TEST, ROBOKASSA_*_URL, ZVONOK_API_KEY, ZVONOK_MODE, PLUSOFON_USER_ID, PLUSOFON_ACCESS_TOKEN, PLUSOFON_MODE, REDIS_HOST, REDIS_PORT. Legacy: SALON_ROLE_ENABLED (alias). Не из env в runtime: MASTER_CANON_MODE (только dict в тестах/скриптах).
+JWT_SECRET_KEY, DATABASE_URL, ENVIRONMENT, ACCESS_TOKEN_EXPIRE_DAYS, REFRESH_TOKEN_EXPIRE_DAYS, ENABLE_DEV_TESTDATA, DEV_E2E, SALONS_ENABLED, LEGACY_INDIE_MODE, MASTER_CANON_DEBUG, TZ, DEBUG_FUTURE_BOOKING_ID, SUBSCRIPTION_*_DEBUG, PAYMENT_URL_DEBUG, DAILY_CHARGE_DEBUG, FRONTEND_URL, API_BASE_URL, ROBOKASSA_MODE, ROBOKASSA_MERCHANT_LOGIN, ROBOKASSA_PASSWORD_1, ROBOKASSA_PASSWORD_2, ROBOKASSA_IS_TEST, ROBOKASSA_*_URL, ZVONOK_API_KEY, ZVONOK_MODE, REDIS_HOST, REDIS_PORT. Legacy: SALON_ROLE_ENABLED (alias). Не из env в runtime: MASTER_CANON_MODE (только dict в тестах/скриптах).
 
 ### OpenAPI — краткая выжимка
 

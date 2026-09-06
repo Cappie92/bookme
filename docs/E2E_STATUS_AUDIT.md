@@ -1,5 +1,7 @@
 # STATUS/AUDIT: пункты (3)-(6) и E2E готовность
 
+> Исторический аудит, не текущий runbook. В cleanup 2026-09-06 актуализированы адресные компоненты и обычная ссылка на карты; остальные выводы ниже относятся к прежнему состоянию. Актуальная публичная страница: `/m/:slug` → `MasterPublicBookingPage`, API `/api/public/masters/{slug}`; legacy `/domain/:subdomain` уже снят.
+
 ## (3) Публичная страница мастера
 
 ### Что уже реализовано
@@ -8,22 +10,21 @@
 |-----------|-----|----------|
 | **Роут** | `frontend/App.jsx` | `/domain/:subdomain` → `SubdomainPage` |
 | **API** | `backend/routers/domain.py` | `GET /api/domain/{subdomain}/info` — без авторизации |
-| **Страница** | `frontend/src/pages/SubdomainPage.jsx` | Загрузка owner (master/indie_master/salon), YandexMap, MasterBookingModule, фон по background_color |
+| **Страница** | `frontend/src/pages/MasterPublicBookingPage.jsx` | Загрузка owner (master/indie_master/salon), ссылка на карты, MasterBookingModule, фон по background_color |
 | **Данные** | Master/IndieMaster | `domain`, `bio`, `address`, `logo`, `website`, `background_color`, `site_description` |
 | **Модули** | `MasterPageModule` | Кастомные блоки (module_type, config) |
-| **Карта** | `YandexMap.jsx` | Компонент карты Яндекса |
+| **Карта** | `backend/utils/yandex_maps_url.py` | Обычная HTTPS search-ссылка без API |
 
 ### Чего не хватает
 
 1. **URL:** Сейчас `/domain/{subdomain}`. Пользователь хотел `/m/{slug}` или `/master/{id}/page` — текущий вариант уже SEO-friendly и работает; альтернативный путь можно добавить как redirect.
 2. **SEO:** Нет явного sitemap/robots; проверить, что страница не блокируется для индексации.
 3. **Кастомизация:** `master_public_page_settings` или отдельная таблица — пока всё в полях Master; достаточно для MVP.
-4. **Карта без ключа:** Заглушка при отсутствии YANDEX_MAPS_API_KEY — нужно проверить в `YandexMap.jsx`.
 5. **robots.txt / sitemap:** Убедиться, что `/domain/*` не закрыт в robots.
 
 ### Где в коде
 
-- Frontend: `frontend/src/pages/SubdomainPage.jsx`, `frontend/src/components/YandexMap.jsx`
+- Frontend: `frontend/src/pages/MasterPublicBookingPage.jsx`, `frontend/src/components/booking/PublicBookingSidebar.jsx`
 - Backend: `backend/routers/domain.py`
 - Модели: `backend/models.py` (Master, IndieMaster, MasterPageModule)
 

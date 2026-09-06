@@ -30,7 +30,7 @@ Coverage measures whether a significant runtime aspect has a clear Knowledge own
 | Public profile/domain/page modules/blog | `domain-map.md`; `configuration.md` | PARTIAL | Domain/blog/public/module routers and models | No single lifecycle/API owner for the composed public surface |
 | Admin/moderator platform operations | `identity-access.md`; configuration and Debt documents | PARTIAL | Admin, moderator, plan and function routers | Authorization and feature administration are covered; full operational surface is not |
 | Account deletion and privacy boundary | `privacy-data-handling.md`; `identity-api.md` | FULL | Account-deletion service and auth endpoints | External retention remains host/provider unknown |
-| Email, telephony, OAuth and geocoder integrations | Identity, privacy, topology and domain overview | PARTIAL | Integration services/routers and settings categories | No unified integration owner for failure/status/retry contracts |
+| Email, telephony, OAuth integrations | Identity, privacy, topology and domain overview | PARTIAL | Integration services/routers and settings categories | No unified integration owner for failure/status/retry contracts |
 | Backend business-rule utils | Respective Booking, Scheduling, Loyalty, Billing and Finance owners | FULL | Status, money, loyalty, subscription and statistics helper groups | None for owned domains |
 | Five background jobs | `background-jobs.md` | FULL | `backend/main.py`; job services | None |
 | Runtime settings and feature configuration | `configuration.md` | FULL | Backend settings, DB settings, web/mobile feature layers | Live values remain unknown by design |

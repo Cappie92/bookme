@@ -122,13 +122,6 @@ if [[ "$(lowercase "${ZVONOK_MODE}")" != "stub" ]]; then
   require_non_placeholder ZVONOK_API_KEY
 fi
 
-PLUSOFON_MODE="$(env_value PLUSOFON_MODE)"
-require_present PLUSOFON_MODE
-if [[ "$(lowercase "${PLUSOFON_MODE}")" != "stub" ]]; then
-  require_non_placeholder PLUSOFON_USER_ID
-  require_non_placeholder PLUSOFON_ACCESS_TOKEN
-fi
-
 YANDEX_AUTH_ENABLED="$(env_value YANDEX_AUTH_ENABLED)"
 require_present YANDEX_AUTH_ENABLED
 case "$(lowercase "${YANDEX_AUTH_ENABLED}")" in

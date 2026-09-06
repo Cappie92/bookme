@@ -53,11 +53,11 @@ Repository transport integrations use HTTP clients and configured provider endpo
 | Yandex Metrika | web path/query/hash, referrer, page/goal context; click/link/session features | Enabled by default unless explicitly disabled |
 | AppMetrica | internal user id, role/event context, revenue, errors/crashes | NoOp when key absent; ad identifiers/location disabled in wrapper |
 | Payment provider | payment identifier, amount and callback metadata | Subscription billing contract owns details |
-| Maps/geocoding | address/search query context | Consumer of profile/location input |
+| Yandex Maps link | city/address in an HTTPS search URL | Opens only on user click; no Maps, Suggest or Geocoder API |
 
 Provider-side retention, geographic processing, subprocessors and production account settings are UNKNOWN from repository evidence. Credential values are outside Knowledge.
 
-**Source:** `backend/routers/auth.py`; `backend/services/zvonok_service.py`; `backend/services/plusofon_service.py`; `backend/services/email/unisender_provider.py`; `backend/routers/payments.py`; `frontend/src/analytics/metrika.js`; `mobile/src/services/analytics/providers/AppMetricaProvider.ts`; `backend/routers/yandex_geocoder.py`; `frontend/src/components/AddressAutocomplete.jsx`.
+**Source:** `backend/routers/auth.py`; `backend/services/zvonok_service.py`; `backend/services/email/unisender_provider.py`; `backend/routers/payments.py`; `frontend/src/analytics/metrika.js`; `mobile/src/services/analytics/providers/AppMetricaProvider.ts`; `backend/utils/yandex_maps_url.py`.
 
 ## 5. Analytics behavior
 

@@ -44,7 +44,6 @@
 - **DATABASE_URL** — если содержит пароль (postgres), только из секретов.
 - **ROBOKASSA_PASSWORD_1**, **ROBOKASSA_PASSWORD_2** — секреты.
 - **ZVONOK_API_KEY** — секрет.
-- **PLUSOFON_ACCESS_TOKEN** — секрет.
 - **TOKEN** (в скриптах) — не хранить в репо; передавать через env при запуске или интерактивно.
 
 В .env.example и env_template — только имена переменных и комментарии, без реальных значений для секретов.
@@ -56,10 +55,9 @@
 | Переменная | Было | Стало | Где |
 |------------|------|-------|-----|
 | JWT_SECRET_KEY | Дефолт в коде для dev | В settings оставить dev-дефолт только для non-production; в production валидатор запрещает дефолт | Уже сделано в settings.py (model_validator) |
-| PLUSOFON_ACCESS_TOKEN | Захардкоженный дефолт в коде | Без дефолта; читать из env (пустая строка в settings) | Уже сделано: в settings пустая строка, в plusofon_service убран хардкод |
 | ROBOKASSA_PASSWORD_1/2 | Пустая строка в settings | Оставить пустую строку как "не задано"; в prod при включённых платежах проверять на пустоту при первом использовании (опционально) | При необходимости добавить проверку в роутере платежей при non-stub |
 
-Итог: дефолтов у секретов в коде нет (пустая строка = «не задано»). В production при старте: JWT_SECRET_KEY проверяется всегда; при включённой фиче (режим задан и не stub) проверяются Robokassa-, Zvonok-, Plusofon-секреты (см. `validate_feature_secrets_in_production` в settings.py).
+Итог: дефолтов у секретов в коде нет (пустая строка = «не задано»). В production при старте: JWT_SECRET_KEY проверяется всегда; при включённой фиче (режим задан и не stub) проверяются Robokassa-, Zvonok-секреты (см. `validate_feature_secrets_in_production` в settings.py).
 
 ---
 

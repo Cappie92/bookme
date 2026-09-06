@@ -9,13 +9,11 @@
 | Zvonok: убран api_key из `/zvonok/balance` | ✅ | `backend/routers/auth.py` |
 | Zvonok: `ZVONOK_MODE=stub` | ✅ | `backend/services/zvonok_service.py` |
 | Robokassa: `ROBOKASSA_MODE=stub` | ✅ | `backend/routers/payments.py`, `utils/robokassa.py` |
-| Plusofon: `PLUSOFON_MODE=stub` | ✅ | `backend/services/plusofon_service.py` |
 
 ### Stub-режимы
 
 - **ZVONOK_MODE=stub:** `send_verification_call` возвращает `call_id=stub-call-0001`, `verify_phone_digits` принимает `digits=1234`.
 - **ROBOKASSA_MODE=stub:** `init` возвращает `payment_url` на `/api/payments/robokassa/stub-complete?invoice_id=...`; GET по этому URL применяет оплату и редиректит на success.
-- **PLUSOFON_MODE=stub:** `initiate_call` возвращает `call_id=stub-plusofon-0001` без реального звонка.
 
 ---
 
@@ -26,7 +24,6 @@
 ```env
 ZVONOK_MODE=stub
 ROBOKASSA_MODE=stub
-PLUSOFON_MODE=stub
 API_BASE_URL=http://localhost:8000   # для Robokassa stub-complete
 ```
 
@@ -75,7 +72,7 @@ cd frontend && npm run test:e2e
 
 **ENV для e2e_full.sh:**
 - `DEV_E2E=true` — включает seed endpoint
-- `ZVONOK_MODE=stub`, `ROBOKASSA_MODE=stub`, `PLUSOFON_MODE=stub`
+- `ZVONOK_MODE=stub`, `ROBOKASSA_MODE=stub`
 - `E2E_DATABASE_PATH` (опционально) — путь к e2e.db
 - `BACKEND_PORT` / `FRONTEND_PORT` (опционально) — порты; иначе скрипт сам выбирает свободные (5173/8000 или следующие)
 

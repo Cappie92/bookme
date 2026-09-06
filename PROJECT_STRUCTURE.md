@@ -13,13 +13,7 @@ frontend/src/
 │   └── react.svg
 │
 ├── components/                # React компоненты
-│   ├── AddressAutocomplete.jsx
-│   ├── AddressExtractor.jsx
-│   ├── AddressFromYandexMaps.jsx
-│   ├── AddressInputDemo.jsx
-│   ├── AddressValidator.jsx
 │   ├── AdminSidebar.jsx
-│   ├── AdvancedAddressFromYandexMaps.jsx
 │   ├── AdvancedScheduleView.jsx
 │   ├── BlogEditor.jsx
 │   ├── BlogEditor.css
@@ -58,15 +52,11 @@ frontend/src/
 │   ├── SalonMasters.jsx
 │   ├── SalonSidebar.jsx
 │   ├── SalonWorkSchedule.jsx
-│   ├── ServerBasedAddressExtractor.jsx
 │   ├── Sidebar.jsx
-│   ├── SimpleAddressFromYandexMaps.jsx
 │   ├── SubscriptionModal.jsx
 │   ├── SubscriptionPlanForm.jsx
 │   ├── Tooltip.jsx
 │   ├── WorkingHours.jsx
-│   ├── YandexApiStatus.jsx
-│   ├── YandexGeocoder.jsx
 │   │
 │   ├── booking/               # Компоненты бронирования
 │   │   ├── BranchBookingModule.jsx
@@ -162,7 +152,6 @@ frontend/src/
 │   ├── PublicProfile.jsx
 │   ├── SalonTariff.jsx
 │   ├── ServiceDashboard.jsx
-│   ├── SubdomainPage.jsx
 │   ├── TestAnyMaster.jsx
 │   ├── UserAgreement.jsx
 │   │
@@ -173,7 +162,6 @@ frontend/src/
 │       ├── ScheduleTest.jsx
 │       ├── SimpleDomainTest.jsx
 │       ├── WorkingHoursTest.jsx
-│       └── YandexGeocoderTest.jsx
 │
 ├── routes/                    # Роутинг (пустая папка)
 │
@@ -206,7 +194,6 @@ backend/
 ├── routers/                   # API роутеры (endpoints)
 │   ├── __init__.py
 │   ├── accounting.py          # Финансовый учет
-│   ├── address_extraction.py  # Извлечение адресов
 │   ├── admin.py               # Админ панель
 │   ├── auth.py                # Авторизация
 │   ├── balance.py             # Баланс пользователей
@@ -226,7 +213,6 @@ backend/
 │   ├── subscription_plans_public.py # Планы подписок (публичные)
 │   ├── subscriptions.py      # Подписки
 │   ├── tax_rates.py           # Налоговые ставки
-│   └── yandex_geocoder.py     # Яндекс геокодер
 │
 ├── utils/                     # Бизнес-логика и утилиты
 │   ├── __init__.py
@@ -242,7 +228,6 @@ backend/
 │   ├── bookings_limit_monitor.py    # Мониторинг лимитов бронирований
 │   ├── daily_charges.py             # Ежедневные списания
 │   ├── email_service.py             # Email сервис
-│   ├── plusofon_service.py          # Plusofon интеграция
 │   ├── recalc_favorites.py           # Пересчет избранного
 │   ├── recurring_expenses.py         # Циклические расходы
 │   ├── scheduling.py                 # Планирование задач
@@ -319,4 +304,3 @@ backend/
 - **Бронирования**: `routers/bookings.py`, `utils/booking_status.py`, `services/bookings_limit_monitor.py`
 - **Админка**: `routers/admin.py`, `routers/moderator.py`
 - **Финансы**: `routers/accounting.py`, `routers/expenses.py`, `routers/tax_rates.py`
-

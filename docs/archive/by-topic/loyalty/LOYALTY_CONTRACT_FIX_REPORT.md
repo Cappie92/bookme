@@ -179,7 +179,6 @@ def update_booking(...):
 @@ -26,6 +28,7 @@ from schemas import (
  from services.scheduling import check_booking_conflicts, get_available_slots, get_available_slots_any_master_logic, get_best_master_for_slot
  from services.verification_service import VerificationService
- from services.plusofon_service import plusofon_service
 +from utils.loyalty_discounts import evaluate_and_prepare_applied_discount, build_applied_discount_info
  
  router = APIRouter(prefix="/bookings", tags=["bookings"])

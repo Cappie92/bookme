@@ -74,7 +74,6 @@
 - **Config и Runbook:** CONFIG_AUDIT/CONFIG_CLEANUP_PLAN соответствуют коду; runbook_config_check.sh и Makefile в порядке; не трогать без необходимости.
 - **Структура backend:** Роутеры, settings, auth, сервисы разделены; не нужен рефакторинг ради Swagger.
 - **Dev-роутеры (dev_testdata, dev_e2e):** Можно оставить без response_model и богатой документации — они не для продакшена.
-- **Geocoder/address_extraction:** Вспомогательные; приоритет ниже, чем у продуктовых эндпоинтов.
 
 ---
 

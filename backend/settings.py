@@ -117,9 +117,6 @@ class Settings(BaseSettings):
     # --- Telephony / SMS ---
     ZVONOK_API_KEY: str = ""
     ZVONOK_MODE: str = ""
-    PLUSOFON_USER_ID: str = ""
-    PLUSOFON_ACCESS_TOKEN: str = ""
-    PLUSOFON_MODE: str = ""
     REDIS_HOST: str = "localhost"
     REDIS_PORT: str = "6379"
 
@@ -197,12 +194,6 @@ class Settings(BaseSettings):
         zvonok_mode = (self.ZVONOK_MODE or "").strip().lower()
         if zvonok_mode and zvonok_mode != "stub" and not (self.ZVONOK_API_KEY or "").strip():
             errs.append("ZVONOK_API_KEY")
-        plusofon_mode = (self.PLUSOFON_MODE or "").strip().lower()
-        if plusofon_mode and plusofon_mode != "stub":
-            if not (self.PLUSOFON_USER_ID or "").strip():
-                errs.append("PLUSOFON_USER_ID")
-            if not (self.PLUSOFON_ACCESS_TOKEN or "").strip():
-                errs.append("PLUSOFON_ACCESS_TOKEN")
         if errs:
             raise ValueError(
                 "In production, the following secrets are required for enabled features: "
@@ -298,10 +289,6 @@ class Settings(BaseSettings):
         if mode in ("live", "production", "prod", "1", "true", "yes"):
             return False
         return True
-
-    @property
-    def plusofon_stub(self) -> bool:
-        return self.PLUSOFON_MODE.strip().lower() == "stub"
 
     @property
     def email_enabled(self) -> bool:

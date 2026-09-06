@@ -144,7 +144,6 @@ The active environment is `REPORTED` as follows; the tracked template/validator 
 | `API_BASE_URL` | `https://test.dedato.ru` |
 | `EMAIL_ENABLED` / `EMAIL_PROVIDER` | `false` / `unisender` |
 | `ZVONOK_MODE` | `stub` |
-| `PLUSOFON_MODE` | `stub` |
 | `ROBOKASSA_MODE` / `ROBOKASSA_IS_TEST` | `stub` / `true` |
 | `YANDEX_AUTH_ENABLED` | `true` |
 | `YANDEX_REDIRECT_URI` | `https://test.dedato.ru/api/auth/yandex/callback` |
@@ -167,9 +166,9 @@ https://test.dedato.ru/api/auth/yandex/callback
 
 The staging server template and validator were reportedly corrected manually and then returned `Staging env contract is valid`. Current repository HEAD still contains the obsolete `/api/auth/oauth/callback` value in both `deploy/staging/backend.env.example` and `deploy/staging/check-env.sh`; server and Git therefore drift. Before provider smoke, the Yandex application allowlist must contain the effective callback exactly.
 
-### Zvonok and Plusofon
+### Zvonok
 
-`ZVONOK_MODE=stub` and `PLUSOFON_MODE=stub` are mandatory for the current release smoke. Live Zvonok is `BLOCKED`, even though credentials are present. Repository-confirmed blockers are owned by [Security and privacy Debt](security-and-privacy.md): fragmented verification contracts, unsafe legacy reverse verification, incomplete phone-change challenge semantics, sensitive provider logging and hard-coded campaign ID. Live enablement requires a unified `VerificationService`, retirement (`410 Gone`) or migration of reverse endpoints, atomic/bound challenge consumption, log redaction and environment-owned `ZVONOK_CAMPAIGN_ID`.
+`ZVONOK_MODE=stub` is mandatory for the current release smoke. Live Zvonok is `BLOCKED`, even though credentials are present. Repository-confirmed blockers are owned by [Security and privacy Debt](security-and-privacy.md): fragmented verification contracts, unsafe legacy reverse verification, incomplete phone-change challenge semantics, sensitive provider logging and hard-coded campaign ID. Live enablement requires a unified `VerificationService`, retirement (`410 Gone`) or migration of reverse endpoints, atomic/bound challenge consumption, log redaction and environment-owned `ZVONOK_CAMPAIGN_ID`.
 
 ### Email / Unisender
 
