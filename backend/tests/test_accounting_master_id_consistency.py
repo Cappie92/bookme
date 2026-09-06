@@ -96,12 +96,21 @@ def test_accounting_uses_user_id_for_finance_models_even_when_user_id_differs_fr
     db.commit()
     db.refresh(service)
 
+    # Weekly summary uses local calendar dates, not UTC dates. Use the middle
+    # of the previous complete week so the booking is always in the past,
+    # including on Monday and around the local/UTC week boundary.
+    today = datetime.now().date()
+    week_start = datetime.combine(
+        today - timedelta(days=today.weekday() + 7), datetime.min.time()
+    )
+    accounting_at = week_start + timedelta(days=2, hours=12)
+
     booking = Booking(
         client_id=master_user.id,  # не важно для этого теста
         service_id=service.id,
         master_id=master_profile.id,  # Booking.master_id -> masters.id
-        start_time=datetime.utcnow() - timedelta(hours=2),
-        end_time=datetime.utcnow() - timedelta(hours=1),
+        start_time=accounting_at - timedelta(hours=2),
+        end_time=accounting_at - timedelta(hours=1),
         status=BookingStatus.AWAITING_CONFIRMATION,
         payment_amount=1500,
         loyalty_points_used=0,
@@ -129,6 +138,11 @@ def test_accounting_uses_user_id_for_finance_models_even_when_user_id_differs_fr
     assert confirmation is not None
     assert confirmation.master_id == master_user.id
 
+    # Preserve the endpoint-created confirmation and its ownership assertions;
+    # only anchor its timestamp inside the same fixture week as the expense.
+    confirmation.confirmed_at = accounting_at
+    db.commit()
+
     # Создаем расход (endpoint принимает query params)
     resp = client.post(
         "/api/master/accounting/expenses",
@@ -136,7 +150,7 @@ def test_accounting_uses_user_id_for_finance_models_even_when_user_id_differs_fr
             "name": "Test expense",
             "expense_type": "one_time",
             "amount": 200.0,
-            "expense_date": datetime.utcnow().isoformat(),
+            "expense_date": accounting_at.isoformat(),
         },
         headers=headers,
     )
@@ -152,9 +166,11 @@ def test_accounting_uses_user_id_for_finance_models_even_when_user_id_differs_fr
     assert expense.master_id == master_user.id
 
     # summary/operations должны видеть и доход, и расход
-    resp = client.get("/api/master/accounting/summary", params={"period": "week", "offset": 0}, headers=headers)
+    resp = client.get("/api/master/accounting/summary", params={"period": "week", "offset": -1}, headers=headers)
     assert resp.status_code == 200, resp.text
     summary = resp.json()
+    assert datetime.fromisoformat(summary["start_date"]) == week_start
+    assert datetime.fromisoformat(summary["end_date"]) == week_start + timedelta(days=7, microseconds=-1)
     assert (summary.get("total_income") or 0) > 0
     assert (summary.get("total_expense") or 0) > 0
 
@@ -171,4 +187,3 @@ def test_accounting_uses_user_id_for_finance_models_even_when_user_id_differs_fr
     ]
     assert len(income_ops) >= 1
     assert any(op.get("operation_type") == "expense" for op in operations)
-
