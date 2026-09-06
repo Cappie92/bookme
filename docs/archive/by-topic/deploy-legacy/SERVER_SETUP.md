@@ -53,7 +53,6 @@ ssh-copy-id user@your-server-ip
 cd /home/user/appointo
 cat > .env << EOF
 ENVIRONMENT=production
-YANDEX_API_KEY=32d81139-8da9-4182-9f0a-ef47cfe6733f
 EOF
 ```
 
@@ -82,26 +81,6 @@ docker-compose -f docker-compose.prod.yml ps
 docker-compose -f docker-compose.prod.yml logs
 ```
 
-## 📋 Шаг 4: Настройка API ключа Яндекс
-
-### 4.1 Настройка API ключа для продакшена
-1. Перейдите в [Яндекс.Карты API](https://yandex.ru/dev/maps/)
-2. Найдите ключ: `32d81139-8da9-4182-9f0a-ef47cfe6733f`
-3. Добавьте HTTP-рефереры:
-   ```
-   your-server-ip
-   your-domain.com (если есть домен)
-   ```
-4. Добавьте IP-адреса:
-   ```
-   your-server-ip
-   ```
-
-### 4.2 Проверка API
-```bash
-# На сервере
-curl "http://localhost:8000/api/geocoder/api-status"
-```
 
 ## 📋 Шаг 5: Настройка nginx (опционально)
 
@@ -211,9 +190,8 @@ sudo apt update && sudo apt upgrade -y
 - [ ] Настроены SSH ключи
 - [ ] Обновлены конфигурации скриптов
 - [ ] Выполнен первый деплой
-- [ ] Настроен API ключ Яндекс
 - [ ] Проверена работа приложения
 - [ ] Настроен nginx (опционально)
 - [ ] Настроен SSL (опционально)
 - [ ] Настроен firewall
-- [ ] Протестированы обновления 
+- [ ] Протестированы обновления

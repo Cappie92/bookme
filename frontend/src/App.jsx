@@ -73,7 +73,6 @@ const BookingForm = lazy(() => import("./pages/test/BookingForm"))
 // DomainTest / SimpleDomainTest сняты вместе с /domain/:subdomain.
 const WorkingHoursTest = lazy(() => import("./pages/test/WorkingHoursTest"))
 const ScheduleTest = lazy(() => import("./pages/test/ScheduleTest"))
-const YandexGeocoderTest = lazy(() => import("./pages/test/YandexGeocoderTest"))
 const TestAnyMaster = lazy(() => import("./pages/TestAnyMaster"))
 
 // Loading компонент для Suspense
@@ -221,7 +220,6 @@ function App() {
           <Route path="/test/auth" element={<MainLayout><AuthTest/></MainLayout>} />
           <Route path="/test/working-hours" element={<MainLayout><WorkingHoursTest/></MainLayout>} />
           <Route path="/test/schedule" element={<MainLayout><ScheduleTest/></MainLayout>} />
-          <Route path="/test/yandex-geocoder" element={<MainLayout><YandexGeocoderTest/></MainLayout>} />
           <Route path="/design-system" element={<MainLayout><DesignSystemDemo/></MainLayout>} />
           <Route path="/booking/:salonId/:branchId" element={<BranchBookingPage />} />
           <Route path="/test/any-master" element={<MainLayout><TestAnyMaster/></MainLayout>} />

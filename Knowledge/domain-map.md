@@ -430,7 +430,7 @@ CONFIRMED: есть служебный поиск внутри admin/списк�
 |------------|------------|
 | Robokassa | Оплата SaaS-подписки |
 | Yandex OAuth | Вход/привязка на web |
-| Yandex Maps / geocoder | Адрес/карты |
+| Яндекс Карты — обычная HTTPS-ссылка | Строковый адрес; API-ключ не требуется |
 | AppMetrica / Яндекс.Метрика | Analytics |
 | SMS/email провайдеры | Notifications (каналы) |
 

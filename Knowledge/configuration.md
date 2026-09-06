@@ -72,7 +72,7 @@ This flag drives returned dashboard/UI visibility, not a universal backend route
 
 OAuth and email use explicit enable flags. Payment and telephony select stub/live behavior from mode fields; Zvonok has a safe stub default unless a recognized live mode is selected, while other providers have their own mode semantics. Production validators establish only required configuration shape, not provider availability.
 
-The active staging environment has a stricter operational allowlist: email disabled, Zvonok/Plusofon/Robokassa in stub mode, Robokassa test flag enabled and Yandex OAuth enabled only with the staging callback. Credentials present in an ignored env file do not authorize outbound traffic. Effective values, provider smoke gates and current tracked-vs-server drift belong to [Staging infrastructure](staging.md).
+The active staging environment has a stricter operational allowlist: email disabled, Zvonok/Robokassa in stub mode, Robokassa test flag enabled and Yandex OAuth enabled only with the staging callback. Credentials present in an ignored env file do not authorize outbound traffic. Effective values, provider smoke gates and current tracked-vs-server drift belong to [Staging infrastructure](staging.md).
 
 **Source:** `backend/settings.py`; provider factories/services; [production topology](production-topology.md).
 

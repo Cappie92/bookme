@@ -13,8 +13,6 @@ from exceptions import SchemaOutdatedError
 from routers import admin, admin_promo_engine, auth, bookings, client, master, salon, blog, moderator, domain, subscriptions, balance, loyalty, expenses, promo_codes, promo_engine, accounting, tax_rates, subscription_plans, subscription_plans_public, master_page_modules, service_functions, payments, apple_iap, public_master
 from routers import master_loyalty, client_loyalty, master_clients
 from routers import dev_testdata, dev_e2e
-from routers.address_extraction import router as address_router
-from routers.yandex_geocoder import router as geocoder_router
 from services.daily_charges import run_daily_charges_task
 from services.recurring_expenses import run_recurring_expenses_task
 from services.bookings_limit_monitor import run_bookings_limit_monitor_task
@@ -187,8 +185,6 @@ app.include_router(master_page_modules.router)
 app.include_router(service_functions.router)
 app.include_router(payments.router, prefix="/api")
 app.include_router(apple_iap.router, prefix="/api")
-app.include_router(address_router, prefix="/api")
-app.include_router(geocoder_router, prefix="/api/geocoder")
 app.include_router(public_master.router)
 
 # dev_testdata: только при ENVIRONMENT=development И ENABLE_DEV_TESTDATA=1

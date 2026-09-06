@@ -16,7 +16,7 @@ cd frontend && npm install && npx playwright install
 
 ```bash
 # Backend на 8000, frontend на 5173
-export DEV_E2E=true ZVONOK_MODE=stub ROBOKASSA_MODE=stub PLUSOFON_MODE=stub
+export DEV_E2E=true ZVONOK_MODE=stub ROBOKASSA_MODE=stub
 
 # Seed (один раз)
 curl -X POST http://localhost:8000/api/dev/e2e/seed
@@ -32,7 +32,6 @@ cd frontend && E2E_BASE_URL=http://localhost:5173 npx playwright test
 | `DEV_E2E` | `true` — включает `/api/dev/e2e/seed` |
 | `ZVONOK_MODE` | `stub` — без реальных звонков |
 | `ROBOKASSA_MODE` | `stub` — без реальных платежей |
-| `PLUSOFON_MODE` | `stub` — без реальных звонков |
 | `E2E_DATABASE_PATH` | Путь к e2e.db (опционально) |
 | `E2E_BASE_URL` | URL фронтенда для Playwright (по умолчанию http://localhost:5173) |
 | `BACKEND_PORT` | Порт backend (опционально; иначе — авто-выбор свободного) |

@@ -41,9 +41,6 @@
 | **ROBOKASSA_FAIL_URL** | settings.py; utils/robokassa | str (url) | "" | required если не stub | payments | non-secret | used | |
 | **ZVONOK_API_KEY** | settings.py; services/zvonok_service через get_settings() | str | "" | optional (при stub не нужен) | telephony | secret | used | |
 | **ZVONOK_MODE** | settings.py; services/zvonok_service | str | "" | optional | telephony | non-secret | used | stub = без реальных звонков. |
-| **PLUSOFON_USER_ID** | settings.py; services/plusofon_service | str | "" | optional | telephony | non-secret | used | В коде fallback "3545" если пусто. |
-| **PLUSOFON_ACCESS_TOKEN** | settings.py; services/plusofon_service | str | "" | required если не stub | telephony | secret | used | Дефолта в коде нет. |
-| **PLUSOFON_MODE** | settings.py; services/plusofon_service | str | "" | optional | telephony | non-secret | used | |
 | **REDIS_HOST** | settings.py; sms.py через get_settings() | str | localhost | optional | storage (SMS) | non-secret | used | |
 | **REDIS_PORT** | settings.py; sms.py через get_settings().redis_port_int | str→int | 6379 | optional | storage | non-secret | used | |
 | **BASE_URL** | scripts/verify_master_canon.py:16 | str (url) | http://localhost:8000 | optional | scripts | non-secret | used | Только скрипты. Не для uvicorn. |
@@ -55,7 +52,7 @@
 ## 2. Выводы
 
 - **Единый модуль:** конфигурация приложения загружается из `backend/settings.py` (pydantic-settings). В приложении (routers, services, main, auth, database, utils) используется только `get_settings()`. Исключения: `alembic/env.py` (DATABASE_URL), скрипты в `scripts/`, `create_test_token.py` — осознанно через getenv для автономного запуска.
-- **Секреты в prod:** при `ENVIRONMENT=production`: (1) JWT_SECRET_KEY обязателен и не дефолтный; (2) при включённой фиче (режим задан и не stub) обязательны соответствующие секреты: Robokassa (MERCHANT_LOGIN, PASSWORD_1, PASSWORD_2), Zvonok (ZVONOK_API_KEY), Plusofon (PLUSOFON_USER_ID, PLUSOFON_ACCESS_TOKEN). Иначе старт падает с понятной ошибкой.
+- **Секреты в prod:** при `ENVIRONMENT=production`: (1) JWT_SECRET_KEY обязателен и не дефолтный; (2) при включённой фиче (режим задан и не stub) обязательны соответствующие секреты: Robokassa (MERCHANT_LOGIN, PASSWORD_1, PASSWORD_2), Zvonok (ZVONOK_API_KEY). Иначе старт падает с понятной ошибкой.
 - **Legacy:** `MASTER_CANON_MODE` не в settings; в runtime из `os.environ` не читается. В `utils/master_canon.py` допускается только чтение из переданного dict env (тесты/скрипты). В шаблонах не указывать.
 - **SALON_ROLE_ENABLED:** legacy alias к SALONS_ENABLED (fallback в settings, если SALONS_ENABLED пустой); при использовании — один WARNING при старте. Срок поддержки: до ближайшего major релиза или оговорённого дедлайна. В шаблонах не указывать; только SALONS_ENABLED.
 - **Alembic:** DATABASE_URL читается в env.py из env; дублировать в settings для alembic не обязательно.
@@ -78,7 +75,7 @@ DATABASE_URL=sqlite:///./bookme.db
 
 - **Обязательные (строго):** `ENVIRONMENT=production`, `JWT_SECRET_KEY` (сильный секрет из vault), `DATABASE_URL` (postgres из секретов; в prod не использовать дефолтный sqlite).
 - **Платежи (если режим задан и не stub):** ROBOKASSA_MERCHANT_LOGIN, ROBOKASSA_PASSWORD_1, ROBOKASSA_PASSWORD_2 (и при необходимости URL). При старте в prod валидатор проверяет наличие.
-- **Телефония:** при ZVONOK_MODE ≠ stub — ZVONOK_API_KEY; при PLUSOFON_MODE ≠ stub — PLUSOFON_USER_ID, PLUSOFON_ACCESS_TOKEN.
+- **Телефония:** при ZVONOK_MODE ≠ stub — ZVONOK_API_KEY.
 - **Письма:** FRONTEND_URL, API_BASE_URL для ссылок в письмах.
 - Секреты не коммитить в .env; брать из vault/secrets.
 

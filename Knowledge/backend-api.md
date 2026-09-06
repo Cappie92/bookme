@@ -38,9 +38,9 @@ Repository-known architectural/API failure boundaries. Security-sensitive findin
 ## Exception text is returned by multiple handlers
 
 - **Confidence:** CONFIRMED for code; concrete runtime text/data is request/provider dependent.
-- **Evidence:** multiple caught exceptions are interpolated or copied into 4xx/5xx `detail` across accounting, client, master, auth, promo and geocoding routes.
+- **Evidence:** multiple caught exceptions are interpolated or copied into 4xx/5xx `detail` across accounting, client, master, auth and promo routes.
 - **Failure scenario:** internal implementation/provider/database details can become public response data, and clients can accidentally depend on unstable text.
-- **Sources:** exception handlers in `backend/routers/accounting.py`, `backend/routers/client.py`, `backend/routers/master.py`, `backend/routers/auth.py`, `backend/routers/promo_codes.py`, `backend/routers/yandex_geocoder.py`.
+- **Sources:** exception handlers in `backend/routers/accounting.py`, `backend/routers/client.py`, `backend/routers/master.py`, `backend/routers/auth.py`, `backend/routers/promo_codes.py`.
 - **Required action:** separate error redaction/observability remediation; retain detailed diagnostics only in controlled logs.
 
 ## Transaction ownership is not uniform

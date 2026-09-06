@@ -81,7 +81,6 @@ trap cleanup EXIT
 export DEV_E2E=true
 export ZVONOK_MODE=stub
 export ROBOKASSA_MODE=stub
-export PLUSOFON_MODE=stub
 export E2E_BACKEND_URL
 export E2E_BASE_URL
 export VITE_API_BASE_URL="$E2E_BACKEND_URL"

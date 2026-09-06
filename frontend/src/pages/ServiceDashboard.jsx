@@ -15,7 +15,6 @@ import LoyaltySystem from "../components/LoyaltySystem"
 
 import { getApiUrl, getImageUrl } from "../utils/config"
 import WorkingHours from "../components/WorkingHours"
-import YandexGeocoder from "../components/YandexGeocoder"
 import PaymentMethodSelector from "../components/PaymentMethodSelector"
 import ClientRestrictionsManager from "../components/ClientRestrictionsManager"
 import { Button } from "../components/ui"
@@ -1731,4 +1730,4 @@ export default function ServiceDashboard() {
       )}
     </div>
   )
-} 
+}

@@ -114,24 +114,6 @@ def test_phone_verification_scenarios():
     except Exception as e:
         print(f"❌ Ошибка запроса: {e}")
     
-    # 5. Тест API получения информации о Plusofon
-    print("\n5. Тестируем API Plusofon")
-    
-    try:
-        response = requests.get(f"{base_url}/auth/plusofon/balance")
-        print(f"Статус запроса баланса Plusofon: {response.status_code}")
-        
-        if response.status_code == 200:
-            result = response.json()
-            print(f"✅ {result['message']}")
-            if result.get('success'):
-                print(f"   Account ID: {result.get('account_id')}")
-                print(f"   Account Name: {result.get('account_name')}")
-        else:
-            print(f"❌ Ошибка: {response.text}")
-    except Exception as e:
-        print(f"❌ Ошибка запроса: {e}")
-    
     print("\n=== ТЕСТ ЗАВЕРШЕН ===")
     print("\nДля полного тестирования необходимо:")
     print("1. Проверить звонки на указанные номера телефонов")
@@ -139,4 +121,4 @@ def test_phone_verification_scenarios():
     print("3. Проверить, что верификация работает корректно")
 
 if __name__ == "__main__":
-    test_phone_verification_scenarios() 
+    test_phone_verification_scenarios()
