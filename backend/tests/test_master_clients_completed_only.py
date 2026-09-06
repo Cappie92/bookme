@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 
 from auth import get_password_hash
 from models import User, Master, Salon, Service, Booking, BookingStatus, Subscription, SubscriptionPlan, SubscriptionStatus, SubscriptionType
+from services.account_deletion import delete_account
 
 
 @pytest.fixture
@@ -147,3 +148,39 @@ def test_search_finds_completed_client(client, master_user, master_record, maste
     assert r.status_code == 200
     rows = r.json()
     assert any(x.get("client_phone") == "+79993000004" for x in rows)
+
+
+def test_anonymized_client_with_completed_booking_keeps_history_with_null_phone(
+    client,
+    db,
+    master_user,
+    master_record,
+    master_with_clients_plan,
+    client_user,
+    completed_booking,
+    master_token,
+):
+    """Анонимизация не должна ломать список и карточку исторического клиента."""
+    historical_client = db.query(User).filter(User.phone == "+79993000004").one()
+    client_id = historical_client.id
+    delete_account(db, historical_client, commit=True)
+    db.expire_all()
+
+    headers = {"Authorization": f"Bearer {master_token}"}
+    response = client.get(
+        "/api/master/clients?sort_by=last_visit_at&sort_dir=desc",
+        headers=headers,
+    )
+
+    assert response.status_code == 200, response.text
+    row = next(item for item in response.json() if item["client_id"] == client_id)
+    assert row["client_key"] == f"user:{client_id}"
+    assert row["client_phone"] is None
+    assert row["completed_count"] == 1
+
+    detail_response = client.get(
+        f"/api/master/clients/user:{client_id}",
+        headers=headers,
+    )
+    assert detail_response.status_code == 200, detail_response.text
+    assert detail_response.json()["client_phone"] is None

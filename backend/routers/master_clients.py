@@ -161,7 +161,7 @@ def _get_clients_with_completed(db: Session, master_id: int) -> List[Dict[str, A
 class MasterClientListItem(BaseModel):
     client_key: str
     client_id: Optional[int] = None
-    client_phone: str
+    client_phone: Optional[str] = None
     master_client_name: Optional[str] = None
     completed_count: int
     cancelled_count: int
