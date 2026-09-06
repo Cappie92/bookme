@@ -60,6 +60,10 @@ import {
   getMasterNavCatalogRows,
   MASTER_MOBILE_MAIN_BOTTOM_PADDING_CLASS,
 } from '../config/masterNavConfig'
+import {
+  filterMasterNavRowsForWebSession,
+  resolveMasterTabForWebSession,
+} from '../utils/iosAppWebEditorPolicy'
 
 /** Ключ блока «Без категории» в Set свёрнутых секций */
 const SERVICES_UNCATEGORIZED_KEY = '__uncategorized__'
@@ -884,10 +888,7 @@ export default function MasterDashboard() {
   const getTabFromUrl = () => {
     const params = new URLSearchParams(search)
     const tab = params.get('tab')
-    const requested = tab || 'dashboard'
-    return isIosAppWebSession && !['dashboard', 'schedule', 'services', 'settings'].includes(requested)
-      ? 'dashboard'
-      : requested
+    return resolveMasterTabForWebSession(tab, isIosAppWebSession)
   }
   
   const [activeTab, setActiveTab] = useState(getTabFromUrl())
@@ -903,9 +904,7 @@ export default function MasterDashboard() {
   
   // Обновляем URL при изменении activeTab
   const handleTabChange = (tab) => {
-    const next = isIosAppWebSession && !['dashboard', 'schedule', 'services', 'settings'].includes(tab)
-      ? 'dashboard'
-      : tab
+    const next = resolveMasterTabForWebSession(tab, isIosAppWebSession)
     setActiveTab(next)
     navigate(`/master?tab=${encodeURIComponent(next)}`, { replace: true })
   }
@@ -1065,10 +1064,13 @@ export default function MasterDashboard() {
       hasClientRestrictions,
       hasClientsAccess,
     }
-    const catalogRows = getMasterNavCatalogRows(accessFlags, isSalonFeaturesEnabled(), {
-      scheduleConflicts,
-      pendingInvitations,
-    }).filter((row) => !isIosAppWebSession || ['schedule', 'services'].includes(row.tab))
+    const catalogRows = filterMasterNavRowsForWebSession(
+      getMasterNavCatalogRows(accessFlags, isSalonFeaturesEnabled(), {
+        scheduleConflicts,
+        pendingInvitations,
+      }),
+      isIosAppWebSession,
+    )
 
     const navItemBase =
       'group flex w-full items-center gap-2.5 rounded-[10px] px-3 py-[9px] text-left text-[13px] font-medium leading-snug tracking-tight transition-[background-color,color,box-shadow] duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4CAF50]/30 focus-visible:ring-offset-2 focus-visible:ring-offset-white'
@@ -2095,10 +2097,19 @@ export default function MasterDashboard() {
       <MasterMobileBottomNav
         activeTab={activeTab}
         menuOpen={masterMenuOpen}
+        isIosAppWebSession={isIosAppWebSession}
         onDashboard={() => {
           setMasterMenuOpen(false)
           setDashboardOverlayResetKey((k) => k + 1)
           handleTabChange('dashboard')
+        }}
+        onSchedule={() => {
+          setMasterMenuOpen(false)
+          handleTabChange('schedule')
+        }}
+        onServices={() => {
+          setMasterMenuOpen(false)
+          handleTabChange('services')
         }}
         onMenuToggle={() => setMasterMenuOpen((open) => !open)}
         onSettings={() => {
@@ -2106,21 +2117,23 @@ export default function MasterDashboard() {
           handleTabChange('settings')
         }}
       />
-      <MasterMobileMenu
-        isOpen={masterMenuOpen}
-        onClose={() => setMasterMenuOpen(false)}
-        activeTab={activeTab}
-        handleTabChange={handleTabChange}
-        hasFinanceAccess={canUseFinance}
-        hasExtendedStats={canUseExtendedStats}
-        hasLoyaltyAccess={canUseLoyalty}
-        hasClientRestrictions={canUseRestrictions}
-        hasClientsAccess={canUseClients}
-        subscriptionPlans={subscriptionPlans}
-        scheduleConflicts={scheduleConflicts}
-        refreshKey={refreshInvitations}
-        isIosAppWebSession={isIosAppWebSession}
-      />
+      {!isIosAppWebSession && (
+        <MasterMobileMenu
+          isOpen={masterMenuOpen}
+          onClose={() => setMasterMenuOpen(false)}
+          activeTab={activeTab}
+          handleTabChange={handleTabChange}
+          hasFinanceAccess={canUseFinance}
+          hasExtendedStats={canUseExtendedStats}
+          hasLoyaltyAccess={canUseLoyalty}
+          hasClientRestrictions={canUseRestrictions}
+          hasClientsAccess={canUseClients}
+          subscriptionPlans={subscriptionPlans}
+          scheduleConflicts={scheduleConflicts}
+          refreshKey={refreshInvitations}
+          isIosAppWebSession={isIosAppWebSession}
+        />
+      )}
     </div>
   )
 }

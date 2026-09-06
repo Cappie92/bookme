@@ -1,5 +1,11 @@
 import React from 'react'
-import { ChartBarIcon, Bars3Icon, Cog6ToothIcon } from '@heroicons/react/24/outline'
+import {
+  Bars3Icon,
+  BriefcaseIcon,
+  CalendarDaysIcon,
+  ChartBarIcon,
+  Cog6ToothIcon,
+} from '@heroicons/react/24/outline'
 import { MASTER_CATALOG_TAB_KEYS } from '../../../config/masterNavConfig'
 
 /**
@@ -12,6 +18,9 @@ export default function MasterMobileBottomNav({
   onDashboard,
   onMenuToggle,
   onSettings,
+  onSchedule,
+  onServices,
+  isIosAppWebSession = false,
 }) {
   const menuHubActive = menuOpen || MASTER_CATALOG_TAB_KEYS.has(activeTab)
 
@@ -26,6 +35,35 @@ export default function MasterMobileBottomNav({
     }`
 
   const iconStroke = (on) => (on ? 1.875 : 1.5)
+
+  if (isIosAppWebSession) {
+    const editorItems = [
+      { tab: 'dashboard', label: 'Дашборд', Icon: ChartBarIcon, onClick: onDashboard },
+      { tab: 'schedule', label: 'Расписание', Icon: CalendarDaysIcon, onClick: onSchedule },
+      { tab: 'services', label: 'Услуги', Icon: BriefcaseIcon, onClick: onServices },
+      { tab: 'settings', label: 'Настройки', Icon: Cog6ToothIcon, onClick: onSettings },
+    ]
+
+    return (
+      <nav
+        className="fixed bottom-0 left-0 right-0 z-40 rounded-t-[14px] border border-b-0 border-[#E7E2DF]/90 bg-[rgba(252,250,248,0.94)] pb-[env(safe-area-inset-bottom,0px)] shadow-[0_-4px_24px_-8px_rgba(45,45,45,0.1)] backdrop-blur-[14px] lg:hidden"
+        aria-label="Навигация редактора из iOS"
+        data-testid="ios-app-web-editor-nav"
+      >
+        <div className="mx-auto flex max-w-lg items-stretch px-0.5">
+          {editorItems.map(({ tab, label, Icon, onClick }) => {
+            const active = activeTab === tab
+            return (
+              <button key={tab} type="button" className={itemClass(active)} onClick={onClick}>
+                <Icon className="h-5 w-5 shrink-0" strokeWidth={iconStroke(active)} />
+                <span>{label}</span>
+              </button>
+            )
+          })}
+        </div>
+      </nav>
+    )
+  }
 
   return (
     <nav
