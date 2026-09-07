@@ -1,0 +1,316 @@
+{
+  "version": 1,
+  "reviewed_against": "c43957b9eb9a29f13b3ad232ac6962b3ce088c65",
+  "findings": [
+    {
+      "rule": "jwt",
+      "path": "backend/test_stats.py",
+      "line": 20,
+      "commit": "e32dce473450a2919cb6789f456995a7f4be0e7f",
+      "blob": "ccd600d5e837bf769cb7a2023d2c54522e0175c6",
+      "fingerprint": "e32dce473450a2919cb6789f456995a7f4be0e7f:backend/test_stats.py:jwt:20",
+      "classification": "EXPIRED_JWT_REMOVED",
+      "evidence": "Owner approved this exact expired JWT occurrence as historical-only debt on 2026-09-07 after source removal. Not a false positive or revocation claim; current-tree and new-commit findings remain blocking."
+    },
+    {
+      "rule": "jwt",
+      "path": "frontend/public/test-auth.html",
+      "line": 135,
+      "commit": "e32dce473450a2919cb6789f456995a7f4be0e7f",
+      "blob": "0cd94f2d180c233a1decaf25f793fd9bcadfb9f1",
+      "fingerprint": "e32dce473450a2919cb6789f456995a7f4be0e7f:frontend/public/test-auth.html:jwt:135",
+      "classification": "EXPIRED_JWT_REMOVED",
+      "evidence": "Owner approved this exact expired JWT occurrence as historical-only debt on 2026-09-07 after source removal. Not a false positive or revocation claim; current-tree and new-commit findings remain blocking."
+    },
+    {
+      "rule": "generic-api-key",
+      "path": "mobile/__tests__/unit/services/api/appleIapApi.test.ts",
+      "line": 15,
+      "commit": "4d423cf3d91324b1dee599fc7aaa0e5f899d6886",
+      "blob": "0958c8b1f6309c17f0b12b57c92e0c0ee3f266d0",
+      "fingerprint": "4d423cf3d91324b1dee599fc7aaa0e5f899d6886:mobile/__tests__/unit/services/api/appleIapApi.test.ts:generic-api-key:15",
+      "classification": "SYNTHETIC_FIXTURE",
+      "evidence": "Reviewed StoreKit UUID-shaped mock, replaced with low-entropy valid UUID in source cleanup."
+    },
+    {
+      "rule": "generic-api-key",
+      "path": "mobile/__tests__/unit/services/appleIapService.test.ts",
+      "line": 61,
+      "commit": "4d423cf3d91324b1dee599fc7aaa0e5f899d6886",
+      "blob": "bc17cab1314078b6e9b7f8bab5af7c2a1ebedd91",
+      "fingerprint": "4d423cf3d91324b1dee599fc7aaa0e5f899d6886:mobile/__tests__/unit/services/appleIapService.test.ts:generic-api-key:61",
+      "classification": "SYNTHETIC_FIXTURE",
+      "evidence": "Reviewed StoreKit UUID-shaped mock, replaced with low-entropy valid UUID in source cleanup."
+    },
+    {
+      "rule": "generic-api-key",
+      "path": "mobile/__tests__/unit/services/api/appleIapApi.test.ts",
+      "line": 15,
+      "commit": "e5dfd4f84820659682794611983e27925e0b0994",
+      "blob": "0958c8b1f6309c17f0b12b57c92e0c0ee3f266d0",
+      "fingerprint": "e5dfd4f84820659682794611983e27925e0b0994:mobile/__tests__/unit/services/api/appleIapApi.test.ts:generic-api-key:15",
+      "classification": "SYNTHETIC_FIXTURE",
+      "evidence": "Reviewed StoreKit UUID-shaped mock, replaced with low-entropy valid UUID in source cleanup."
+    },
+    {
+      "rule": "generic-api-key",
+      "path": "mobile/__tests__/unit/services/appleIapService.test.ts",
+      "line": 60,
+      "commit": "e5dfd4f84820659682794611983e27925e0b0994",
+      "blob": "a49ee57f95459f652a4d9709f95efb3f831fadbf",
+      "fingerprint": "e5dfd4f84820659682794611983e27925e0b0994:mobile/__tests__/unit/services/appleIapService.test.ts:generic-api-key:60",
+      "classification": "SYNTHETIC_FIXTURE",
+      "evidence": "Reviewed StoreKit UUID-shaped mock, replaced with low-entropy valid UUID in source cleanup."
+    },
+    {
+      "rule": "curl-auth-header",
+      "path": "DEPLOY_INSTRUCTIONS_DETAILED.md",
+      "line": 239,
+      "commit": "e32dce473450a2919cb6789f456995a7f4be0e7f",
+      "blob": "638a699539c6aee37c1f69cb7be629df0864b57a",
+      "fingerprint": "e32dce473450a2919cb6789f456995a7f4be0e7f:DEPLOY_INSTRUCTIONS_DETAILED.md:curl-auth-header:239",
+      "classification": "DOCUMENTATION_EXAMPLE",
+      "evidence": "Reviewed documentation example replaced with explicit non-credential placeholder."
+    },
+    {
+      "rule": "curl-auth-header",
+      "path": "DEPLOYMENT_PLAN.md",
+      "line": 320,
+      "commit": "e32dce473450a2919cb6789f456995a7f4be0e7f",
+      "blob": "4aeb2b3514581a2ca95f3d1e996659ec8b6331a3",
+      "fingerprint": "e32dce473450a2919cb6789f456995a7f4be0e7f:DEPLOYMENT_PLAN.md:curl-auth-header:320",
+      "classification": "DOCUMENTATION_EXAMPLE",
+      "evidence": "Reviewed documentation example replaced with explicit non-credential placeholder."
+    },
+    {
+      "rule": "curl-auth-header",
+      "path": "DEPLOYMENT_PLAN.md",
+      "line": 343,
+      "commit": "e32dce473450a2919cb6789f456995a7f4be0e7f",
+      "blob": "4aeb2b3514581a2ca95f3d1e996659ec8b6331a3",
+      "fingerprint": "e32dce473450a2919cb6789f456995a7f4be0e7f:DEPLOYMENT_PLAN.md:curl-auth-header:343",
+      "classification": "DOCUMENTATION_EXAMPLE",
+      "evidence": "Reviewed documentation example replaced with explicit non-credential placeholder."
+    },
+    {
+      "rule": "generic-api-key",
+      "path": "QUICK_START_ENV.md",
+      "line": 133,
+      "commit": "e32dce473450a2919cb6789f456995a7f4be0e7f",
+      "blob": "49e835a092552c2ffc4aab699f13ae78d646f95c",
+      "fingerprint": "e32dce473450a2919cb6789f456995a7f4be0e7f:QUICK_START_ENV.md:generic-api-key:133",
+      "classification": "DOCUMENTATION_EXAMPLE",
+      "evidence": "Reviewed documentation example replaced with explicit non-credential placeholder."
+    },
+    {
+      "rule": "generic-api-key",
+      "path": "ROBOKASSA_SETUP_GUIDE.md",
+      "line": 77,
+      "commit": "e32dce473450a2919cb6789f456995a7f4be0e7f",
+      "blob": "27202ca3665d63bce3190fdd63f32b3f1e6514f8",
+      "fingerprint": "e32dce473450a2919cb6789f456995a7f4be0e7f:ROBOKASSA_SETUP_GUIDE.md:generic-api-key:77",
+      "classification": "OBSOLETE_CREDENTIAL_CLOSED_STORE",
+      "evidence": "Owner confirmed legacy store closed; differs from current production store. All current-tree copies removed."
+    },
+    {
+      "rule": "generic-api-key",
+      "path": "ROBOKASSA_SETUP_GUIDE.md",
+      "line": 80,
+      "commit": "e32dce473450a2919cb6789f456995a7f4be0e7f",
+      "blob": "27202ca3665d63bce3190fdd63f32b3f1e6514f8",
+      "fingerprint": "e32dce473450a2919cb6789f456995a7f4be0e7f:ROBOKASSA_SETUP_GUIDE.md:generic-api-key:80",
+      "classification": "OBSOLETE_CREDENTIAL_CLOSED_STORE",
+      "evidence": "Owner confirmed legacy store closed; differs from current production store. All current-tree copies removed."
+    },
+    {
+      "rule": "curl-auth-header",
+      "path": "ROBOKASSA_SETUP_GUIDE.md",
+      "line": 264,
+      "commit": "e32dce473450a2919cb6789f456995a7f4be0e7f",
+      "blob": "27202ca3665d63bce3190fdd63f32b3f1e6514f8",
+      "fingerprint": "e32dce473450a2919cb6789f456995a7f4be0e7f:ROBOKASSA_SETUP_GUIDE.md:curl-auth-header:264",
+      "classification": "DOCUMENTATION_EXAMPLE",
+      "evidence": "Reviewed documentation example replaced with explicit non-credential placeholder."
+    },
+    {
+      "rule": "curl-auth-header",
+      "path": "ROBOKASSA_SETUP_GUIDE.md",
+      "line": 287,
+      "commit": "e32dce473450a2919cb6789f456995a7f4be0e7f",
+      "blob": "27202ca3665d63bce3190fdd63f32b3f1e6514f8",
+      "fingerprint": "e32dce473450a2919cb6789f456995a7f4be0e7f:ROBOKASSA_SETUP_GUIDE.md:curl-auth-header:287",
+      "classification": "DOCUMENTATION_EXAMPLE",
+      "evidence": "Reviewed documentation example replaced with explicit non-credential placeholder."
+    },
+    {
+      "rule": "generic-api-key",
+      "path": "YANDEX_API_SETUP_COMPLETE.md",
+      "line": 47,
+      "commit": "e32dce473450a2919cb6789f456995a7f4be0e7f",
+      "blob": "a8761096b982fe27e494c2c03787289d372cd5b6",
+      "fingerprint": "e32dce473450a2919cb6789f456995a7f4be0e7f:YANDEX_API_SETUP_COMPLETE.md:generic-api-key:47",
+      "classification": "REVOKED_CREDENTIAL",
+      "evidence": "Revocation confirmed in reviewed audit/owner clarification; current-tree copies absent."
+    },
+    {
+      "rule": "generic-api-key",
+      "path": "SERVER_SETUP.md",
+      "line": 56,
+      "commit": "e32dce473450a2919cb6789f456995a7f4be0e7f",
+      "blob": "e2f1e39e14111bc6466e66e62021847bb538db34",
+      "fingerprint": "e32dce473450a2919cb6789f456995a7f4be0e7f:SERVER_SETUP.md:generic-api-key:56",
+      "classification": "REVOKED_CREDENTIAL",
+      "evidence": "Revocation confirmed in reviewed audit/owner clarification; current-tree copies absent."
+    },
+    {
+      "rule": "generic-api-key",
+      "path": "backend/ENV_FINAL_TEXT.txt",
+      "line": 20,
+      "commit": "e32dce473450a2919cb6789f456995a7f4be0e7f",
+      "blob": "2acadd048d8231bc1c1b0b101113de86d2426ece",
+      "fingerprint": "e32dce473450a2919cb6789f456995a7f4be0e7f:backend/ENV_FINAL_TEXT.txt:generic-api-key:20",
+      "classification": "OBSOLETE_CREDENTIAL_CLOSED_STORE",
+      "evidence": "Owner confirmed legacy store closed; differs from current production store. All current-tree copies removed."
+    },
+    {
+      "rule": "generic-api-key",
+      "path": "backend/ENV_FINAL_TEXT.txt",
+      "line": 23,
+      "commit": "e32dce473450a2919cb6789f456995a7f4be0e7f",
+      "blob": "2acadd048d8231bc1c1b0b101113de86d2426ece",
+      "fingerprint": "e32dce473450a2919cb6789f456995a7f4be0e7f:backend/ENV_FINAL_TEXT.txt:generic-api-key:23",
+      "classification": "OBSOLETE_CREDENTIAL_CLOSED_STORE",
+      "evidence": "Owner confirmed legacy store closed; differs from current production store. All current-tree copies removed."
+    },
+    {
+      "rule": "generic-api-key",
+      "path": "backend/PLUSOFON_SETUP.md",
+      "line": 18,
+      "commit": "e32dce473450a2919cb6789f456995a7f4be0e7f",
+      "blob": "6d941508af1f4289e795c8d452fc044533999fb8",
+      "fingerprint": "e32dce473450a2919cb6789f456995a7f4be0e7f:backend/PLUSOFON_SETUP.md:generic-api-key:18",
+      "classification": "REVOKED_CREDENTIAL",
+      "evidence": "Revocation confirmed in reviewed audit/owner clarification; current-tree copies absent."
+    },
+    {
+      "rule": "curl-auth-header",
+      "path": "backend/BALANCE_SYSTEM_README.md",
+      "line": 122,
+      "commit": "e32dce473450a2919cb6789f456995a7f4be0e7f",
+      "blob": "f4897159838f4504e0fed61d6981017d25bddc1a",
+      "fingerprint": "e32dce473450a2919cb6789f456995a7f4be0e7f:backend/BALANCE_SYSTEM_README.md:curl-auth-header:122",
+      "classification": "DOCUMENTATION_EXAMPLE",
+      "evidence": "Reviewed documentation example replaced with explicit non-credential placeholder."
+    },
+    {
+      "rule": "curl-auth-header",
+      "path": "backend/BALANCE_SYSTEM_README.md",
+      "line": 130,
+      "commit": "e32dce473450a2919cb6789f456995a7f4be0e7f",
+      "blob": "f4897159838f4504e0fed61d6981017d25bddc1a",
+      "fingerprint": "e32dce473450a2919cb6789f456995a7f4be0e7f:backend/BALANCE_SYSTEM_README.md:curl-auth-header:130",
+      "classification": "DOCUMENTATION_EXAMPLE",
+      "evidence": "Reviewed documentation example replaced with explicit non-credential placeholder."
+    },
+    {
+      "rule": "generic-api-key",
+      "path": "backend/routers/yandex_geocoder.py",
+      "line": 10,
+      "commit": "e32dce473450a2919cb6789f456995a7f4be0e7f",
+      "blob": "e8b3269e67e9e1234ccf45e1f12f9bd1f8d284ad",
+      "fingerprint": "e32dce473450a2919cb6789f456995a7f4be0e7f:backend/routers/yandex_geocoder.py:generic-api-key:10",
+      "classification": "REVOKED_CREDENTIAL",
+      "evidence": "Revocation confirmed in reviewed audit/owner clarification; current-tree copies absent."
+    },
+    {
+      "rule": "generic-api-key",
+      "path": "docs/SUBSCRIPTION_PRICE_SST_AUDIT.md",
+      "line": 168,
+      "commit": "e32dce473450a2919cb6789f456995a7f4be0e7f",
+      "blob": "5a0e025018c535b26a7789a78b0a38fac73afa5b",
+      "fingerprint": "e32dce473450a2919cb6789f456995a7f4be0e7f:docs/SUBSCRIPTION_PRICE_SST_AUDIT.md:generic-api-key:168",
+      "classification": "FALSE_POSITIVE",
+      "evidence": "Reviewed daily_rate calculation, labels corrected without removing numeric data."
+    },
+    {
+      "rule": "generic-api-key",
+      "path": "docs/SUBSCRIPTION_PRICE_SST_AUDIT.md",
+      "line": 174,
+      "commit": "e32dce473450a2919cb6789f456995a7f4be0e7f",
+      "blob": "5a0e025018c535b26a7789a78b0a38fac73afa5b",
+      "fingerprint": "e32dce473450a2919cb6789f456995a7f4be0e7f:docs/SUBSCRIPTION_PRICE_SST_AUDIT.md:generic-api-key:174",
+      "classification": "FALSE_POSITIVE",
+      "evidence": "Reviewed daily_rate calculation, labels corrected without removing numeric data."
+    },
+    {
+      "rule": "generic-api-key",
+      "path": "docs/architecture/api-design.md",
+      "line": 58,
+      "commit": "e32dce473450a2919cb6789f456995a7f4be0e7f",
+      "blob": "33bbbad93a3562a9712c93365cb77d35c8e36b8b",
+      "fingerprint": "e32dce473450a2919cb6789f456995a7f4be0e7f:docs/architecture/api-design.md:generic-api-key:58",
+      "classification": "DOCUMENTATION_EXAMPLE",
+      "evidence": "Reviewed documentation example replaced with explicit non-credential placeholder."
+    },
+    {
+      "rule": "generic-api-key",
+      "path": "docs/architecture/api-design.md",
+      "line": 59,
+      "commit": "e32dce473450a2919cb6789f456995a7f4be0e7f",
+      "blob": "33bbbad93a3562a9712c93365cb77d35c8e36b8b",
+      "fingerprint": "e32dce473450a2919cb6789f456995a7f4be0e7f:docs/architecture/api-design.md:generic-api-key:59",
+      "classification": "DOCUMENTATION_EXAMPLE",
+      "evidence": "Reviewed documentation example replaced with explicit non-credential placeholder."
+    },
+    {
+      "rule": "generic-api-key",
+      "path": "frontend/src/components/YandexApiStatus.jsx",
+      "line": 18,
+      "commit": "e32dce473450a2919cb6789f456995a7f4be0e7f",
+      "blob": "9b305fd1eab1bf4cae35bee08659b791355026d4",
+      "fingerprint": "e32dce473450a2919cb6789f456995a7f4be0e7f:frontend/src/components/YandexApiStatus.jsx:generic-api-key:18",
+      "classification": "DOCUMENTATION_EXAMPLE",
+      "evidence": "Reviewed documentation example replaced with explicit non-credential placeholder."
+    },
+    {
+      "rule": "generic-api-key",
+      "path": "frontend/src/components/YANDEX_API_SETUP.md",
+      "line": 51,
+      "commit": "e32dce473450a2919cb6789f456995a7f4be0e7f",
+      "blob": "de27fdbe60e9c678f0b9b702d0044f4c22d49031",
+      "fingerprint": "e32dce473450a2919cb6789f456995a7f4be0e7f:frontend/src/components/YANDEX_API_SETUP.md:generic-api-key:51",
+      "classification": "REVOKED_CREDENTIAL",
+      "evidence": "Revocation confirmed in reviewed audit/owner clarification; current-tree copies absent."
+    },
+    {
+      "rule": "generic-api-key",
+      "path": "frontend/test_yandex_api.html",
+      "line": 86,
+      "commit": "e32dce473450a2919cb6789f456995a7f4be0e7f",
+      "blob": "ab83b9408f56eb8f10bd66b8a9c340a41ed77698",
+      "fingerprint": "e32dce473450a2919cb6789f456995a7f4be0e7f:frontend/test_yandex_api.html:generic-api-key:86",
+      "classification": "REVOKED_CREDENTIAL",
+      "evidence": "Revocation confirmed in reviewed audit/owner clarification; current-tree copies absent."
+    },
+    {
+      "rule": "generic-api-key",
+      "path": "frontend/test_yandex_api.html",
+      "line": 87,
+      "commit": "e32dce473450a2919cb6789f456995a7f4be0e7f",
+      "blob": "ab83b9408f56eb8f10bd66b8a9c340a41ed77698",
+      "fingerprint": "e32dce473450a2919cb6789f456995a7f4be0e7f:frontend/test_yandex_api.html:generic-api-key:87",
+      "classification": "REVOKED_CREDENTIAL",
+      "evidence": "Revocation confirmed in reviewed audit/owner clarification; current-tree copies absent."
+    },
+    {
+      "rule": "generic-api-key",
+      "path": "frontend/test_yandex_api.html",
+      "line": 176,
+      "commit": "e32dce473450a2919cb6789f456995a7f4be0e7f",
+      "blob": "ab83b9408f56eb8f10bd66b8a9c340a41ed77698",
+      "fingerprint": "e32dce473450a2919cb6789f456995a7f4be0e7f:frontend/test_yandex_api.html:generic-api-key:176",
+      "classification": "REVOKED_CREDENTIAL",
+      "evidence": "Revocation confirmed in reviewed audit/owner clarification; current-tree copies absent."
+    }
+  ]
+}

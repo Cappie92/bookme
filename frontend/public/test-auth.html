@@ -58,7 +58,7 @@
         
         <div>
             <label for="token">Токен:</label>
-            <input type="text" id="token" placeholder="Вставьте токен сюда">
+            <input type="password" autocomplete="off" id="token" placeholder="Вставьте токен сюда">
         </div>
         
         <button onclick="setToken()">Установить токен</button>
@@ -84,7 +84,7 @@
         function checkToken() {
             const token = localStorage.getItem('access_token');
             if (token) {
-                showStatus('Токен найден: ' + token.substring(0, 50) + '...', 'success');
+                showStatus('Токен найден', 'success');
             } else {
                 showStatus('Токен не найден!', 'error');
             }
@@ -131,8 +131,7 @@
             statusDiv.className = 'status ' + type;
         }
         
-        // Автоматически вставляем тестовый токен
-        document.getElementById('token').value = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJzZGFkc2FzZEBzZGZkZi5zZCIsInJvbGUiOiJtYXN0ZXIiLCJleHAiOjE3NTM4MjM2MTB9.AVeHnBB7vwSeuNhwrCo6-_Up7X1uQB8K6NzmHMT6b-E';
+        // Токен вводится вручную; встроенных credentials нет.
     </script>
 </body>
 </html> 

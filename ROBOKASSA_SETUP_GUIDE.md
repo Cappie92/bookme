@@ -30,12 +30,12 @@
 2. **Password #1** (Пароль #1)
    - Используется для генерации подписи платежа
    - Находится в разделе "Технические настройки" → "Пароли"
-   - Пример: `SMOsboVJA0919uMwBC4N`
+   - Пример: `<set-in-production-env>`
 
 3. **Password #2** (Пароль #2)
    - Используется для проверки уведомлений от Robokassa
    - Находится в том же разделе
-   - Пример: `WX67emZei987hdTxiUZw`
+   - Пример: `<set-in-production-env>`
 
 4. **Тестовые данные** (для тестирования)
    - В тестовом режиме можно использовать тестовые карты
@@ -71,13 +71,13 @@
 # ROBOKASSA CONFIGURATION
 # ============================================
 # Логин магазина в Robokassa
-ROBOKASSA_MERCHANT_LOGIN=your_merchant_login_here
+ROBOKASSA_MERCHANT_LOGIN=<MERCHANT_LOGIN>
 
 # Пароль #1 (для генерации подписи платежа)
-ROBOKASSA_PASSWORD_1=SMOsboVJA0919uMwBC4N
+ROBOKASSA_PASSWORD_1=<set-in-production-env>
 
 # Пароль #2 (для проверки уведомлений)
-ROBOKASSA_PASSWORD_2=WX67emZei987hdTxiUZw
+ROBOKASSA_PASSWORD_2=<set-in-production-env>
 
 # Режим работы: true = тестовый, false = боевой
 ROBOKASSA_IS_TEST=true
@@ -97,8 +97,8 @@ ROBOKASSA_FAIL_URL=https://dedato.ru/payment/failed
 **ВАЖНО:** Замените следующие значения на реальные:
 
 1. `your_merchant_login_here` → ваш реальный Merchant Login из личного кабинета Robokassa
-2. `SMOsboVJA0919uMwBC4N` → ваш реальный Password #1
-3. `WX67emZei987hdTxiUZw` → ваш реальный Password #2
+2. `<set-in-production-env>` → ваш реальный Password #1
+3. `<set-in-production-env>` → ваш реальный Password #2
 
 **Для тестирования на localhost:**
 
@@ -263,7 +263,7 @@ curl https://dedato.ru/payment/failed
 ```bash
 curl -X POST http://localhost:8000/api/payments/subscription/init \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Authorization: Bearer <ACCESS_TOKEN>" \
   -d '{
     "plan_id": 1,
     "duration_months": 1,
@@ -286,7 +286,7 @@ curl -X POST http://localhost:8000/api/payments/subscription/init \
 ```bash
 curl -X POST http://localhost:8000/api/payments/deposit/init \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Authorization: Bearer <ACCESS_TOKEN>" \
   -d '{
     "amount": 1000
   }'

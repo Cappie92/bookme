@@ -120,7 +120,7 @@ print(result)
 ### Пополнение баланса через API
 ```bash
 curl -X POST "http://localhost:8000/balance/deposit" \
-  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Authorization: Bearer <ACCESS_TOKEN>" \
   -H "Content-Type: application/json" \
   -d '{"amount": 1000.0, "payment_method": "card"}'
 ```
@@ -128,7 +128,7 @@ curl -X POST "http://localhost:8000/balance/deposit" \
 ### Получение статуса подписки
 ```bash
 curl -X GET "http://localhost:8000/balance/subscription-status" \
-  -H "Authorization: Bearer YOUR_TOKEN"
+  -H "Authorization: Bearer <ACCESS_TOKEN>"
 ```
 
 ## Безопасность

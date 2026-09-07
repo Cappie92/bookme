@@ -4,7 +4,7 @@ project: DeDato
 knowledge_class: living
 environment: common
 status: active
-last_verified: 2026-08-17
+last_verified: 2026-09-07
 ---
 
 # CI/CD
@@ -17,7 +17,7 @@ GitHub Actions discovers the four workflow files under the repository-root `.git
 
 | Workflow | Trigger | Repository-known action |
 |----------|---------|-------------------------|
-| `gitleaks.yml` | pull request; push to `main`/`master` | Downloads gitleaks and scans the commit range selected for the event |
+| `gitleaks.yml` | `pull_request_target`; push to `main`/`master`; manual | Checksum-pinned Gitleaks 8.21.2: directed history plus mandatory exact-tree scan; manual full history including merge diffs |
 | `mkdocs.yml` | every push; pull request | Prepares and builds MkDocs in strict mode, then uploads the generated site artifact |
 | `arch-overview.yml` | daily schedule; manual `workflow_dispatch` | Regenerates architecture overview and commits selected generated outputs when they differ |
 | `deploy.yml` | manual `workflow_dispatch` only | Transfers the checkout, rebuilds/recreates Compose application services, runs the migration helper and performs an external HTTP health check |
@@ -28,7 +28,7 @@ Only the deploy job declares concurrency: one active run in the fixed `productio
 
 ## Pull-request gates
 
-Root repository workflows do not run backend pytest/lint, frontend Vitest/Playwright/lint/build or mobile Jest/Maestro/EAS build as PR jobs. Root PR automation is limited to incremental secret scanning and strict MkDocs build. These workflow runs are repository capabilities; whether either is configured as a required branch-protection gate is `UNKNOWN`.
+Root repository workflows do not run backend pytest/lint, frontend Vitest/Playwright/lint/build or mobile Jest/Maestro/EAS build as PR jobs. Root PR automation consists of directed-history/current-tree secret gates with trusted security regression tests, and strict MkDocs build. These workflow runs are repository capabilities; whether either is configured as a required branch-protection gate is `UNKNOWN`.
 
 MkDocs uses `docs_dir: docs`; canonical `Knowledge/` is outside that build and therefore is not validated by Docs CI. Package-local Knowledge link/source checks currently depend on the documentation workflow used during this Knowledge track, not a repository action.
 
@@ -86,6 +86,14 @@ No production target, credential reference or remote command sequence is reprodu
 
 ## Security scanning boundary
 
-Gitleaks scans event commit ranges, not the full unchanged repository on every run. Existing credential-like repository evidence is tracked sanitized in [Security and privacy Debt](security-and-privacy.md); scan success must not be interpreted as proof that the repository has no historical or unchanged sensitive artifacts.
+Gitleaks 8.21.2 uses three layers: directed new reachable history, an obligatory exact target-tree snapshot, and manually requested full history. Both history modes include individual merge-parent diffs (`--full-history -m`); incremental ranges are `BEFORE..HEAD`, never a silent latest-commit fallback. Missing/zero ranges, shallow history, scanner errors and unresolved findings fail closed.
 
-**Sources:** `.github/workflows/gitleaks.yml`; [Security and privacy Debt](security-and-privacy.md).
+For PRs, `pull_request_target` runs only the target-branch workflow and policy. The PR snapshot is untrusted data: no candidate code, package install, build or tests execute. Both checkouts disable persisted credentials; the job has only `contents: read`. PR changes to the workflow, wrapper, security tests or metadata/config produce `POLICY_REVIEW_REQUIRED`; they cannot approve themselves. Security-policy changes require a separate owner-reviewed integration, not a PR-authored allowlist or automatic bypass. This trust boundary must be preserved if the workflow is extended.
+
+Current-tree input comes from Git blobs (not export-filtered archives), including tracked env templates. There are no project-wide path exclusions or inline allow-comment bypasses. The only current exception is an AppMetricaKeychain 40-hex checksum line inside `SPEC CHECKSUMS` in the exact `mobile/ios/Podfile.lock` path. It does not exclude that file or unrelated keys.
+
+The historical ledger stores reviewed rule/path/line/commit/blob/fingerprint metadata, never credential values. It applies only to history; reintroducing a value in a new commit or retaining it in the current tree fails. History debt remains present in Git objects; a passing gate does not mean a purge, credential rotation or exhaustive proof of secret absence.
+
+Scanner reports are redacted and transferred through a private FIFO into memory; stdout/stderr are captured, never forwarded. Only sanitized finding metadata and counts are emitted; raw reports are not uploaded. The Linux binary is version/checksum-pinned. The optional existing local pre-commit hook is not a substitute for these CI gates.
+
+**Sources:** `.github/workflows/gitleaks.yml`; `scripts/security/gitleaks_gate.py`; `scripts/security/test_gitleaks_gate.py`; `.gitleaks-current-exceptions.json`; `.gitleaks-history-baseline.json`; [Security and privacy Debt](security-and-privacy.md).

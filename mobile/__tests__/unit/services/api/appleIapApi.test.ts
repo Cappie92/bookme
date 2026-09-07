@@ -12,7 +12,7 @@ describe('direct Apple IAP API client', () => {
   });
 
   it('loads the backend-issued appAccountToken', async () => {
-    const data = { app_account_token: '8d84e539-8f28-4b61-9073-d8e38eabbad8' };
+    const data = { app_account_token: '00000000-0000-4000-8000-000000000001' };
     (apiClient.get as jest.Mock).mockResolvedValueOnce({ data });
     await expect(fetchAppleBillingIdentity()).resolves.toEqual(data);
     expect(apiClient.get).toHaveBeenCalledWith('/api/payments/apple/billing-identity');

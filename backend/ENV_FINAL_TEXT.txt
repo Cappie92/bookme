@@ -14,13 +14,13 @@ DATABASE_URL=sqlite:///./bookme.db
 # ============================================
 # Логин магазина в Robokassa
 # ВАЖНО: Замените на ваш реальный MerchantLogin из личного кабинета
-ROBOKASSA_MERCHANT_LOGIN=your_merchant_login_here
+ROBOKASSA_MERCHANT_LOGIN=<MERCHANT_LOGIN>
 
 # Пароль #1 для генерации подписи запроса
-ROBOKASSA_PASSWORD_1=SMOsboVJA0919uMwBC4N
+ROBOKASSA_PASSWORD_1=<set-in-production-env>
 
 # Пароль #2 для проверки подписи уведомлений
-ROBOKASSA_PASSWORD_2=WX67emZei987hdTxiUZw
+ROBOKASSA_PASSWORD_2=<set-in-production-env>
 
 # Режим работы: true = тестовый режим, false = боевой режим
 ROBOKASSA_IS_TEST=true

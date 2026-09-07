@@ -1,12 +1,12 @@
-# Сканирует **диапазон коммитов** (PR или push), а не всё рабочее дерево:
-# блокирует новые утечки без требования немедленной зачистки исторических примеров в .md.
-# Полный аудит рабочего дерева: `gitleaks detect --source . --no-git` (см. docs/internal/POST_INCIDENT_REPO_HARDENING.md).
-name: Secret scan (gitleaks, incremental)
+name: Secret scan (history and current tree)
 
 on:
-  pull_request:
+  # Execute the trusted base workflow, never code supplied by the PR.
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: [main, master]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -14,36 +14,60 @@ permissions:
 jobs:
   gitleaks:
     runs-on: ubuntu-latest
+    env:
+      TARGET_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      TRUSTED_SHA: ${{ github.event.pull_request.base.sha || github.sha }}
+      BEFORE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+      EVENT_NAME: ${{ github.event_name }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout trusted policy
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
+          ref: ${{ env.TRUSTED_SHA }}
+          path: policy
           fetch-depth: 0
+          persist-credentials: false
 
-      - name: Install gitleaks
-        env:
-          GITLEAKS_VERSION: "8.21.2"
-        run: |
-          wget -qO /tmp/gitleaks.tgz "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
-          tar -xzf /tmp/gitleaks.tgz -C /tmp
-          sudo install -m755 /tmp/gitleaks /usr/local/bin/gitleaks
+      - name: Checkout candidate as data only
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ env.TARGET_SHA }}
+          path: candidate
+          fetch-depth: 0
+          persist-credentials: false
 
-      - name: Detect secrets in commit range (PR)
-        if: github.event_name == 'pull_request'
-        env:
-          BASE: ${{ github.event.pull_request.base.sha }}
-          HEAD: ${{ github.event.pull_request.head.sha }}
+      - name: Install verified Gitleaks 8.21.2
+        shell: bash
         run: |
-          gitleaks detect --source . --config .gitleaks.toml --log-opts="$BASE...$HEAD" --verbose
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/gitleaks"
+          curl --fail --silent --show-error --location \
+            https://github.com/gitleaks/gitleaks/releases/download/v8.21.2/gitleaks_8.21.2_linux_x64.tar.gz \
+            --output "$RUNNER_TEMP/gitleaks.tgz"
+          echo "5bc41815076e6ed6ef8fbecc9d9b75bcae31f39029ceb55da08086315316e3ba  $RUNNER_TEMP/gitleaks.tgz" | sha256sum --check --status
+          tar -xzf "$RUNNER_TEMP/gitleaks.tgz" -C "$RUNNER_TEMP/gitleaks" gitleaks
+          test "$("$RUNNER_TEMP/gitleaks/gitleaks" version)" = "8.21.2"
 
-      - name: Detect secrets in commit range (push)
-        if: github.event_name == 'push'
+      - name: Test trusted gate
         env:
-          BEFORE: ${{ github.event.before }}
-          AFTER: ${{ github.event.after }}
+          GITLEAKS_BIN: ${{ runner.temp }}/gitleaks/gitleaks
+        run: python3 policy/scripts/security/test_gitleaks_gate.py
+
+      - name: Directed history and mandatory exact-tree gates
+        shell: bash
         run: |
-          if [ "$BEFORE" = "0000000000000000000000000000000000000000" ] || [ -z "$BEFORE" ]; then
-            echo "Initial push or unknown range — scan last commit only"
-            gitleaks detect --source . --config .gitleaks.toml --log-opts="-1" --verbose
-          else
-            gitleaks detect --source . --config .gitleaks.toml --log-opts="$BEFORE...$AFTER" --verbose
+          set -uo pipefail
+          status=0
+          policy_guard=()
+          if [ "$EVENT_NAME" = "pull_request_target" ]; then
+            policy_guard=(--check-policy-changes)
           fi
+          common=(--repo "$GITHUB_WORKSPACE/candidate" --policy-dir "$GITHUB_WORKSPACE/policy" --binary "$RUNNER_TEMP/gitleaks/gitleaks" --head "$TARGET_SHA")
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            python3 policy/scripts/security/gitleaks_gate.py "${common[@]}" --mode history || status=1
+          else
+            python3 policy/scripts/security/gitleaks_gate.py "${common[@]}" --mode incremental --before "$BEFORE_SHA" "${policy_guard[@]}" || status=1
+          fi
+          # Run even when the history gate finds a problem. Do not upload raw reports.
+          python3 policy/scripts/security/gitleaks_gate.py "${common[@]}" --mode current-tree "${policy_guard[@]}" || status=1
+          exit "$status"

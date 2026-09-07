@@ -1,5 +1,0 @@
-# Локальные env (уже в .gitignore); не сканируем, чтобы не тащить машинные пути в baseline CI
-.env
-.env.*
-backend/.env
-frontend/.env

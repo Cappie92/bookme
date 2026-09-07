@@ -59,7 +59,7 @@
 |---------|---------|
 | **A. Rewrite history в запланированном окне** | Есть окно на force-push, список fork/интеграций проверен, согласовано с владельцем remote. |
 | **B. Rewrite не делаем; компенсации** | Remote узкий, риск приемлем; **обязательны**: scan (CI + при желании pre-commit), access review, документ **residual risk**, пересмотр через N месяцев. |
-| **C. Инкрементальный CI + зачистка по backlog** | CI сканирует **только новые коммиты**; старые примеры в доках — отдельные задачи на redact/шаблоны; **baseline-файл** в репо не обязателен, при желании — вручную по `gitleaks` docs. |
+| **C. Трёхслойный CI + reviewed historical debt** | Новые reachable commits и exact current tree обязательны; полный history scan запускается вручную. Historical ledger не разрешает хранить старые секреты в current tree. Реализация — §6. |
 
 **Практично для многих команд после ротации ключа:** **B или C**, с **планом A** при жёсткой политике или утечке remote.
 
@@ -89,11 +89,47 @@
 
 | Мера | Назначение |
 |------|------------|
-| **gitleaks** + `.gitleaks.toml` | Единые правила; allowlist: локальные `.env`, `mobile/ios/Pods/` (сгенерированное). |
-| **GitHub Actions** `gitleaks.yml` | **Инкрементально:** скан **диапазона коммитов** в PR / push (`--log-opts`), чтобы **не** требовать за один раз вычистку всех старых ложных/исторических срабатываний в доках; **новые** секреты в коммите — падают. |
-| **Полный scan рабочего дерева** | Вручную: `gitleaks detect --source . --no-git --config .gitleaks.toml` — для аудита и backlog по «примерам» в `.md` (не обязательно зелёный до отдельной зачистки). |
-| **Pre-commit** (опционально) | Корневой `.pre-commit-config.yaml`: `gitleaks protect` на staged. |
-| **Полный scan истории** | `gitleaks detect --source .` (git-режим) — для решения по `filter-repo` / отчёта; ожидаемо шумно, пока история не очищена. |
+| **Gitleaks 8.21.2** | Версия и SHA-256 Linux release archive закреплены в workflow; стандартные правила без дополнительных broad path exclusions. Tracked env templates сканируются. |
+| **PR / push** | Directed range `BEFORE..HEAD` с `--full-history -m` плюс обязательный exact-tree gate даже при findings в истории. |
+| **Current tree** | Raw Git blobs, без checkout filters и `export-ignore`. Historical baseline здесь не применяется. Локальный `WORKTREE` включает неигнорируемые новые файлы; CI сканирует exact commit. |
+| **Manual history** | Все reachable commits и merge-parent diffs выбранного commit; дополнительно current-tree gate. Никакого history rewrite. |
+| **Pre-commit** (опционально) | Существующий локальный hook не заменяет обязательные CI gates. Его переработка — отдельный scope. |
+
+### Trusted policy и fail-closed поведение
+
+PR запускает `pull_request_target` workflow из target branch. Candidate checkout используется **только как данные**: исполняется wrapper/security suite из trusted policy checkout, не candidate code. Права — только `contents: read`, без persisted credentials. Нельзя добавлять запуск PR scripts/build/package install в этот job.
+
+Изменение policy/config/ledger/workflow/security tests в PR приводит к `POLICY_REVIEW_REQUIRED`. Для такого изменения требуется отдельная проверка владельцем и разрешённая интеграция; автоматического self-approval через новую exception нет. Push проверяет уже принятую policy canonical HEAD.
+
+Отсутствующий или нулевой BEFORE, shallow history, неподдерживаемый tracked entry, неверная версия, ошибка scanner или неполный report завершаются ошибкой. Диапазон не заменяется на последний commit. Directed range учитывает second-parent и merge-resolution content, включая временный secret, добавленный и удалённый внутри push.
+
+### Два разных metadata ledger
+
+- `.gitleaks-current-exceptions.json`: только `generic-api-key` в точном `mobile/ios/Podfile.lock`, полная строка AppMetricaKeychain с 40 hex внутри `SPEC CHECKSUMS`. Wrapper проверяет source context, а не усечённый Match. Другой secret в этом файле не подавляется; сам lockfile не меняется.
+- `.gitleaks-history-baseline.json`: exact rule/path/line/commit/blob/fingerprint и reviewed classification/evidence. Содержит подтверждённо revoked Yandex/Plusofon, закрытый legacy Robokassa store и reviewed documentation/synthetic/false-positive occurrences. Не хранит raw values и не использует native `--baseline-path`.
+- Новый commit с тем же старым значением не совпадает с historical fingerprint и падает. Existing historical exception не разрешает secret в current tree.
+- Ошибочный `.gitleaksignore` удалён; inline `gitleaks:allow` не обходят wrapper.
+
+### Source cleanup и граница production
+
+Все найденные копии двух legacy Robokassa passwords закрытого магазина заменены явными placeholders, включая дополнительные недетектировавшиеся текстовые копии. Текущие production credentials/config и payment runtime не изменяются. Этот cleanup не является подтверждением реального payment smoke.
+
+В `backend/test_stats.py` токен берётся только из `TEST_AUTH_TOKEN`; отсутствие останавливает diagnostic до HTTP-запросов. Public `test-auth.html` сохранён после проверки reachability, но без embedded JWT/autofill и отображения фрагментов токена. Обычный application auth не меняется. StoreKit fixtures заменены валидным synthetic UUID v4 без exception. Doc examples — явные placeholders; расчёты daily_rate сохранены.
+
+Два просроченных JWT удалены из current source. Владелец отдельно разрешил historical-only classification `EXPIRED_JWT_REMOVED` для двух точных occurrences с origin commit/path/rule/line/blob/fingerprint. Это не false positive, не synthetic и не подтверждение revocation. JWT values, Secret/Match и исходные строки в ledger не хранятся. Current-tree exceptions и JWT allowlist не добавлены: повторное внесение старого JWT или любой новый JWT finding завершаются FAIL.
+
+### Локальная проверка без raw logs
+
+Из корня репозитория, с проверенным Gitleaks 8.21.2 в PATH:
+
+```sh
+GITLEAKS_BIN=gitleaks python3 scripts/security/test_gitleaks_gate.py
+python3 scripts/security/gitleaks_gate.py --mode current-tree --head WORKTREE
+python3 scripts/security/gitleaks_gate.py --mode incremental --before <BEFORE_SHA> --head <HEAD_SHA>
+python3 scripts/security/gitleaks_gate.py --mode history --head HEAD
+```
+
+Вывод: rule, file, line, fingerprint, classification и агрегаты raw/suppressed/baselined/unresolved. Target — unresolved = 0. Scanner работает с `--redact=100`; полный JSON поступает через private FIFO в память. stdout/stderr scanner не транслируются, raw report не сохраняется и не загружается в Actions artifacts. Ошибки возвращают только безопасный код, без traceback/source line/Secret/Match.
 
 ### Политика файлов
 

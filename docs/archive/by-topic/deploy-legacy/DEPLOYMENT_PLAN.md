@@ -319,7 +319,7 @@ backend/scripts/test_users_balance_system.log.jsonl
 ```bash
 curl -X POST https://dedato.ru/api/payments/subscription/init \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Authorization: Bearer <ACCESS_TOKEN>" \
   -d '{
     "plan_id": 1,
     "duration_months": 1,
@@ -342,7 +342,7 @@ curl -X POST https://dedato.ru/api/payments/subscription/init \
 ```bash
 curl -X POST https://dedato.ru/api/payments/deposit/init \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Authorization: Bearer <ACCESS_TOKEN>" \
   -d '{
     "amount": 1000
   }'

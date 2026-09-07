@@ -237,7 +237,7 @@ sqlite3 backend/bookme.db "SELECT id, name, display_name, is_active FROM subscri
 ```bash
 # Проверьте, что API работает
 curl http://localhost:8000/api/balance/subscription-status \
-  -H "Authorization: Bearer YOUR_TOKEN"
+  -H "Authorization: Bearer <ACCESS_TOKEN>"
 ```
 
 **Ожидаемый результат:**

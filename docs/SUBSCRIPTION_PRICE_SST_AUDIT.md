@@ -165,13 +165,13 @@ return {..., "daily_rate": daily_rate, "price": subscription.price, ...}
 ДО ИЗМЕНЕНИЯ:
   subscription: price=1500.0 daily_rate=50.0
   plan: price_1month=1500.0
-  API: daily_rate=50.0 days_remaining=30
+  Ответ сервера: daily_rate=50.0 days_remaining=30
 
 План price_1month изменён: 1500 -> 3000
 
 ПОСЛЕ ИЗМЕНЕНИЯ:
   subscription в БД: price=1500.0 daily_rate=50.0  ← не изменилось
-  API: daily_rate=50.0 days_remaining=30           ← не изменилось
+  Ответ сервера: daily_rate=50.0 days_remaining=30           ← не изменилось
 
 ✓ subscription.daily_rate НЕ изменился (SSoT подтверждён)
 ✓ API daily_rate НЕ изменился

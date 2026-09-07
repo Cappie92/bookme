@@ -1,3 +1,4 @@
+import os
 import requests
 import json
 from datetime import datetime
@@ -8,6 +9,10 @@ BASE_URL = "http://localhost:8000"
 def test_stats_api():
     """Тестирование API статистики"""
     
+    token = os.environ.get("TEST_AUTH_TOKEN", "").strip()
+    if not token:
+        raise SystemExit("Set TEST_AUTH_TOKEN before running this diagnostic")
+
     # Сначала попробуем получить статистику без авторизации
     print("1. Тестирование без авторизации:")
     response = requests.get(f"{BASE_URL}/admin/dashboard/stats")
@@ -17,7 +22,7 @@ def test_stats_api():
     
     # Попробуем с реальным токеном
     print("2. Тестирование с реальным токеном:")
-    headers = {"Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhZG1pbkBhcHBvaW50by5jb20iLCJyb2xlIjoiYWRtaW4iLCJleHAiOjE3NTI4NDA0NjZ9.K7bfb0ctpCjUGa5hH3Gg1FCClFX9Gu-janUQNSHi4Ls"}
+    headers = {"Authorization": f"Bearer {token}"}
     response = requests.get(f"{BASE_URL}/admin/dashboard/stats", headers=headers)
     print(f"Status: {response.status_code}")
     if response.status_code == 200:

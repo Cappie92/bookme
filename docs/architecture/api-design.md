@@ -55,8 +55,8 @@ Content-Type: application/json
 **Response:**
 ```json
 {
-  "access_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...",
-  "refresh_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...",
+  "access_token": "<ACCESS_TOKEN>",
+  "refresh_token": "<REFRESH_TOKEN>",
   "token_type": "bearer",
   "expires_in": 1800
 }
@@ -83,8 +83,8 @@ Content-Type: application/json
 **Response:**
 ```json
 {
-  "access_token": "...",
-  "refresh_token": "...",
+  "access_token": "<ACCESS_TOKEN>",
+  "refresh_token": "<REFRESH_TOKEN>",
   "user": {
     "id": 1,
     "email": "user@example.com",

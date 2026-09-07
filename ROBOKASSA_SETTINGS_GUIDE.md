@@ -8,8 +8,8 @@
 
 ## 1. ✅ Пароли (уже настроены правильно)
 
-**Пароль #1:** `SMOsboVJA0919uMwBC4N` ✅  
-**Пароль #2:** `WX67emZei987hdTxiUZw` ✅
+**Пароль #1:** `<set-in-production-env>` ✅
+**Пароль #2:** `<set-in-production-env>` ✅
 
 **Действие:** Оставьте как есть, пароли уже заданы.
 
@@ -108,8 +108,8 @@ https://app.dedato.ru/payment/failed
 
 Проверьте, что у вас настроено:
 
-- [x] Пароль #1: `SMOsboVJA0919uMwBC4N` ✅
-- [x] Пароль #2: `WX67emZei987hdTxiUZw` ✅
+- [x] Пароль #1: `<set-in-production-env>` ✅
+- [x] Пароль #2: `<set-in-production-env>` ✅
 - [ ] Result URL: `http://localhost:8000/api/payments/robokassa/result` (для теста)
 - [ ] Метод Result URL: **POST** (не GET!)
 - [ ] Success URL: `http://localhost:5173/payment/success` (для теста)
@@ -132,8 +132,8 @@ Success URL: http://localhost:5173/payment/success
 Fail URL: http://localhost:5173/payment/failed
 Метод: GET
 
-Пароль #1: SMOsboVJA0919uMwBC4N ✅
-Пароль #2: WX67emZei987hdTxiUZw ✅
+Пароль #1: <set-in-production-env> ✅
+Пароль #2: <set-in-production-env> ✅
 Алгоритм хеша: MD5
 ```
 
@@ -172,4 +172,3 @@ Fail URL: http://localhost:5173/payment/failed
 ---
 
 **Готово!** После сохранения настроек можно переходить к тестированию.
-

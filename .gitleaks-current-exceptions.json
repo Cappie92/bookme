@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "exceptions": [
+    {
+      "rule": "generic-api-key",
+      "path": "mobile/ios/Podfile.lock",
+      "classification": "FALSE_POSITIVE_BUILD_CHECKSUM",
+      "rationale": "CocoaPods AppMetricaKeychain metadata, not a credential. Gitleaks 8.21.2 directory chunks may truncate this line.",
+      "guard": {
+        "kind": "cocoapods_spec_checksum",
+        "section": "SPEC CHECKSUMS",
+        "dependency": "AppMetricaKeychain",
+        "hex_length": 40
+      }
+    }
+  ]
+}

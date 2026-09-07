@@ -11,8 +11,8 @@ cd /Users/s.devyatov/DeDato/backend
 # Создайте файл .env
 cat > .env << 'EOF'
 ROBOKASSA_MERCHANT_LOGIN=your_merchant_login_here
-ROBOKASSA_PASSWORD_1=your_password_1_here
-ROBOKASSA_PASSWORD_2=your_password_2_here
+ROBOKASSA_PASSWORD_1=<set-in-production-env>
+ROBOKASSA_PASSWORD_2=<set-in-production-env>
 ROBOKASSA_IS_TEST=true
 ROBOKASSA_RESULT_URL=http://localhost:8000/api/payments/robokassa/result
 ROBOKASSA_SUCCESS_URL=http://localhost:5173/payment/success
@@ -31,8 +31,8 @@ cat .env
 
 ```
 ROBOKASSA_MERCHANT_LOGIN=your_merchant_login_here
-ROBOKASSA_PASSWORD_1=your_password_1_here
-ROBOKASSA_PASSWORD_2=your_password_2_here
+ROBOKASSA_PASSWORD_1=<set-in-production-env>
+ROBOKASSA_PASSWORD_2=<set-in-production-env>
 ROBOKASSA_IS_TEST=true
 ROBOKASSA_RESULT_URL=http://localhost:8000/api/payments/robokassa/result
 ROBOKASSA_SUCCESS_URL=http://localhost:5173/payment/success
@@ -78,7 +78,7 @@ ROBOKASSA_MERCHANT_LOGIN=demo_merchant
 
 **Пример:**
 ```
-ROBOKASSA_PASSWORD_1=MyPassword123456
+ROBOKASSA_PASSWORD_1=<set-in-production-env>
 ```
 
 ### 3. ROBOKASSA_PASSWORD_2
@@ -89,7 +89,7 @@ ROBOKASSA_PASSWORD_1=MyPassword123456
 
 **Пример:**
 ```
-ROBOKASSA_PASSWORD_2=MyPassword789012
+ROBOKASSA_PASSWORD_2=<set-in-production-env>
 ```
 
 ### 4. ROBOKASSA_IS_TEST
@@ -129,8 +129,8 @@ cat .env
 
 ```env
 ROBOKASSA_MERCHANT_LOGIN=demo_merchant
-ROBOKASSA_PASSWORD_1=test_pass_1_abc123
-ROBOKASSA_PASSWORD_2=test_pass_2_xyz789
+ROBOKASSA_PASSWORD_1=<set-in-production-env>
+ROBOKASSA_PASSWORD_2=<set-in-production-env>
 ROBOKASSA_IS_TEST=true
 ROBOKASSA_RESULT_URL=http://localhost:8000/api/payments/robokassa/result
 ROBOKASSA_SUCCESS_URL=http://localhost:5173/payment/success

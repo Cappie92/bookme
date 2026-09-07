@@ -58,7 +58,7 @@ function nativeMock() {
 
 function backendMock() {
   return {
-    fetchIdentity: jest.fn(async () => ({ app_account_token: '8d84e539-8f28-4b61-9073-d8e38eabbad8' })),
+    fetchIdentity: jest.fn(async () => ({ app_account_token: '00000000-0000-4000-8000-000000000001' })),
     fetchEligibility: jest.fn(async () => ({ allowed: true })),
     verifyTransaction: jest.fn(async ({ source }: { source: string }) => ({
       verified: true,
