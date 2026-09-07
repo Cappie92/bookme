@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import re
+import random
 import runpy
 import secrets
 import shutil
@@ -41,14 +42,17 @@ class GateTests(unittest.TestCase):
         for file in self.policy.iterdir():
             shutil.copyfile(file, self.repo / file.name)
         self.git("init", "-q", "-b", "main")
+        self.git("config", "--local", "user.name", "DeDato Security Test")
+        self.git("config", "--local", "user.email", "security-test@example.invalid")
         self.write("README.md", "Security gate fixture\n")
         self.base = self.commit("clean baseline")
-        self.canary = "synthetic_" + secrets.token_hex(24)
+        # Stable synthetic fixture: random hex can hit Gitleaks' dead/feed stopwords.
+        rng = random.Random(0)
+        self.canary = "synthetic_" + bytes(rng.getrandbits(8) for _ in range(24)).hex()
 
-    def git(self, *args, check=True):
+    def git(self, *args, expected_returncode=0):
         result = subprocess.run(["git", "-C", str(self.repo), *args], capture_output=True)
-        if check:
-            self.assertEqual(result.returncode, 0, "temporary Git operation failed")
+        self.assertEqual(result.returncode, expected_returncode, "temporary Git fixture operation failed")
         return result
 
     def write(self, name, text):
@@ -58,8 +62,7 @@ class GateTests(unittest.TestCase):
 
     def commit(self, message):
         self.git("add", "--all")
-        self.git("-c", "user.name=Security Test", "-c", "user.email=security@example.invalid",
-                 "commit", "-q", "--allow-empty", "-m", message)
+        self.git("commit", "-q", "--allow-empty", "-m", message)
         return self.git("rev-parse", "HEAD").stdout.decode().strip()
 
     def secret(self, name="settings.txt"):
@@ -200,8 +203,7 @@ class GateTests(unittest.TestCase):
         self.secret()
         self.commit("side parent canary")
         self.git("checkout", "-q", "main")
-        self.git("-c", "user.name=Security Test", "-c", "user.email=security@example.invalid",
-                 "merge", "--no-ff", "-m", "merge side", "side")
+        self.git("merge", "--no-ff", "-m", "merge side", "side")
         self.assertGreater(self.run_gate("incremental", before=self.base)["unresolved"], 0)
 
     def test_secret_added_then_removed_inside_push_range_fails(self):
@@ -217,16 +219,27 @@ class GateTests(unittest.TestCase):
         base = self.commit("conflict base")
         self.git("checkout", "-q", "-b", "side")
         self.write("conflict.txt", "side\n")
-        self.commit("side edit")
+        side = self.commit("side edit")
         self.git("checkout", "-q", "main")
         self.write("conflict.txt", "main\n")
-        self.commit("main edit")
-        self.git("merge", "--no-commit", "side", check=False)
+        main = self.commit("main edit")
+        # A content conflict is expected (1); identity/other fatal errors (128) are not.
+        self.git("merge", "--no-commit", "side", expected_returncode=1)
+        self.assertEqual(self.git("rev-parse", "MERGE_HEAD").stdout.decode().strip(), side)
+        self.assertEqual(self.git("diff", "--name-only", "--diff-filter=U").stdout, b"conflict.txt\n")
+        for parent in [main, side]:
+            self.assertFalse(self.canary.encode() in self.git("show", parent + ":conflict.txt").stdout)
         self.secret("conflict.txt")
-        self.commit("merge resolution canary")
+        merged = self.commit("merge resolution canary")
         parents = self.git("show", "-s", "--format=%P", "HEAD").stdout.split()
-        self.assertEqual(len(parents), 2)
-        self.assertGreater(self.run_gate("incremental", before=base)["unresolved"], 0)
+        self.assertEqual(len(parents), 2, "merge fixture must have two parents before scanning")
+        self.assertEqual(parents, [main.encode(), side.encode()])
+        result = self.run_gate("incremental", before=base)
+        self.assertGreater(result["unresolved"], 0)
+        self.assertTrue(any(row["file"] == "conflict.txt"
+                            and row["fingerprint"].startswith(merged + ":")
+                            and row["classification"] == "UNRESOLVED"
+                            for row in result["findings"]))
 
     def test_storekit_low_entropy_uuid_passes(self):
         value = "00000000-0000-4000-8000-000000000001"
