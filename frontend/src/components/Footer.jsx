@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 
 export default function Footer({ compact = false }) {
-  const { isIosAppWebSession } = useAuth()
+  const { commerceAllowed } = useAuth()
   return (
     <footer
       className={
@@ -58,7 +58,7 @@ export default function Footer({ compact = false }) {
           >
             Главная
           </Link>
-          {!isIosAppWebSession ? <Link
+          {commerceAllowed ? <Link
             to="/pricing"
             className={
               compact

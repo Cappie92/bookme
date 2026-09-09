@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { useLocation } from 'react-router-dom'
 import { metrikaInitOnce, metrikaPageView } from './metrika'
+import { analyticsSafePath } from './analyticsUrl'
 
 /**
  * Init один раз, при смене маршрута — виртуальный pageview (hit).
@@ -10,7 +11,7 @@ export default function MetrikaRouteListener() {
   const prevKey = useRef('')
 
   useEffect(() => {
-    const key = `${location.pathname}${location.search || ''}${location.hash || ''}`
+    const key = analyticsSafePath(`${location.pathname}${location.search || ''}${location.hash || ''}`)
     if (prevKey.current === key) {
       return
     }

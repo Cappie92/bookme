@@ -1,3 +1,4 @@
+import { useAuth } from '../contexts/AuthContext';
 import { useState, useEffect } from 'react';
 import { ChevronLeftIcon, ChevronRightIcon, InformationCircleIcon } from '@heroicons/react/24/outline';
 import { apiGet, apiPost } from '../utils/api';
@@ -5,6 +6,8 @@ import { formatMoney } from '../utils/formatMoney';
 import { masterDisplayMainRub, masterLoyaltyRub } from '../utils/masterBookingMoney';
 
 export default function PastAppointments() {
+  const { commerceAllowed } = useAuth();
+  const canEditAccounting = commerceAllowed === true;
   const [appointments, setAppointments] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -65,6 +68,7 @@ export default function PastAppointments() {
   };
 
   const handleApplyStatus = async (appointmentId, fallbackStatus) => {
+    if (!canEditAccounting) return;
     const chosen = (statusDraft[appointmentId] || fallbackStatus || '').toLowerCase();
     if (!['created','awaiting_confirmation','completed','cancelled','client_requested_early','client_requested_late'].includes(chosen)) {
       alert('Выберите корректный статус');
@@ -260,9 +264,9 @@ export default function PastAppointments() {
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Сумма
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    {canEditAccounting && (<th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Изменить статус
-                    </th>
+                    </th>)}
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
@@ -307,7 +311,7 @@ export default function PastAppointments() {
                           '-'
                         )}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-right">
+                      {canEditAccounting && (<td className="px-6 py-4 whitespace-nowrap text-sm text-right">
                         {appointment.status === 'cancelled_by_client_early' || appointment.status === 'cancelled_by_client_late' ? (
                           <div className="text-gray-500 text-sm">
                             Нельзя изменить
@@ -360,7 +364,7 @@ export default function PastAppointments() {
                           )}
                           </div>
                         )}
-                      </td>
+                      </td>)}
                     </tr>
                   ))}
                 </tbody>
@@ -401,4 +405,3 @@ export default function PastAppointments() {
     </div>
   );
 }
-

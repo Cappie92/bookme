@@ -4,6 +4,8 @@
  * Важно: tag.js грузится БЕЗ ?id= — иначе отдаётся auto-init бандл без window.ym API.
  */
 
+import { analyticsSafePath, analyticsSafeReferrer } from './analyticsUrl'
+
 const DEFAULT_COUNTER_ID = 108773879
 export const METRIKA_TAG_URL = 'https://mc.yandex.ru/metrika/tag.js'
 
@@ -125,16 +127,11 @@ export function metrikaPageView() {
     return
   }
 
-  const url = `${window.location.pathname}${window.location.search || ''}${window.location.hash || ''}`
+  // Boundary protection must run before ym(), independently of lazy route cleanup.
+  const url = analyticsSafePath(`${window.location.pathname}${window.location.search || ''}${window.location.hash || ''}`)
   const opts = { title: document.title }
-  if (document.referrer) {
-    try {
-      const refUrl = new URL(document.referrer)
-      opts.referer = refUrl.toString()
-    } catch {
-      // ignore
-    }
-  }
+  const referer = analyticsSafeReferrer(document.referrer)
+  if (referer) opts.referer = referer
   window.ym(counterId, 'hit', url, opts)
 }
 

@@ -1,4 +1,5 @@
 import { env } from '@src/config/env';
+import { Platform } from 'react-native';
 
 export const USER_AGREEMENT_PATH = '/user-agreement';
 export const PERSONAL_DATA_CONSENT_PATH = '/personal-data-consent';
@@ -10,7 +11,9 @@ export function buildLegalDocumentUrl(path: string, baseUrl?: string): string {
   const raw = (baseUrl ?? env.WEB_URL ?? DEFAULT_LEGAL_ORIGIN).trim().replace(/\/+$/, '');
   const origin = raw || DEFAULT_LEGAL_ORIGIN;
   const normalizedPath = path.startsWith('/') ? path : `/${path}`;
-  return `${origin}${normalizedPath}`;
+  const url = `${origin}${normalizedPath}`;
+  // Public UX context only: no identity, JWT or one-time handoff code.
+  return Platform.OS === 'ios' ? `${url}${url.includes('?') ? '&' : '?'}context=ios_app` : url;
 }
 
 export async function openLegalDocument(

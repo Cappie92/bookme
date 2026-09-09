@@ -73,7 +73,7 @@ function StatCell({ title, text }) {
 }
 
 export default function About() {
-  const { openAuthModal } = useAuth()
+  const { openAuthModal, commerceAllowed } = useAuth()
 
   const handleAboutHeroRegister = () => {
     metrikaGoal(M.ABOUT_HERO_REGISTER)
@@ -116,16 +116,16 @@ export default function About() {
             лишней сложности.
           </p>
           <div className="mt-8 flex flex-col sm:flex-row gap-3 justify-center items-stretch sm:items-center">
-            <Button variant="primary" size="lg" onClick={handleAboutHeroRegister} className="w-full sm:w-auto">
+            {commerceAllowed && <Button variant="primary" size="lg" onClick={handleAboutHeroRegister} className="w-full sm:w-auto">
               Попробовать бесплатно
               <ArrowRightIcon className="h-4 w-4 ml-2" />
-            </Button>
-            <Link
+            </Button>}
+            {commerceAllowed && (<Link
               to="/pricing"
               className="inline-flex items-center justify-center rounded-lg font-medium px-6 py-3 text-base border border-[#E7E2DF] bg-white text-neutral-900 hover:bg-[#FAFAF9] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#4CAF50] transition-colors w-full sm:w-auto"
             >
               Посмотреть тарифы
-            </Link>
+            </Link>)}
           </div>
         </section>
 
@@ -193,21 +193,21 @@ export default function About() {
               </p>
             </div>
             <div className="relative mt-8 lg:mt-0 flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-center lg:justify-end flex-shrink-0">
-              <button
+              {commerceAllowed && <button
                 type="button"
                 onClick={handleAboutFinalRegister}
                 className="inline-flex items-center justify-center font-medium rounded-xl px-6 py-3 text-base bg-white text-[#1C1917] hover:bg-[#F4F1EF] shadow-md transition-colors"
               >
                 Начать бесплатно
                 <ArrowRightIcon className="h-4 w-4 ml-2 text-[#45A049]" />
-              </button>
-              <Link
+              </button>}
+              {commerceAllowed && (<Link
                 to="/pricing"
                 onClick={() => metrikaGoal(M.ABOUT_CTA_PRICING)}
                 className="inline-flex items-center justify-center rounded-xl px-5 py-3 text-base font-medium text-white border border-white/40 hover:bg-white/10 transition-colors"
               >
                 Перейти к тарифам
-              </Link>
+              </Link>)}
             </div>
           </div>
         </section>

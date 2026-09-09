@@ -1,3 +1,5 @@
+jest.mock('react-native', () => ({ Platform: { OS: 'android' } }));
+import { Platform } from 'react-native';
 import {
   buildLegalDocumentUrl,
   openLegalDocument,
@@ -7,6 +9,16 @@ import {
 } from '@src/utils/legalDocuments';
 
 describe('legalDocuments', () => {
+  afterEach(() => { (Platform as { OS: string }).OS = 'android'; });
+
+  it.each([USER_AGREEMENT_PATH, PERSONAL_DATA_CONSENT_PATH, PRIVACY_POLICY_PATH, '/account-deletion'])(
+    'iOS legal %s carries only a non-sensitive UX context flag', (path) => {
+      (Platform as { OS: string }).OS = 'ios';
+      const url = new URL(buildLegalDocumentUrl(path, 'https://dedato.ru'));
+      expect(url.pathname).toBe(path);
+      expect(url.search).toBe('?context=ios_app');
+    }
+  );
   it('builds absolute user agreement URL from base', () => {
     expect(buildLegalDocumentUrl(USER_AGREEMENT_PATH, 'https://dedato.ru')).toBe(
       'https://dedato.ru/user-agreement'

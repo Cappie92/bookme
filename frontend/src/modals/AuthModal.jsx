@@ -177,6 +177,7 @@ async function fetchWithTimeout(resource, options = {}, timeoutMs = 20000) {
 export default function AuthModal() {
   const {
     login,
+    prepareLogin,
     authModalOpen,
     authModalType,
     authModalInitialTab,
@@ -599,6 +600,7 @@ export default function AuthModal() {
         } catch { /* ignore */ }
         localStorage.setItem('access_token', data.access_token)
         localStorage.setItem('refresh_token', data.refresh_token)
+        prepareLogin()
         if (role) localStorage.setItem('user_role', role)
 
         let userData = null
@@ -615,6 +617,7 @@ export default function AuthModal() {
           )
           if (userResponse.ok) {
             userData = await userResponse.json()
+            if (localStorage.getItem('access_token') !== data.access_token) return
             if (userData.role) {
               localStorage.setItem('user_role', userData.role)
               role = userData.role
@@ -626,13 +629,17 @@ export default function AuthModal() {
             // Таймаут / отмена /me после успешного login — не блокируем вход (роль уже из JWT при наличии)
             console.warn('[auth] GET /api/auth/users/me aborted (timeout); continuing login with JWT')
           } else {
+            login(null, data.access_token)
             console.error('Ошибка получения данных пользователя:', err)
             setLoginErrors({ general: 'Не удалось загрузить профиль. Попробуйте обновить страницу.' })
             return
           }
         }
 
-        login(userData || data)
+        if (!login(userData || data, data.access_token)) {
+          setLoginErrors({ general: 'Не удалось подтвердить сессию. Повторите вход.' })
+          return
+        }
         reportAuthLoginSuccess({ role: (role || userData?.role || '').toString() })
         setLoginForm({ phone: '+7', password: '' })
         onClose()
@@ -901,6 +908,7 @@ export default function AuthModal() {
       if (verificationTokenRef.current !== verificationToken) return
 
       if (response.ok && result.access_token && result.refresh_token) {
+        const profileTokenSnapshot = localStorage.getItem('access_token')
         const userResponse = await fetchWithTimeout(
           '/api/auth/users/me',
           {
@@ -916,6 +924,7 @@ export default function AuthModal() {
         }
         const userData = await userResponse.json()
         if (verificationTokenRef.current !== verificationToken) return
+        if (localStorage.getItem('access_token') !== profileTokenSnapshot) return
 
         localStorage.setItem('access_token', result.access_token)
         localStorage.setItem('refresh_token', result.refresh_token)

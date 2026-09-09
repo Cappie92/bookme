@@ -6,7 +6,7 @@ import { fetchBookingById, Booking, getStatusLabel, getStatusColor, cancelBookin
 import { BookingTimeEditModal } from '@src/components/BookingTimeEditModal';
 import { PrimaryButton } from '@src/components/PrimaryButton';
 import { SecondaryButton } from '@src/components/SecondaryButton';
-import { MasterLoyaltyInfo } from '@src/components/loyalty/MasterLoyaltyInfo';
+import MasterBookingLoyaltyHost from '@src/components/loyalty/MasterBookingLoyaltyHost';
 import { safeBack } from '@src/utils/safeBack';
 
 const BOOKINGS_LIST_PATH = '/bookings';
@@ -295,11 +295,9 @@ export default function BookingDetailScreen() {
           </View>
         </View>
 
-        {/* Информация о программе лояльности мастера (только для клиентов) */}
+        {/* Platform-specific master surface; client loyalty is unchanged. */}
         {booking.master_id && (
-          <View style={styles.section}>
-            <MasterLoyaltyInfo masterId={booking.master_id} />
-          </View>
+          <MasterBookingLoyaltyHost masterId={booking.master_id} />
         )}
 
         {/* Дата и время */}

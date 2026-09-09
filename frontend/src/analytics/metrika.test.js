@@ -135,6 +135,26 @@ describe('metrikaGoal and metrikaPageView', () => {
     vi.unstubAllEnvs()
   })
 
+  it('sanitizes hit and referrer even before the handoff page can clear the URL', () => {
+    vi.stubEnv('VITE_YANDEX_METRIKA_ID', '108773879')
+    const ym = vi.fn()
+    globalThis.window = {
+      ym,
+      location: { pathname: '/auth/mobile-handoff', search: '?code=SYNTHETIC_HANDOFF_TICKET', hash: '#access_token=SYNTHETIC_TOKEN' },
+    }
+    globalThis.document = { referrer: 'https://dedato.ru/auth/mobile-handoff?code=SYNTHETIC_REFERRER_TICKET', title: 'DeDato' }
+    metrikaPageView()
+    metrikaPageView()
+    expect(ym).toHaveBeenCalledTimes(2)
+    for (const args of ym.mock.calls) {
+      expect(args).toEqual([108773879, 'hit', '/auth/mobile-handoff', {
+        title: 'DeDato', referer: 'https://dedato.ru/auth/mobile-handoff',
+      }])
+      expect(JSON.stringify(args)).not.toMatch(/SYNTHETIC|code=|access_token=/)
+    }
+    expect(window.location.search).toContain('SYNTHETIC_HANDOFF_TICKET')
+  })
+
   it('no-ops when counter id disabled', () => {
     vi.stubEnv('VITE_YANDEX_METRIKA_ID', '')
 

@@ -270,7 +270,7 @@ function OAuthOnboardingForm({ ticket, onComplete }) {
 export default function OAuthCallback() {
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
-  const { login } = useAuth()
+  const { login, prepareLogin } = useAuth()
   const { showToast } = useToast()
   const [error, setError] = useState('')
   const [onboardingStatus, setOnboardingStatus] = useState('idle')
@@ -321,6 +321,7 @@ export default function OAuthCallback() {
 
         localStorage.setItem('access_token', authData.access_token)
         if (authData.refresh_token) localStorage.setItem('refresh_token', authData.refresh_token)
+        prepareLogin()
 
         let user = authData.user || null
         try {
@@ -336,9 +337,10 @@ export default function OAuthCallback() {
         } catch {
           // OAuth уже успешен и токены сохранены; профиль подтянется в AuthProvider/кабинете.
         }
+        if (localStorage.getItem('access_token') !== authData.access_token) return
         if (!user) throw new Error('profile missing')
         if (user.role) localStorage.setItem('user_role', user.role)
-        login(user)
+        if (!login(user, authData.access_token)) return
         cleanOAuthCallbackUrl()
         if (oauth.purpose === 'oauth_link') {
           showToast(oauth.message || 'Яндекс аккаунт привязан', 'success')

@@ -861,7 +861,7 @@ function SalonWorkSection({ onInvitationUpdate }) {
 }
 
 export default function MasterDashboard() {
-  const { isIosAppWebSession, loading: authLoading } = useAuth()
+  const { isIosRestrictedContext: isIosAppWebSession, loading: authLoading, commerceAllowed } = useAuth()
   const { showToast } = useToast()
   const {
     hasFinanceAccess,
@@ -873,7 +873,7 @@ export default function MasterDashboard() {
     canCustomizeDomain,
     planName: subscriptionPlanName,
     refresh: refreshSubscriptionFeatures,
-  } = useMasterSubscription({ enabled: !isIosAppWebSession })
+  } = useMasterSubscription({ enabled: commerceAllowed })
   const { search } = useLocation()
   const navigate = useNavigate()
   const isDemoMode = localStorage.getItem('demo_mode') === '1' || new URLSearchParams(search).get('demo') === '1'
@@ -891,7 +891,8 @@ export default function MasterDashboard() {
     return resolveMasterTabForWebSession(tab, isIosAppWebSession)
   }
   
-  const [activeTab, setActiveTab] = useState(getTabFromUrl())
+  const [requestedTab, setActiveTab] = useState(getTabFromUrl())
+  const activeTab = resolveMasterTabForWebSession(requestedTab, isIosAppWebSession)
   
   // Синхронизируем activeTab с URL при изменении
   useEffect(() => {
@@ -1422,6 +1423,7 @@ export default function MasterDashboard() {
 
   useEffect(() => {
     if (authLoading) return undefined
+    let cancelled = false
     // Проверяем авторизацию при загрузке компонента
     const token = localStorage.getItem('access_token')
     if (!token) {
@@ -1433,9 +1435,11 @@ export default function MasterDashboard() {
     const timer = setTimeout(() => {
       ;(async () => {
         const settingsData = await loadMasterSettings()
+        if (cancelled) return
         if (settingsData) {
           await checkProfileCompleteness(settingsData)
         }
+        if (cancelled) return
         if (!isIosAppWebSession) {
           loadBalanceAndSubscription()
           loadBookingsLimit()
@@ -1444,7 +1448,7 @@ export default function MasterDashboard() {
       })()
     }, 100)
     
-    return () => clearTimeout(timer)
+    return () => { cancelled = true; clearTimeout(timer) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authLoading, isIosAppWebSession])
 
@@ -1931,7 +1935,7 @@ export default function MasterDashboard() {
               <h1 className="mb-2 text-xl font-bold leading-snug tracking-tight text-gray-900 lg:mb-6 lg:text-3xl">Статистика</h1>
               <MasterStats 
                 hasExtendedStats={canUseExtendedStats}
-                onOpenSubscriptionModal={isIosAppWebSession ? () => handleTabChange('tariff') : () => setShowSubscriptionModal(true)}
+                onOpenSubscriptionModal={isIosAppWebSession ? undefined : () => setShowSubscriptionModal(true)}
               />
             </div>
           )}

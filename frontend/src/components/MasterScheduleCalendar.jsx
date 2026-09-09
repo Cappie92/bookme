@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react'
+import { useAuth } from '../contexts/AuthContext'
 import { CalendarDaysIcon, EyeSlashIcon, TrashIcon, AdjustmentsHorizontalIcon } from '@heroicons/react/24/outline'
 import { apiGet, apiPut, apiPost, apiDelete } from '../utils/api'
 import { useHoverCloseDelay } from '../hooks/useHoverCloseDelay'
@@ -117,6 +118,7 @@ export default function MasterScheduleCalendar({
   onDayScheduleSaved = null,
   hasExtendedStats = false,
 }) {
+  const { isIosRestrictedContext } = useAuth()
   // schedule: { [slotKey]: true/false } — true = рабочий, false = нерабочий
   const [selected, setSelected] = useState(new Set())
   const [dragging, setDragging] = useState(false)
@@ -1774,7 +1776,7 @@ export default function MasterScheduleCalendar({
                     const isActive = slotData?.is_working || false
                     const workType = slotData?.work_type
                     const hasConflict = slotData?.has_conflict || false
-                    const isFrozen = slotData?.is_frozen || false
+                    const isFrozen = !isIosRestrictedContext && (slotData?.is_frozen || false)
                     const isSelected = selected.has(slotKey)
                     const timeIndex = hour * 6 + (minute / 10)
                     const slotBookings = getBookingsForSlot(day.date, hour, minute)
@@ -1909,10 +1911,10 @@ export default function MasterScheduleCalendar({
               <div className="w-4 h-4 bg-gray-100 border border-gray-200 rounded"></div>
               <span className="text-gray-600">Нерабочее время</span>
             </div>
-            <div className="flex items-center gap-2">
+            {!isIosRestrictedContext && <div className="flex items-center gap-2">
               <div className="w-4 h-4 bg-cyan-100 border border-gray-200 rounded"></div>
               <span className="text-gray-600">Тариф заморожен</span>
-            </div>
+            </div>}
             <div className="flex items-center gap-2">
               <div className="w-4 h-4 rounded" style={{ backgroundColor: '#DFF5EC', border: '1px solid #4CAF50' }}></div>
               <span className="text-gray-600">Выделено для изменения</span>
@@ -2143,4 +2145,4 @@ export default function MasterScheduleCalendar({
       </div>
     </div>
   )
-} 
+}

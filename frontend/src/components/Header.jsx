@@ -9,7 +9,7 @@ export default function Header({ compactPublicBooking = false, clientManagedBran
   const [clientCabinetMenuOpen, setClientCabinetMenuOpen] = useState(false)
   const clientCabinetMenuDesktopRef = useRef(null)
   const clientCabinetMenuMobileRef = useRef(null)
-  const { isAuthenticated, logout, openAuthModal, user, isIosAppWebSession } = useAuth()
+  const { isAuthenticated, logout, openAuthModal, user, isIosRestrictedContext: isIosAppWebSession, commerceAllowed } = useAuth()
   const navigate = useNavigate()
   const { pathname } = useLocation()
   const isPublicBooking = pathname.startsWith('/m/')
@@ -110,7 +110,7 @@ export default function Header({ compactPublicBooking = false, clientManagedBran
           </Link>
 
           {/* Навигация для десктопа — якоря главной (см. design ref в docs/archive/design-references/) */}
-          <nav className={`${isIosAppWebSession ? 'hidden' : 'flex'} items-center gap-4 lg:gap-6 xl:gap-8 flex-wrap justify-end`}>
+          <nav className={`${!commerceAllowed ? 'hidden' : 'flex'} items-center gap-4 lg:gap-6 xl:gap-8 flex-wrap justify-end`}>
             {pathname === '/' ? (
               <>
                 <a href="#features" className="nav-link">
@@ -136,7 +136,7 @@ export default function Header({ compactPublicBooking = false, clientManagedBran
                 </Link>
               </>
             )}
-            {!isIosAppWebSession ? (
+            {commerceAllowed ? (
               <Link to="/pricing" className="nav-link">
                 Тарифы
               </Link>
@@ -266,7 +266,7 @@ export default function Header({ compactPublicBooking = false, clientManagedBran
           }
         >
           <div className="flex min-w-0 items-center justify-self-start justify-start">
-            {!isIosAppWebSession && (
+            {commerceAllowed && (
               <button
                 type="button"
                 onClick={() => {
@@ -426,7 +426,7 @@ export default function Header({ compactPublicBooking = false, clientManagedBran
         </div>
 
         {/* Мобильное меню */}
-        {isMenuOpen && !isIosAppWebSession && (
+        {isMenuOpen && commerceAllowed && (
           <div className="md:hidden border-t border-neutral-200 py-4 animate-slide-down" style={{zIndex: 999}}>
             <nav className={`${isIosAppWebSession ? 'hidden' : 'flex'} flex-col space-y-4`}>
               {pathname === '/' ? (

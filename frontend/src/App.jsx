@@ -1,3 +1,4 @@
+import AuthSafetyBoundary, { IsolatedSessionError } from './components/AuthSafetyBoundary'
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom"
 import { HelmetProvider } from 'react-helmet-async'
 import { lazy, Suspense, useEffect, useRef } from 'react'
@@ -145,9 +146,10 @@ function AdminRoute({ children }) {
 }
 
 function IosCommerceRouteGuard({ children }) {
-  const { loading, isIosAppWebSession } = useAuth()
+  const { loading, commerceAllowed, isIosAppWebSession } = useAuth()
   if (loading) return <PageLoader />
   if (isIosAppWebSession) return <Navigate to="/master" replace />
+  if (!commerceAllowed) return <IsolatedSessionError />
   return children
 }
 
@@ -159,6 +161,7 @@ function App() {
             <MetrikaRouteListener />
             <ScrollToTopOnRouteChange />
             <AuthProvider>
+              <AuthSafetyBoundary>
               <ToastProvider>
               <FavoritesProvider>
                 <RegisterQueryHandler />
@@ -233,6 +236,7 @@ function App() {
         </Suspense>
               </FavoritesProvider>
               </ToastProvider>
+              </AuthSafetyBoundary>
         </AuthProvider>
       </BrowserRouter>
     </HelmetProvider>

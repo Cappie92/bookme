@@ -12,6 +12,7 @@ jest.mock('react-native', () => {
     return Comp;
   };
   return {
+    Platform: { OS: 'android' },
     View: Mock('View'),
     Text: Mock('Text'),
     TouchableOpacity: Mock('TouchableOpacity'),

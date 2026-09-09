@@ -1,16 +1,30 @@
-import React, { createContext, useContext, useState, useEffect, useRef } from 'react'
+import React, { createContext, useContext, useState, useEffect, useRef, useSyncExternalStore } from 'react'
 import { useNavigate } from 'react-router-dom'
 // AUTH_LOGIN_SUCCESS / AUTH_REGISTER_SUCCESS не вызывать здесь — только authReachGoals.js из AuthModal
 import { metrikaGoal } from '../analytics/metrika'
 import { M } from '../analytics/metrikaEvents'
 
+import { authPermissions, createAuthSession } from '../utils/authSession'
+
 const AuthContext = createContext()
+const serverStorage = { getItem: () => null, setItem: () => {}, removeItem: () => {} }
 
 export function AuthProvider({ children }) {
-  const [isAuthenticated, setIsAuthenticated] = useState(false)
-  const [user, setUser] = useState(null)
-  const [webSessionOrigin, setWebSessionOrigin] = useState(null)
-  const [loading, setLoading] = useState(true)
+  const sessionRef = useRef(null)
+  if (!sessionRef.current) sessionRef.current = createAuthSession({
+    storage: typeof window === 'undefined' ? serverStorage : window.localStorage,
+    tabStorage: typeof window === 'undefined' ? serverStorage : window.sessionStorage,
+    fetcher: (...args) => fetch(...args),
+    path: typeof window === 'undefined' ? '/' : window.location.pathname,
+    search: typeof window === 'undefined' ? '' : window.location.search,
+  })
+  const session = sessionRef.current
+  const authState = useSyncExternalStore(session.subscribe, session.getSnapshot, session.getSnapshot)
+  const { isAuthenticated, loading, isIosAppWebSession, isIosRestrictedContext, commerceAllowed } = authPermissions(authState)
+  const user = authState.user
+  const webSessionOrigin = user?.web_session_origin || null
+  const checkAuthStatus = session.check
+  const login = session.login
   const [authModalOpen, setAuthModalOpen] = useState(false)
   const [authModalType, setAuthModalType] = useState('client')
   /** 'login' | 'register' — начальная вкладка при открытии. После применения сбрасывается. */
@@ -32,57 +46,6 @@ export function AuthProvider({ children }) {
     }
   }
 
-  const checkAuthStatus = async () => {
-    const token = localStorage.getItem('access_token')
-    
-    if (!token) {
-      setIsAuthenticated(false)
-      setUser(null)
-      setWebSessionOrigin(null)
-      setLoading(false)
-      return
-    }
-
-    try {
-      const response = await fetch('/api/auth/users/me', {
-        headers: getAuthHeaders()
-      })
-
-      if (response.ok) {
-        const userData = await response.json()
-        setUser(userData)
-        setIsAuthenticated(true)
-        const origin = userData.web_session_origin || null
-        setWebSessionOrigin(origin)
-        if (origin) {
-          sessionStorage.setItem('dedato_web_session_origin', origin)
-        } else {
-          sessionStorage.removeItem('dedato_web_session_origin')
-        }
-        if (userData.role) localStorage.setItem('user_role', userData.role)
-        if (userData.phone !== '+79990009999') {
-          localStorage.removeItem('demo_mode')
-        }
-      } else {
-        // 401/403 — не авторизован, не логируем и не ретраим
-        if (response.status !== 401 && response.status !== 403) {
-          console.error('checkAuthStatus:', response.status, response.statusText)
-        }
-        localStorage.removeItem('access_token')
-        setIsAuthenticated(false)
-        setUser(null)
-        setWebSessionOrigin(null)
-        sessionStorage.removeItem('dedato_web_session_origin')
-      }
-    } catch (error) {
-      setIsAuthenticated(false)
-      setUser(null)
-      setWebSessionOrigin(null)
-    } finally {
-      setLoading(false)
-    }
-  }
-
   const logout = () => {
     localStorage.removeItem('access_token')
     localStorage.removeItem('refresh_token')
@@ -91,22 +54,8 @@ export function AuthProvider({ children }) {
     localStorage.removeItem('new_client_setup')
     localStorage.removeItem('existing_client_verification')
     sessionStorage.removeItem('dedato_web_session_origin')
-    setIsAuthenticated(false)
-    setUser(null)
-    setWebSessionOrigin(null)
+    session.logout()
     navigate('/')
-  }
-
-  const login = (userData) => {
-    setUser(userData)
-    setIsAuthenticated(true)
-    const origin = userData?.web_session_origin || null
-    setWebSessionOrigin(origin)
-    if (origin) {
-      sessionStorage.setItem('dedato_web_session_origin', origin)
-    } else {
-      sessionStorage.removeItem('dedato_web_session_origin')
-    }
   }
 
   /**
@@ -115,6 +64,7 @@ export function AuthProvider({ children }) {
    * @param {{ redirectMode?: 'default'|'stay'|'returnTo', returnToPath?: string, flow?: 'default'|'publicBookingConfirm' }} options - redirectMode после логина; flow — метка сценария (см. PublicBookingWizard + draft TTL)
    */
   const openAuthModal = (type = 'client', initialTab = null, options = {}) => {
+    if (isIosRestrictedContext) return
     setAuthModalType(type)
     setAuthModalInitialTab(initialTab ?? null)
     setAuthModalRedirectMode(options.redirectMode ?? 'default')
@@ -130,49 +80,22 @@ export function AuthProvider({ children }) {
   }
 
   useEffect(() => {
-    checkAuthStatus()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
-  // Синхронизация auth-state в трёх кейсах:
-  //   1) `auth:logout` — диспатчится из apiRequest при 401 на protected endpoint
-  //      (см. utils/api.js). Это закрывает рассинхрон header'а с реальной сессией.
-  //   2) `storage` event — токен пропал в соседней вкладке (логаут / истёк refresh).
-  //   3) Возврат фокуса на вкладку — токен мог быть стёрт, пока вкладка была фоном.
-  // Не вызываем navigate — пусть текущий экран сам решит, что показать.
-  useEffect(() => {
-    const dropAuth = () => {
-      setIsAuthenticated(false)
-      setUser(null)
-      setWebSessionOrigin(null)
-      sessionStorage.removeItem('dedato_web_session_origin')
+    if (window.location.pathname !== '/auth/mobile-handoff') session.check()
+    const onStorage = (event) => {
+      if (event.key === 'access_token' || event.key === null) session.sync()
     }
-
-    const onAuthLogout = () => {
-      dropAuth()
-    }
-
-    const onStorage = (e) => {
-      if (e.key === 'access_token' && !e.newValue) {
-        dropAuth()
-      }
-    }
-
-    const onFocus = () => {
-      if (isAuthenticated && !localStorage.getItem('access_token')) {
-        dropAuth()
-      }
-    }
-
-    window.addEventListener('auth:logout', onAuthLogout)
+    const onFocus = () => session.sync()
+    const onLogout = () => session.check()
     window.addEventListener('storage', onStorage)
     window.addEventListener('focus', onFocus)
+    window.addEventListener('auth:logout', onLogout)
     return () => {
-      window.removeEventListener('auth:logout', onAuthLogout)
+      session.dispose()
       window.removeEventListener('storage', onStorage)
       window.removeEventListener('focus', onFocus)
+      window.removeEventListener('auth:logout', onLogout)
     }
-  }, [isAuthenticated])
+  }, [session])
 
   useEffect(() => {
     if (authModalOpen && !wasAuthModalOpen.current) {
@@ -185,13 +108,17 @@ export function AuthProvider({ children }) {
     wasAuthModalOpen.current = authModalOpen
   }, [authModalOpen, authModalType, authModalInitialTab, authModalFlow])
 
-  const isIosAppWebSession = webSessionOrigin === 'ios_app'
-
   const value = {
     isAuthenticated,
     user,
     webSessionOrigin,
     isIosAppWebSession,
+    isIosRestrictedContext,
+    commerceAllowed,
+    authStatus: authState.status,
+    handoffPending: authState.marker?.kind === 'ios_app_pending',
+    beginHandoff: session.beginHandoff,
+    prepareLogin: session.prepareLogin,
     loading,
     getAuthHeaders,
     logout,
@@ -199,7 +126,7 @@ export function AuthProvider({ children }) {
     checkAuthStatus,
     openAuthModal,
     closeAuthModal,
-    authModalOpen,
+    authModalOpen: authModalOpen && !isIosRestrictedContext,
     authModalType,
     authModalInitialTab,
     setAuthModalInitialTab,
@@ -225,4 +152,4 @@ export function useAuth() {
     throw new Error('useAuth must be used within an AuthProvider')
   }
   return context
-} 
+}
