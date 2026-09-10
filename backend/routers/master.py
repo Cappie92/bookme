@@ -2711,29 +2711,6 @@ def delete_master_service(
     
     return {"message": "Услуга успешно удалена"}
 
-@router.post("/test-category", response_model=MasterServiceCategoryOut)
-def test_create_category(
-    category_in: MasterServiceCategoryCreate,
-    db: Session = Depends(get_db)
-):
-    """
-    Тестовый эндпоинт для создания категории без аутентификации.
-    """
-    # Используем первого мастера для теста
-    master = db.query(Master).first()
-    if not master:
-        raise HTTPException(status_code=404, detail="No master found")
-    
-    # Создаем категорию для мастера
-    category = MasterServiceCategory(
-        name=category_in.name, 
-        master_id=master.id
-    )
-    db.add(category)
-    db.commit()
-    db.refresh(category)
-    return category
-
 @router.post("/invitations/{invitation_id}/respond")
 def respond_to_invitation(
     invitation_id: int,
