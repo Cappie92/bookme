@@ -63,6 +63,7 @@ class User(UserBase):
     updated_at: datetime
     # Server-trusted JWT claim (ios_app handoff); not a DB column.
     web_session_origin: Optional[str] = None
+    is_demo_session: bool = False  # server-validated session scope, never a User DB field
 
     class Config:
         from_attributes = True
@@ -432,7 +433,7 @@ class Booking(BaseModel):
     
     created_at: datetime
     updated_at: datetime
-    edit_requests: List[Any] = []  # Убираем циклическую зависимость
+    edit_requests: List[BookingEditRequest] = Field(default_factory=list)
     
     # Дополнительные поля для отображения
     salon_name: Optional[str] = None

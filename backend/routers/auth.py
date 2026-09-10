@@ -52,7 +52,7 @@ from schemas import User as UserSchema
 from schemas import UserCreate, VerifyRequest
 from services.verification_service import PhoneChallengeError, VerificationService
 from services.zvonok_service import zvonok_service
-from services.demo_master_seed import ensure_demo_master_exists
+from services.demo_session import issue_demo_access, is_demo_payload
 from services.promo_engine import (
     PromoEngineError,
     create_pending_redemption,
@@ -1087,19 +1087,13 @@ async def confirm_email_change(
         return ConfirmEmailChangeResponse(message="Внутренняя ошибка сервера", success=False)
 
 
-@router.post("/demo-master-access", response_model=Token)
+@router.post("/demo-master-access")
 def demo_master_access(db: Session = Depends(get_db)) -> Any:
     """
     One-click доступ в демо-кабинет мастера без логина/пароля.
-    Выдаёт обычные токены демо-пользователя (read-only enforcement на backend).
+    Только проверяет pre-created identity и выдаёт короткую readonly сессию.
     """
-    ensure_demo_master_exists(db)
-    demo_phone = get_settings().DEMO_MASTER_PHONE
-    user = db.query(User).filter(User.phone == demo_phone).first()
-    if not user:
-        raise HTTPException(status_code=500, detail="Не удалось подготовить demo master")
-
-    return _issue_tokens_for_user(user, extra_claims={"demo": True})
+    return issue_demo_access(db)
 
 
 @router.get("/yandex/login", include_in_schema=False)
@@ -1541,7 +1535,7 @@ def refresh_token(refresh_data: dict, db: Session = Depends(get_db)) -> Any:
         payload = jwt.decode(
             refresh_data["refresh_token"], SECRET_KEY, algorithms=[ALGORITHM]
         )
-        if payload.get("purpose") or not refresh_token_type_matches(payload):
+        if is_demo_payload(payload) or payload.get("purpose") or not refresh_token_type_matches(payload):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token"
             )

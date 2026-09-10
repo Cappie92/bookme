@@ -2,7 +2,7 @@
 import asyncio
 import logging
 import os
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
@@ -20,6 +20,7 @@ from services.temporary_bookings_cleanup import run_temporary_bookings_cleanup_t
 from services.expired_payments_cleanup import run_expired_payments_cleanup_task
 from spa_catchall_route import SpaCatchAllAPIRoute
 from route_diagnostics import log_app_entrypoint_hint, log_route_diagnostics
+from services.demo_session import enforce_demo_readonly
 
 # Создаем таблицы в базе данных
 Base.metadata.create_all(bind=engine)
@@ -54,6 +55,7 @@ OPENAPI_TAGS = [
 ]
 
 app = FastAPI(
+    dependencies=[Depends(enforce_demo_readonly)],
     title="DeDato API",
     description="API для системы бронирования салонов красоты и мастеров",
     version="1.0.0",

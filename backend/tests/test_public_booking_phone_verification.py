@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time, timezone
 
 import pytest
 from jose import jwt
@@ -22,8 +22,35 @@ from routers.bookings import (
 from services.zvonok_service import ZVONOK_STUB_DIGITS
 
 
+def _future_booking_start(reference):
+    """One UTC reference per test; a future noon slot never crosses midnight."""
+    day = reference.astimezone(timezone.utc).date() + timedelta(days=2)
+    return datetime.combine(day, time(12, 0))
+
+
 @pytest.fixture
-def booking_master(db):
+def booking_start():
+    return _future_booking_start(datetime.now(timezone.utc))
+
+
+@pytest.mark.parametrize("reference", [
+    "2026-09-10T22:59:59+00:00", "2026-09-10T23:00:00+00:00",
+    "2026-09-10T23:59:59+00:00", "2026-09-11T00:00:00+00:00",
+    "2026-09-10T22:59:59+03:00", "2026-09-10T23:00:00+03:00",
+    "2026-09-10T23:59:59+03:00", "2026-09-11T00:00:00+03:00",
+])
+def test_booking_fixture_slot_stays_inside_day_at_midnight(reference):
+    now = datetime.fromisoformat(reference)
+    start = _future_booking_start(now)
+    end = start + timedelta(hours=1)
+    assert start == _future_booking_start(now.astimezone(timezone.utc))
+    assert start - now.astimezone(timezone.utc).replace(tzinfo=None) > timedelta(days=1)
+    assert start.date() == end.date()
+    assert time(9, 0) < start.time() < end.time() < time(18, 0)
+
+
+@pytest.fixture
+def booking_master(db, booking_start):
     owner = User(
         phone="+79005550090", email="booking-master@example.com",
         role=UserRole.MASTER, is_active=True, is_verified=True,
@@ -38,7 +65,7 @@ def booking_master(db):
     db.add(master)
     db.flush()
     for days in (1, 2):
-        date_value = (datetime.now() + timedelta(days=days)).date()
+        date_value = (booking_start + timedelta(days=days - 1)).date()
         db.add(MasterSchedule(
             master_id=master.id,
             date=date_value,
@@ -68,10 +95,8 @@ def booking_service(db, booking_master):
     return service
 
 
-def _payload(service, master, *, days=1):
-    start = (datetime.now() + timedelta(days=days)).replace(
-        minute=0, second=0, microsecond=0
-    )
+def _payload(service, master, booking_start, *, days=1):
+    start = booking_start + timedelta(days=days - 1)
     return {
         "service_id": service.id,
         "master_id": master.id,
@@ -85,11 +110,11 @@ def _payload(service, master, *, days=1):
     }
 
 
-def _start(client, service, master, phone="+79005550101"):
+def _start(client, service, master, booking_start, phone="+79005550101"):
     response = client.post(
         "/api/bookings/public",
         params={"client_phone": phone},
-        json=_payload(service, master),
+        json=_payload(service, master, booking_start),
     )
     assert response.status_code == 200, response.text
     data = response.json()
@@ -132,11 +157,11 @@ def _confirm(client, pending, call_id="booking-call-1", digits=ZVONOK_STUB_DIGIT
 
 
 def test_initial_public_booking_has_no_permanent_rows_or_jwt(
-    client, db, booking_service, booking_master
+    client, db, booking_service, booking_master, booking_start
 ):
     users_before, bookings_before = db.query(User).count(), db.query(Booking).count()
 
-    pending = _start(client, booking_service, booking_master)
+    pending = _start(client, booking_service, booking_master, booking_start)
 
     assert db.query(User).count() == users_before
     assert db.query(Booking).count() == bookings_before
@@ -146,7 +171,7 @@ def test_initial_public_booking_has_no_permanent_rows_or_jwt(
 
 
 def test_public_booking_ticket_storage_fails_closed_in_production(
-    client, db, booking_service, booking_master, monkeypatch
+    client, db, booking_service, booking_master, monkeypatch, booking_start
 ):
     def unavailable(*args, **kwargs):
         raise RuntimeError("redis unavailable")
@@ -161,7 +186,7 @@ def test_public_booking_ticket_storage_fails_closed_in_production(
     response = client.post(
         "/api/bookings/public",
         params={"client_phone": "+79005550110"},
-        json=_payload(booking_service, booking_master),
+        json=_payload(booking_service, booking_master, booking_start),
     )
 
     assert response.status_code == 503
@@ -169,12 +194,12 @@ def test_public_booking_ticket_storage_fails_closed_in_production(
 
 
 def test_wrong_expired_cancel_and_ticket_expiry_leave_no_rows(
-    client, db, booking_service, booking_master, monkeypatch
+    client, db, booking_service, booking_master, monkeypatch, booking_start
 ):
     _stub_calls(monkeypatch)
     before = (db.query(User).count(), db.query(Booking).count())
 
-    wrong = _start(client, booking_service, booking_master, "+79005550102")
+    wrong = _start(client, booking_service, booking_master, booking_start, "+79005550102")
     _request_call(client, wrong)
     assert _confirm(client, wrong, digits="9999").status_code == 400
 
@@ -185,14 +210,14 @@ def test_wrong_expired_cancel_and_ticket_expiry_leave_no_rows(
     _save_public_booking_ticket(wrong["verification_token"], state)
     assert _confirm(client, wrong).status_code == 400
 
-    cancelled = _start(client, booking_service, booking_master, "+79005550103")
+    cancelled = _start(client, booking_service, booking_master, booking_start, "+79005550103")
     cancel = client.post(
         "/api/bookings/public/verification/cancel", headers=_headers(cancelled)
     )
     assert cancel.status_code == 204
     assert _get_public_booking_ticket(cancelled["verification_token"]) is None
 
-    expired = _start(client, booking_service, booking_master, "+79005550104")
+    expired = _start(client, booking_service, booking_master, booking_start, "+79005550104")
     state = _get_public_booking_ticket(expired["verification_token"])
     state["exp"] = int((datetime.utcnow() - timedelta(seconds=1)).timestamp())
     _save_public_booking_ticket(expired["verification_token"], state)
@@ -201,11 +226,11 @@ def test_wrong_expired_cancel_and_ticket_expiry_leave_no_rows(
 
 
 def test_correct_proof_creates_once_and_issues_canonical_access(
-    client, db, booking_service, booking_master, monkeypatch
+    client, db, booking_service, booking_master, monkeypatch, booking_start
 ):
     _stub_calls(monkeypatch)
     phone = "+79005550105"
-    pending = _start(client, booking_service, booking_master, phone)
+    pending = _start(client, booking_service, booking_master, booking_start, phone)
     _request_call(client, pending)
 
     confirmed = _confirm(client, pending)
@@ -226,13 +251,13 @@ def test_correct_proof_creates_once_and_issues_canonical_access(
 
 
 def test_resend_invalidates_old_call_and_binding_rejects_tampering(
-    client, db, booking_service, booking_master, monkeypatch
+    client, db, booking_service, booking_master, monkeypatch, booking_start
 ):
     _stub_calls(
         monkeypatch,
         [("old-call", "1111"), ("new-call", "2222")],
     )
-    pending = _start(client, booking_service, booking_master, "+79005550106")
+    pending = _start(client, booking_service, booking_master, booking_start, "+79005550106")
     _request_call(client, pending)
     _request_call(client, pending)
 
@@ -256,13 +281,13 @@ def test_resend_invalidates_old_call_and_binding_rejects_tampering(
 
 
 def test_slot_race_rolls_back_new_user(
-    client, db, booking_service, booking_master, monkeypatch
+    client, db, booking_service, booking_master, monkeypatch, booking_start
 ):
     _stub_calls(monkeypatch)
     phone = "+79005550107"
-    pending = _start(client, booking_service, booking_master, phone)
+    pending = _start(client, booking_service, booking_master, booking_start, phone)
     _request_call(client, pending)
-    slot = _payload(booking_service, booking_master)
+    slot = _payload(booking_service, booking_master, booking_start)
     occupied_by = User(
         phone="+79005550999", role=UserRole.CLIENT, is_active=True,
         is_verified=True, is_phone_verified=True,
@@ -289,10 +314,10 @@ def test_slot_race_rolls_back_new_user(
 
 
 def test_existing_verified_phone_still_requires_proof_and_is_not_duplicated(
-    client, db, test_user, booking_service, booking_master, monkeypatch
+    client, db, test_user, booking_service, booking_master, monkeypatch, booking_start
 ):
     _stub_calls(monkeypatch)
-    pending = _start(client, booking_service, booking_master, test_user.phone)
+    pending = _start(client, booking_service, booking_master, booking_start, test_user.phone)
     assert "access_token" not in pending
     assert db.query(Booking).filter(Booking.client_id == test_user.id).count() == 0
     _request_call(client, pending)
@@ -303,11 +328,11 @@ def test_existing_verified_phone_still_requires_proof_and_is_not_duplicated(
 
 
 def test_duplicate_phone_appearing_before_confirm_is_safely_reused(
-    client, db, booking_service, booking_master, monkeypatch
+    client, db, booking_service, booking_master, monkeypatch, booking_start
 ):
     _stub_calls(monkeypatch)
     phone = "+79005550109"
-    pending = _start(client, booking_service, booking_master, phone)
+    pending = _start(client, booking_service, booking_master, booking_start, phone)
     _request_call(client, pending)
     raced_user = User(
         phone=phone, role=UserRole.CLIENT, is_active=True,
@@ -325,7 +350,7 @@ def test_duplicate_phone_appearing_before_confirm_is_safely_reused(
 
 
 def test_any_master_is_pending_then_creates_once(
-    client, db, booking_service, booking_master, monkeypatch
+    client, db, booking_service, booking_master, monkeypatch, booking_start
 ):
     salon_owner = User(
         phone="+79005550091", role=UserRole.SALON, is_active=True,
@@ -349,9 +374,7 @@ def test_any_master_is_pending_then_creates_once(
         "routers.bookings.check_booking_conflicts", lambda *args, **kwargs: False
     )
     phone = "+79005550108"
-    start = (datetime.now() + timedelta(days=2)).replace(
-        minute=0, second=0, microsecond=0
-    )
+    start = booking_start + timedelta(days=1)
     response = client.post(
         "/api/bookings/create-with-any-master",
         params={
@@ -379,7 +402,7 @@ def test_any_master_is_pending_then_creates_once(
 
 
 def test_authenticated_verified_client_any_master_behavior_is_preserved(
-    client, db, test_user, booking_service, booking_master, monkeypatch
+    client, db, test_user, booking_service, booking_master, monkeypatch, booking_start
 ):
     salon_owner = User(
         phone="+79005550092", role=UserRole.SALON, is_active=True,
@@ -409,9 +432,7 @@ def test_authenticated_verified_client_any_master_behavior_is_preserved(
         json={"phone": client_phone, "password": "testpassword"},
     )
     headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
-    start = (datetime.now() + timedelta(days=2)).replace(
-        minute=0, second=0, microsecond=0
-    )
+    start = booking_start + timedelta(days=1)
 
     response = client.post(
         "/api/bookings/create-with-any-master",

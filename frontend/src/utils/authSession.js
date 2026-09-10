@@ -74,7 +74,8 @@ export function createAuthSession({ storage, tabStorage, fetcher, path = '/', se
       if (!user || !user.role || ![undefined, null, '', 'web', 'ios_app'].includes(user.web_session_origin)) throw new Error('Unknown session origin')
       syncOrigin(user)
       if (user.role) storage.setItem('user_role', user.role)
-      if (user.phone !== '+79990009999') storage.removeItem('demo_mode')
+      if (user.is_demo_session === true) storage.setItem('demo_mode', '1')
+      else storage.removeItem('demo_mode')
       publish(user.web_session_origin === 'ios_app' ? AUTH_STATUS.IOS_APP : AUTH_STATUS.ORDINARY, user)
     } catch {
       // Keep the credential on transport/server/auth errors: failure is NOT anonymous.

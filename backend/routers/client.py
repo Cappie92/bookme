@@ -28,6 +28,7 @@ def _parse_optional_client_birth_date(raw: Any) -> Optional[date_type]:
 
 from services.account_deletion import MASTER_ACCOUNT_DELETED_REASON, is_master_deleted
 from auth import get_current_active_user, require_client, update_password_and_revoke_sessions
+from utils.booking_access import validate_booking_changes
 from utils.booking_loyalty_reserve import clear_loyalty_points_reserve
 from database import get_db
 from models import (
@@ -1052,6 +1053,7 @@ def update_booking(
 
     # Write-path: master-only — запретить установку indie_master_id
     updates = booking_in.dict(exclude_unset=True)
+    validate_booking_changes(db, current_user, booking, updates, client_flow=True)
     if not LEGACY_INDIE_MODE and updates.get("indie_master_id") is not None:
         raise HTTPException(
             status_code=400,

@@ -3520,6 +3520,9 @@ def get_master_payment_settings(
             master_id=master.id,
             accepts_online_payment=False
         )
+        if db.info.get("demo_readonly"):
+            settings.id = 0  # transient defaults, not a persistent settings row
+            return _master_payment_settings_to_out(settings)
         db.add(settings)
         db.commit()
         db.refresh(settings)

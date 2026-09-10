@@ -173,7 +173,7 @@ describe('ios_app operational web editor isolation', () => {
     expect(header).toContain("isIosAppWebSession ? 'hidden' : 'flex'")
     expect(header).toContain('{commerceAllowed && (')
     expect(footer).toContain('commerceAllowed ? <Link')
-    expect(dashboard).toContain('!isIosAppWebSession && showSubscriptionModal')
+    expect(dashboard).toContain('!isIosAppWebSession && !isDemoMode && showSubscriptionModal')
     expect(dashboard).toContain('!isIosAppWebSession &&')
   })
 

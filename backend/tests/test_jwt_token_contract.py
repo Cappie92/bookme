@@ -175,13 +175,16 @@ def test_optional_auth_accepts_access_but_not_refresh(db, test_user):
     assert refresh_user is None
 
 
-def test_demo_pair_is_typed_numeric_and_preserves_demo_claim(
+def test_demo_access_is_short_typed_and_has_no_refresh(
     client, db, monkeypatch
 ):
+    from models import Master
+    from settings import get_settings
     demo = User(
         email="typed-demo@example.com",
         phone="+79005550199",
         full_name="Typed Demo",
+        is_always_free=True,
         role=UserRole.MASTER,
         is_active=True,
         is_verified=True,
@@ -190,19 +193,17 @@ def test_demo_pair_is_typed_numeric_and_preserves_demo_claim(
     db.add(demo)
     db.commit()
     db.refresh(demo)
-    monkeypatch.setattr(auth_router, "ensure_demo_master_exists", lambda _db: None)
-    monkeypatch.setattr(
-        auth_router,
-        "get_settings",
-        lambda: SimpleNamespace(DEMO_MASTER_PHONE=demo.phone),
-    )
+    uid = demo.id
+    db.add(Master(user_id=uid, domain=f"demo-master-{uid}"))
+    db.commit()
+    monkeypatch.setattr(get_settings(), "DEMO_MASTER_USER_ID", uid)
+    monkeypatch.setattr(get_settings(), "DEMO_MASTER_PHONE", demo.phone)
 
     response = client.post("/api/auth/demo-master-access")
     assert response.status_code == 200, response.text
     access = _decode(response.json()["access_token"])
-    refresh = _decode(response.json()["refresh_token"])
-    assert access["sub"] == refresh["sub"] == str(demo.id)
-    assert access["token_type"] == "access"
-    assert refresh["token_type"] == "refresh"
+    assert "refresh_token" not in response.json()
+    assert access["sub"] == str(uid)
+    assert access["token_type"] == "demo_access"
+    assert access["exp"] - access["iat"] <= 901
     assert access["demo"] is True
-    assert refresh["demo"] is True

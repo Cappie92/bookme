@@ -2068,16 +2068,19 @@ export default function MasterDashboard() {
           )}
           {activeTab === 'tariff' && (
             !isIosAppWebSession &&
+            (isDemoMode ? (
+              <p className="p-6" role="status">Демо-кабинет доступен только для просмотра. Покупка и изменение подписки недоступны.</p>
+            ) :
             <MasterTariff
               canCustomizeDomain={canCustomizeDomain}
               onRefreshSubscriptionFeatures={refreshSubscriptionFeatures}
-            />
+            />)
           )}
         </main>
       </div>
       
       {/* Модальное окно покупки подписки */}
-      {!isIosAppWebSession && showSubscriptionModal && (
+      {!isIosAppWebSession && !isDemoMode && showSubscriptionModal && (
         <SubscriptionModal
           isOpen={showSubscriptionModal}
           onClose={() => setShowSubscriptionModal(false)}

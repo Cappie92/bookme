@@ -98,6 +98,8 @@ def get_or_create_user_balance(db: Session, user_id: int, do_commit: bool = True
             balance=0,
             currency="RUB"
         )
+        if db.info.get("demo_readonly"):
+            return balance  # transient zero balance; no INSERT/flush
         db.add(balance)
         if do_commit:
             db.commit()
@@ -927,4 +929,4 @@ def create_admin_operation(
         service_description=service_description
     )
     db.add(admin_operation)
-    return admin_operation 
+    return admin_operation

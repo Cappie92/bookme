@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, time, date
+from datetime import datetime, timedelta, time, timezone
 import pytest
 from jose import jwt
 from sqlalchemy import inspect
@@ -16,6 +16,33 @@ from models import (
 from services.zvonok_service import ZVONOK_STUB_DIGITS
 
 # Используем client и db из conftest (с override get_db), чтобы все запросы шли в одну тестовую БД.
+
+
+def _future_booking_start(reference):
+    """One UTC reference per test; a future noon slot never crosses midnight."""
+    day = reference.astimezone(timezone.utc).date() + timedelta(days=2)
+    return datetime.combine(day, time(12, 0))
+
+
+@pytest.fixture
+def booking_start():
+    return _future_booking_start(datetime.now(timezone.utc))
+
+
+@pytest.mark.parametrize("reference", [
+    "2026-09-10T22:59:59+00:00", "2026-09-10T23:00:00+00:00",
+    "2026-09-10T23:59:59+00:00", "2026-09-11T00:00:00+00:00",
+    "2026-09-10T22:59:59+03:00", "2026-09-10T23:00:00+03:00",
+    "2026-09-10T23:59:59+03:00", "2026-09-11T00:00:00+03:00",
+])
+def test_booking_fixture_slot_stays_inside_day_at_midnight(reference):
+    now = datetime.fromisoformat(reference)
+    start = _future_booking_start(now)
+    end = start + timedelta(hours=1)
+    assert start == _future_booking_start(now.astimezone(timezone.utc))
+    assert start - now.astimezone(timezone.utc).replace(tzinfo=None) > timedelta(days=1)
+    assert start.date() == end.date()
+    assert time(9, 0) < start.time() < end.time() < time(18, 0)
 
 
 @pytest.fixture(scope="function")
@@ -57,10 +84,10 @@ def test_master(db):
 
 
 @pytest.fixture(scope="function")
-def master_schedule(db, test_master):
+def master_schedule(db, test_master, booking_start):
     """Личное расписание мастера на ближайшие дни, чтобы create_booking не падал с 400 «Мастер не работает»."""
     for days_ahead in (1, 2):
-        d = date.today() + timedelta(days=days_ahead)
+        d = (booking_start + timedelta(days=days_ahead - 1)).date()
         db.add(
             MasterSchedule(
                 master_id=test_master.id,
@@ -116,9 +143,8 @@ def master_headers(client, test_master):
     return {"Authorization": f"Bearer {token}"}
 
 
-def _booking_payload(test_service, test_master, days_offset=1, hours_offset=1):
-    start = datetime.now() + timedelta(days=days_offset)
-    start = start.replace(minute=0, second=0, microsecond=0)
+def _booking_payload(test_service, test_master, booking_start, days_offset=1, hours_offset=1):
+    start = booking_start + timedelta(days=days_offset - 1)
     end = start + timedelta(hours=hours_offset)
     data = {
         "service_id": test_service.id,
@@ -136,8 +162,10 @@ def _booking_payload(test_service, test_master, days_offset=1, hours_offset=1):
     return data
 
 
-def test_create_booking(client, auth_headers, test_service, test_master):
-    booking_data = _booking_payload(test_service, test_master)
+def test_create_booking(
+    client, auth_headers, test_service, test_master, booking_start
+):
+    booking_data = _booking_payload(test_service, test_master, booking_start)
     response = client.post("/api/bookings/", json=booking_data, headers=auth_headers)
     if response.status_code != 200:
         print("\nRESPONSE JSON:", response.json())
@@ -148,14 +176,14 @@ def test_create_booking(client, auth_headers, test_service, test_master):
 
 
 def test_public_booking_access_token_is_typed_numeric(
-    client, db, test_user, test_service, test_master, monkeypatch
+    client, db, test_user, test_service, test_master, monkeypatch, booking_start
 ):
     test_master.timezone = "Europe/Moscow"
     db.commit()
     response = client.post(
         "/api/bookings/public",
         params={"client_phone": test_user.phone},
-        json=_booking_payload(test_service, test_master),
+        json=_booking_payload(test_service, test_master, booking_start),
     )
 
     assert response.status_code == 200, response.text
@@ -197,26 +225,27 @@ def test_get_bookings(client, auth_headers):
     assert isinstance(response.json(), list)
 
 
-def test_update_booking(client, auth_headers, test_service, test_master, db):
+def test_update_booking(
+    client, auth_headers, test_service, test_master, db, booking_start
+):
     service_id = test_service.id
     master_id = test_master.id
     salon_id = getattr(test_service, "salon_id", None)
 
-    booking_data = _booking_payload(test_service, test_master)
+    booking_data = _booking_payload(test_service, test_master, booking_start)
     if salon_id:
         booking_data["salon_id"] = salon_id
     response = client.post("/api/bookings/", json=booking_data, headers=auth_headers)
     booking_id = response.json()["id"]
+    original_status = response.json()["status"]
 
-    start2 = datetime.now() + timedelta(days=2)
-    start2 = start2.replace(minute=0, second=0, microsecond=0)
+    start2 = booking_start + timedelta(days=1)
     end2 = start2 + timedelta(hours=1)
     update_data = {
         "service_id": service_id,
         "master_id": master_id,
         "start_time": start2.isoformat(),
         "end_time": end2.isoformat(),
-        "status": "confirmed",
     }
     if salon_id:
         update_data["salon_id"] = salon_id
@@ -228,17 +257,19 @@ def test_update_booking(client, auth_headers, test_service, test_master, db):
         print("Ошибка обновления бронирования:", response.status_code, response.json())
     assert response.status_code == 200
     updated_booking = response.json()
-    assert updated_booking["status"] == "confirmed"
+    assert updated_booking["status"] == original_status
     assert updated_booking["start_time"] == update_data["start_time"]
     assert updated_booking["end_time"] == update_data["end_time"]
 
 
-def test_delete_booking(client, auth_headers, test_service, test_master, db):
+def test_delete_booking(
+    client, auth_headers, test_service, test_master, db, booking_start
+):
     """Client больше не может hard-delete; admin удаляет чистую будущую бронь."""
     from auth import get_password_hash
     from models import Booking
 
-    booking_data = _booking_payload(test_service, test_master)
+    booking_data = _booking_payload(test_service, test_master, booking_start)
     response = client.post("/api/bookings/", json=booking_data, headers=auth_headers)
     assert response.status_code == 200, response.json()
     booking_id = response.json()["id"]
@@ -272,15 +303,17 @@ def test_delete_booking(client, auth_headers, test_service, test_master, db):
     assert response.status_code == 404
 
 
-def test_create_edit_request(client, auth_headers, test_service, test_master):
-    booking_data = _booking_payload(test_service, test_master)
+def test_create_edit_request(
+    client, auth_headers, test_service, test_master, booking_start
+):
+    booking_data = _booking_payload(test_service, test_master, booking_start)
     response = client.post("/api/bookings/", json=booking_data, headers=auth_headers)
     booking_id = response.json()["id"]
 
     edit_request_data = {
         "booking_id": booking_id,
-        "proposed_start": (datetime.now() + timedelta(days=2)).isoformat(),
-        "proposed_end": (datetime.now() + timedelta(days=2, hours=1)).isoformat(),
+        "proposed_start": (booking_start + timedelta(days=1)).isoformat(),
+        "proposed_end": (booking_start + timedelta(days=1, hours=1)).isoformat(),
     }
     response = client.post(
         f"/api/bookings/{booking_id}/edit-requests",
@@ -292,15 +325,17 @@ def test_create_edit_request(client, auth_headers, test_service, test_master):
     assert data["status"] == "pending"
 
 
-def test_update_edit_request(client, master_headers, test_service, test_master):
-    booking_data = _booking_payload(test_service, test_master)
+def test_update_edit_request(
+    client, master_headers, test_service, test_master, booking_start
+):
+    booking_data = _booking_payload(test_service, test_master, booking_start)
     response = client.post("/api/bookings/", json=booking_data, headers=master_headers)
     booking_id = response.json()["id"]
 
     edit_request_data = {
         "booking_id": booking_id,
-        "proposed_start": (datetime.now() + timedelta(days=2)).isoformat(),
-        "proposed_end": (datetime.now() + timedelta(days=2, hours=1)).isoformat(),
+        "proposed_start": (booking_start + timedelta(days=1)).isoformat(),
+        "proposed_end": (booking_start + timedelta(days=1, hours=1)).isoformat(),
     }
     response = client.post(
         f"/api/bookings/{booking_id}/edit-requests",
@@ -320,13 +355,15 @@ def test_update_edit_request(client, master_headers, test_service, test_master):
     assert data["status"] == "accepted"
 
 
-def test_get_available_slots(client, master_headers):
+def test_get_available_slots(
+    client, master_headers, booking_start
+):
     response = client.get(
         "/api/bookings/available-slots",
         params={
             "owner_type": "master",
             "owner_id": 1,
-            "date": datetime.now().isoformat(),
+            "date": booking_start.isoformat(),
             "service_duration": 60,
         },
         headers=master_headers,
@@ -336,12 +373,12 @@ def test_get_available_slots(client, master_headers):
 
 
 def test_master_reschedule_uses_owned_booking_and_canonical_conflicts(
-    client, db, test_user, test_master, test_service, master_headers
+    client, db, test_user, test_master, test_service, master_headers, booking_start
 ):
     client_id = inspect(test_user).identity[0]
     master_id = inspect(test_master).identity[0]
     service_id = inspect(test_service).identity[0]
-    target_date = date.today() + timedelta(days=1)
+    target_date = booking_start.date()
     original_start = datetime.combine(target_date, time(9, 0))
     booking = Booking(
         client_id=client_id,
@@ -395,7 +432,7 @@ def test_master_reschedule_uses_owned_booking_and_canonical_conflicts(
 
 
 def test_master_reschedule_rejects_foreign_booking(
-    client, db, test_user, test_master, test_service, master_headers
+    client, db, test_user, test_master, test_service, master_headers, booking_start
 ):
     client_id = inspect(test_user).identity[0]
     service_id = inspect(test_service).identity[0]
@@ -413,7 +450,7 @@ def test_master_reschedule_rejects_foreign_booking(
     other_master = Master(user_id=other_user.id, bio="", experience_years=0)
     db.add(other_master)
     db.flush()
-    start = datetime.combine(date.today() + timedelta(days=1), time(10, 0))
+    start = datetime.combine(booking_start.date(), time(10, 0))
     foreign = Booking(
         client_id=client_id,
         service_id=service_id,

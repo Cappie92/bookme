@@ -51,6 +51,7 @@ from services.zvonok_service import zvonok_service
 from settings import get_settings
 from utils.loyalty_discounts import evaluate_and_prepare_applied_discount, build_applied_discount_info
 from utils.phone import normalize_to_canonical
+from utils.booking_access import require_booking_actor, validate_booking_changes
 
 router = APIRouter(
     prefix="/bookings",
@@ -736,30 +737,8 @@ async def update_booking(
             status_code=status.HTTP_404_NOT_FOUND, detail="Бронирование не найдено"
         )
     
-    # Проверка доступа по роли
-    if current_user.role == "client":
-        if db_booking.client_id != current_user.id:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Доступ запрещён")
-    elif current_user.role == "master":
-        master = db.query(Master).filter(Master.user_id == current_user.id).first()
-        if not master:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Профиль мастера не найден")
-        if db_booking.master_id != master.id:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Доступ запрещён")
-    elif current_user.role == "salon":
-        # Проверяем, является ли пользователь владельцем салона
-        salon = db.query(Salon).filter(Salon.user_id == current_user.id).first()
-        if salon:
-            if db_booking.salon_id != salon.id:
-                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Доступ запрещён")
-        else:
-            # Проверяем, является ли пользователь менеджером филиала
-            branch = db.query(SalonBranch).filter(
-                SalonBranch.manager_id == current_user.id,
-                SalonBranch.salon_id == db_booking.salon_id
-            ).first()
-            if not branch or (db_booking.branch_id and db_booking.branch_id != branch.id):
-                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Доступ запрещён")
+    changes = booking.dict(exclude_unset=True)
+    validate_booking_changes(db, current_user, db_booking, changes)
 
     # Проверяем конфликты
     if booking.start_time and booking.end_time:
@@ -767,8 +746,8 @@ async def update_booking(
             db,
             booking.start_time,
             booking.end_time,
-            OwnerType.MASTER if booking.master_id else OwnerType.SALON,
-            booking.master_id or booking.salon_id,
+            OwnerType.MASTER if db_booking.master_id else OwnerType.SALON,
+            changes.get("master_id", db_booking.master_id) or db_booking.salon_id,
             booking_id,
         ):
             raise HTTPException(
@@ -854,6 +833,9 @@ async def create_edit_request(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Бронирование не найдено"
         )
+    require_booking_actor(db, current_user, db_booking)
+    if edit_request.booking_id != booking_id:
+        raise HTTPException(400, "Несогласованный идентификатор бронирования")
 
     # Проверяем конфликты для нового времени
     if check_booking_conflicts(
@@ -898,7 +880,15 @@ async def update_edit_request(
             detail="Запрос на изменение не найден",
         )
 
+    db_booking = db_request.booking
+    require_booking_actor(db, current_user, db_booking)
     if update.status == EditRequestStatus.ACCEPTED:
+        if check_booking_conflicts(
+            db, db_request.proposed_start, db_request.proposed_end,
+            OwnerType.MASTER if db_booking.master_id else OwnerType.SALON,
+            db_booking.master_id or db_booking.salon_id, db_booking.id,
+        ):
+            raise HTTPException(400, "Выбранное время уже занято")
         # Обновляем время бронирования
         db_booking = db_request.booking
         db_booking.start_time = db_request.proposed_start

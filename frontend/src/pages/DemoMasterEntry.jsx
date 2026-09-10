@@ -1,14 +1,18 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useAuth } from '../contexts/AuthContext'
+import { storeDemoSession } from '../utils/demoSession'
 
 export default function DemoMasterEntry() {
   const navigate = useNavigate()
+  const { checkAuthStatus, isIosRestrictedContext } = useAuth()
   const [error, setError] = useState('')
 
   useEffect(() => {
     let cancelled = false
     const run = async () => {
       try {
+        if (isIosRestrictedContext) throw new Error('Demo unavailable in this context')
         const response = await fetch('/api/auth/demo-master-access', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -18,21 +22,19 @@ export default function DemoMasterEntry() {
         }
         const data = await response.json()
         if (cancelled) return
-        localStorage.setItem('access_token', data.access_token)
-        localStorage.setItem('refresh_token', data.refresh_token)
-        localStorage.setItem('user_role', 'master')
-        localStorage.setItem('demo_mode', '1')
+        storeDemoSession(data, localStorage, sessionStorage)
         navigate('/master?tab=dashboard&demo=1', { replace: true })
+        checkAuthStatus()
       } catch (e) {
         if (cancelled) return
-        setError('Не удалось открыть демо. Попробуйте ещё раз.')
+        setError('Демо временно недоступно. Попробуйте позже.')
       }
     }
     run()
     return () => {
       cancelled = true
     }
-  }, [navigate])
+  }, [navigate, checkAuthStatus, isIosRestrictedContext])
 
   return (
     <div className="min-h-[60vh] flex items-center justify-center px-4">

@@ -11,6 +11,7 @@ from database import get_db
 from models import User, UserRole
 from schemas import TokenData
 from settings import get_settings
+from services.demo_session import is_demo_payload, validate_demo_payload, reject_ordinary_demo_identity
 
 _conf = get_settings()
 SECRET_KEY = _conf.JWT_SECRET_KEY
@@ -109,6 +110,7 @@ def create_user_refresh_token(user: User, extra_claims: Optional[dict] = None) -
 
 
 def issue_tokens_for_user(user: User, extra_claims: Optional[dict] = None) -> dict:
+    reject_ordinary_demo_identity(user.id, user.phone)
     return {
         "access_token": create_user_access_token(user, extra_claims),
         "refresh_token": create_user_refresh_token(user, extra_claims),
@@ -286,7 +288,7 @@ async def get_current_user(
     )
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        if payload.get("purpose") or not bearer_token_type_matches(payload):
+        if payload.get("purpose") or (not is_demo_payload(payload) and not bearer_token_type_matches(payload)):
             raise credentials_exception
         sub: str = payload.get("sub")
         if sub is None:
@@ -298,6 +300,11 @@ async def get_current_user(
     user = _reject_if_deleted_or_inactive(user)
     if not session_version_matches(payload, user):
         raise credentials_exception
+    if is_demo_payload(payload):
+        validate_demo_payload(payload, db)
+    else:
+        reject_ordinary_demo_identity(user.id, user.phone)
+    user.is_demo_session = is_demo_payload(payload)
     user.web_session_origin = get_web_session_origin_from_payload(payload)
     return user
 
@@ -311,7 +318,7 @@ async def get_current_user_optional(
         return None
     try:
         payload = jwt.decode(creds.credentials, SECRET_KEY, algorithms=[ALGORITHM])
-        if payload.get("purpose") or not bearer_token_type_matches(payload):
+        if payload.get("purpose") or (not is_demo_payload(payload) and not bearer_token_type_matches(payload)):
             return None
         sub = payload.get("sub")
         if not sub:
@@ -321,6 +328,11 @@ async def get_current_user_optional(
             return None
         if not session_version_matches(payload, user):
             return None
+        if is_demo_payload(payload):
+            validate_demo_payload(payload, db)
+        else:
+            reject_ordinary_demo_identity(user.id, user.phone)
+        user.is_demo_session = is_demo_payload(payload)
         user.web_session_origin = get_web_session_origin_from_payload(payload)
         return user
     except JWTError:
@@ -359,9 +371,9 @@ async def get_current_active_user(
     if not current_user.is_active or getattr(current_user, "deleted_at", None) is not None:
         raise HTTPException(status_code=400, detail="Inactive user")
 
-    # Demo master: только read-only в кабинете (блокируем write даже при прямых API-вызовах)
-    demo_phone = (get_settings().DEMO_MASTER_PHONE or "").strip()
-    if demo_phone and current_user.phone == demo_phone:
+    # Defense in depth; the global demo boundary also covers get_current_user
+    # and public/optional-auth handlers. Phone alone never selects demo mode.
+    if getattr(current_user, "is_demo_session", False):
         method = (request.method or "").upper()
         if method in {"POST", "PUT", "PATCH", "DELETE"}:
             raise HTTPException(

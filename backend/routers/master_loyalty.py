@@ -49,6 +49,12 @@ async def get_loyalty_settings(
             max_payment_percent=None,
             points_lifetime_days=None
         )
+        if db.info.get("demo_readonly"):
+            now = datetime.utcnow()
+            return LoyaltySettingsOut(
+                id=0, master_id=master_id, is_enabled=False,
+                created_at=now, updated_at=now,
+            )
         db.add(settings)
         db.commit()
         db.refresh(settings)
@@ -241,4 +247,3 @@ async def get_loyalty_stats(
         current_balance=current_balance,
         active_clients_count=active_clients
     )
-

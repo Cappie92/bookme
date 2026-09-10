@@ -152,6 +152,7 @@ def test_C_end_date_null_only_if_started_and_active_unit():
     class _DB:
         def __init__(self, items):
             self._items = items
+            self.info = {}  # match SQLAlchemy Session's request-local context
 
         def query(self, *args, **kwargs):
             return _Q(self._items)
@@ -227,4 +228,3 @@ def test_D_timezone_edge_end_date_boundary(db: Session, test_master: User):
     assert chosen is not None
     assert chosen.id == active_micro.id
     assert chosen.id != expired_exact.id
-

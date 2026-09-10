@@ -97,6 +97,8 @@ def get_user_subscription_with_plan(
     if active_count > 1:
         logger.warning("multiple_active_now_strict: user_id=%s type=%s count=%s", user_id, subscription_type, active_count)
     subscription = get_active_subscription_readonly(db, user_id, subscription_type, now_utc=now)
+    if db.info.get("demo_readonly"):
+        return subscription  # no lazy AlwaysFree/Premium provisioning from demo GET
     
     # Если подписки нет, но пользователь имеет is_always_free, создаем подписку на план AlwaysFree автоматически
     if not subscription:
@@ -183,6 +185,10 @@ def check_feature_access(db: Session, user_id: int, feature_key: str, subscripti
     Returns:
         True если функция доступна, False иначе
     """
+    if db.info.get("demo_readonly"):
+        user = db.query(User).filter(User.id == user_id).first()
+        if user and user.is_always_free:
+            return True  # demo reads need no persistent synthetic subscription
     subscription = get_user_subscription_with_plan(db, user_id, subscription_type)
     if not subscription:
         return False
@@ -445,4 +451,3 @@ def get_current_page_modules_count(db: Session, master_id: int) -> int:
             MasterPageModule.is_active == True
         )
     ).count()
-
