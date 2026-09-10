@@ -244,52 +244,6 @@ class ZvonokService:
                 "error": f"Ошибка сервиса: {str(e)}"
             }
     
-    def check_call_status(self, call_id: str) -> Dict[str, Any]:
-        """Проверяет статус звонка"""
-        try:
-            if self._is_stub():
-                ok = call_id == ZVONOK_STUB_CALL_ID
-                return {"success": True, "status": "completed", "verified": ok, "details": {"call_id": call_id}}
-            logger.info(f"Проверка статуса звонка {call_id}")
-            return {
-                "success": True,
-                "status": "completed",
-                "verified": True,
-                "details": {
-                    "call_id": call_id,
-                    "status": "completed",
-                    "verified": True
-                }
-            }
-            
-            # Закомментированный код для реального API:
-            # url = f"{self.base_url}/calls/{call_id}"
-            # headers = {
-            #     "Authorization": f"Bearer {self.api_key}"
-            # }
-            # 
-            # response = requests.get(url, headers=headers, timeout=30)
-            # 
-            # if response.status_code == 200:
-            #     result = response.json()
-            #     return {
-            #         "success": True,
-            #         "status": result.get("status"),
-            #         "details": result
-            #     }
-            # else:
-            #     return {
-            #         "success": False,
-            #         "error": f"Ошибка получения статуса: {response.status_code}"
-            #     }
-                
-        except Exception as e:
-            logger.error(f"Ошибка при проверке статуса звонка: {str(e)}")
-            return {
-                "success": False,
-                "error": f"Ошибка сервиса: {str(e)}"
-            }
-    
     def _clean_phone_number(self, phone: str) -> Optional[str]:
         """Очищает и форматирует номер телефона"""
         if not phone:
