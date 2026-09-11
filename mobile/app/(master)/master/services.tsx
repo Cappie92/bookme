@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { parseServicePrice, serviceEditError } from 'shared/serviceEdit';
 import {
   View,
   Text,
@@ -381,7 +382,8 @@ export default function MasterServicesScreen() {
   };
 
   const handleSaveService = async () => {
-    if (!serviceForm.name.trim() || !serviceForm.duration || !serviceForm.price) {
+    const price = parseServicePrice(serviceForm.price);
+    if (!serviceForm.name.trim() || !serviceForm.duration || price === null) {
       Alert.alert(
         'Не заполнены обязательные поля',
         'Пожалуйста, заполните все поля, отмеченные звёздочкой (*)',
@@ -403,9 +405,9 @@ export default function MasterServicesScreen() {
     try {
       const serviceData = {
         name: serviceForm.name.trim(),
-        description: serviceForm.description.trim() || undefined,
+        description: serviceForm.description.trim(),
         duration: serviceForm.duration,
-        price: parseFloat(serviceForm.price),
+        price,
         category_id: serviceForm.category_id ?? null,
       };
 
@@ -422,17 +424,7 @@ export default function MasterServicesScreen() {
                   setShowDurationPicker(false);
                   loadData();
     } catch (err: any) {
-      const errorMessage = err.response?.data?.detail || err.message || 'Не удалось сохранить услугу';
-      let displayMessage = errorMessage;
-      
-      // Улучшаем сообщения об ошибках
-      if (errorMessage.includes('уже существует') || errorMessage.includes('already exists')) {
-        displayMessage = `Услуга с названием "${serviceForm.name.trim()}" уже существует. Пожалуйста, выберите другое название.`;
-      } else if (errorMessage.includes('Invalid category')) {
-        displayMessage = 'Выбранная категория не найдена. Пожалуйста, выберите другую категорию.';
-      } else if (errorMessage.includes('int_type') || errorMessage.includes('valid integer')) {
-        displayMessage = 'Ошибка в данных. Пожалуйста, проверьте правильность введённых значений.';
-      }
+      const displayMessage = serviceEditError(err);
       
       Alert.alert(
         'Ошибка сохранения услуги',

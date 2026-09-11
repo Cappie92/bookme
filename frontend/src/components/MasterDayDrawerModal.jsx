@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react'
 import { XMarkIcon } from '@heroicons/react/24/outline'
 import { apiPost } from '../utils/api'
-import { localizeScheduleError } from '../utils/scheduleDates'
+import { formatLocalDate, localizeScheduleError } from '../utils/scheduleDates'
 import {
   SLOT_MINUTE_STEPS,
   resolveDayRangeMinutes,
@@ -67,7 +67,7 @@ export default function MasterDayDrawerModal({
   const dayBookings = useMemo(() => {
     return (bookings || [])
       .filter((b) => {
-        const bd = new Date(b.start_time).toISOString().split('T')[0]
+        const bd = formatLocalDate(new Date(b.start_time))
         return bd === dateStr
       })
       .sort((a, b) => new Date(a.start_time) - new Date(b.start_time))

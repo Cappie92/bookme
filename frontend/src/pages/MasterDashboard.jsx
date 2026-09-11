@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react'
+import React, { useState, useEffect, useMemo, useRef } from 'react'
 import {
   BanknotesIcon,
   BuildingOffice2Icon,
@@ -171,8 +171,7 @@ function ServicesSection() {
       setEditingService(null)
       await loadData({ silent: true })
     } catch (err) {
-      const errorData = err.response?.data || {}
-      throw new Error(errorData.detail || 'Ошибка создания услуги')
+      throw err
     }
   }
 
@@ -183,7 +182,7 @@ function ServicesSection() {
       setEditingService(null)
       await loadData({ silent: true })
     } catch (err) {
-      console.error('Ошибка обновления услуги:', err)
+      throw err
     }
   }
 
@@ -913,8 +912,13 @@ export default function MasterDashboard() {
   }
   const [schedule, setSchedule] = useState({})
   const [scheduleLoading, setScheduleLoading] = useState(false)
+  const [scheduleResolved, setScheduleResolved] = useState(false)
   const [scheduleError, setScheduleError] = useState('')
   const [currentWeekOffset, setCurrentWeekOffset] = useState(0)
+  const scheduleGeneration = useRef(0)
+  const currentScheduleWeek = useRef(currentWeekOffset)
+  currentScheduleWeek.current = currentWeekOffset
+  useEffect(() => () => { scheduleGeneration.current += 1 }, [])
   const [refreshInvitations, setRefreshInvitations] = useState(0)
   const [refreshKey, setRefreshKey] = useState(0)
   const [scheduleConflicts, setScheduleConflicts] = useState(0)
@@ -1466,6 +1470,8 @@ export default function MasterDashboard() {
   const loadSchedule = async (options = {}) => {
     const silent = options.silent === true
     if (!checkAuth()) return
+    const request = ++scheduleGeneration.current
+    const isCurrent = () => request === scheduleGeneration.current && currentWeekOffset === currentScheduleWeek.current
 
     if (!silent) {
       setScheduleLoading(true)
@@ -1473,6 +1479,7 @@ export default function MasterDashboard() {
     }
     try {
       const data = await apiGet(`/api/master/schedule/weekly?week_offset=${currentWeekOffset}&weeks_ahead=3`)
+      if (!isCurrent()) return
       const scheduleDict = {}
       data.slots.forEach(slot => {
         const key = `${slot.schedule_date}_${slot.hour}_${slot.minute}`
@@ -1484,22 +1491,17 @@ export default function MasterDashboard() {
         }
       })
       setSchedule(scheduleDict)
+      setScheduleResolved(true)
     } catch (err) {
+      if (!isCurrent()) return
       console.error('Ошибка загрузки расписания:', err)
       setScheduleError('Ошибка сети')
     } finally {
-      if (!silent) {
+      if (isCurrent() && !silent) {
         setScheduleLoading(false)
       }
     }
   }
-
-  useEffect(() => {
-    if (activeTab === 'schedule') {
-      loadSchedule()
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab])
 
   // Обработка массовых изменений
   const handleScheduleChange = async (updates) => {
@@ -1891,7 +1893,7 @@ export default function MasterDashboard() {
                       {scheduleError}
                     </div>
                   )}
-                  {scheduleLoading ? (
+                  {scheduleLoading && !scheduleResolved ? (
                     <div className="text-center py-8">Загрузка расписания...</div>
                   ) : (
                     <MasterScheduleCalendar

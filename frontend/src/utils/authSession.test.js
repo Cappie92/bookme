@@ -17,6 +17,66 @@ const setup = (options = {}) => {
 }
 
 describe('auth session identity and fail-closed commerce', () => {
+  it.each([null, 'ios_app'])('OAuth %s completion uses the authoritative exchange profile atomically', async origin => {
+    const x = setup({ path: '/auth/oauth/callback' })
+    const attempt = x.session.beginOAuth()
+    await x.session.check()
+    expect(x.fetcher).not.toHaveBeenCalled()
+    expect(x.permissions().commerceAllowed).toBe(false)
+    expect(attempt.complete({ access_token: 'oauth-new', user: person(origin) })).toBe(true)
+    expect(x.state().user.web_session_origin).toBe(origin)
+    expect(x.permissions().commerceAllowed).toBe(origin !== 'ios_app')
+  })
+
+  it('OAuth error cannot bootstrap an old ordinary token or fall back to commerce', async () => {
+    const x = setup({ path: '/auth/oauth/callback' })
+    const attempt = x.session.beginOAuth()
+    attempt.fail()
+    await x.session.check()
+    expect(x.state().status).toBe(S.ERROR)
+    expect(x.permissions().commerceAllowed).toBe(false)
+    expect(x.fetcher).not.toHaveBeenCalled()
+  })
+
+  it('OAuth requires explicit server origin, never an incomplete fallback user', () => {
+    const x = setup({ path: '/auth/oauth/callback' })
+    expect(() => x.session.beginOAuth().complete({ access_token: 'oauth-new', user: { role: 'master' } })).toThrow()
+    expect(x.permissions().commerceAllowed).toBe(false)
+    expect(x.storage.getItem('access_token')).toBe('test-session-one')
+  })
+
+  it('a subsequent explicit successful login ends the failed OAuth resolution lock', async () => {
+    const x = setup({ path: '/auth/oauth/callback' })
+    x.session.beginOAuth().fail()
+    x.storage.setItem('access_token', 'explicit-new-login')
+    x.session.login(person('ios_app'))
+    x.fetcher.mockResolvedValue(response('ios_app'))
+    await x.session.check()
+    expect(x.fetcher).toHaveBeenCalledTimes(1)
+    expect(x.state().status).toBe(S.IOS_APP)
+    expect(x.permissions().commerceAllowed).toBe(false)
+  })
+
+  it('late OAuth exchange cannot replace a newer multi-tab ios_app token even before storage event', () => {
+    const x = setup()
+    const attempt = x.session.beginOAuth()
+    x.storage.setItem('access_token', 'newer-ios')
+    expect(attempt.complete({ access_token: 'stale-ordinary', user: person() })).toBe(false)
+    expect(x.storage.getItem('access_token')).toBe('newer-ios')
+    expect(x.permissions().commerceAllowed).toBe(false)
+  })
+
+  it('OAuth invalidates delayed bootstrap and refuses an ios_app downgrade', async () => {
+    const pending = deferred()
+    const x = setup({ fetcher: vi.fn(() => pending.promise) })
+    const check = x.session.check()
+    const attempt = x.session.beginOAuth()
+    attempt.complete({ access_token: 'oauth-ios', user: person('ios_app') })
+    pending.resolve(response()); await check
+    expect(x.state().status).toBe(S.IOS_APP)
+    expect(() => x.session.beginOAuth().complete({ access_token: 'ordinary', user: person() })).toThrow()
+    expect(x.permissions().commerceAllowed).toBe(false)
+  })
   it('ignores late login hydration for an obsolete token', () => {
     const x = setup()
     x.storage.setItem('access_token', 'test-ios-session')

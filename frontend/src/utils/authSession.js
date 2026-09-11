@@ -30,6 +30,9 @@ export function createAuthSession({ storage, tabStorage, fetcher, path = '/', se
   if (path === '/auth/mobile-handoff') mark('ios_app_pending')
   if (LEGAL_PATHS.has(path) && new URLSearchParams(search).get('context') === 'ios_app') mark('ios_app')
   let generation = 0
+  // OAuth is an auth-resolution screen. Never bootstrap the old token into a
+  // cabinet while its replacement is pending or the exchange has failed.
+  let oauthPending = path === '/auth/oauth/callback'
   let controller
   let identity = storage.getItem('access_token')
   let state = { status: AUTH_STATUS.LOADING, user: null, marker }
@@ -50,11 +53,14 @@ export function createAuthSession({ storage, tabStorage, fetcher, path = '/', se
       publish(AUTH_STATUS.ERROR)
       return false
     }
+    oauthPending = false
     syncOrigin(user)
     publish(user?.web_session_origin === 'ios_app' ? AUTH_STATUS.IOS_APP : AUTH_STATUS.ORDINARY, user)
     return true
   }
   const check = async () => {
+    if (oauthPending && identity === storage.getItem('access_token')) return
+    oauthPending = false
     if (state.status === AUTH_STATUS.IOS_APP && !storage.getItem('access_token')) mark('ios_app')
     const current = invalidate()
     const token = identity
@@ -88,6 +94,33 @@ export function createAuthSession({ storage, tabStorage, fetcher, path = '/', se
     check,
     login,
     prepareLogin: () => { invalidate(); publish(AUTH_STATUS.LOADING) },
+    beginOAuth: () => {
+      const requireIos = state.status === AUTH_STATUS.IOS_APP || Boolean(marker)
+      const current = invalidate()
+      const token = identity
+      oauthPending = true
+      publish(AUTH_STATUS.LOADING)
+      const valid = () => current === generation && token === storage.getItem('access_token')
+      return {
+        complete: (data) => {
+          if (!valid()) return false
+          const user = data?.user
+          if (!data?.access_token || !user?.role || !Object.prototype.hasOwnProperty.call(user, 'web_session_origin') ||
+              ![null, 'web', 'ios_app'].includes(user.web_session_origin) ||
+              (requireIos && user.web_session_origin !== 'ios_app')) {
+            publish(AUTH_STATUS.ERROR)
+            throw new Error('Invalid OAuth session response')
+          }
+          storage.setItem('access_token', data.access_token)
+          if (data.refresh_token) storage.setItem('refresh_token', data.refresh_token)
+          else storage.removeItem('refresh_token')
+          storage.setItem('user_role', user.role)
+          oauthPending = false
+          return login(user, data.access_token)
+        },
+        fail: () => { if (valid()) publish(AUTH_STATUS.ERROR) },
+      }
+    },
     logout: () => {
       if (state.status === AUTH_STATUS.IOS_APP) mark('ios_app')
       invalidate(); syncOrigin(null); publish(AUTH_STATUS.ANONYMOUS)

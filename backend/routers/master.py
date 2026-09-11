@@ -1331,8 +1331,10 @@ def get_master_weekly_schedule(
     if not master:
         raise HTTPException(status_code=404, detail="Профиль мастера не найден")
 
-    # Получаем даты недели с учетом offset
-    today = datetime.utcnow().date()
+    # Calendar week uses the existing master timezone/fallback contract,
+    # never UTC truncation or the server host's local timezone.
+    from services.scheduling import _resolve_master_zoneinfo
+    today = datetime.now(_resolve_master_zoneinfo(db, master.id)).date()
     current_day = today.weekday()  # 0 = понедельник, 6 = воскресенье
     
     # Находим понедельник текущей недели

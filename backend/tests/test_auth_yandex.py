@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+import pytest
 from urllib.parse import parse_qs, urlparse
 
 from fastapi import status
@@ -7,6 +8,47 @@ from jose import jwt
 import routers.auth as auth_router
 from auth import ALGORITHM, SECRET_KEY, get_password_hash, update_password_and_revoke_sessions
 from models import User, Master, UserOAuthAccount, UserRole
+
+
+@pytest.mark.parametrize("origin", [None, "ios_app"])
+@pytest.mark.parametrize("already_linked", [False, True])
+def test_oauth_link_preserves_server_origin_through_state_ticket_and_tokens(
+    client, db, test_user, monkeypatch, origin, already_linked,
+):
+    _mock_yandex(monkeypatch, {"id": "batch-a-origin", "default_email": "origin@example.test"})
+    if already_linked:
+        db.add(UserOAuthAccount(user_id=test_user.id, provider="yandex", provider_user_id="batch-a-origin"))
+        db.commit()
+    tokens = auth_router._issue_tokens_for_user(test_user, web_session_origin=origin)
+    # Arbitrary query origin must not turn an ordinary session into ios_app.
+    start = client.get("/api/auth/yandex/link?as_json=true&web_session_origin=ios_app", headers=_auth_headers(tokens))
+    assert start.status_code == 200
+    redirect = start.json()["redirect_url"]
+    if not already_linked:
+        state = parse_qs(urlparse(redirect).query)["state"][0]
+        assert auth_router._verify_oauth_state(state).get("web_session_origin") == origin
+        callback = client.get("/api/auth/yandex/callback", params={"code": "mock-code", "state": state}, follow_redirects=False)
+        redirect = callback.headers["location"]
+    exchange = _exchange_ticket(client, _callback_ticket(redirect))
+    assert exchange.status_code == 200
+    data = exchange.json()
+    assert data["user"]["web_session_origin"] == origin
+    for field in ("access_token", "refresh_token"):
+        assert jwt.decode(data[field], SECRET_KEY, algorithms=[ALGORITHM]).get("web_session_origin") == origin
+    profile = client.get("/api/auth/users/me", headers=_auth_headers(data))
+    assert profile.status_code == 200
+    assert profile.json().get("web_session_origin") == origin
+
+
+def test_oauth_origin_tampering_invalidates_signed_state(client, test_user, monkeypatch):
+    monkeypatch.setattr(auth_router, "get_settings", _enabled_settings)
+    state = auth_router._create_oauth_state(mode="link", user_id=test_user.id, source_session_version=test_user.session_version)
+    payload, signature = state.split(".")
+    data = auth_router._decode_b64_json(payload)
+    data["web_session_origin"] = "ios_app"
+    tampered = auth_router._b64_json(data) + "." + signature
+    response = client.get("/api/auth/yandex/callback", params={"code": "mock-code", "state": tampered}, follow_redirects=False)
+    assert response.status_code == 400
 
 
 def _enabled_settings():

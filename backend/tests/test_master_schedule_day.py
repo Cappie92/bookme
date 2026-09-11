@@ -1,5 +1,5 @@
 """PUT /api/master/schedule/day — локальная правка слотов на одну дату."""
-from datetime import date, datetime, timedelta, time
+from datetime import date, datetime, timedelta, time, timezone
 
 import pytest
 from sqlalchemy import inspect
@@ -15,6 +15,37 @@ from models import (
     User,
     UserRole,
 )
+
+
+@pytest.mark.parametrize("zone,expected", [
+    ("UTC", "2030-01-07"), ("Europe/Moscow", "2030-01-14"),
+    (None, "2030-01-14"), ("invalid-zone", "2030-01-14"),
+])
+@pytest.mark.parametrize("offset", [-1, 0, 1])
+def test_weekly_range_uses_master_calendar_at_sunday_monday_boundary(
+    client, db, master_user_and_profile, monkeypatch, zone, expected, offset,
+):
+    import routers.master as router
+    from auth import get_current_active_user
+    from main import app
+
+    class BoundaryClock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            # Sunday UTC 21:15 == Monday MSK 00:15.
+            instant = datetime(2030, 1, 13, 21, 15, tzinfo=timezone.utc)
+            return instant.astimezone(tz) if tz else instant.replace(tzinfo=None)
+
+    user, master = master_user_and_profile
+    master.timezone = zone
+    db.commit()
+    monkeypatch.setattr(router, "datetime", BoundaryClock)
+    app.dependency_overrides[get_current_active_user] = lambda: user
+    response = client.get("/api/master/schedule/weekly", params={"week_offset": offset, "weeks_ahead": 1})
+    assert response.status_code == 200
+    dates = sorted({s["schedule_date"] for s in response.json()["slots"]})
+    start = date.fromisoformat(expected) + timedelta(weeks=offset)
+    assert dates == [(start + timedelta(days=i)).isoformat() for i in range(7)]
 
 
 @pytest.mark.parametrize("weekday_keys", [[str(i)] for i in range(1, 8)] + [["1", "3", "5"]])

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, ActivityIndicator, RefreshControl } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTabBarHeight } from '@src/contexts/TabBarHeightContext';
@@ -25,6 +25,10 @@ export default function MasterScheduleScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [rulesReloadToken, setRulesReloadToken] = useState(0);
   const [weekOffset, setWeekOffset] = useState(0);
+  const requestGeneration = useRef(0);
+  const currentWeek = useRef(weekOffset);
+  currentWeek.current = weekOffset;
+  useEffect(() => () => { requestGeneration.current += 1; }, []);
   const [error, setError] = useState<string | null>(null);
 
   const tabs = [
@@ -35,6 +39,8 @@ export default function MasterScheduleScreen() {
 
   const loadData = async (opts?: { silent?: boolean }) => {
     const silent = opts?.silent === true;
+    const request = ++requestGeneration.current;
+    const isCurrent = () => request === requestGeneration.current && weekOffset === currentWeek.current;
     try {
       setError(null);
       if (!silent) {
@@ -47,14 +53,16 @@ export default function MasterScheduleScreen() {
         getMasterSettings(),
       ]);
 
+      if (!isCurrent()) return;
       setSchedule(scheduleData);
       setBookings(bookingsData);
       setMasterSettings(settingsData);
     } catch (err: any) {
+      if (!isCurrent()) return;
       setError(err.message || 'Ошибка загрузки данных');
       console.error('Error loading schedule data:', err);
     } finally {
-      if (!silent) {
+      if (isCurrent() && !silent) {
         setLoading(false);
       }
     }

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react"
+import { parseServicePrice, serviceEditError } from '../../../shared/serviceEdit'
 import { apiPost } from '../utils/api'
 import { useModal } from '../hooks/useModal'
 
@@ -81,7 +82,8 @@ export default function ServiceEditModal({ service, categories, onSave, onClose,
 
   const handleSubmit = async (e) => {
     e.preventDefault()
-    if (!formData.name.trim() || (!service && !formData.category_id) || !formData.price || !formData.duration) return
+    const price = parseServicePrice(formData.price)
+    if (!formData.name.trim() || (!service && !formData.category_id) || price === null || !formData.duration) return
 
     setLoading(true)
     setError('')
@@ -90,12 +92,11 @@ export default function ServiceEditModal({ service, categories, onSave, onClose,
         name: formData.name.trim(),
         description: formData.description.trim(),
         duration: parseInt(formData.duration),
-        price: parseFloat(formData.price),
+        price,
         category_id: formData.category_id ? parseInt(formData.category_id) : null
       })
     } catch (err) {
-      console.error('Ошибка сохранения услуги:', err)
-      setError(err.message || 'Ошибка сохранения услуги')
+      setError(serviceEditError(err))
     } finally {
       setLoading(false)
     }
@@ -203,13 +204,12 @@ export default function ServiceEditModal({ service, categories, onSave, onClose,
                 Цена (₽) *
               </label>
               <input
-                type="number"
+                type="text"
+                inputMode="decimal"
                 value={formData.price}
                 onChange={(e) => handleChange('price', e.target.value)}
                 className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#4CAF50]"
                 placeholder="0"
-                min="0"
-                step="0.01"
                 required
               />
             </div>
@@ -249,7 +249,7 @@ export default function ServiceEditModal({ service, categories, onSave, onClose,
             <button
               type="submit"
               className="px-4 py-2 text-white rounded-md transition-colors disabled:opacity-50 bg-[#4CAF50] hover:bg-[#43a047]"
-              disabled={loading || !formData.name.trim() || (!service && !formData.category_id) || !formData.price || !formData.duration}
+              disabled={loading || !formData.name.trim() || (!service && !formData.category_id) || parseServicePrice(formData.price) === null || !formData.duration}
             >
               {loading ? 'Сохранение...' : (service ? 'Сохранить' : 'Создать')}
             </button>

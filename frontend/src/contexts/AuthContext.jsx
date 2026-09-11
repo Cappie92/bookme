@@ -118,6 +118,7 @@ export function AuthProvider({ children }) {
     authStatus: authState.status,
     handoffPending: authState.marker?.kind === 'ios_app_pending',
     beginHandoff: session.beginHandoff,
+    beginOAuth: session.beginOAuth,
     prepareLogin: session.prepareLogin,
     loading,
     getAuthHeaders,

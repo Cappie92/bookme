@@ -1027,16 +1027,17 @@ class MasterServiceCategoryOut(BaseModel):
 class MasterServiceCreate(BaseModel):
     name: str
     description: Optional[str] = None
-    duration: int
-    price: float
+    # Same bounds as both master service editors; no arbitrary price ceiling.
+    duration: int = Field(..., ge=10, le=480)
+    price: float = Field(..., ge=0, allow_inf_nan=False)
     category_id: int
 
 
 class MasterServiceUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
-    duration: Optional[int] = None
-    price: Optional[float] = None
+    duration: Optional[int] = Field(None, ge=10, le=480)
+    price: Optional[float] = Field(None, ge=0, allow_inf_nan=False)
     category_id: Optional[int] = None
 
 

@@ -3,6 +3,150 @@ import { test, expect, type Page } from '@playwright/test'
 const forbidden = /pricing-catalog|subscription-plans|subscription|balance|payment\/init|loyalty|invitations/
 const commerceLinks = 'a[href="/pricing"], a[href="/master/tariff"], a[href="/master/subscription/plans"]'
 
+for (const staleError of [false, true]) {
+  test(`batch A web schedule A → B → C ignores late response/error ${staleError}`, async ({ page }) => {
+    const evidence = await fixture(page)
+    await page.clock.setFixedTime(new Date('2026-09-11T12:00:00Z'))
+    const held = new Map<number, () => Promise<void>>()
+    const calls: number[] = []
+    await page.route('**/api/master/schedule/weekly?**', async route => {
+      const params = new URL(route.request().url()).searchParams
+      // The independent conflict summary loads a different, wide date range.
+      if (params.get('weeks_ahead') !== '3') return route.fulfill({ json: { slots: [] } })
+      const offset = Number(params.get('week_offset'))
+      calls.push(offset)
+      if (!offset) return route.fulfill({ json: { slots: [] } })
+      await new Promise<void>(resolve => {
+        held.set(offset, async () => {
+          await route.fulfill(staleError && offset === 1
+            ? { status: 500, json: { detail: 'Old request error' } }
+            : { json: { slots: [{ schedule_date: offset === 3 ? '2026-09-28' : '2026-09-14', hour: 8, minute: 0, is_working: true }] } })
+          resolve()
+        })
+      })
+    })
+    await page.goto('/master?tab=schedule')
+    for (const offset of [1, 2, 3]) {
+      await page.getByRole('button', { name: 'Следующая неделя', exact: true }).click()
+      await expect.poll(() => held.has(offset)).toBe(true)
+    }
+    const mondayEight = page.locator('#schedule-table tbody tr').nth(16).locator('td').nth(1)
+    await held.get(3)!()
+    await expect(mondayEight).toHaveClass(/bg-green-100/)
+    await held.get(2)!()
+    await held.get(1)!()
+    await page.waitForLoadState('networkidle')
+    await expect(mondayEight).toHaveClass(/bg-green-100/)
+    await expect(page.getByText('Ошибка сети', { exact: true })).toHaveCount(0)
+    // Development StrictMode replays initial mount; navigation itself fetches once.
+    expect(calls).toEqual([0, 0, 1, 2, 3])
+    expect(evidence.errors).toEqual([])
+  })
+}
+
+for (const origin of ['ios_app', null]) {
+  for (const outcome of ['success', 'error', 'newer-tab']) {
+    test(`batch A OAuth ${origin} ${outcome}: unresolved origin never opens commerce`, async ({ page }) => {
+      const evidence = await fixture(page, { origin })
+      let release!: () => void
+      const pending = new Promise<void>(resolve => { release = resolve })
+      let started = false
+      await page.route('**/api/auth/oauth/exchange', async route => {
+        started = true
+        await pending
+        return route.fulfill(outcome === 'error'
+          ? { status: 400, json: { detail: 'Invalid ticket' } }
+          : { json: { access_token: 'oauth-result', user: user(origin, 'Paid'), oauth: { purpose: 'oauth_link', return_to: '/master' } } })
+      })
+      await page.goto('/auth/oauth/callback?ticket=local-fixture&mode=link')
+      await expect.poll(() => started).toBe(true)
+      await expect(page.locator(commerceLinks)).toHaveCount(0)
+      expect(evidence.requests.filter(url => forbidden.test(url))).toEqual([])
+      if (outcome === 'newer-tab') {
+        await page.evaluate(() => {
+          localStorage.setItem('access_token', 'test-ios-session')
+          window.dispatchEvent(new StorageEvent('storage', { key: 'access_token' }))
+        })
+      }
+      release()
+      if (outcome === 'success') {
+        await expect(page).toHaveURL(/\/master$/)
+        if (origin === 'ios_app') {
+          await expect(page.getByRole('complementary', { name: 'Навигация кабинета' })).toBeVisible()
+          await expect(page.locator(commerceLinks)).toHaveCount(0)
+          expect(evidence.requests.filter(url => forbidden.test(url))).toEqual([])
+        } else await expect.poll(() => evidence.requests.some(url => /subscription|balance/.test(url))).toBe(true)
+      } else if (outcome === 'error') {
+        await expect(page.getByText('Не удалось войти через Яндекс. Попробуйте ещё раз или войдите по телефону.')).toBeVisible()
+        expect(evidence.requests.filter(url => forbidden.test(url))).toEqual([])
+      } else {
+        await page.waitForLoadState('networkidle')
+        expect(await page.evaluate(() => localStorage.getItem('access_token'))).toBe('test-ios-session')
+        expect(evidence.requests.filter(url => forbidden.test(url))).toEqual([])
+      }
+      expect(evidence.errors).toEqual([])
+    })
+  }
+}
+
+for (const timezoneId of ['UTC', 'Europe/Moscow']) {
+  test.describe(`batch A drawer ${timezoneId}`, () => {
+    test.use({ timezoneId })
+    test('00:15 and 23:45 stay in the selected local day', async ({ page }) => {
+      const evidence = await fixture(page)
+      await page.clock.setFixedTime(new Date('2026-09-11T12:00:00Z'))
+      const offset = timezoneId === 'UTC' ? 'Z' : '+03:00'
+      const bookings = [
+        { id: 1, service_name: 'Midnight local', start_time: `2026-09-11T00:15:00${offset}`, end_time: `2026-09-11T00:45:00${offset}`, status: 'confirmed' },
+        { id: 2, service_name: 'Late local', start_time: `2026-09-11T23:45:00${offset}`, end_time: `2026-09-12T00:00:00${offset}`, status: 'confirmed' },
+        { id: 3, service_name: 'Adjacent local', start_time: `2026-09-12T00:15:00${offset}`, end_time: `2026-09-12T00:45:00${offset}`, status: 'confirmed' },
+      ]
+      await page.route('**/api/master/bookings/detailed', route => route.fulfill({ json: bookings }))
+      await page.goto('/master?tab=schedule')
+      await page.getByRole('button', { name: 'Настроить день', exact: true }).nth(4).click()
+      const drawer = page.getByText('Локальные правки только на эту дату · правило недели не меняется').locator('../../..')
+      await expect(drawer.getByText('Midnight local', { exact: true })).toBeVisible()
+      await expect(drawer.getByText('Late local', { exact: true })).toBeVisible()
+      await expect(drawer.getByText('Adjacent local', { exact: true })).toHaveCount(0)
+      expect(evidence.errors).toEqual([])
+    })
+  })
+}
+
+for (const input of ['100', '100.5', '100,5', '100.50', '100,50', '0']) {
+  test(`batch A service decimal ${input} and clear description survive refetch`, async ({ page }) => {
+    const evidence = await serviceEditorFixture(page)
+    evidence.state.services[0].description = 'Old description'
+    if (input === '0') evidence.state.services[0].price = 0
+    await page.goto('/master?tab=services')
+    const editor = await openServiceEditor(page)
+    await editor.getByPlaceholder('Описание услуги').fill('')
+    if (input !== '0') await editor.getByPlaceholder('0', { exact: true }).fill(input)
+    await expect(editor.getByRole('button', { name: 'Сохранить', exact: true })).toBeEnabled()
+    await editor.getByRole('button', { name: 'Сохранить', exact: true }).click()
+    await expect(editor).toHaveCount(0)
+    expect(evidence.state.services[0]).toMatchObject({ price: Number(input.replace(',', '.')), description: '', category_id: null })
+    const reopened = await openServiceEditor(page)
+    await expect(reopened.getByPlaceholder('Описание услуги')).toHaveValue('')
+    await expect(reopened.getByPlaceholder('0', { exact: true })).toHaveValue(String(Number(input.replace(',', '.'))))
+    expect(evidence.errors).toEqual([])
+  })
+}
+
+test('batch A service rejects malformed decimal and safely displays structured errors', async ({ page }) => {
+  const evidence = await serviceEditorFixture(page)
+  await page.route('**/api/master/services/9', route => route.fulfill({ status: 422, json: { detail: [{ loc: ['body', 'price'], msg: 'private validation internals', input: 'private input' }] } }))
+  await page.goto('/master?tab=services')
+  const editor = await openServiceEditor(page)
+  await editor.getByPlaceholder('0', { exact: true }).fill('100,5,2')
+  await expect(editor.getByRole('button', { name: 'Сохранить', exact: true })).toBeDisabled()
+  await editor.getByPlaceholder('0', { exact: true }).fill('100,50')
+  await editor.getByRole('button', { name: 'Сохранить', exact: true }).click()
+  await expect(editor.getByText('Проверьте поля: Цена.', { exact: true })).toBeVisible()
+  await expect(editor.getByText(/private|\[object Object\]/)).toHaveCount(0)
+  expect(evidence.errors).toEqual([])
+})
+
 for (const path of ['/master', '/master?tab=tariff', '/pricing', '/master/subscription/plans', '/payment/success', '/payment/failed']) {
   test(`integration demo ${path}: readonly cabinet never opens purchase UI`, async ({ page }) => {
     const evidence = await fixture(page, { origin: null })

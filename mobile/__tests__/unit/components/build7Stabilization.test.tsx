@@ -209,6 +209,40 @@ const saveServiceForm = async () => {
 describe.each(['ios', 'android'])('null-category editing on %s', os => {
   beforeEach(() => { Platform.OS = os; });
 
+  it.each(['100', '100.5', '100,5', '100.50', '100,50', '0'])('service price %s and cleared description survive refetch', async input => {
+    const state = serviceState();
+    state.services[0].description = 'Old description';
+    await act(async () => { tree = create(<Services />); });
+    await editPreservedService(state.services[0]);
+    await changeServiceField('Цена, ₽ *', input);
+    await changeServiceField('Описание услуги', '');
+    await saveServiceForm();
+    expect(mockApi.updateMasterService).toHaveBeenCalledWith(9, expect.objectContaining({ price: Number(input.replace(',', '.')), description: '', category_id: null }));
+    const preserved = tree.root.findAllByType('CategoryAccordion').flatMap((section: any) => section.props.services).find((service: any) => service.id === 9);
+    expect(preserved.description).toBe('');
+  });
+
+  it('malformed price is not partially submitted', async () => {
+    const state = serviceState();
+    await act(async () => { tree = create(<Services />); });
+    await editPreservedService(state.services[0]);
+    await changeServiceField('Цена, ₽ *', '100,5,2');
+    await saveServiceForm();
+    expect(mockApi.updateMasterService).not.toHaveBeenCalled();
+  });
+
+  it.each([[{ loc: ['body', 'price'], msg: 'private diagnostic' }], { internal: 'private diagnostic' }])('structured error is a safe string and editor remains usable', async detail => {
+    const state = serviceState();
+    mockApi.updateMasterService.mockRejectedValueOnce({ response: { data: { detail } } });
+    await act(async () => { tree = create(<Services />); });
+    await editPreservedService(state.services[0]);
+    await saveServiceForm();
+    const message = Alert.alert.mock.calls.at(-1)[1];
+    expect(typeof message).toBe('string');
+    expect(message).not.toMatch(/private|\[object Object\]/);
+    expect(tree.root.findAllByType('Modal')).toHaveLength(1);
+  });
+
   it.each([null, 8])('ordinary edit retains category %s and remains visible after refetch', async categoryId => {
     const state = serviceState(categoryId);
     await act(async () => { tree = create(<Services />); });
@@ -311,7 +345,39 @@ describe.each(['ios', 'android'])('null-category editing on %s', os => {
   });
 });
 
-describe('local weekday identity', () => {
+describe.each(['ios', 'android'])('local weekday identity and response ordering on %s', os => {
+  beforeEach(() => { Platform.OS = os; });
+  it.each([
+    [13, 'Следующий день', '2030-01-14', 1],
+    [14, 'Предыдущий день', '2030-01-13', -1],
+  ])('day arrows cross the loaded week from January %s', async (day, label, expected, offset) => {
+    jest.setSystemTime(new Date(2030, 0, Number(day), 12));
+    mockApi.getWeeklySchedule.mockResolvedValue({ slots: [] });
+    await act(async () => { tree = create(<ScheduleScreen />); });
+    await act(async () => tree.root.findByType('SegmentedControl').props.onSegmentChange(1));
+    await act(async () => tree.root.findByProps({ accessibilityLabel: label }).props.onPress());
+    expect(mockApi.getWeeklySchedule).toHaveBeenLastCalledWith(offset, 1);
+    expect(mockApi.getWeeklySchedule).toHaveBeenCalledTimes(2);
+    expect(tree.root.findByType(DayDrawer).props.date).toBe(expected);
+  });
+
+  it.each([[false, 2], [true, 2], [false, 3], [true, 3]])('schedule response ordering error=%s, weeks=%s', async (failOld, weekCount) => {
+    const pending: Array<{ resolve: (value: any) => void; reject: (error: Error) => void }> = [];
+    mockApi.getWeeklySchedule.mockImplementationOnce(async () => ({ slots: [] })).mockImplementation(() => new Promise((resolve, reject) => pending.push({ resolve, reject })));
+    await act(async () => { tree = create(<ScheduleScreen />); });
+    for (let offset = 1; offset <= Number(weekCount); offset++) {
+      await act(async () => tree.root.findByType(WeekView).props.onWeekChange(offset));
+    }
+    const current = { slots: [], week: 'current' };
+    await act(async () => pending[Number(weekCount) - 1].resolve(current));
+    if (weekCount === 3) await act(async () => pending[1].resolve({ slots: [], week: 'B' }));
+    await act(async () => failOld ? pending[0].reject(new Error('old A error')) : pending[0].resolve({ slots: [], week: 'A' }));
+    expect(tree.root.findByType(WeekView).props.schedule).toEqual(current);
+    expect(tree.root.findByType(WeekView).props.weekOffset).toBe(weekCount);
+    expect(mockApi.getWeeklySchedule).toHaveBeenCalledTimes(1 + Number(weekCount));
+    mockApi.getWeeklySchedule.mockResolvedValue({ slots: [] });
+  });
+
   it('real WeekView headers select matching Mon..Sun calendar dates', async () => {
     jest.useFakeTimers();
     jest.setSystemTime(new Date(2026, 8, 11, 0, 15));

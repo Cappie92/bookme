@@ -6,7 +6,6 @@ import { cities, getTimezoneByCity } from '../utils/cities'
 import { normalizeRussianPhoneForApi } from '../utils/normalizeRussianPhoneForApi'
 
 const oauthExchangeRequests = new Map()
-const oauthExchangeSuccesses = new Set()
 
 function getRolePath(role) {
   const normalized = (role || '').toString().toLowerCase()
@@ -14,10 +13,6 @@ function getRolePath(role) {
   if (normalized === 'master' || normalized === 'indie') return '/master'
   if (normalized === 'salon') return '/salon'
   return '/client'
-}
-
-function oauthTicketSuccessKey(ticket) {
-  return `dedato_oauth_ticket_success_${ticket}`
 }
 
 function cleanOAuthCallbackUrl() {
@@ -39,17 +34,11 @@ async function exchangeOAuthTicketOnce(ticket) {
         })
         .then((authData) => {
           if (!authData.access_token) throw new Error('token missing')
-          oauthExchangeSuccesses.add(ticket)
-          sessionStorage.setItem(oauthTicketSuccessKey(ticket), '1')
           return authData
         })
     )
   }
   return oauthExchangeRequests.get(ticket)
-}
-
-function wasOAuthTicketCompleted(ticket) {
-  return oauthExchangeSuccesses.has(ticket) || sessionStorage.getItem(oauthTicketSuccessKey(ticket)) === '1'
 }
 
 function formatPhone(input) {
@@ -270,40 +259,31 @@ function OAuthOnboardingForm({ ticket, onComplete }) {
 export default function OAuthCallback() {
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
-  const { login, prepareLogin } = useAuth()
+  const { beginOAuth } = useAuth()
   const { showToast } = useToast()
   const [error, setError] = useState('')
   const [onboardingStatus, setOnboardingStatus] = useState('idle')
   const processedTicketRef = useRef(null)
   const exchangeInFlightRef = useRef(false)
+  const attemptRef = useRef(null)
   const onboardingTicket = searchParams.get('onboarding_ticket')
 
   const completeAuth = (authData) => {
-    if (!authData?.access_token) throw new Error('token missing')
-    localStorage.setItem('access_token', authData.access_token)
-    if (authData.refresh_token) localStorage.setItem('refresh_token', authData.refresh_token)
-    const user = authData.user
-    if (!user) throw new Error('profile missing')
-    if (user.role) localStorage.setItem('user_role', user.role)
-    login(user)
+    if (!attemptRef.current?.complete(authData)) return
     cleanOAuthCallbackUrl()
-    navigate(getRolePath(user.role), { replace: true })
+    navigate(getRolePath(authData.user.role), { replace: true })
   }
 
   useEffect(() => {
     const completeLogin = async () => {
+      if (!attemptRef.current) attemptRef.current = beginOAuth()
       if (onboardingTicket) return
       const ticket = searchParams.get('ticket')
       const oauthError = searchParams.get('error')
-      const mode = searchParams.get('mode') || 'login'
       const returnTo = searchParams.get('return_to') || '/client/profile'
 
       if (oauthError || !ticket) {
-        if (mode === 'link') {
-          showToast(oauthError || 'Не удалось привязать Яндекс', 'error')
-          navigate(returnTo, { replace: true })
-          return
-        }
+        attemptRef.current.fail()
         setError('Не удалось войти через Яндекс. Попробуйте ещё раз или войдите по телефону.')
         return
       }
@@ -319,41 +299,16 @@ export default function OAuthCallback() {
         const authData = await exchangeOAuthTicketOnce(ticket)
         const oauth = authData.oauth || {}
 
-        localStorage.setItem('access_token', authData.access_token)
-        if (authData.refresh_token) localStorage.setItem('refresh_token', authData.refresh_token)
-        prepareLogin()
-
-        let user = authData.user || null
-        try {
-          const response = await fetch('/api/auth/users/me', {
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${authData.access_token}`,
-            },
-          })
-          if (response.ok) {
-            user = await response.json()
-          }
-        } catch {
-          // OAuth уже успешен и токены сохранены; профиль подтянется в AuthProvider/кабинете.
-        }
-        if (localStorage.getItem('access_token') !== authData.access_token) return
-        if (!user) throw new Error('profile missing')
-        if (user.role) localStorage.setItem('user_role', user.role)
-        if (!login(user, authData.access_token)) return
+        if (!attemptRef.current.complete(authData)) return
         cleanOAuthCallbackUrl()
         if (oauth.purpose === 'oauth_link') {
           showToast(oauth.message || 'Яндекс аккаунт привязан', 'success')
           navigate(oauth.return_to || returnTo, { replace: true })
         } else {
-          navigate(getRolePath(user.role), { replace: true })
+          navigate(getRolePath(authData.user.role), { replace: true })
         }
       } catch {
-        if (wasOAuthTicketCompleted(ticket) && localStorage.getItem('access_token')) {
-          cleanOAuthCallbackUrl()
-          navigate(getRolePath(localStorage.getItem('user_role')), { replace: true })
-          return
-        }
+        attemptRef.current.fail()
         setError('Не удалось войти через Яндекс. Попробуйте ещё раз или войдите по телефону.')
       } finally {
         exchangeInFlightRef.current = false
@@ -361,7 +316,7 @@ export default function OAuthCallback() {
     }
 
     completeLogin()
-  }, [login, navigate, onboardingTicket, searchParams, showToast])
+  }, [beginOAuth, navigate, onboardingTicket, searchParams, showToast])
 
   useEffect(() => {
     if (!onboardingTicket) return

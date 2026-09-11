@@ -16,8 +16,8 @@ export default function AuthSafetyBoundary({ children }) {
   const { pathname } = useLocation()
   const { handoffPending, authStatus, isIosRestrictedContext, isIosAppWebSession, loading } = useAuth()
   if (pathname === '/auth/mobile-handoff' || isSafePublicPath(pathname)) return children
-  // An ordinary OAuth callback is an auth-resolution screen, not a cabinet.
-  if (pathname === '/auth/oauth/callback' && !isIosRestrictedContext) return children
+  // Both ordinary and iOS callbacks resolve auth; neither is a cabinet.
+  if (pathname === '/auth/oauth/callback' && !handoffPending) return children
   // An expired readonly demo can be re-entered anonymously; never relax an
   // ios_app/pending handoff boundary or enter before auth context is resolved.
   if (pathname === '/demo/master' && !loading && !isIosRestrictedContext && !handoffPending) return children

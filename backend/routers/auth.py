@@ -229,6 +229,7 @@ def _create_oauth_state(
     user_id: Optional[int] = None,
     return_to: Optional[str] = None,
     source_session_version: Optional[int] = None,
+    web_session_origin: Optional[str] = None,
 ) -> str:
     normalized_mode = mode if mode in {"login", "link"} else "login"
     data = {
@@ -241,6 +242,8 @@ def _create_oauth_state(
         data["user_id"] = int(user_id or 0)
         data["return_to"] = _sanitize_oauth_return_to(return_to)
         data["source_session_version"] = int(source_session_version or 0)
+        if web_session_origin == "ios_app":
+            data["web_session_origin"] = "ios_app"
     payload = _b64_json({
         **data,
     })
@@ -282,8 +285,8 @@ def _issue_tokens_for_user(
     return issue_tokens_for_user(user, claims)
 
 
-def _token_response_for_user(user: User) -> dict:
-    tokens = _issue_tokens_for_user(user)
+def _token_response_for_user(user: User, web_session_origin: Optional[str] = None) -> dict:
+    tokens = _issue_tokens_for_user(user, web_session_origin=web_session_origin)
     tokens["user"] = {
         "id": user.id,
         "email": user.email,
@@ -294,6 +297,7 @@ def _token_response_for_user(user: User) -> dict:
         "is_phone_verified": user.is_phone_verified,
         "phone_required": user.phone_required,
         "phone_verified": user.phone_verified,
+        "web_session_origin": web_session_origin,
     }
     return tokens
 
@@ -395,6 +399,7 @@ def _store_oauth_ticket(
     status_value: str = "success",
     message: Optional[str] = None,
     return_to: Optional[str] = None,
+    web_session_origin: Optional[str] = None,
 ) -> str:
     ticket = secrets.token_urlsafe(32)
     payload_dict = {
@@ -403,6 +408,8 @@ def _store_oauth_ticket(
         "provider": provider,
         "status": status_value,
     }
+    if purpose == "oauth_link" and web_session_origin == "ios_app":
+        payload_dict["web_session_origin"] = "ios_app"
     if message:
         payload_dict["message"] = message
     if return_to:
@@ -1124,6 +1131,7 @@ def yandex_link(
             status_value="already_linked",
             message="Яндекс уже привязан",
             return_to=safe_return_to,
+            web_session_origin=getattr(current_user, "web_session_origin", None),
         )
         query = urlencode({"ticket": ticket, "mode": "link"})
         redirect_url = f"{settings.FRONTEND_URL.rstrip('/')}/auth/oauth/callback?{query}"
@@ -1133,6 +1141,7 @@ def yandex_link(
         user_id=current_user.id,
         return_to=safe_return_to,
         source_session_version=current_user.session_version,
+        web_session_origin=getattr(current_user, "web_session_origin", None),
     )
     redirect = _yandex_authorize_redirect(settings, state)
     return {"redirect_url": redirect.headers["location"]} if as_json else redirect
@@ -1179,6 +1188,7 @@ def yandex_callback(
                 status_value=link_status,
                 message=message,
                 return_to=state_data.get("return_to"),
+                web_session_origin=state_data.get("web_session_origin"),
             )
             query = urlencode({"ticket": ticket, "mode": "link"})
         else:
@@ -1202,7 +1212,9 @@ def oauth_exchange(payload: OAuthExchangeRequest, db: Session = Depends(get_db))
     user = db.query(User).filter(User.id == ticket_data["user_id"]).first()
     if not user or not user.is_active:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Недействительный OAuth ticket")
-    response = _token_response_for_user(user)
+    # Origin comes only from the server ticket, bound to the signed link state.
+    origin = "ios_app" if ticket_data.get("purpose") == "oauth_link" and ticket_data.get("web_session_origin") == "ios_app" else None
+    response = _token_response_for_user(user, web_session_origin=origin)
     response["oauth"] = {
         "purpose": ticket_data.get("purpose", "oauth_login"),
         "provider": ticket_data.get("provider", YANDEX_PROVIDER),

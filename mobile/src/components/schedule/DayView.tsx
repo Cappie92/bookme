@@ -193,21 +193,34 @@ export function DayView({
   }, [daySlots, dayBookings]);
 
   // Навигация по дням
+  const selectDate = (date: Date) => {
+    setSelectedDate(formatLocalDate(date));
+    const monday = (d: Date) => {
+      const result = new Date(d);
+      result.setHours(0, 0, 0, 0);
+      result.setDate(result.getDate() - ((result.getDay() + 6) % 7));
+      return result;
+    };
+    // Round for DST: a calendar week is not always exactly 168 hours.
+    const offset = Math.round((monday(date).getTime() - monday(new Date()).getTime()) / 604800000);
+    if (offset !== weekOffset) onWeekChange(offset);
+  };
+
   const handlePrevDay = () => {
     const date = new Date(currentDateObj);
     date.setDate(date.getDate() - 1);
-    setSelectedDate(formatLocalDate(date));
+    selectDate(date);
   };
 
   const handleNextDay = () => {
     const date = new Date(currentDateObj);
     date.setDate(date.getDate() + 1);
-    setSelectedDate(formatLocalDate(date));
+    selectDate(date);
   };
 
   const handleToday = () => {
     const today = new Date();
-    setSelectedDate(formatLocalDate(today));
+    selectDate(today);
   };
 
   const handleCalendar = () => {
@@ -216,15 +229,7 @@ export function DayView({
   };
 
   const selectCalendarDate = () => {
-    setSelectedDate(formatLocalDate(calendarDate));
-    // Compare local Monday boundaries; rounding avoids DST hour differences.
-    const monday = (d: Date) => {
-      const result = new Date(d);
-      result.setHours(0, 0, 0, 0);
-      result.setDate(result.getDate() - ((result.getDay() + 6) % 7));
-      return result;
-    };
-    onWeekChange(Math.round((monday(calendarDate).getTime() - monday(new Date()).getTime()) / 604800000));
+    selectDate(calendarDate);
     setCalendarVisible(false);
   };
 
