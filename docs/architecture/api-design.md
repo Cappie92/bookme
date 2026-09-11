@@ -226,19 +226,17 @@ Content-Type: application/json
 #### GET `/master/bookings`
 Записи мастера
 
-#### GET `/master/schedule`
-Расписание мастера
+#### Расписание мастера
 
-#### POST `/master/schedule`
-Создание расписания
+Legacy GET/POST `/master/schedule` удалены: возвращают 404.
+Чтение: GET `/master/schedule/weekly`, `/master/schedule/monthly`,
+`/master/schedule/rules`. Изменение одного дня: POST/PUT `/master/schedule/day`.
 
 **Request:**
 ```json
 {
-  "date": "2024-10-25",
-  "start_time": "09:00:00",
-  "end_time": "18:00:00",
-  "is_available": true
+  "schedule_date": "2030-01-10",
+  "open_slots": [{"hour": 12, "minute": 0}, {"hour": 12, "minute": 30}]
 }
 ```
 

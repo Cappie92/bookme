@@ -146,10 +146,11 @@ function AdminRoute({ children }) {
 }
 
 function IosCommerceRouteGuard({ children }) {
-  const { loading, commerceAllowed, isIosAppWebSession } = useAuth()
+  const { loading, commerceAllowed, isIosAppWebSession, user } = useAuth()
   if (loading) return <PageLoader />
   if (isIosAppWebSession) return <Navigate to="/master" replace />
   if (!commerceAllowed) return <IsolatedSessionError />
+  if (user?.is_demo_session === true) return <Navigate to="/master?tab=tariff" replace />
   return children
 }
 

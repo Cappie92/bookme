@@ -72,8 +72,7 @@ def _validate_master_timezone_update(timezone: Optional[str], master: Master) ->
 from models import ClientRestriction as ClientRestrictionModel
 from schemas import Booking as BookingSchema
 from schemas import Salon as SalonSchema
-from schemas import Schedule as ScheduleSchema
-from schemas import ScheduleCreate, User as UserSchema
+from schemas import User as UserSchema
 from schemas import MasterScheduleSlot, MasterScheduleUpdate, MasterScheduleResponse
 from schemas import MasterDayScheduleUpdate
 from utils.schedule_conflicts import get_schedule_with_conflicts, create_schedule_from_settings
@@ -716,58 +715,6 @@ def get_booking_conflicts(
         })
 
     return conflicts
-
-
-@router.post("/schedule", response_model=ScheduleSchema)
-def create_schedule(
-    schedule_in: ScheduleCreate,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user),
-) -> Any:
-    """
-    Установка расписания доступности мастера.
-    """
-    master = db.query(Master).filter(Master.user_id == current_user.id).first()
-    if not master:
-        raise HTTPException(status_code=404, detail="Профиль мастера не найден")
-
-    # Проверка на пересечение с существующими бронированиями
-    existing_booking = (
-        db.query(Booking)
-        .filter(
-            Booking.master_id == master.id,
-            Booking.start_time >= schedule_in.start_time,
-            Booking.end_time <= schedule_in.end_time,
-            Booking.status != BookingStatus.CANCELLED,
-        )
-        .first()
-    )
-
-    if existing_booking:
-        raise HTTPException(
-            status_code=400,
-            detail="Cannot set schedule: there are existing bookings in this time slot",
-        )
-
-    schedule = MasterSchedule(**schedule_in.dict(), master_id=master.id)
-    db.add(schedule)
-    db.commit()
-    db.refresh(schedule)
-    return schedule
-
-
-@router.get("/schedule", response_model=List[ScheduleSchema])
-def get_schedule(
-    db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)
-) -> Any:
-    """
-    Получение расписания мастера.
-    """
-    master = db.query(Master).filter(Master.user_id == current_user.id).first()
-    if not master:
-        raise HTTPException(status_code=404, detail="Профиль мастера не найден")
-
-    return master.schedule
 
 
 @router.get("/profile", response_model=UserSchema)

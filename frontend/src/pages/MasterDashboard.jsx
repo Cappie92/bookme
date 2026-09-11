@@ -877,6 +877,7 @@ export default function MasterDashboard() {
   const { search } = useLocation()
   const navigate = useNavigate()
   const isDemoMode = localStorage.getItem('demo_mode') === '1' || new URLSearchParams(search).get('demo') === '1'
+  const canPurchaseSubscription = !isIosAppWebSession && !isDemoMode
   const requestedSettingsSection = new URLSearchParams(search).get('section')
   const canUseFinance = isDemoMode || hasFinanceAccess
   const canUseExtendedStats = isDemoMode || hasExtendedStats
@@ -1709,7 +1710,7 @@ export default function MasterDashboard() {
                               <BanknotesIcon className="h-6 w-6 text-white" strokeWidth={2} aria-hidden />
                             </div>
                           </div>
-                          {!isIosAppWebSession && (
+                          {canPurchaseSubscription && (
 <button
                             type="button"
                             onClick={() => setShowSubscriptionModal(true)}
@@ -1832,6 +1833,7 @@ export default function MasterDashboard() {
               </div>
               
               <MasterDashboardStats 
+                isDemoMode={isDemoMode}
                 refreshTrigger={clientsUpdateTrigger}
                 dashboardOverlayResetKey={dashboardOverlayResetKey}
                 settingsPayload={masterSettingsPayload}
@@ -1843,7 +1845,7 @@ export default function MasterDashboard() {
                   setRefreshKey((prev) => prev + 1);
                   setClientsUpdateTrigger((t) => t + 1);
                 }}
-                onOpenSubscriptionModal={isIosAppWebSession ? null : () => setShowSubscriptionModal(true)}
+                onOpenSubscriptionModal={canPurchaseSubscription ? () => setShowSubscriptionModal(true) : null}
                 onOpenSchedule={handleCopyPublicLink}
                 onOpenServices={() => handleTabChange('services')}
                 onOpenTariff={isIosAppWebSession ? null : () => handleTabChange('tariff')}
@@ -1935,7 +1937,7 @@ export default function MasterDashboard() {
               <h1 className="mb-2 text-xl font-bold leading-snug tracking-tight text-gray-900 lg:mb-6 lg:text-3xl">Статистика</h1>
               <MasterStats 
                 hasExtendedStats={canUseExtendedStats}
-                onOpenSubscriptionModal={isIosAppWebSession ? undefined : () => setShowSubscriptionModal(true)}
+                onOpenSubscriptionModal={canPurchaseSubscription ? () => setShowSubscriptionModal(true) : undefined}
               />
             </div>
           )}

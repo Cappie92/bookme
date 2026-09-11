@@ -228,7 +228,7 @@ graph TB
 - `GET /master/services` - Услуги мастера
 - `POST /master/services` - Создание услуги
 - `GET /master/bookings` - Записи мастера
-- `GET /master/schedule` - Расписание
+- `GET /master/schedule/weekly`, `GET /master/schedule/monthly` - Расписание (legacy GET/POST `/master/schedule` удалены, 404)
 
 **Зависимости:**
 - BookingService

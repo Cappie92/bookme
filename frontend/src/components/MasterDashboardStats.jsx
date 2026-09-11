@@ -116,6 +116,7 @@ export default function MasterDashboardStats({
   subscriptionStatus,
   balance = null,
   hasExtendedStats = false,
+  isDemoMode = false,
   onOpenSubscriptionModal,
   onOpenSchedule,
   onOpenServices,
@@ -124,6 +125,7 @@ export default function MasterDashboardStats({
   onOpenSettings,
 }) {
   const { isIosAppWebSession } = useAuth()
+  const canPurchaseSubscription = !isIosAppWebSession && !isDemoMode
   const { showToast } = useToast();
   const DASHBOARD_LAYOUT_DEBUG = false;
   const [stats, setStats] = useState(null);
@@ -1532,7 +1534,7 @@ export default function MasterDashboardStats({
         </div>
         {/* Chart */}
         <div className="relative border-b border-[#E7E2DF] bg-white px-6 py-4">
-          {!hasExtendedStats && (
+          {canPurchaseSubscription && !hasExtendedStats && (
             <div
               className="absolute inset-0 z-20 flex items-center justify-center cursor-pointer bg-gray-800/70 backdrop-blur-[2px] transition hover:[&_p]:no-underline"
               onClick={() => {
@@ -1978,7 +1980,7 @@ export default function MasterDashboardStats({
                 </p>
               )}
             </div>
-            {!isIosAppWebSession && (
+            {canPurchaseSubscription && (
 <button
               type="button"
               onClick={() => {
@@ -2040,7 +2042,7 @@ export default function MasterDashboardStats({
             ref={chartsAnchorRef}
             className="relative"
           >
-            {!hasExtendedStats && (
+            {canPurchaseSubscription && !hasExtendedStats && (
             <div
               className="absolute inset-0 bg-gray-800 bg-opacity-70 rounded-xl lg:rounded-lg z-10 flex items-center justify-center cursor-pointer hover:[&_p]:no-underline"
               onClick={() => {
@@ -2244,7 +2246,7 @@ export default function MasterDashboardStats({
                   )}
                 </div>
 
-                {!isIosAppWebSession && (
+                {canPurchaseSubscription && (
 <button
                   type="button"
                   onClick={() => {

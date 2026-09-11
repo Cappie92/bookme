@@ -111,7 +111,7 @@
 | Создать правила | `/api/master/schedule/rules` | POST | `type`, **`effective_start_date`**, **`valid_until`**, `weekdays` (для type=weekdays) | `routers/master.py` | 1372–1762 |
 | Массовое создание слотов | `/api/master/schedule/bulk-create` | POST | Query: `start_date`, `end_date` (YYYY-MM-DD); `salon_id?`, `branch_id?`, `place_id?` | `routers/master.py` | 4120–4171 |
 | Массовое удаление | `/api/master/schedule/bulk-delete` | DELETE | Query: `start_date`, `end_date`; `work_type?` | `routers/master.py` | 4175–4208 |
-| Одиночный слот | `/api/master/schedule` | POST | `ScheduleCreate` (date, start_time, end_time, …) | `routers/master.py` | 456–491 |
+| День расписания | `/api/master/schedule/day` | POST / PUT | `schedule_date`, `open_slots` (hour, minute); legacy GET/POST `/api/master/schedule` удалены, 404 | `routers/master.py` | `update_master_day_schedule_post/put` |
 | Удалить слоты с даты | `/api/master/schedule/future` | DELETE | — | `routers/master.py` | 4077–4117 |
 | Неделя/месяц (чтение) | `/api/master/schedule/weekly`, `/api/master/schedule/monthly` | GET | Query: `week_offset`, `weeks_ahead` / `year`, `month` | `routers/master.py` | 1050–1150, 1152–1332 |
 
