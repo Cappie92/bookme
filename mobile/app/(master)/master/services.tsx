@@ -299,14 +299,14 @@ export default function MasterServicesScreen() {
     loadData();
   };
 
-  const handleCreateService = async () => {
+  const handleCreateService = async (categoryId: number | null = null) => {
     setEditingService(null);
     setServiceForm({
       name: '',
       description: '',
       duration: 30,
       price: '',
-      category_id: null,
+      category_id: categoryId,
     });
     setNewCategoryName('');
     // Загружаем категории при открытии модалки
@@ -390,7 +390,7 @@ export default function MasterServicesScreen() {
       return;
     }
 
-    if (!serviceForm.category_id) {
+    if (!editingService && !serviceForm.category_id) {
       Alert.alert(
         'Не выбрана категория',
         'Пожалуйста, выберите категорию для услуги или создайте новую',
@@ -406,7 +406,7 @@ export default function MasterServicesScreen() {
         description: serviceForm.description.trim() || undefined,
         duration: serviceForm.duration,
         price: parseFloat(serviceForm.price),
-        category_id: serviceForm.category_id,
+        category_id: serviceForm.category_id ?? null,
       };
 
       if (editingService) {
@@ -573,7 +573,7 @@ export default function MasterServicesScreen() {
         <Text style={styles.title}>Мои услуги</Text>
         <View style={styles.actions}>
           <PlatformFeatureLock feature="has_booking_page">
-            <TouchableOpacity onPress={handleCreateService} style={[styles.actionButton, styles.primaryAction]}>
+            <TouchableOpacity onPress={() => handleCreateService()} style={[styles.actionButton, styles.primaryAction]}>
               <Text style={[styles.actionButtonText, styles.primaryActionText]}>+ Услуга</Text>
             </TouchableOpacity>
           </PlatformFeatureLock>
@@ -638,7 +638,7 @@ export default function MasterServicesScreen() {
                   onMenuPress={handleServiceMenuPress}
                 />
               )}
-              onCreateService={handleCreateService}
+              onCreateService={() => handleCreateService(category.id)}
             />
           );
         })}
@@ -742,6 +742,7 @@ export default function MasterServicesScreen() {
                   <TouchableOpacity
                     style={[styles.selectButton, !serviceForm.category_id && styles.selectButtonEmpty]}
                     onPress={() => {
+                      Keyboard.dismiss();
                       setShowCategoryDropdown(!showCategoryDropdown);
                       setShowDurationPicker(false);
                     }}
@@ -749,7 +750,7 @@ export default function MasterServicesScreen() {
                     <Text style={[styles.selectButtonText, !serviceForm.category_id && styles.selectButtonTextEmpty]}>
                       {serviceForm.category_id
                         ? categories.find(c => c.id === serviceForm.category_id)?.name || 'Выберите категорию *'
-                        : 'Выберите категорию *'}
+                        : editingService ? 'Без категории' : 'Выберите категорию *'}
                     </Text>
                     <Ionicons
                       name={showCategoryDropdown ? 'chevron-up' : 'chevron-down'}
@@ -760,7 +761,18 @@ export default function MasterServicesScreen() {
                   </TouchableOpacity>
                   {showCategoryDropdown && (
                     <View style={styles.dropdownList}>
-                      <ScrollView style={styles.dropdownScrollView} nestedScrollEnabled>
+                      <ScrollView style={styles.dropdownScrollView} nestedScrollEnabled keyboardShouldPersistTaps="handled">
+                        {editingService && editingService.category_id == null && (
+                          <TouchableOpacity
+                            style={[styles.dropdownItem, serviceForm.category_id == null && styles.dropdownItemSelected]}
+                            onPress={() => {
+                              setServiceForm({ ...serviceForm, category_id: null });
+                              setShowCategoryDropdown(false);
+                            }}
+                          >
+                            <Text style={styles.dropdownItemText}>Без категории</Text>
+                          </TouchableOpacity>
+                        )}
                         {categories.length === 0 ? (
                           <View style={styles.dropdownEmptyItem}>
                             <Text style={styles.dropdownEmptyText}>Категорий пока нет</Text>

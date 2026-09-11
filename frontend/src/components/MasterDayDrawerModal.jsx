@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react'
 import { XMarkIcon } from '@heroicons/react/24/outline'
 import { apiPost } from '../utils/api'
+import { localizeScheduleError } from '../utils/scheduleDates'
 import {
   SLOT_MINUTE_STEPS,
   resolveDayRangeMinutes,
@@ -104,7 +105,7 @@ export default function MasterDayDrawerModal({
       onClose()
     } catch (e) {
       const msg = e?.response?.data?.detail || e?.message || 'Не удалось сохранить'
-      alert(typeof msg === 'string' ? msg : JSON.stringify(msg))
+      alert(localizeScheduleError(typeof msg === 'string' ? msg : 'Не удалось сохранить'))
     } finally {
       setSaving(false)
     }

@@ -106,10 +106,10 @@ const PaymentMethodSelector = ({
       </div>
 
       {/* Информация */}
-      <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+      <div className="mt-4 p-3 bg-[#E8F5E9] border border-[#4CAF50]/25 rounded-lg">
         <div className="flex items-start space-x-2">
-          <div className="text-blue-600 text-sm">💡</div>
-          <div className="text-sm text-blue-800">
+          <div className="text-[#4CAF50] text-sm">💡</div>
+          <div className="text-sm text-[#2f7d32]">
             <p className="font-medium mb-1">Важно:</p>
             <ul className="list-disc list-inside space-y-1 text-xs">
               <li>Должен быть выбран хотя бы один способ оплаты</li>

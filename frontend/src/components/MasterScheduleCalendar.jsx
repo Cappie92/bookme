@@ -1,3 +1,4 @@
+import { formatLocalDate, localizeScheduleError } from '../utils/scheduleDates';
 import React, { useState, useRef, useEffect } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { CalendarDaysIcon, EyeSlashIcon, TrashIcon, AdjustmentsHorizontalIcon } from '@heroicons/react/24/outline'
@@ -104,7 +105,7 @@ function getTimeLabel(hour, minute) {
 }
 
 function getSlotKey(date, hour, minute) {
-  return `${date.toISOString().split('T')[0]}_${hour}_${minute}`
+  return `${formatLocalDate(date)}_${hour}_${minute}`
 }
 
 export default function MasterScheduleCalendar({
@@ -234,11 +235,11 @@ export default function MasterScheduleCalendar({
 
   // Функция для получения записей для конкретного слота
   const getBookingsForSlot = (date, hour, minute) => {
-    const dateStr = date.toISOString().split('T')[0]
+    const dateStr = formatLocalDate(date)
     const timeStr = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`
     
     return bookings.filter(booking => {
-      const bookingDate = new Date(booking.start_time).toISOString().split('T')[0]
+      const bookingDate = formatLocalDate(new Date(booking.start_time))
       const bookingTime = new Date(booking.start_time).toTimeString().slice(0, 5)
       return bookingDate === dateStr && bookingTime === timeStr
     })
@@ -631,7 +632,7 @@ export default function MasterScheduleCalendar({
 
   // Массовое выделение по клику на заголовок дня
   const openDayDrawerMenu = (day) => {
-    const dateStr = day.date.toISOString().split('T')[0]
+    const dateStr = formatLocalDate(day.date)
     const slotsForDay = []
     HOURS.forEach((hour) => {
       MINUTES.forEach((minute) => {
@@ -650,7 +651,7 @@ export default function MasterScheduleCalendar({
   }
 
   const handleDayHeaderClick = (dayKey) => {
-    const daySlots = slots.filter(s => s.date.toISOString().split('T')[0] === dayKey).map(s => getSlotKey(s.date, s.hour, s.minute))
+    const daySlots = slots.filter(s => formatLocalDate(s.date) === dayKey).map(s => getSlotKey(s.date, s.hour, s.minute))
     const allSelected = daySlots.every(slot => selected.has(slot))
     setSelected(prev => {
       const next = new Set(prev)
@@ -987,7 +988,7 @@ export default function MasterScheduleCalendar({
         
       } catch (error) {
         console.error('Ошибка при создании расписания:', error)
-        alert(`Ошибка: ${error.message}`)
+        alert(`Ошибка: ${localizeScheduleError(error.message)}`)
       }
     }
 
@@ -1065,7 +1066,7 @@ export default function MasterScheduleCalendar({
                 type="date"
                 value={effectiveStartDate}
                 onChange={(e) => setEffectiveStartDate(e.target.value)}
-                min={new Date().toISOString().split('T')[0]}
+                min={formatLocalDate(new Date())}
                 className="w-full border rounded px-3 py-2"
               />
               {errors.effectiveStartDate && <p className="text-red-500 text-sm mt-1">{errors.effectiveStartDate}</p>}
@@ -1220,7 +1221,7 @@ export default function MasterScheduleCalendar({
               type="date"
               value={validUntil}
               onChange={(e) => setValidUntil(e.target.value)}
-              min={new Date().toISOString().split('T')[0]}
+              min={formatLocalDate(new Date())}
               className="w-full border rounded px-3 py-2"
             />
             {errors.validUntil && <p className="text-red-500 text-sm mt-1">{errors.validUntil}</p>}
@@ -1706,7 +1707,7 @@ export default function MasterScheduleCalendar({
                   const isTodayCol = isSameCalendarDay(day.date, todayRef)
                   return (
                   <th
-                    key={day.date.toISOString().split('T')[0]}
+                    key={formatLocalDate(day.date)}
                     className={`text-center px-2 py-1 text-sm font-semibold text-gray-700 ${isTodayCol ? 'bg-green-50 ring-1 ring-inset ring-green-500/40' : ''}`}
                     style={{ transition: 'background-color 0.2s', width: '160px' }}
                   >
@@ -1743,11 +1744,11 @@ export default function MasterScheduleCalendar({
                         title={!isLg ? 'Нажмите — выделить день; удерживайте — настройки дня' : undefined}
                         onMouseEnter={(e) => { e.currentTarget.closest('th').style.backgroundColor = '#DFF5EC' }}
                         onMouseLeave={(e) => { e.currentTarget.closest('th').style.backgroundColor = '' }}
-                        onClick={handleDayLabelClick(day.date.toISOString().split('T')[0])}
+                        onClick={handleDayLabelClick(formatLocalDate(day.date))}
                         onKeyDown={(e) => {
                           if (e.key === 'Enter' || e.key === ' ') {
                             e.preventDefault()
-                            handleDayLabelClick(day.date.toISOString().split('T')[0])(e)
+                            handleDayLabelClick(formatLocalDate(day.date))(e)
                           }
                         }}
                       >
@@ -1778,7 +1779,7 @@ export default function MasterScheduleCalendar({
                     const hasConflict = slotData?.has_conflict || false
                     const isFrozen = !isIosRestrictedContext && (slotData?.is_frozen || false)
                     const isSelected = selected.has(slotKey)
-                    const timeIndex = hour * 6 + (minute / 10)
+                    const timeIndex = hour * 2 + (minute / 30)
                     const slotBookings = getBookingsForSlot(day.date, hour, minute)
                     
                     // Определяем цвет ячейки

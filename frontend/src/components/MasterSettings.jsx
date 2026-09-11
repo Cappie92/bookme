@@ -80,7 +80,7 @@ export default function MasterSettings({
 }) {
   const { isIosAppWebSession } = useAuth()
   const isDemoMode = typeof window !== 'undefined' && localStorage.getItem('demo_mode') === '1'
-  const canCustomizeDomainEffective = isDemoMode || canCustomizeDomain || isIosAppWebSession
+  const canCustomizeDomainEffective = !isIosAppWebSession && (isDemoMode || canCustomizeDomain)
   const hasExtendedStatsEffective = isDemoMode || hasExtendedStats
   
   const [profile, setProfile] = useState(null)
@@ -208,7 +208,7 @@ export default function MasterSettings({
       })
       setWebsiteSettingsChanged(false)
       setPhotoFile(null)
-      await loadPaymentSettings()
+      if (!isIosAppWebSession) await loadPaymentSettings()
     } catch {
       setError('Ошибка сети')
     } finally {
@@ -303,6 +303,7 @@ export default function MasterSettings({
         'payment_advance',
       ]
       workKeys.forEach(key => {
+        if (isIosAppWebSession && (key === 'payment_on_visit' || key === 'payment_advance')) return
         const v = form[key]
         if (v === undefined || v === '') return
         if ((key === 'city' || key === 'timezone') && !String(v).trim()) return
@@ -658,17 +659,13 @@ export default function MasterSettings({
   }
 
   const handleSaveWebsiteSettings = async () => {
+    if (!canCustomizeDomainEffective) return
     setLoading(true)
     setError('')
     setSuccess('')
     try {
       let res
-      if (isIosAppWebSession) {
-        res = await apiFetch('/api/master/ios-web/domain', {
-          method: 'PUT',
-          body: JSON.stringify({ domain: websiteSettings.domain || '' }),
-        })
-      } else {
+      {
         const formData = new FormData()
         formData.append('background_color', websiteSettings.background_color || '#ffffff')
         formData.append('site_description', websiteSettings.site_description || '')
@@ -858,7 +855,7 @@ export default function MasterSettings({
       {success && <div className="mb-3 rounded-[11px] border border-green-200 bg-green-50 p-3 text-sm text-green-800">{success}</div>}
       {error && <div className="mb-3 rounded-[11px] border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
       {emailChangeInfo && (
-        <div className="mb-3 rounded-[11px] border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
+        <div className="mb-3 rounded-[11px] border border-[#4CAF50]/25 bg-[#E8F5E9] p-3 text-sm text-[#2f7d32]">
           {emailChangeInfo}
         </div>
       )}
@@ -1190,6 +1187,7 @@ export default function MasterSettings({
                     Подтверждение будущих записей до визита включено вместе с ручным режимом
                   </div>
                 )}
+                {!isIosAppWebSession && <>
                 <div className="work-item flex items-start justify-between gap-3 rounded-[12px] border border-[#E7E2DF]/85 bg-[#FAFAF8] px-3 py-2.5">
                   <span className="text-sm font-medium text-[#2D2D2D]">Оплата при визите</span>
                   <span className={profile.master.payment_on_visit !== false ? workPillGreen : workPillNeutral}>
@@ -1202,6 +1200,7 @@ export default function MasterSettings({
                     {profile.master.payment_advance ? 'Да' : 'Нет'}
                   </span>
                 </div>
+                </>}
               </div>
 
               <div className="panel-actions mt-4">
@@ -1286,6 +1285,7 @@ export default function MasterSettings({
                   </div>
                 </div>
 
+                {!isIosAppWebSession && (
                 <div className="border-t border-[#E7E2DF]/80 pt-4">
                   <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-[#6B6B6B]">Способы оплаты</h3>
                   <PaymentMethodSelector
@@ -1313,6 +1313,7 @@ export default function MasterSettings({
                     </div>
                   </div>
                 </div>
+                )}
               </div>
               
               <div className="panel-actions mt-5 flex flex-col gap-2 sm:flex-row">

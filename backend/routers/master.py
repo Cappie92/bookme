@@ -783,32 +783,9 @@ def update_ios_web_master_domain(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ) -> Any:
-    """Operational domain editor available only to a server-trusted iOS handoff session."""
-    if getattr(current_user, "web_session_origin", None) != "ios_app":
-        raise HTTPException(status_code=403, detail="iOS web handoff session required")
+    """Retired capability: iOS handoff must not unlock paid domain customization."""
+    raise HTTPException(status_code=403, detail="Изменение адреса недоступно в этой сессии")
 
-    master = db.query(Master).filter(Master.user_id == current_user.id).first()
-    if not master:
-        raise HTTPException(status_code=404, detail="Профиль мастера не найден")
-    if not master.can_work_independently:
-        raise HTTPException(status_code=400, detail="Публичная страница мастера не активна")
-
-    from utils.base62 import (
-        is_domain_unique,
-        validate_custom_master_domain,
-    )
-
-    try:
-        domain = validate_custom_master_domain(body.domain)
-    except ValueError as error:
-        raise HTTPException(status_code=400, detail=str(error)) from error
-
-    if not is_domain_unique(domain, db, exclude_master_id=master.id):
-        raise HTTPException(status_code=400, detail="Домен уже занят другим мастером")
-
-    master.domain = domain
-    db.commit()
-    return {"domain": master.domain}
 
 
 @router.get("/subscription/features")
@@ -1122,6 +1099,8 @@ async def update_master_profile(
             master.domain = generate_unique_domain(master.id, db)
         # Если domain указан явно в запросе, проверяем доступ к функции изменения домена
         elif domain is not None and domain != master.domain:
+            if getattr(current_user, "web_session_origin", None) == "ios_app":
+                raise HTTPException(status_code=403, detail="Изменение адреса недоступно в этой сессии")
             from utils.subscription_features import can_customize_domain
             from fastapi import status
             
@@ -2458,16 +2437,16 @@ def delete_master_category(
     if not category:
         raise HTTPException(status_code=404, detail="Категория не найдена")
     
-    # Удаляем все услуги в этой категории
+    # Категория — только группировка: услуги и ссылки записей сохраняются.
     services = db.query(MasterService).filter(MasterService.category_id == category_id).all()
     for service in services:
-        db.delete(service)
+        service.category_id = None
     
     # Удаляем саму категорию
     db.delete(category)
     db.commit()
     
-    return {"message": "Категория и все связанные услуги успешно удалены"}
+    return {"message": "Категория удалена, услуги сохранены без категории"}
 
 # Управление услугами мастера
 @router.get("/services", response_model=List[MasterServiceOut])

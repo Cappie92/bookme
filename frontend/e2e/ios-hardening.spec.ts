@@ -2,6 +2,318 @@ import { test, expect, type Page } from '@playwright/test'
 
 const forbidden = /pricing-catalog|subscription-plans|subscription|balance|payment\/init|loyalty|invitations/
 const commerceLinks = 'a[href="/pricing"], a[href="/master/tariff"], a[href="/master/subscription/plans"]'
+
+for (const path of ['/master', '/master?tab=tariff', '/pricing', '/master/subscription/plans', '/payment/success', '/payment/failed']) {
+  test(`integration demo ${path}: readonly cabinet never opens purchase UI`, async ({ page }) => {
+    const evidence = await fixture(page, { origin: null })
+    await page.route('**/api/auth/users/me', route => route.fulfill({
+      json: { ...user(null, 'Paid'), is_demo_session: true },
+    }))
+    await page.goto(path)
+    await expect(page.getByText('Демо-режим', { exact: true })).toBeVisible()
+    await expect(page.getByRole('button', { name: /Продлить|Улучшить тариф|Оплатить|Купить/ })).toHaveCount(0)
+    await expect(page.locator('[data-testid="subscription-modal"]')).toHaveCount(0)
+    expect(evidence.requests.filter(url => /payment\/init|payments\/.*init/.test(url))).toEqual([])
+    expect(evidence.errors).toEqual([])
+  })
+}
+
+for (const plan of ['Free', 'Paid', 'AlwaysFree']) {
+  test(`stabilization ios_app ${plan}: settings never mount domain editor/payment controls`, async ({ page }) => {
+    const evidence = await fixture(page, { plan })
+    await page.route('**/api/master/settings', route => route.fulfill({ json: {
+      user: user('ios_app', plan), master: {
+        domain: 'fixture', city: 'Москва', timezone: 'Europe/Moscow', can_work_independently: true,
+        bio: 'Fixture', auto_confirm_bookings: false, payment_on_visit: true, payment_advance: true,
+      },
+    } }))
+    await page.goto('/master?tab=settings&section=public-page')
+    await expect(page.getByText('Ссылка на страницу записи', { exact: true })).toBeVisible()
+    await expect(page.getByTestId('settings-master-domain-input')).toHaveCount(0)
+    await expect(page.getByTestId('settings-save-domain-inline')).toHaveCount(0)
+    await page.getByRole('button', { name: 'Редактировать настройки', exact: true }).click()
+    await expect(page.getByText('Способы оплаты', { exact: true })).toHaveCount(0)
+    await expect(page.getByText(/Оплата при визите|Предоплата|оплата через систему DeDato/)).toHaveCount(0)
+    const saved = page.waitForRequest(request =>
+      new URL(request.url()).pathname === '/api/master/profile' && request.method() === 'PUT')
+    await page.getByTestId('settings-save').click()
+    const body = (await saved).postData() || ''
+    expect(body).toContain('name="timezone"')
+    expect(body).not.toMatch(/payment_on_visit|payment_advance|prepayment|robokassa/i)
+    await expect(page.getByTestId('settings-edit')).toBeVisible()
+    expect(evidence.requests.filter(url => /payment-settings|ios-web\/domain/.test(url))).toEqual([])
+    expect(evidence.errors).toEqual([])
+  })
+}
+
+test('stabilization ordinary web retains payment settings and green information text', async ({ page }) => {
+  const evidence = await fixture(page, { origin: null })
+  await page.goto('/master?tab=settings')
+  await page.getByRole('button', { name: 'Редактировать настройки', exact: true }).click()
+  await expect(page.getByText('Онлайн оплата через систему DeDato', { exact: true })).toBeVisible()
+  const info = page.getByText('Предоплата и её контроль осуществляются мастером вне платформы', { exact: true })
+  await expect(info).toBeVisible()
+  await expect(info.locator('xpath=ancestor::div[contains(@class,"rounded-lg")][1]')).toHaveClass(/bg-\[#E8F5E9\]/)
+  expect(evidence.requests.some(url => url.includes('payment-settings'))).toBe(true)
+  expect(evidence.errors).toEqual([])
+})
+
+for (const kind of ['category', 'service', 'failure']) {
+  test(`stabilization web delete ${kind}: no React hook crash, refetch without reload`, async ({ page }) => {
+    const evidence = await fixture(page)
+    let categories = [{ id: 8, name: 'Category X' }]
+    let services: any[] = [{ id: 9, category_id: 8, name: 'Preserved service', price: 100, duration: 30 }]
+    const deletions: string[] = []
+    await page.route(/\/api\/master\/(categories|services)(\/\d+)?$/, async route => {
+      const path = new URL(route.request().url()).pathname
+      if (route.request().method() === 'DELETE') {
+        deletions.push(path)
+        if (kind === 'failure') return route.fulfill({ status: 500, json: { detail: 'Local failure' } })
+        if (path.includes('/categories/')) { categories = []; services = services.map(s => ({ ...s, category_id: null })) }
+        else services = []
+        return route.fulfill({ json: { message: 'OK' } })
+      }
+      return route.fulfill({ json: path.endsWith('categories') ? categories : services })
+    })
+    await page.goto('/master?tab=services')
+    await expect(page.getByText('Preserved service', { exact: true })).toBeVisible()
+    await page.getByRole('button', { name: 'Удалить', exact: true }).nth(kind === 'service' ? 1 : 0).click()
+    expect(evidence.errors).toEqual([])
+    const modal = page.getByRole('heading', { name: kind === 'service' ? 'Удалить услугу' : 'Удалить категорию', exact: true }).locator('..')
+    await modal.getByRole('button', { name: 'Удалить', exact: true }).click()
+    if (kind === 'failure') {
+      await expect(page.getByRole('alert')).toHaveText('Не удалось удалить. Попробуйте ещё раз.')
+      await modal.getByRole('button', { name: 'Отмена', exact: true }).click()
+    } else if (kind === 'category') {
+      await expect(page.getByRole('heading', { name: 'Без категории', exact: true })).toBeVisible()
+      await expect(page.getByText('Preserved service', { exact: true })).toBeVisible()
+    } else await expect(page.getByText('Preserved service', { exact: true })).toHaveCount(0)
+    await expect(page.getByRole('heading', { name: 'Мои услуги', exact: true })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Создать услугу', exact: true })).toBeEnabled()
+    expect(deletions).toHaveLength(1)
+    expect(evidence.errors).toEqual([])
+  })
+}
+
+async function serviceEditorFixture(page: Page, categoryId: number | null = null, empty = false) {
+  const evidence = await fixture(page, { origin: null })
+  const state = {
+    categories: empty ? [] : [{ id: 8, name: 'Category A' }],
+    services: empty ? [] as any[] : [{ id: 9, category_id: categoryId, name: 'Preserved service', price: 100, duration: 30, description: '' }],
+    writes: [] as { method: string, path: string, body: any }[],
+    failSave: false,
+  }
+  await page.route(/\/api\/master\/(categories|services)(\/\d+)?$/, async route => {
+    const path = new URL(route.request().url()).pathname
+    const method = route.request().method()
+    const isCategory = path.includes('/categories')
+    if (method === 'GET') return route.fulfill({ json: isCategory ? state.categories : state.services })
+    const body = method === 'DELETE' ? null : route.request().postDataJSON()
+    state.writes.push({ method, path, body })
+    if (method === 'PUT') {
+      if (state.failSave) return route.fulfill({ status: 500, json: { detail: 'Local save failure' } })
+      // Match the existing API: null preserves the current category, not a clear command.
+      state.services = state.services.map(s => ({ ...s, ...body, category_id: body.category_id ?? s.category_id }))
+      return route.fulfill({ json: state.services[0] })
+    }
+    if (method === 'DELETE' && isCategory) {
+      state.categories = []
+      state.services = state.services.map(s => ({ ...s, category_id: null }))
+      return route.fulfill({ json: { message: 'OK' } })
+    }
+    if (method === 'POST' && isCategory) {
+      const category = { id: 8, ...body }
+      state.categories.push(category)
+      return route.fulfill({ json: category })
+    }
+    if (method === 'POST' && !isCategory) {
+      const service = { id: 9, ...body }
+      state.services.push(service)
+      return route.fulfill({ json: service })
+    }
+    return route.fulfill({ status: 405, json: {} })
+  })
+  return { ...evidence, state }
+}
+
+async function openServiceEditor(page: Page) {
+  await page.getByRole('heading', { level: 4 }).first().locator('..')
+    .getByRole('button', { name: 'Редактировать', exact: true }).click()
+  const editor = page.getByRole('heading', { name: 'Изменить услугу', exact: true }).locator('..')
+  // Wait for the edit fixture to populate before clearing an initially empty input.
+  await expect(editor.getByPlaceholder('Введите название услуги')).not.toHaveValue('')
+  return editor
+}
+
+test('integration ordinary web can edit a preserved service without assigning a new category', async ({ page }) => {
+  const evidence = await serviceEditorFixture(page)
+  await page.goto('/master?tab=services')
+  await expect(page.getByRole('heading', { name: 'Без категории', exact: true })).toBeVisible()
+  const editor = await openServiceEditor(page)
+  await expect(editor.locator('select').first()).toHaveValue('')
+  await expect(editor.locator('select option:checked').first()).toHaveText('Без категории')
+  await editor.getByPlaceholder('Введите название услуги').fill('Updated preserved service')
+  await expect(editor.getByRole('button', { name: 'Сохранить', exact: true })).toBeEnabled()
+  await editor.getByRole('button', { name: 'Сохранить', exact: true }).click()
+  await expect(page.getByText('Updated preserved service', { exact: true })).toBeVisible()
+  expect(evidence.state.writes).toEqual([expect.objectContaining({
+    method: 'PUT', path: '/api/master/services/9',
+    body: expect.objectContaining({ name: 'Updated preserved service', category_id: null }),
+  })])
+  await expect(page.getByRole('heading', { name: 'Без категории', exact: true })).toBeVisible()
+  expect(evidence.errors).toEqual([])
+})
+
+for (const categoryId of [null, 8]) {
+  test(`null-category ordinary fields edit retains category ${categoryId}`, async ({ page }) => {
+    const evidence = await serviceEditorFixture(page, categoryId)
+    await page.goto('/master?tab=services')
+    const editor = await openServiceEditor(page)
+    await editor.getByPlaceholder('0', { exact: true }).fill('250')
+    await editor.locator('select').nth(1).selectOption('60')
+    await editor.getByPlaceholder('Описание услуги').fill('Updated description')
+    await editor.getByRole('button', { name: 'Сохранить', exact: true }).click()
+    await expect(editor).toHaveCount(0)
+    expect(evidence.state.services).toEqual([expect.objectContaining({ price: 250, duration: 60, description: 'Updated description', category_id: categoryId })])
+    expect(evidence.state.writes[0].body.category_id).toBe(categoryId)
+    await expect(page.getByText('Preserved service', { exact: true })).toBeVisible()
+    expect(evidence.errors).toEqual([])
+  })
+}
+
+for (const assign of [true, false]) {
+  test(`null-category optional assignment, keep assignment=${assign}`, async ({ page }) => {
+    const evidence = await serviceEditorFixture(page)
+    await page.goto('/master?tab=services')
+    const editor = await openServiceEditor(page)
+    await editor.locator('select').first().selectOption('8')
+    if (!assign) await editor.locator('select').first().selectOption('')
+    await editor.getByRole('button', { name: 'Сохранить', exact: true }).click()
+    await expect(editor).toHaveCount(0)
+    expect(evidence.state.writes[0].body.category_id).toBe(assign ? 8 : null)
+    expect(evidence.state.services[0].category_id).toBe(assign ? 8 : null)
+    await expect(page.getByText('Preserved service', { exact: true })).toBeVisible()
+    expect(evidence.errors).toEqual([])
+  })
+}
+
+for (const field of ['name', 'price']) {
+  test(`null-category required ${field} validation remains enforced`, async ({ page }) => {
+    const evidence = await serviceEditorFixture(page)
+    await page.goto('/master?tab=services')
+    const editor = await openServiceEditor(page)
+    await editor.getByPlaceholder(field === 'name' ? 'Введите название услуги' : '0', { exact: true }).fill('')
+    await expect(editor.getByRole('button', { name: 'Сохранить', exact: true })).toBeDisabled()
+    expect(evidence.state.writes).toEqual([])
+  })
+}
+
+test('null-category backend failure leaves editor usable, retry preserves service', async ({ page }) => {
+  const evidence = await serviceEditorFixture(page)
+  evidence.state.failSave = true
+  await page.goto('/master?tab=services')
+  const editor = await openServiceEditor(page)
+  await editor.getByPlaceholder('Введите название услуги').fill('Retry service')
+  await editor.getByRole('button', { name: 'Сохранить', exact: true }).click()
+  await expect.poll(() => evidence.state.writes.length).toBe(1)
+  await expect(editor.getByRole('button', { name: 'Сохранить', exact: true })).toBeEnabled()
+  expect(evidence.state.services).toEqual([expect.objectContaining({ name: 'Preserved service', category_id: null })])
+  evidence.state.failSave = false
+  await editor.getByRole('button', { name: 'Сохранить', exact: true }).click()
+  await expect(editor).toHaveCount(0)
+  await expect(page.getByText('Retry service', { exact: true })).toBeVisible()
+  expect(evidence.state.services).toHaveLength(1)
+  expect(evidence.state.services[0].category_id).toBeNull()
+  expect(evidence.errors).toEqual([])
+})
+
+test('null-category complete create category/service, delete category, edit preserved service', async ({ page }) => {
+  const evidence = await serviceEditorFixture(page, null, true)
+  await page.goto('/master?tab=services')
+  // Creation still requires a category.
+  await page.getByRole('button', { name: 'Создать услугу', exact: true }).click()
+  let editor = page.getByRole('heading', { name: 'Создать услугу', exact: true }).locator('..')
+  await editor.getByPlaceholder('Введите название услуги').fill('Created service')
+  await editor.getByPlaceholder('0', { exact: true }).fill('100')
+  await expect(editor.getByRole('button', { name: 'Создать', exact: true }).last()).toBeDisabled()
+  await expect(editor.locator('select').first()).toHaveAttribute('required', '')
+  await editor.getByRole('button', { name: 'Отмена', exact: true }).click()
+  await page.getByRole('button', { name: 'Создать категорию', exact: true }).click()
+  const categoryEditor = page.getByRole('heading', { name: 'Создать категорию', exact: true }).locator('..')
+  await categoryEditor.getByPlaceholder('Введите название категории').fill('Category A')
+  await categoryEditor.getByRole('button', { name: 'Создать', exact: true }).click()
+  await expect(categoryEditor).toHaveCount(0)
+  await page.getByRole('button', { name: 'Создать услугу', exact: true }).click()
+  editor = page.getByRole('heading', { name: 'Создать услугу', exact: true }).locator('..')
+  await editor.getByPlaceholder('Введите название услуги').fill('Created service')
+  await editor.getByPlaceholder('0', { exact: true }).fill('100')
+  await editor.getByRole('button', { name: 'Создать', exact: true }).last().click()
+  await expect(page.getByText('Created service', { exact: true })).toBeVisible()
+  expect(evidence.state.services[0].category_id).toBe(8)
+  await page.getByRole('button', { name: 'Удалить', exact: true }).first().click()
+  const confirmation = page.getByRole('heading', { name: 'Удалить категорию', exact: true }).locator('..')
+  await confirmation.getByRole('button', { name: 'Удалить', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Без категории', exact: true })).toBeVisible()
+  expect(evidence.state.categories).toEqual([])
+  editor = await openServiceEditor(page)
+  await editor.getByPlaceholder('Введите название услуги').fill('Edited after category deletion')
+  await editor.getByRole('button', { name: 'Сохранить', exact: true }).click()
+  await expect(page.getByText('Edited after category deletion', { exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Без категории', exact: true })).toBeVisible()
+  expect(evidence.state.services).toEqual([expect.objectContaining({ id: 9, category_id: null })])
+  expect(evidence.state.writes.map(w => w.method)).toEqual(['POST', 'POST', 'DELETE', 'PUT'])
+  expect(evidence.state.writes[3].body.category_id).toBeNull()
+  expect(evidence.errors).toEqual([])
+})
+
+test('stabilization pending first load survives settings/request race without tab roundtrip', async ({ page }) => {
+  const evidence = await fixture(page, { origin: null })
+  const held: (() => Promise<void>)[] = []
+  let filteredCalls = 0
+  await page.route('**/api/master/past-appointments?*', async route => {
+    const url = new URL(route.request().url())
+    const status = url.searchParams.get('status')
+    const payload = { appointments: status === 'created' ? [{
+      id: 99, date: '2026-01-01', time: '10:00', status: 'created',
+      client_name: 'Pending fixture client', service_name: 'Pending fixture service',
+      start_time: '2026-01-01T10:00:00', end_time: '2026-01-01T11:00:00',
+    }] : [], total: status === 'created' ? 19 : 0, pages: 1 }
+    const fulfill = () => route.fulfill({ json: payload })
+    if (status && ++filteredCalls <= 3) { held.push(fulfill); return }
+    await fulfill()
+  })
+  await page.goto('/master')
+  await expect.poll(() => filteredCalls).toBeGreaterThan(3)
+  // The first requests captured master=null; complete them last.
+  await Promise.all(held.map(fulfill => fulfill()))
+  await page.waitForLoadState('networkidle')
+  await page.getByRole('tab', { name: /Ожидают/ }).filter({ visible: true }).first().click()
+  await expect(page.getByText('Pending fixture client', { exact: true }).filter({ visible: true }).first()).toBeVisible()
+  expect(evidence.errors).toEqual([])
+})
+
+for (const timezoneId of ['UTC', 'Europe/Moscow']) {
+  test.describe(`stabilization browser date ${timezoneId}`, () => {
+    test.use({ timezoneId })
+    test('Friday selection sends only Friday; no past Sunday, error dates localized', async ({ page }) => {
+      const evidence = await fixture(page)
+      await page.clock.setFixedTime(new Date('2026-09-10T21:15:00Z'))
+      const payloads: any[] = []
+      await page.route('**/api/master/schedule/day', route => {
+        payloads.push(route.request().postDataJSON())
+        return route.fulfill({ status: 400, json: { detail: 'Дата 2026-09-06 уже прошла.' } })
+      })
+      await page.goto('/master?tab=schedule')
+      const cell = page.locator('#schedule-table tbody tr').nth(16).locator('td').nth(5)
+      await cell.click()
+      await page.getByRole('button', { name: 'Установить рабочее время', exact: true }).click()
+      await expect.poll(() => payloads.length).toBe(1)
+      expect(payloads[0]).toEqual({ schedule_date: '2026-09-11', open_slots: [{ hour: 8, minute: 0 }] })
+      await expect(page.getByText('Дата 06.09.2026 уже прошла.', { exact: true })).toBeVisible()
+      expect(evidence.errors).toEqual([])
+    })
+  })
+}
 const user = (origin: string | null, plan = 'Free') => ({
   id: 1, role: 'master', full_name: 'Fixture Master', web_session_origin: origin,
   phone: '+79990000000', is_phone_verified: true,

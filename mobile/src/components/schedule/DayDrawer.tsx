@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -11,6 +11,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { parseLocalDate, localizeScheduleError } from '@src/utils/date';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   Booking,
@@ -128,8 +129,8 @@ function openSlotsPayload(keys: Set<string>): Array<{ hour: number; minute: numb
 function getApiErrorMessage(err: unknown): string {
   const ax = err as { response?: { data?: { detail?: string } }; message?: string };
   const d = ax?.response?.data?.detail;
-  if (typeof d === 'string') return d;
-  return ax?.message || 'Неизвестная ошибка';
+  if (typeof d === 'string') return localizeScheduleError(d);
+  return localizeScheduleError(ax?.message || 'Неизвестная ошибка');
 }
 
 export function DayDrawer({
@@ -146,7 +147,7 @@ export function DayDrawer({
   const insets = useSafeAreaInsets();
   const sheetBottomPadding = Math.max(insets.bottom, 12) + 16;
   const [cancelSheetBookingId, setCancelSheetBookingId] = useState<number | null>(null);
-  const [noteSheetBooking, setNoteSheetBooking] = useState<Booking | null>(null);
+  const [noteSheetBooking, setNoteSheetBooking] = useState<React.ComponentProps<typeof BookingCardCompact>['booking'] | null>(null);
   const [saving, setSaving] = useState(false);
   const [closePickerVisible, setClosePickerVisible] = useState(false);
   /** Ключи слотов, которые пользователь хочет закрыть */
@@ -157,7 +158,13 @@ export function DayDrawer({
   const [rangeEndH, setRangeEndH] = useState(18);
   const [rangeEndM, setRangeEndM] = useState(0);
 
-  const dateObj = new Date(date);
+  useEffect(() => {
+    setOpenRangeVisible(false);
+    setClosePickerVisible(false);
+    setKeysToClose(new Set());
+  }, [visible, date]);
+
+  const dateObj = parseLocalDate(date);
 
   const handleConfirm = async (bookingId: number, booking: Booking) => {
     const master = masterSettings?.master ?? null;
@@ -304,7 +311,11 @@ export function DayDrawer({
         visible={visible}
         transparent
         animationType="slide"
-        onRequestClose={onClose}
+        onRequestClose={() => {
+          if (openRangeVisible) setOpenRangeVisible(false);
+          else if (closePickerVisible) setClosePickerVisible(false);
+          else onClose();
+        }}
         statusBarTranslucent={true}
         presentationStyle="overFullScreen"
       >
@@ -415,9 +426,8 @@ export function DayDrawer({
             </SafeAreaView>
           </View>
         </View>
-      </Modal>
-
-      <Modal visible={openRangeVisible} transparent animationType="fade" onRequestClose={() => setOpenRangeVisible(false)}>
+      {/* One native presenter: sibling RN Modals cannot reliably stack on iOS. */}
+      {openRangeVisible && <View style={StyleSheet.absoluteFill} testID="open-slot-picker">
         <View style={styles.pickerOverlay}>
           <View style={[styles.pickerCard, styles.rangeCard]}>
             <Text style={styles.pickerTitle}>Интервал доступности</Text>
@@ -492,9 +502,9 @@ export function DayDrawer({
             </View>
           </View>
         </View>
-      </Modal>
+      </View>}
 
-      <Modal visible={closePickerVisible} transparent animationType="fade" onRequestClose={() => setClosePickerVisible(false)}>
+      {closePickerVisible && <View style={StyleSheet.absoluteFill} testID="close-slot-picker">
         <View style={styles.pickerOverlay}>
           <View style={styles.pickerCard}>
             <Text style={styles.pickerTitle}>Закрыть свободные слоты</Text>
@@ -528,6 +538,7 @@ export function DayDrawer({
             </View>
           </View>
         </View>
+      </View>}
       </Modal>
 
       <NoteSheet visible={noteSheetBooking !== null} onClose={() => setNoteSheetBooking(null)} content={noteSheetBooking?.client_note} />

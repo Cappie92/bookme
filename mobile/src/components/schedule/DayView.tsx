@@ -1,5 +1,7 @@
+import { formatLocalDate, parseLocalDate } from '@src/utils/date';
 import React, { useState, useMemo, useEffect, type ReactElement } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Pressable } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Pressable, Modal } from 'react-native';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { Ionicons } from '@expo/vector-icons';
 import { ScheduleWeek, Booking, ScheduleSlot, MasterSettings } from '@src/services/api/master';
 import { DayDrawer } from './DayDrawer';
@@ -13,7 +15,7 @@ interface DayViewProps {
   masterSettings?: MasterSettings | null;
   /** Обновить данные после действий в DayDrawer */
   onScheduleUpdated?: () => void;
-  refreshControl?: ReactElement;
+  refreshControl?: React.ComponentProps<typeof ScrollView>['refreshControl'];
   hasExtendedStats?: boolean;
 }
 
@@ -37,6 +39,8 @@ export function DayView({
 }: DayViewProps) {
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [dayDrawerVisible, setDayDrawerVisible] = useState(false);
+  const [calendarVisible, setCalendarVisible] = useState(false);
+  const [calendarDate, setCalendarDate] = useState(new Date());
 
   // Вычисляем даты текущей недели
   const weekDates = useMemo(() => {
@@ -58,7 +62,7 @@ export function DayView({
   const slotsByDay = useMemo(() => {
     const grouped: { [date: string]: ScheduleSlot[] } = {};
     weekDates.forEach((date) => {
-      const dateStr = date.toISOString().split('T')[0];
+      const dateStr = formatLocalDate(date);
       grouped[dateStr] = schedule.slots.filter(
         (slot) => (slot.date || slot.schedule_date) === dateStr
       );
@@ -70,9 +74,9 @@ export function DayView({
   const bookingsByDay = useMemo(() => {
     const grouped: { [date: string]: Booking[] } = {};
     weekDates.forEach((date) => {
-      const dateStr = date.toISOString().split('T')[0];
+      const dateStr = formatLocalDate(date);
       grouped[dateStr] = bookings.filter((booking) => {
-        const bookingDate = new Date(booking.start_time).toISOString().split('T')[0];
+        const bookingDate = formatLocalDate(new Date(booking.start_time));
         return bookingDate === dateStr;
       });
     });
@@ -82,7 +86,7 @@ export function DayView({
   // Находим начальный день: сегодня, если доступен для записи, иначе ближайший рабочий день в будущем
   const getInitialDate = useMemo(() => {
     const today = new Date();
-    const todayStr = today.toISOString().split('T')[0];
+    const todayStr = formatLocalDate(today);
     
     // Проверяем, есть ли рабочие слоты сегодня
     const todaySlots = slotsByDay[todayStr] || [];
@@ -96,7 +100,7 @@ export function DayView({
     for (let i = 0; i < 365; i++) {
       const date = new Date(today);
       date.setDate(today.getDate() + i + 1);
-      const dateStr = date.toISOString().split('T')[0];
+      const dateStr = formatLocalDate(date);
       
       // Если день в текущей неделе, проверяем слоты из schedule
       if (slotsByDay[dateStr]) {
@@ -120,7 +124,7 @@ export function DayView({
 
   // Текущая дата для отображения
   const currentDate = selectedDate || getInitialDate;
-  const currentDateObj = new Date(currentDate);
+  const currentDateObj = parseLocalDate(currentDate);
   
   // Получаем слоты для текущего дня
   const daySlots = useMemo(() => {
@@ -192,24 +196,36 @@ export function DayView({
   const handlePrevDay = () => {
     const date = new Date(currentDateObj);
     date.setDate(date.getDate() - 1);
-    setSelectedDate(date.toISOString().split('T')[0]);
+    setSelectedDate(formatLocalDate(date));
   };
 
   const handleNextDay = () => {
     const date = new Date(currentDateObj);
     date.setDate(date.getDate() + 1);
-    setSelectedDate(date.toISOString().split('T')[0]);
+    setSelectedDate(formatLocalDate(date));
   };
 
   const handleToday = () => {
     const today = new Date();
-    setSelectedDate(today.toISOString().split('T')[0]);
+    setSelectedDate(formatLocalDate(today));
   };
 
   const handleCalendar = () => {
-    // TODO: Открыть календарь для выбора даты
-    // Пока просто переключаем на сегодня
-    handleToday();
+    setCalendarDate(currentDateObj);
+    setCalendarVisible(true);
+  };
+
+  const selectCalendarDate = () => {
+    setSelectedDate(formatLocalDate(calendarDate));
+    // Compare local Monday boundaries; rounding avoids DST hour differences.
+    const monday = (d: Date) => {
+      const result = new Date(d);
+      result.setHours(0, 0, 0, 0);
+      result.setDate(result.getDate() - ((result.getDay() + 6) % 7));
+      return result;
+    };
+    onWeekChange(Math.round((monday(calendarDate).getTime() - monday(new Date()).getTime()) / 604800000));
+    setCalendarVisible(false);
   };
 
   // Форматируем дату для заголовка
@@ -251,7 +267,7 @@ export function DayView({
           >
             <Ionicons name="chevron-forward" size={26} color="#333" />
           </Pressable>
-          <TouchableOpacity onPress={handleCalendar} style={styles.calendarButton} accessibilityLabel="Календарь, перейти на сегодня">
+          <TouchableOpacity onPress={handleCalendar} style={styles.calendarButton} accessibilityLabel="Календарь, выбрать дату">
             <Ionicons name="calendar-outline" size={22} color="#333" />
           </TouchableOpacity>
         </View>
@@ -334,6 +350,23 @@ export function DayView({
         })}
       </ScrollView>
 
+      <Modal visible={calendarVisible} transparent animationType="fade" onRequestClose={() => setCalendarVisible(false)}>
+        <View style={{ flex: 1, justifyContent: 'center', padding: 20, backgroundColor: 'rgba(0,0,0,0.45)' }}>
+          <View style={{ backgroundColor: '#fff', borderRadius: 12, padding: 16 }}>
+            <DateTimePicker value={calendarDate} mode="date" display="spinner" locale="ru-RU"
+              onChange={(event, date) => {
+                if (event.type === 'dismissed') setCalendarVisible(false);
+                else if (date) setCalendarDate(date);
+              }} />
+            <TouchableOpacity onPress={selectCalendarDate} accessibilityLabel="Выбрать дату">
+              <Text>Выбрать дату</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setCalendarVisible(false)} accessibilityLabel="Отмена выбора даты">
+              <Text>Отмена</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
       <DayDrawer
         visible={dayDrawerVisible}
         date={currentDate}

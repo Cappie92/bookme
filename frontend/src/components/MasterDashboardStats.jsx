@@ -141,7 +141,7 @@ export default function MasterDashboardStats({
   const [desktopFuturePreview, setDesktopFuturePreview] = useState([]);
   const [desktopFutureTotal, setDesktopFutureTotal] = useState(0);
   const [desktopCancelledPreview, setDesktopCancelledPreview] = useState([]);
-  const [desktopPastPendingPreview, setDesktopPastPendingPreview] = useState([]);
+  const [desktopPastPendingRows, setDesktopPastPendingRows] = useState([]);
   const [desktopPastPendingTotal, setDesktopPastPendingTotal] = useState(0);
   const [servicesStatsTab, setServicesStatsTab] = useState('bookings'); // 'bookings' или 'earnings'
   const [cancelBookingId, setCancelBookingId] = useState(null);
@@ -149,6 +149,11 @@ export default function MasterDashboardStats({
   /** Для disabled на мобильных карточках во время confirm/cancel (как в AllBookingsModal) */
   const [actionBookingId, setActionBookingId] = useState(null);
   const [masterSettings, setMasterSettings] = useState(null);
+  // Settings arrive independently. Never persist a preview filtered with a stale/null master.
+  const desktopPastPendingPreview = useMemo(
+    () => desktopPastPendingRows.filter(b => canConfirmPostVisit(b, masterSettings?.master ?? null)),
+    [desktopPastPendingRows, masterSettings?.master]
+  );
   const [confirmLoading, setConfirmLoading] = useState(false);
   const [notePopover, setNotePopover] = useState(null);
   // На узком экране графики свёрнуты по умолчанию; на lg+ всегда видны через класс lg:block (без matchMedia).
@@ -309,20 +314,18 @@ export default function MasterDashboardStats({
         ...(Array.isArray(awaiting?.appointments) ? awaiting.appointments : []),
       ];
 
-      const master = masterSettings?.master ?? null;
       const normalized = merge
         .map((b) => ({
           ...b,
           start_time: b.start_time || (b.date && b.time ? `${b.date}T${b.time}:00` : null),
         }))
         .filter((b) => !!b.start_time)
-        .filter((b) => canConfirmPostVisit(b, master))
         .sort((a, b) => new Date(b.start_time || 0) - new Date(a.start_time || 0));
 
-      setDesktopPastPendingPreview(normalized);
+      setDesktopPastPendingRows(normalized);
     } catch (err) {
       console.error('Ошибка загрузки прошедших на подтверждение (desktop totals):', err);
-      setDesktopPastPendingPreview([]);
+      setDesktopPastPendingRows([]);
       setDesktopPastPendingTotal(0);
     }
   };

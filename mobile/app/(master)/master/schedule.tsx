@@ -61,7 +61,9 @@ export default function MasterScheduleScreen() {
   };
 
   useEffect(() => {
-    loadData();
+    // Keep DayView mounted while its chosen week's data reloads.
+    // A full loading screen would discard the date selected in its calendar.
+    loadData({ silent: schedule !== null });
   }, [weekOffset]);
 
   const onPullRefresh = async () => {

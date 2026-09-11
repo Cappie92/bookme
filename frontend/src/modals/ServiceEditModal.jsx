@@ -81,7 +81,7 @@ export default function ServiceEditModal({ service, categories, onSave, onClose,
 
   const handleSubmit = async (e) => {
     e.preventDefault()
-    if (!formData.name.trim() || !formData.category_id || !formData.price || !formData.duration) return
+    if (!formData.name.trim() || (!service && !formData.category_id) || !formData.price || !formData.duration) return
 
     setLoading(true)
     setError('')
@@ -91,7 +91,7 @@ export default function ServiceEditModal({ service, categories, onSave, onClose,
         description: formData.description.trim(),
         duration: parseInt(formData.duration),
         price: parseFloat(formData.price),
-        category_id: parseInt(formData.category_id)
+        category_id: formData.category_id ? parseInt(formData.category_id) : null
       })
     } catch (err) {
       console.error('Ошибка сохранения услуги:', err)
@@ -141,15 +141,18 @@ export default function ServiceEditModal({ service, categories, onSave, onClose,
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              Категория *
+              {service ? 'Категория' : 'Категория *'}
             </label>
             <select
               value={formData.category_id}
               onChange={(e) => handleChange('category_id', e.target.value)}
               className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#4CAF50]"
-              required
+              required={!service}
             >
-              <option value="">Выберите категорию</option>
+              {/* Null preserves an already uncategorized service; the API does not clear an assigned category. */}
+              <option value="" disabled={service?.category_id != null}>
+                {service ? 'Без категории' : 'Выберите категорию'}
+              </option>
               {localCategories.map(category => (
                 <option key={category.id} value={String(category.id)}>
                   {category.name}
@@ -246,7 +249,7 @@ export default function ServiceEditModal({ service, categories, onSave, onClose,
             <button
               type="submit"
               className="px-4 py-2 text-white rounded-md transition-colors disabled:opacity-50 bg-[#4CAF50] hover:bg-[#43a047]"
-              disabled={loading || !formData.name.trim() || !formData.category_id || !formData.price || !formData.duration}
+              disabled={loading || !formData.name.trim() || (!service && !formData.category_id) || !formData.price || !formData.duration}
             >
               {loading ? 'Сохранение...' : (service ? 'Сохранить' : 'Создать')}
             </button>

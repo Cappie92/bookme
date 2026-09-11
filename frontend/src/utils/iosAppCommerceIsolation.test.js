@@ -182,7 +182,8 @@ describe('ios_app operational web editor isolation', () => {
     const settings = source('../components/MasterSettings.jsx')
     expect(dashboard).toContain("requestedSettingsSection === 'public-page'")
     expect(dashboard).toContain('initialPublicPageEditor=')
-    expect(settings).toContain("apiFetch('/api/master/ios-web/domain'")
+    expect(settings).not.toContain("apiFetch('/api/master/ios-web/domain'")
+    expect(settings).toContain('!isIosAppWebSession && (isDemoMode || canCustomizeDomain)')
   })
 
   it('does not reuse native iOS capability policy in web code', () => {

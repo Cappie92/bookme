@@ -29,3 +29,11 @@ export function parseLocalDate(ymd: string): Date {
   return new Date(year, month - 1, day);
 }
 
+/** A schedule date is a local calendar day, never a UTC instant. */
+export function formatLocalDate(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+export function localizeScheduleError(message: string): string {
+  return message.replace(/\b(\d{4})-(\d{2})-(\d{2})\b/g, '$3.$2.$1');
+}

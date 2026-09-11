@@ -49,7 +49,7 @@ import ClientRestrictionsDemo from '../components/ClientRestrictionsDemo'
 import DemoAccessBanner from '../components/DemoAccessBanner'
 import LockedNavItem from '../components/LockedNavItem'
 import { useToast } from '../contexts/ToastContext'
-import { getWeekDates } from '../utils/calendarUtils'
+import { editedScheduleDays, localizeScheduleError } from '../utils/scheduleDates'
 import FreeSlotsShareCardModal from '../components/FreeSlotsShareCardModal'
 import MasterNavTabIcon from '../components/master/MasterNavTabIcon'
 import MasterMobileBottomNav from '../components/master/mobile/MasterMobileBottomNav'
@@ -467,6 +467,7 @@ function ServicesSection() {
       )}
 
       <DeleteConfirmModal
+        preserveServices
         open={!!pendingDelete}
         onClose={() => setPendingDelete(null)}
         onConfirm={handleDeleteConfirmed}
@@ -1506,31 +1507,10 @@ export default function MasterDashboard() {
     const merged = { ...schedule, ...updates }
     setSchedule(merged)
 
-    const weekDates = getWeekDates(currentWeekOffset)
-    const allSlots = []
-
-    for (const dayData of weekDates) {
-      const dateStr = dayData.date.toISOString().split('T')[0]
-      for (let hour = 0; hour < 24; hour++) {
-        for (let minute of [0, 30]) {
-          const key = `${dateStr}_${hour}_${minute}`
-          const slot = merged[key]
-          const currentIsWorking =
-            typeof slot === 'object' && slot !== null
-              ? Boolean(slot.is_working)
-              : Boolean(slot)
-          allSlots.push({
-            schedule_date: dateStr,
-            hour,
-            minute,
-            is_working: currentIsWorking,
-          })
-        }
-      }
-    }
-
     try {
-      await apiPut('/api/master/schedule/weekly', { slots: allSlots })
+      for (const day of editedScheduleDays(schedule, updates)) {
+        await apiPut('/api/master/schedule/day', day)
+      }
       await loadSchedule({ silent: true })
       loadScheduleConflicts()
       checkProfileCompleteness()
@@ -1542,8 +1522,10 @@ export default function MasterDashboard() {
         Array.isArray(detail)
           ? 'Не удалось сохранить расписание. Проверьте данные.'
           : (detail || 'Не удалось сохранить расписание')
-      showToast(msg, 'error')
+      showToast(localizeScheduleError(msg), 'error')
+      // Some edited days may have succeeded; always reconcile with server state.
       setSchedule(prevSchedule)
+      await loadSchedule({ silent: true })
     }
   }
 

@@ -17,6 +17,28 @@ from models import (
 )
 
 
+@pytest.mark.parametrize("weekday_keys", [[str(i)] for i in range(1, 8)] + [["1", "3", "5"]])
+def test_rule_weekday_identity_through_real_database(client, db, master_user_and_profile, weekday_keys):
+    """ISO Mon=1..Sun=7 is already correct; never compensate with a blind shift."""
+    mu, master = master_user_and_profile
+    master_id = master.id
+    login = client.post("/api/auth/login", json={"phone": mu.phone, "password": "testpassword"})
+    headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+    # Fixed future Monday: independent of the test runner's weekday/timezone.
+    response = client.post("/api/master/schedule/rules", headers=headers, json={
+        "type": "weekdays", "effective_start_date": "2030-01-07", "valid_until": "2030-01-13",
+        "weekdays": {key: {"start": "08:00", "end": "18:00"} for key in weekday_keys},
+    })
+    assert response.status_code == 200, response.text
+    slots = db.query(MasterSchedule).filter(MasterSchedule.master_id == master_id).all()
+    assert {str(s.date.isoweekday()) for s in slots} == set(weekday_keys)
+    assert len(slots) == len(weekday_keys) * 20
+    for key in weekday_keys:
+        day_slots = [s for s in slots if str(s.date.isoweekday()) == key]
+        assert min(s.start_time for s in day_slots) == time(8, 0)
+        assert max(s.end_time for s in day_slots) == time(18, 0)
+
+
 @pytest.fixture
 def master_user_and_profile(db):
     mu = User(

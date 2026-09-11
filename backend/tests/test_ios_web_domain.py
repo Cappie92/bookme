@@ -23,19 +23,22 @@ def _ios_headers(client, user, monkeypatch):
     return _headers(tokens)
 
 
-@pytest.mark.parametrize("entitlement", ["free", "paid"])
+@pytest.mark.parametrize("entitlement", ["free", "paid", "always_free"])
 def test_ios_web_domain_update_has_free_paid_parity(
     entitlement, client, db, test_master, monkeypatch
 ):
     master = Master(
         user_id=test_master.id,
         domain=f"old-{entitlement}",
+        timezone="Europe/Moscow",
         can_work_independently=True,
         bio="",
         experience_years=0,
     )
     db.add(master)
-    if entitlement == "paid":
+    if entitlement == "always_free":
+        test_master.is_always_free = True
+    if entitlement in {"paid", "always_free"}:
         plan = SubscriptionPlan(
             name="DomainPaid",
             display_name="Domain Paid",
@@ -44,7 +47,7 @@ def test_ios_web_domain_update_has_free_paid_parity(
             price_3months=1,
             price_6months=1,
             price_12months=1,
-            features={"can_customize_domain": True},
+            features={"service_functions": [6]},
             limits={},
         )
         db.add(plan)
@@ -62,13 +65,24 @@ def test_ios_web_domain_update_has_free_paid_parity(
         ))
     db.commit()
 
+    headers = _ios_headers(client, test_master, monkeypatch)
     response = client.put(
         "/api/master/ios-web/domain",
         json={"domain": f"  fixed-{entitlement}  "},
-        headers=_ios_headers(client, test_master, monkeypatch),
+        headers=headers,
     )
-    assert response.status_code == 200, response.text
-    assert response.json() == {"domain": f"fixed-{entitlement}"}
+    assert response.status_code == 403, response.text
+    legacy = client.put("/api/master/profile", data={"domain": f"fixed-{entitlement}"}, headers=headers)
+    assert legacy.status_code == 403, legacy.text
+    db.expire_all()
+    assert db.query(Master).filter(Master.user_id == test_master.id).one().domain == f"old-{entitlement}"
+
+    # Ordinary web/Android keep their existing entitlement contract.
+    tokens = client.post("/api/auth/login", json={"phone": test_master.phone, "password": "testpassword"})
+    assert tokens.status_code == 200
+    ordinary = client.put("/api/master/profile", data={"domain": f"ordinary-{entitlement}"},
+                          headers=_headers(tokens.json()))
+    assert ordinary.status_code == (403 if entitlement == "free" else 200), ordinary.text
 
 
 def test_ios_web_domain_rejects_reserved_and_duplicate(
@@ -89,7 +103,7 @@ def test_ios_web_domain_rejects_reserved_and_duplicate(
     reserved = client.put(
         "/api/master/ios-web/domain", json={"domain": "pricing"}, headers=headers
     )
-    assert reserved.status_code == 400
+    assert reserved.status_code == 403
 
     db.add(Master(
         user_id=other_user_id,
@@ -102,7 +116,7 @@ def test_ios_web_domain_rejects_reserved_and_duplicate(
     duplicate = client.put(
         "/api/master/ios-web/domain", json={"domain": "occupied-domain"}, headers=headers
     )
-    assert duplicate.status_code == 400
+    assert duplicate.status_code == 403
 
 
 def test_ordinary_free_web_domain_policy_remains_denied(

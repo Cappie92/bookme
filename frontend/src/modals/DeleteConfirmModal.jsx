@@ -6,6 +6,8 @@ export default function DeleteConfirmModal({
   onClose = () => {}, 
   onConfirm = () => {}, 
   category = null,
+  /** Master categories preserve services; legacy salon contract is separate. */
+  preserveServices = false,
   /** @default 'Нет' */
   cancelLabel = 'Нет',
   /** @default 'Да' */
@@ -14,14 +16,17 @@ export default function DeleteConfirmModal({
   variant = 'default',
 }) {
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const { handleBackdropClick, handleMouseDown } = useModal(onClose)
 
   const handleConfirm = async () => {
     setLoading(true)
+    setError('')
     try {
       await onConfirm()
       onClose()
     } catch (err) {
-      console.error('Ошибка удаления:', err)
+      setError('Не удалось удалить. Попробуйте ещё раз.')
     } finally {
       setLoading(false)
     }
@@ -33,9 +38,9 @@ export default function DeleteConfirmModal({
   const title = isService ? 'Удалить услугу' : 'Удалить категорию'
   const message = isService 
     ? `Вы уверены, что хотите удалить услугу "${category.name}"?`
-    : `Вы уверены, что хотите удалить категорию "${category.name}"? Вместе с ней будут удалены все связанные услуги!`
-
-  const { handleBackdropClick, handleMouseDown } = useModal(onClose)
+    : preserveServices
+      ? `Вы уверены, что хотите удалить категорию "${category.name}"? Услуги сохранятся в «Без категории».`
+      : `Вы уверены, что хотите удалить категорию "${category.name}"? Вместе с ней будут удалены все связанные услуги!`
 
   const confirmBtnClass =
     variant === 'danger'
@@ -80,6 +85,7 @@ export default function DeleteConfirmModal({
                 {loading ? 'Удаление...' : confirmLabel}
               </button>
             </div>
+            {error && <p role="alert" className="mt-3 text-sm text-red-700">{error}</p>}
           </div>
         </div>
       </div>

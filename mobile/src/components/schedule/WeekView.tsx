@@ -1,3 +1,4 @@
+import { formatLocalDate } from '@src/utils/date';
 import React, { useState, useMemo, useRef, useEffect, useCallback, memo, type ReactElement } from 'react';
 import {
   View,
@@ -23,7 +24,7 @@ interface WeekViewProps {
   onWeekChange: (offset: number) => void;
   onScheduleUpdated?: () => void | Promise<void>;
   masterSettings?: MasterSettings | null;
-  refreshControl?: ReactElement;
+  refreshControl?: React.ComponentProps<typeof FlatList>['refreshControl'];
   hasExtendedStats?: boolean;
 }
 
@@ -108,7 +109,7 @@ function buildWeeklyOpenSlotsPayload(slots: ScheduleSlot[]) {
   return slots
     .filter((slot) => !!(slot.is_available ?? slot.is_working))
     .map((slot) => {
-      const date = slot.date || slot.schedule_date;
+      const date: unknown = slot.date || slot.schedule_date;
       const hour =
         slot.hour !== undefined ? slot.hour : parseInt((slot.start_time || '0:0').split(':')[0], 10);
       const minute =
@@ -116,13 +117,13 @@ function buildWeeklyOpenSlotsPayload(slots: ScheduleSlot[]) {
 
       let dateStr = date as string;
       if (date instanceof Date) {
-        dateStr = date.toISOString().split('T')[0];
+        dateStr = formatLocalDate(date);
       } else if (typeof date === 'string') {
         const dateMatch = date.match(/^\d{4}-\d{2}-\d{2}/);
         if (!dateMatch) {
           const dateObj = new Date(date);
           if (!isNaN(dateObj.getTime())) {
-            dateStr = dateObj.toISOString().split('T')[0];
+            dateStr = formatLocalDate(dateObj);
           }
         }
       }
@@ -266,7 +267,7 @@ export function WeekView({
   const slotsByDay = useMemo(() => {
     const grouped: { [date: string]: ScheduleSlot[] } = {};
     weekDates.forEach((date) => {
-      const dateStr = date.toISOString().split('T')[0];
+      const dateStr = formatLocalDate(date);
       grouped[dateStr] = localSchedule.slots.filter(
         (slot) => (slot.date || slot.schedule_date) === dateStr
       );
@@ -278,9 +279,9 @@ export function WeekView({
   const bookingsByDay = useMemo(() => {
     const grouped: { [date: string]: Booking[] } = {};
     weekDates.forEach((date) => {
-      const dateStr = date.toISOString().split('T')[0];
+      const dateStr = formatLocalDate(date);
       grouped[dateStr] = bookings.filter((booking) => {
-        const bookingDate = new Date(booking.start_time).toISOString().split('T')[0];
+        const bookingDate = formatLocalDate(new Date(booking.start_time));
         return bookingDate === dateStr;
       });
     });
@@ -288,7 +289,7 @@ export function WeekView({
   }, [bookings, weekDates]);
 
   const weekDateStrings = useMemo(
-    () => weekDates.map((d) => d.toISOString().split('T')[0]),
+    () => weekDates.map((d) => formatLocalDate(d)),
     [weekDates]
   );
 
@@ -460,7 +461,7 @@ export function WeekView({
     // Добавляем все слоты в диапазоне
     const currentDate = new Date(startDate);
     while (currentDate <= endDate) {
-      const dateStr = currentDate.toISOString().split('T')[0];
+      const dateStr = formatLocalDate(currentDate);
       const currentHour = currentDate.getTime() === startDate.getTime() ? startHour : 
                          currentDate.getTime() === endDate.getTime() ? endHour : 
                          START_HOUR;
@@ -489,7 +490,7 @@ export function WeekView({
 
   // Обработка окончания drag
   const handleSlotRelease = () => {
-    if (!isEditMode || !editAction || selectedSlots.size === 0) return;
+    if (!isEditMode || !editAction || editAction === 'clear' || selectedSlots.size === 0) return;
     
     // Применяем действие к выбранным слотам
     applyActionToSelectedSlots(editAction);
@@ -634,7 +635,7 @@ export function WeekView({
   );
 
   const getWeekRowLayout = useCallback(
-    (_: TimeSlotRow[] | null | undefined, index: number) => ({
+    (_: ArrayLike<TimeSlotRow> | null | undefined, index: number) => ({
       length: TIME_SLOT_HEIGHT,
       offset: TIME_SLOT_HEIGHT * index,
       index,
@@ -654,14 +655,14 @@ export function WeekView({
           return isAvailable === true;
         })
         .map(slot => {
-          const date = slot.date || slot.schedule_date;
+          const date: unknown = slot.date || slot.schedule_date;
           const hour = slot.hour !== undefined ? slot.hour : parseInt((slot.start_time || '0:0').split(':')[0]);
           const minute = slot.minute !== undefined ? slot.minute : parseInt((slot.start_time || '0:0').split(':')[1]);
           
           // Убеждаемся, что дата в формате YYYY-MM-DD
-          let dateStr = date;
+          let dateStr = date as string;
           if (date instanceof Date) {
-            dateStr = date.toISOString().split('T')[0];
+            dateStr = formatLocalDate(date);
           } else if (typeof date === 'string') {
             // Проверяем формат даты
             const dateMatch = date.match(/^\d{4}-\d{2}-\d{2}/);
@@ -669,7 +670,7 @@ export function WeekView({
               // Пытаемся преобразовать
               const dateObj = new Date(date);
               if (!isNaN(dateObj.getTime())) {
-                dateStr = dateObj.toISOString().split('T')[0];
+                dateStr = formatLocalDate(dateObj);
               }
             }
           }
@@ -773,10 +774,10 @@ export function WeekView({
           <View style={styles.timeHeaderSpacer} />
           <View style={styles.daysHeaderSticky}>
             {weekDates.map((date, index) => {
-              const dateStr = date.toISOString().split('T')[0];
+              const dateStr = formatLocalDate(date);
               const dayName = date.toLocaleDateString('ru-RU', { weekday: 'short' });
               const dayNumber = date.getDate();
-              const isToday = dateStr === new Date().toISOString().split('T')[0];
+              const isToday = dateStr === formatLocalDate(new Date());
 
               return (
                 <TouchableOpacity
@@ -1126,4 +1127,3 @@ const styles = StyleSheet.create({
     opacity: 0.55,
   },
 });
-
