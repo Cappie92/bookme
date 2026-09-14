@@ -154,6 +154,13 @@ export default ({ config }: ConfigContext): ExpoConfig => {
             'Разрешите сохранение карточки со свободными слотами в галерею.',
         },
       ],
+      [
+        'expo-notifications',
+        {
+          defaultChannel: 'bookings',
+          enableBackgroundRemoteNotifications: false,
+        },
+      ],
     ],
     extra: {
       ...config.extra,

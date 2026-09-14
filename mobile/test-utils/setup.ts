@@ -86,11 +86,19 @@ jest.mock('@react-native-async-storage/async-storage', () => ({
 jest.mock('expo-constants', () => ({
   __esModule: true,
   default: {
-    expoConfig: { version: '1.0.0', ios: { buildNumber: '1' }, android: { versionCode: 1 } },
+    expoConfig: {
+      version: '1.0.0',
+      ios: { buildNumber: '1' },
+      android: { versionCode: 1 },
+      extra: { eas: { projectId: '004c94fb-d208-42c6-9baa-1ad147fd3011' } },
+    },
+    easConfig: { projectId: '004c94fb-d208-42c6-9baa-1ad147fd3011' },
     nativeAppVersion: '1.0.0',
     nativeBuildVersion: '1',
   },
 }));
+
+jest.mock('expo-notifications', () => require('./mocks/expo-notifications.mock'));
 
 jest.mock('@appmetrica/react-native-analytics', () => ({
   __esModule: true,

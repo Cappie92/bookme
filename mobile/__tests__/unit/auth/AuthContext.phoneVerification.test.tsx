@@ -231,6 +231,34 @@ describe('AuthContext phone verification lifecycle', () => {
     expect(getContext().isAuthenticated).toBe(true);
   });
 
+  it('best-effort deactivates push device before logout and ignores DELETE failure', async () => {
+    (apiLogin as jest.Mock).mockResolvedValue(tokens);
+    (getCurrentUser as jest.Mock).mockResolvedValue(user);
+    const SecureStore = require('expo-secure-store') as {
+      getItemAsync: jest.Mock;
+    };
+    SecureStore.getItemAsync.mockResolvedValue('aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee');
+    (apiClient.delete as jest.Mock).mockRejectedValue(new Error('offline'));
+    const getContext = await renderAuthContext();
+
+    await act(async () => {
+      await getContext().login({ phone: user.phone, password: 'password123' });
+    });
+    (readToken as jest.Mock).mockResolvedValue('full-access');
+
+    await act(async () => {
+      await getContext().logout();
+    });
+
+    expect(apiClient.delete).toHaveBeenCalledWith(
+      '/api/push/devices/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
+      expect.objectContaining({
+        headers: { Authorization: 'Bearer full-access' },
+      })
+    );
+    expect(getContext().isAuthenticated).toBe(false);
+  });
+
   it('stores pending state for unverified login without normal tokens', async () => {
     (apiLogin as jest.Mock).mockResolvedValue({
       ...restricted,

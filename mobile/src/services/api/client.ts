@@ -25,6 +25,10 @@ function truncateForDebug(s: string, max: number): string {
   return s.length > max ? `${s.slice(0, max)}…` : s;
 }
 
+function isPushDevicesApiPath(url?: string | null): boolean {
+  return typeof url === 'string' && url.includes('/api/push/devices');
+}
+
 function previewResponseBody(data: unknown): string | undefined {
   if (data === undefined || data === null) return undefined;
   if (typeof data === 'string') return truncateForDebug(data, DEBUG_BODY_PREVIEW_MAX);
@@ -112,6 +116,7 @@ function captureAxiosErrorForMobileDebug(error: AxiosError): void {
   ) {
     return;
   }
+  if (isPushDevicesApiPath(path)) return;
   const is401WithoutToken = status === 401 && !hadToken;
   const silent404Substrings = [
     'master/loyalty/templates',
@@ -270,6 +275,7 @@ apiClient.interceptors.response.use(
       
       const reqUrl = originalRequest.url || '';
       const isAuthMeRequest = reqUrl.includes('auth/users/me');
+      const isPushDevicesRequest = isPushDevicesApiPath(reqUrl);
       
       // Если токена не было, не логируем как ERROR и не очищаем токен
       if (!hadToken) {
@@ -279,7 +285,7 @@ apiClient.interceptors.response.use(
           url: originalRequest.url,
           isAuthMeRequest,
         });
-        if (!isAuthMeRequest) {
+        if (!isAuthMeRequest && !isPushDevicesRequest) {
           notifyInvalidSession();
         }
         if (__DEV__ && env.DEBUG_AUTH) {
@@ -320,8 +326,9 @@ apiClient.interceptors.response.use(
           (url.includes('client/favorites/') && (originalRequest?.method || '').toLowerCase() === 'delete') ||
           isSubscriptionsMyNoSubscription404(status, url, data, originalRequest?.method));
       const isSilentExpectedPromo400 = isExpectedPromoApply400(status, url, data, originalRequest?.method);
+      const isSilentPushDevices = isPushDevicesApiPath(url);
 
-      if (!isSilent404 && !is401WithoutToken && !isSilentExpectedPromo400) {
+      if (!isSilent404 && !is401WithoutToken && !isSilentExpectedPromo400 && !isSilentPushDevices) {
         logger.error('API Error:', { status, message: data?.detail || data?.message || error.message, url });
       }
 
@@ -354,6 +361,8 @@ apiClient.interceptors.response.use(
       const url = originalRequest?.url ?? '';
       const baseURL = apiClient.defaults.baseURL ?? '';
       const isTimeout = (error as any).code === 'ECONNABORTED' || (error.message || '').toLowerCase().includes('timeout');
+      const isSilentPushDevices = isPushDevicesApiPath(url);
+      if (!isSilentPushDevices) {
       let fullUrl = '';
       try {
         fullUrl = axios.getUri({
@@ -382,7 +391,8 @@ apiClient.interceptors.response.use(
       }
       logger.error('❌ [API] NETWORK ERROR (запрос отправлен, но ответа нет):');
       logger.error('❌ [API] Message:', error.message, 'Code:', (error as any).code, 'URL:', originalRequest?.url);
-    } else {
+      }
+    } else if (!isPushDevicesApiPath(originalRequest?.url || '')) {
       logger.error('Request Error:', error.message);
     }
 

@@ -54,6 +54,7 @@ import {
 import { logAuthDiag } from '@src/debug/authDiag';
 import { registerInvalidSessionHandler } from '@src/auth/authSessionBridge';
 import { analytics, AnalyticsEvent } from '@src/services/analytics';
+import { onAuthSessionWillClear } from '@src/services/push/pushAuthBridge';
 
 const GET_USER_TIMEOUT_MS = 8000;
 
@@ -129,6 +130,19 @@ async function clearAllAuthStorage(
     logger.error('clearAllAuthStorage AsyncStorage', e);
   }
   await deleteSecureAuthItems();
+}
+
+/** Best-effort push deactivate while the outgoing token is still readable, then wipe auth storage. */
+async function deactivatePushThenClearAuthStorage(
+  reason?: string,
+  opts?: { preserveLogoutMarker?: boolean }
+): Promise<void> {
+  try {
+    await onAuthSessionWillClear();
+  } catch {
+    /* push must never block logout / session replace */
+  }
+  await clearAllAuthStorage(reason, opts);
 }
 
 async function loadCachedUser(): Promise<User | null> {
@@ -247,7 +261,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       verification_kind: response.verification_kind,
       ...(registrationRole ? { registration_role: registrationRole } : {}),
     };
-    await clearAllAuthStorage('begin_pending_phone_verification');
+    await deactivatePushThenClearAuthStorage('begin_pending_phone_verification');
     setToken(null);
     setUser(null);
     delete apiClient.defaults.headers.common['Authorization'];
@@ -287,7 +301,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         authTrace(
           `[clearAuth] clearAllAuthStorage reason=${reason} preserveLogoutMarker=${reason === 'logout'}`
         );
-        await clearAllAuthStorage(reason, { preserveLogoutMarker: reason === 'logout' });
+        await deactivatePushThenClearAuthStorage(reason, { preserveLogoutMarker: reason === 'logout' });
         if (reason === 'logout') {
           await clearPendingPhoneVerification();
           setPendingPhoneVerificationState(null);
@@ -374,7 +388,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         true,
         '(bootstrap)'
       );
-      await clearAllAuthStorage('fresh_install_orphan_keychain');
+      await deactivatePushThenClearAuthStorage('fresh_install_orphan_keychain');
       await deleteSecureAuthItems();
       await clearPendingPhoneVerification();
       setPendingPhoneVerificationState(null);
@@ -395,7 +409,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           authContextInstanceId: authContextInstanceIdRef.current,
         });
       }
-      await clearAllAuthStorage('logout_marker', { preserveLogoutMarker: false });
+      await deactivatePushThenClearAuthStorage('logout_marker', { preserveLogoutMarker: false });
       await clearPendingPhoneVerification();
       setPendingPhoneVerificationState(null);
       setPendingVerificationNeedsLogin(false);
@@ -570,7 +584,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       authTrace(`[saveToken] clearAllAuthStorage(before_write) next_reason=${reason} new_token_len=${newToken.length}`);
       // Перед записью токена чистим старые auth-ключи (legacy/маркеры/юзер) в одном месте,
       // чтобы не было рассинхрона между Android/iOS из-за остатков в AsyncStorage/SecureStore.
-      await clearAllAuthStorage('before_write');
+      await deactivatePushThenClearAuthStorage('before_write');
       await writeToken(newToken, isLoggingOutRef, reason);
       await writeRefreshToken(response.refresh_token, isLoggingOutRef);
       if (isLoggingOutRef.current) return;
@@ -699,7 +713,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await cancelPendingPhoneVerification();
       return userData;
     } catch (error) {
-      await clearAllAuthStorage('phone_verification_hydration_failed');
+      await deactivatePushThenClearAuthStorage('phone_verification_hydration_failed');
       await clearPendingPhoneVerification();
       setToken(null);
       setUser(null);
@@ -737,7 +751,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     isLoggingOutRef.current = true;
     try {
       await setLogoutMarker('ensureNoTokenOnLogin');
-      await clearAllAuthStorage('ensureNoTokenOnLogin', { preserveLogoutMarker: true });
+      await deactivatePushThenClearAuthStorage('ensureNoTokenOnLogin', { preserveLogoutMarker: true });
       setToken(null);
       setUser(null);
       delete apiClient.defaults.headers.common['Authorization'];

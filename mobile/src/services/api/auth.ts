@@ -105,6 +105,8 @@ export interface User {
   is_phone_verified?: boolean;
   phone_required?: boolean;
   phone_verified?: boolean;
+  /** Server-validated demo session; never infer from phone/name. */
+  is_demo_session?: boolean;
   birth_date?: string;
   created_at: string;
   updated_at: string;

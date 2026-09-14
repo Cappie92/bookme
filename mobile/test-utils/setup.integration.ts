@@ -81,3 +81,5 @@ jest.mock('@react-native-async-storage/async-storage', () => ({
   multiRemove: jest.fn(() => Promise.resolve()),
 }));
 
+jest.mock('expo-notifications', () => require('./mocks/expo-notifications.mock'));
+

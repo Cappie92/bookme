@@ -39,6 +39,7 @@ import { MobileErrorDebugPanel } from '@src/debug/MobileErrorDebugPanel';
 import { authTrace } from '@src/debug/authRuntimeTrace';
 import { analytics, AcquisitionService, isAppMetricaTestEventEnabled } from '@src/services/analytics';
 import { AppleIapLifecycleHost } from '@src/components/subscriptions/AppleIapLifecycleHost';
+import { PushRegistrationHost } from '@src/components/push/PushRegistrationHost';
 
 const FAILSAFE_MS = 8000;
 const DRAFT_TIMEOUT_MS = 2000;
@@ -562,6 +563,7 @@ export default function RootLayout() {
       <AuthProvider>
         <PasswordResetRecoveryProvider>
           <AppleIapLifecycleHost />
+          <PushRegistrationHost />
           <TabBarHeightProvider>
             <AuthGate rootInstanceId={rootInstanceIdRef.current}>
               <Stack screenOptions={{ headerShown: false }}>
