@@ -4,7 +4,7 @@ project: DeDato
 knowledge_class: living
 environment: common
 status: active
-last_verified: 2026-08-31
+last_verified: 2026-09-13
 ---
 
 # Booking
@@ -72,7 +72,7 @@ List helper временно меняет ORM object для формирован
 
 Runtime использует общий `cancelled` и две client cancellation категории. Accounting reasons: `client_requested`, `client_no_show`, `mutual_agreement`, `master_unavailable`. Не все paths записывают initiator/reason: client DELETE очищает loyalty reserve и ставит общий `cancelled` без детализации.
 
-Отмена сохраняет Booking в основных client/accounting flows. Generic `DELETE /api/bookings/{id}` ограничен admin-only hard delete чистой будущей брони; остаточный critical gap касается edit-request mutations и описан в [Debt](booking-scheduling.md#critical-generic-booking-mutation-authorization).
+Отмена сохраняет Booking в основных client/accounting flows. Generic `DELETE /api/bookings/{id}` ограничен admin-only hard delete чистой будущей брони. Object-level write boundary для generic update и edit-request create/accept/reject — `require_booking_actor` / `validate_booking_changes`; знание идентификатора не даёт права записи. Living contract: [Booking API](booking-api.md#7-authorization-boundary).
 
 ### Reschedule
 

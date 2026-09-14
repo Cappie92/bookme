@@ -4,7 +4,7 @@ project: DeDato
 knowledge_class: living
 environment: prod
 status: active
-last_verified: 2026-08-05
+last_verified: 2026-09-13
 ---
 
 # Deployment artifact inventory
@@ -30,14 +30,14 @@ Topology принадлежит [Production topology](production-topology.md), d
 | **HISTORICAL** | Feature-specific, recovery или разовый артефакт прошлого изменения; наличие в repository не делает его текущей процедурой |
 | **UNKNOWN HOST USAGE** | Назначение видно, но repository недостаточно для подтверждения его совместимости с фактической host configuration |
 
-Для обычного production deploy repository-supported entry point — только root workflow `.github/workflows/deploy.yml`. Его supporting boundary состоит из `docker-compose.prod.yml`, `scripts/prod/compose.sh` и `scripts/prod/migrate.sh`. Specialized data и host helpers не являются шагами обычного release. `LEGACY` и `HISTORICAL` не означают доказанный retirement: фактический запуск любого tracked файла на production host остаётся `UNKNOWN`.
+Для обычного production deploy repository workflow `.github/workflows/deploy.yml` остаётся tracked capability. В текущем host-окружении **Compose recreate не является безопасным canonical method**; last successful cutovers used controlled direct container replacement described in [CI/CD](ci-cd.md). Specialized data и host helpers не являются шагами обычного release. `LEGACY` и `HISTORICAL` не означают доказанный retirement: фактический запуск любого tracked файла на production host остаётся `UNKNOWN`, кроме отдельно verified Compose recreate incompatibility below.
 
 ## Inventory summary
 
 | Classification | Count |
 |---|---:|
-| CURRENT PRIMARY | 1 |
-| CURRENT SUPPORTING | 3 |
+| CURRENT PRIMARY | 0 (host cutover is controlled direct replacement; not a tracked script SSOT) |
+| CURRENT SUPPORTING | 4 |
 | SPECIALIZED | 10 |
 | LEGACY | 14 |
 | HISTORICAL | 21 |
@@ -50,7 +50,7 @@ Topology принадлежит [Production topology](production-topology.md), d
 
 | Path | Purpose | Classification | Evidence | Host usage | Risk |
 |---|---|---|---|---|---|
-| `.github/workflows/deploy.yml` | Обычный production delivery на push в `main` или вручную | CURRENT PRIMARY | Root workflow прямо использует current Compose и migration helpers | Trigger и wiring подтверждены; execution history и host result `UNKNOWN` | Нет test gate; services стартуют до Alembic; health shallow |
+| `.github/workflows/deploy.yml` | Repository-defined production delivery workflow | CURRENT SUPPORTING (capability) | Root workflow uses current Compose and migration helpers | Trigger confirmed; last successful host cutover used direct container replacement, not this Compose recreate | Compose recreate is unsafe in the current network/Compose 1.29.2 environment |
 | `docker-compose.prod.yml` | Production service, network и volume definition | CURRENT SUPPORTING | Прямо используется primary workflow и current prod helpers | Workflow-referenced; active host definition `UNKNOWN` | Repository topology может отличаться от active host overrides/state |
 | `scripts/prod/compose.sh` | Compatibility wrapper для двух Compose CLI forms | CURRENT SUPPORTING | Sourced primary workflow и migration helper | Workflow-referenced; active host CLI `UNKNOWN` | Проверяет наличие CLI, но не host topology или version-specific behavior |
 | `scripts/prod/migrate.sh` | Alembic upgrade для database backend container | CURRENT SUPPORTING | Прямо вызывается primary workflow после service start | Workflow-referenced; host DB revision/result `UNKNOWN` | Нет pre-service schema gate или physical-schema verification |

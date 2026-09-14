@@ -4,7 +4,7 @@ project: DeDato
 knowledge_class: living
 environment: common
 status: active
-last_verified: 2026-08-17
+last_verified: 2026-09-13
 ---
 
 # Configuration and feature flags
@@ -36,7 +36,8 @@ Main categories:
 - external features: OAuth, email, payment and telephony modes;
 - diagnostics: master/subscription/payment/daily-charge/mobile-oriented debug switches;
 - database and public/internal URL coordinates;
-- auth/provider credential categories, whose values are always outside Knowledge.
+- auth/provider credential categories, whose values are always outside Knowledge;
+- demo identity pin: `DEMO_MASTER_USER_ID` (required for pre-created readonly demo; phone/email/name remain supporting identity checks).
 
 Production validation rejects a default/missing signing secret and requires provider credential categories when selected live modes need them. Dev/E2E route properties explicitly prevent mounting unauthenticated E2E helpers in production; dev test-data requires development environment as well as opt-in.
 

@@ -4,7 +4,7 @@ project: DeDato
 knowledge_class: living
 environment: common
 status: active
-last_verified: 2026-08-05
+last_verified: 2026-09-13
 ---
 
 # DeDato — роли и бизнес-модель
@@ -76,6 +76,8 @@ Source: `backend/models.py` — `UserRole.CLIENT`, `Booking.client_id`.
 | **Взаимодействие** | Принимает CLIENT; может быть связан с SALON (модель `salon_masters` / invitations); платит DeDato за тариф |
 
 Source: `backend/models.py` — `Master`, `User.master_profile`.
+
+На iOS текущий master operational flow — native app + trusted `ios_app` web companion. Разрешённые companion surfaces и commerce isolation принадлежат [Web architecture](web.md). Free-20 остаётся backend limit бесплатного тарифа, не iOS presentation rule; см. [Feature entitlements](feature-entitlements.md).
 
 **Флаг профиля:** `is_always_free` на `User` даёт полный доступ к платным функциям без обычной оплаты (операционный/внутренний режим).
 

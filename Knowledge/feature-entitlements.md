@@ -4,7 +4,7 @@ project: DeDato
 knowledge_class: living
 environment: common
 status: active
-last_verified: 2026-08-04
+last_verified: 2026-09-13
 ---
 
 # Contract: Feature entitlements
@@ -23,7 +23,7 @@ current DB user
 
 An effective subscription satisfies all of: matching user/type, `ACTIVE` status, `is_active=true`, `start_date <= now < end_date`. If multiple rows qualify, the selector chooses greatest `end_date`, then greatest ID, and logs a warning. There is no DB uniqueness over overlapping effective intervals.
 
-`get_user_subscription_with_plan` may create an AlwaysFree subscription for `User.is_always_free`; the readonly selector does not. This read-side mutation is existing [billing Debt](subscriptions-billing-debt.md#alwaysfree-side-effect-на-read-path).
+`get_user_subscription_with_plan` may create an AlwaysFree subscription for `User.is_always_free`; the readonly selector does not. This read-side mutation is existing [billing Debt](subscriptions-billing-debt.md#alwaysfree-side-effect-на-read-path). Demo readonly sessions must not perform that write: `db.info["demo_readonly"]` skips lazy entitlement/balance/loyalty/payment settings creation.
 
 **Source:** `backend/utils/subscription_features.py`; `backend/models.py`; [Subscriptions billing](subscriptions-billing.md#7-состояния-компактно).
 
@@ -88,9 +88,13 @@ This table is factual runtime behavior. Missing checks are not intended policy; 
 
 ## 6. Limits
 
-`limits.max_future_bookings` uses null/zero as unlimited in entitlement helpers. Capacity endpoints count active future bookings and compare positive limits; some Free-plan presentation/monitor paths substitute a default when the plan limit is absent/unlimited. The Booking create enforcement owner and exact count semantics remain domain-specific, so clients must treat the features response as display data and rely on server mutation result.
+`limits.max_future_bookings` uses null/zero as unlimited in entitlement helpers. Canonical Free active-future booking limit is **20** (`FREE_ACTIVE_FUTURE_BOOKINGS_LIMIT`, error `free_active_booking_limit_reached`). This is a backend business rule of the free tariff, not iOS presentation isolation and not part of the `ios_app` commerce/isolation contract.
+
+Capacity endpoints count active future bookings and compare positive limits. The Booking create enforcement owner is `backend/utils/booking_limit_guard.py`; clients must treat the features response as display data and rely on server mutation result.
 
 `features.max_page_modules` is returned and counted, but current create path is disabled by the legacy helper regardless of this number. `stats_retention_days` is returned as zero for unlimited; repository does not show a cleanup job enforcing this retention value.
+
+Trusted `ios_app` sessions additionally fail-closed for domain mutation and subscription/payment commerce endpoints even when the underlying plan would allow them; that is session-origin isolation, not a change to Free-20.
 
 **Source:** `backend/utils/subscription_features.py`; `backend/routers/master.py`, `backend/routers/domain.py`, `backend/routers/master_page_modules.py`; `backend/services/bookings_limit_monitor.py`.
 

@@ -4,7 +4,7 @@ project: DeDato
 knowledge_class: living
 environment: common
 status: active
-last_verified: 2026-08-31
+last_verified: 2026-09-13
 ---
 
 # Scheduling and availability
@@ -24,7 +24,9 @@ last_verified: 2026-08-31
 
 Schedule rule endpoints (`weekdays`, `monthdays`, `shift`) материализуют date-specific rows. Day update защищает 30-minute alignment и не позволяет убрать schedule slots, покрывающие active bookings.
 
-**Source:** `backend/models.py` — schedule models; `backend/routers/master.py` — schedule/rules, weekly/day/bulk endpoints; `backend/services/scheduling.py`; `backend/tests/test_master_schedule_day.py`; `backend/alembic/versions/07de82665594_add_master_schedule_settings.py`.
+Current HTTP surface: weekly, monthly, day, rules, create/update/bulk. Legacy `GET /api/master/schedule` и `POST /api/master/schedule` retired (`404`): product consumers не найдены, handlers были несовместимы с актуальной моделью.
+
+**Source:** `backend/models.py` — schedule models; `backend/routers/master.py` — schedule/rules, weekly/day/bulk endpoints; `backend/services/scheduling.py`; `backend/tests/test_master_schedule_day.py`; `backend/tests/test_legacy_master_schedule_retired.py`; `backend/alembic/versions/07de82665594_add_master_schedule_settings.py`.
 
 ## 2. Slot generation
 
@@ -49,11 +51,13 @@ Public master availability использует `MasterService.duration`, выз
 
 ## 4. Timezone semantics
 
-Master schedule хранит local date/time без offset. Scheduling helper интерпретирует naive booking datetime как wall time в `Master.timezone`, а aware datetime переводит в эту timezone. Invalid/missing timezone внутри low-level helper fallback-ится в `Europe/Moscow`; основной public availability/create path отдельно требует настроенную timezone и отклоняет missing value.
+Master schedule хранит local date/time без offset. Business calendar определяется `Master.timezone`; invalid/missing timezone внутри low-level helper fallback-ится в `Europe/Moscow`. Timezone production host не определяет календарный день/неделю мастера. Основной public availability/create path отдельно требует настроенную timezone и отклоняет missing value.
+
+Web/mobile используют request-generation/current-period protection, чтобы поздний A-response не перезаписывал уже выбранный B/C. Stabilized client paths include Week → конкретный день → «Открыть слот», «Закрыть слоты», Day calendar, Sunday ↔ Monday, selected date across refetch/week change, past-date submission, UTC truncation, midnight day assignment and out-of-order schedule responses.
 
 Public API возвращает aware ISO timestamps в timezone мастера и фильтрует past slots относительно `now` в той же zone. Другие compatibility endpoints могут принимать/возвращать naive values; единого repository-wide datetime contract пока нет.
 
-**Source:** `backend/services/scheduling.py` — `_resolve_master_zoneinfo`, `_as_master_local_datetime`; `backend/routers/public_master.py` — timezone guards and slot conversion; `backend/routers/client.py` — timezone guard.
+**Source:** `backend/services/scheduling.py` — `_resolve_master_zoneinfo`, `_as_master_local_datetime`; `backend/routers/public_master.py` — timezone guards and slot conversion; `backend/routers/client.py` — timezone guard; `frontend/src/components/MasterScheduleCalendar.jsx`; `mobile/app/(master)/master/schedule.tsx`.
 
 ## 5. Blocking predicate и overlap
 

@@ -4,7 +4,7 @@ project: DeDato
 knowledge_class: living
 environment: common
 status: active
-last_verified: 2026-08-04
+last_verified: 2026-09-13
 ---
 
 # Backend architecture
@@ -38,7 +38,7 @@ Backend имеет flat module layout:
 
 `main.py` вручную imports и mounts routers. Большинство старых routers задаёт domain prefix (`/auth`, `/master`, `/bookings` и т.п.), а main добавляет `/api`. Более новые routers включают `/api` в собственный prefix и mounts без дополнительного prefix. Public blog/domain/public-master и SPA/static surfaces также имеют свои mount rules.
 
-Dev test-data router монтируется только при computed `enable_dev_testdata`; unauthenticated E2E seed router — только при computed `dev_e2e`. Эти settings принудительно отключают опасные dev surfaces вне development, как описано в [Configuration](configuration.md).
+Dev test-data router монтируется только при computed `enable_dev_testdata`; unauthenticated E2E seed router — только при computed `dev_e2e`. Эти settings принудительно отключают опасные dev surfaces вне development, как описано в [Configuration](configuration.md). FastAPI app also registers global `enforce_demo_readonly` before business handlers.
 
 После всех API routes регистрируется GET catch-all для SPA. Custom `SpaCatchAllAPIRoute` не матчится на `/api` и `/api/*`, чтобы unknown non-GET API path не превращался в catch-all 405. Static uploads доступны под `/uploads`, собранные frontend assets — под `/assets`, если dist существует.
 
@@ -65,10 +65,11 @@ SQLAlchemy engine синхронный. В repository сосуществуют s
 Bearer JWT resolution находится в `auth.py`. Dependencies образуют несколько уровней:
 
 - `get_current_user` — valid bearer и active/non-deleted user;
-- `get_current_active_user` — повторная active check и global read-only guard demo master для mutating HTTP methods;
+- `get_current_active_user` — повторная active check;
+- global `enforce_demo_readonly` — typed `demo_access` session, fail-closed mutations and GET-without-lazy-writes;
 - `require_role(...)` и named role dependencies;
 - moderator permission factory;
-- object ownership и paid capability checks внутри конкретных routers/services.
+- object ownership (`require_booking_actor`) и paid capability checks внутри конкретных routers/services.
 
 Router-level dependencies используются не везде; часть handlers declares dependencies индивидуально. Документация `responses={401: ...}` влияет на OpenAPI, но сама не выполняет enforcement. Фактические enforcement boundaries принадлежат [Identity and access](identity-access.md) и [Feature entitlements](feature-entitlements.md).
 

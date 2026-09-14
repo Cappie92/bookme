@@ -4,7 +4,7 @@ project: DeDato
 knowledge_class: living
 environment: common
 status: active
-last_verified: 2026-08-12
+last_verified: 2026-09-13
 ---
 
 # Debt — client platforms
@@ -68,13 +68,20 @@ last_verified: 2026-08-12
 - **Sources:** `mobile/src/services/analytics/pendingSubscriptionPayment.ts`; `mobile/src/services/analytics/verifyPendingSubscriptionPayment.ts`.
 - **Required action:** financial/reconciliation analytics requiring delivery guarantees must originate from a durable backend path.
 
-## Notification UI is mock-backed
+## Notification UI is a stub, not OS push
 
 - **Confidence:** CONFIRMED.
-- **Evidence:** master dashboard notification hook derives items from `notificationsMock`; no repository-known notification API/feed is connected to this UI.
-- **Failure scenario:** screenshots/UI may be interpreted as a delivered notification capability although data is local fixture-derived and non-durable.
-- **Sources:** `mobile/src/hooks/useMasterNotifications.ts`; `mobile/src/components/master/notifications/notificationsMock.ts`; `mobile/src/components/master/notifications/NotificationsSheet.tsx`.
-- **Required action:** retain mock classification until a real delivery/read-state contract exists.
+- **Evidence:** `useMasterNotifications()` uses a DEV mock only under an explicit flag; otherwise production source is `[]`. Repository has no Expo/FCM/APNs push transport, device-token model or backend sender. Existing NotificationsSheet UI is a prototype.
+- **Failure scenario:** missing push during iOS smoke may be misread as a failed build rather than an unimplemented feature.
+- **Sources:** `mobile/src/hooks/useMasterNotifications.ts`; `mobile/src/components/master/notifications/`; [Mobile architecture](mobile.md).
+- **Required action:** design Push Notifications v1 as a separate post-release track; do not treat push as current product capability.
+
+## Settings save success-message unmount
+
+- **Confidence:** CONFIRMED for the UX failure mode; save persistence succeeds.
+- **Evidence:** after a successful Settings save the success message can disappear because parent loading unmounts/remounts the form. Save persistence succeeds; this is known non-blocking UX debt on the current baseline, not an authorization/isolation regression.
+- **Failure scenario:** operator may think save failed although data was stored.
+- **Required action:** retain as known UX debt; do not mix with authorization/isolation regressions.
 
 ## Split health semantics
 

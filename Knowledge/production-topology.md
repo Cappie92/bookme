@@ -4,16 +4,16 @@ project: DeDato
 knowledge_class: living
 environment: prod
 status: active
-last_verified: 2026-08-04
+last_verified: 2026-09-13
 ---
 
 # Production topology
 
 ## Scope
 
-Этот документ владеет repository-known описанием production-топологии DeDato: Compose services, сетью и портами, request path, persistent state, внешними границами и связанными ограничениями надёжности и масштабирования.
+Документ владеет repository-known описанием production-топологии DeDato и текущим operational release state. Compose/network/volume facts без host access остаются repository-CONFIRMED. Отдельная разрешённая проверка 2026-09-13 зафиксировала current production pointers ниже как `REPORTED`; это living current state, не snapshots build 6/7 или промежуточных revisions.
 
-Документ не подтверждает фактическое состояние production host и не описывает deploy, backup или restore procedures. Host-факты остаются `UNKNOWN`, пока не подтверждены отдельной разрешённой проверкой.
+Deploy procedure принадлежит [CI/CD](ci-cd.md) и [Deployment artifact inventory](deployment-artifact-inventory.md). Секреты и container IDs в Knowledge не хранятся.
 
 ## Confidence model
 
@@ -23,6 +23,27 @@ last_verified: 2026-08-04
 | **INFERRED** | Следует из нескольких подтверждённых repository-фактов |
 | **REPORTED** | Утверждается runbook или комментарием, но не подтверждено состоянием host |
 | **UNKNOWN** | Требует проверки production host или внешней системы |
+
+## Current production release state
+
+Это единственная current release truth. Не хранить параллельные snapshots build 6/7/8 или старых production revisions.
+
+| Pointer | Current value | Confidence |
+|---------|---------------|------------|
+| Git `main` | `61ba4d492b48637f5e20bd8bb30253d700389a19` | CONFIRMED repository; `61ba4d4` меняет только iOS build number 7 → 8 |
+| Runtime-functional commit deployed to production | `7c320bd0d4561cace41ef0c84bff4f6950767a7d` | REPORTED authorized host/cutover check 2026-09-13 |
+| iOS | 1.0.1 (8) | CONFIRMED `mobile/app.config.ts`; EAS build, App Store Connect upload, device smoke and re-review submission — REPORTED |
+| Android | 1.0.1 (2) | CONFIRMED `mobile/app.config.ts` |
+| Production HTTP | `/` → 200; `/api/health` → 200 | REPORTED |
+| SQLite | `integrity_check = ok` | REPORTED |
+| Alembic on production DB | `20260830_free_booking_limit` | REPORTED host; CONFIRMED as repository head |
+| Redis | unchanged by the cutover | REPORTED |
+| `DEMO_MASTER_USER_ID` | configured | REPORTED; category only, value never stored here |
+| Hardening migrations after the Free-20 revision | not required | REPORTED |
+
+iOS 1.0.1 (8) is the current App Store companion cut: previously reproduced TestFlight issues were confirmed fixed on a real iPhone before re-review. That is current release state, not a historical build ledger.
+
+`test/apple-iap-handoff` is not the current production release branch.
 
 ## Repository-confirmed components
 

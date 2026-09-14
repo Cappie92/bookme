@@ -4,7 +4,7 @@ project: DeDato
 knowledge_class: living
 environment: common
 status: active
-last_verified: 2026-08-04
+last_verified: 2026-09-13
 ---
 
 # Client links and payment return contract
@@ -76,6 +76,8 @@ Client analytics delivery is `at-most-once attempt`, best effort. It is not an e
 ## Security and failure rules
 
 - Never treat client navigation, UI role or return route as authorization/payment proof.
+- Trusted web origin after mobile handoff is only the server `web_session_origin` claim. Query/frontend markers cannot mint `ios_app`. Failed handoff is an isolated error state with no ordinary-cabinet or commerce fallback.
+- Demo sessions cannot create a web handoff.
 - Never log or persist the full external payment URL unless a separately reviewed diagnostic policy permits it.
 - A failure to open the app link must retain a usable browser path.
 - Host/build/runtime trust-list drift and duplicated state mapping are tracked in [Client platforms Debt](client-platforms.md).

@@ -4,7 +4,7 @@ project: DeDato
 knowledge_class: living
 environment: common
 status: active
-last_verified: 2026-08-31
+last_verified: 2026-09-13
 ---
 
 # Debt — booking and scheduling
@@ -13,18 +13,15 @@ last_verified: 2026-08-31
 
 См. [Booking](booking.md), [Scheduling](scheduling.md), [Booking API](booking-api.md).
 
-## Critical: generic booking mutation authorization
+## Closed: generic booking mutation authorization
 
-- **Severity:** `critical` (остаточный scope)
-- **Confidence:** CONFIRMED
-- **Trust boundary:** authenticated identity → mutation of a Booking and its reschedule requests.
-- **Category:** missing/inconsistent object-level authorization enforcement.
-- **Mitigated:** `DELETE /api/bookings/{id}` (`delete_booking`) теперь admin-only через `require_admin` и разрешает hard delete только будущей «чистой» брони; финансовые/loyalty/исторические связи → `409 BOOKING_HARD_DELETE_FORBIDDEN`. Client/master soft-cancel paths не затронуты.
-- **Remaining confirmed scope:** generic `create_edit_request` / `update_edit_request` (и сравнение с ownership checks в `update_booking`) всё ещё без полного object-level enforcement.
-- **Potential impact (остаточный):** нарушение целостности reschedule-запросов за пределами разрешённого пользователю объекта.
-- **Sources:** `backend/main.py` — booking router composition; `backend/routers/bookings.py` — `delete_booking`, `create_edit_request`, `update_edit_request`, comparison with `update_booking`; `backend/utils/booking_hard_delete.py`.
-- **Status:** partially remediated for hard delete; remaining edit-request authorization debt is active.
-- **Required action:** отдельный authorization remediation track для оставшихся generic edit-request mutations.
+- **Severity:** was `critical`
+- **Status:** closed / remediated
+- **Historical residual:** after hard-delete was already admin-only, generic edit-request create/accept/reject still lacked uniform object-level enforcement.
+- **Resolution:** that residual authorization gap is closed in runtime. This debt item is not a second current policy owner.
+- **Living current contract:** [Booking API](booking-api.md#7-authorization-boundary).
+- **Regression:** `backend/tests/test_demo_readonly_booking_ownership.py`.
+- **Required action:** none for current policy; do not re-describe the retired unauthenticated mutation surface as open debt.
 
 Эксплуатационные шаги и углублённый exploitability analysis намеренно не входят в Knowledge.
 

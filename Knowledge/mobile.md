@@ -4,12 +4,14 @@ project: DeDato
 knowledge_class: living
 environment: common
 status: active
-last_verified: 2026-08-12
+last_verified: 2026-09-13
 ---
 
 # Mobile architecture
 
-Живой канон repository-known Expo/React Native client. Документ не описывает store release state или фактическую production installation: без внешней проверки это `UNKNOWN`.
+Живой канон repository-known Expo/React Native client и его связь с trusted iOS web companion.
+
+Tracked application versions in `mobile/app.config.ts`: **iOS 1.0.1 (build 8)** и **Android 1.0.1 (versionCode 2)**. Это current product versions, не snapshots build 6/7. App Store Connect / TestFlight / App Review status — `REPORTED` operational fact в [Production topology](production-topology.md).
 
 ## Runtime and route composition
 
@@ -51,6 +53,18 @@ Dynamic Expo config independently формирует native scheme, associated d
 
 **Sources:** `mobile/src/config/env.ts`; `mobile/src/config/resolveMobileEnv.ts`; `mobile/app.config.ts`; `mobile/package.json` — `expo.doctor`; `mobile/android/app/src/main/AndroidManifest.xml`; `mobile/ios/DeDato/DeDato.entitlements`.
 
+## iOS companion versus native
+
+Текущий master-flow на iOS: **native application + trusted `ios_app` web companion**. Native app не является полным дублем ordinary web cabinet.
+
+Companion surfaces (Dashboard / Schedule / Services / Settings) принадлежат [Web architecture](web.md). Native сохраняет public booking, client cabinet и Android monetization. Ordinary web/Android не наследуют iOS presentation isolation.
+
+Free-20 — backend business rule бесплатного тарифа, не часть iOS presentation isolation; см. [Feature entitlements](feature-entitlements.md).
+
+iOS → web handoff выдаёт server-trusted `web_session_origin=ios_app`. Failed/expired handoff не должен открывать ordinary web cabinet. Demo → web handoff запрещён.
+
+**Sources:** `mobile/src/services/auth/openWebHandoffMoreDetails.ts`; `mobile/src/services/api/auth.ts`; `frontend/src/pages/MobileHandoff.jsx`; `frontend/src/utils/iosAppWebEditorPolicy.js`.
+
 ## Deep links and public booking
 
 Root handles cold `Linking.getInitialURL()` and warm `Linking` events. Public parser accepts the app scheme, development Expo links and `/m/{slug}` only on runtime-trusted HTTPS hosts; HTTP is development-only. Internal parser currently maps the subscriptions app link to the master subscriptions route. Module-level guards prevent repeated cold navigation and give a recent warm event priority.
@@ -81,10 +95,16 @@ Metro aliases selected repository `shared/` modules for semantic colors, feature
 
 **Sources:** `mobile/babel.config.js`; `mobile/tsconfig.json`; imports from `shared` under `mobile/src`; `shared/`.
 
-## Analytics, diagnostics and incomplete surfaces
+## Analytics, notifications and incomplete surfaces
 
 App analytics initializes independently of route bootstrap failure and records acquisition/payment/domain events. Development flags can expose auth traces, full effective API URLs and buffered response previews in a copyable debug panel. Sensitive-data/logging remediation is tracked in [Security and privacy Debt](security-and-privacy.md) and [Client platforms Debt](client-platforms.md).
 
-The master notification sheet is currently populated from `notificationsMock`; repository evidence does not establish a backend notification feed, delivery service or persistence contract. It must be described as mock UI, not a production notification subsystem.
+### OS push notifications
 
-**Sources:** `mobile/src/services/analytics/`; `mobile/src/debug/`; `mobile/src/services/api/client.ts`; `mobile/src/hooks/useMasterNotifications.ts`; `mobile/src/components/master/notifications/notificationsMock.ts`.
+Настоящие OS push notifications **не реализованы** ни на iOS, ни на Android. Repository не содержит `expo-notifications`, Firebase Messaging/FCM, APNs integration, Expo/device push token registration, backend device-token API/sender, iOS `aps-environment` или Android `POST_NOTIFICATIONS` permission/listener flow.
+
+Existing Notifications UI (`NotificationsSheet`, cards, filters, grouping, unread/viewed, types created/updated/cancelled) — заготовка. `useMasterNotifications()` использует DEV mock только при специальном flag, иначе production source = `[]`. Это не непройденный smoke текущего iOS build: функция пока отсутствует.
+
+Push Notifications v1 — отдельный будущий track после текущего release, не текущая архитектура. Предпочтительное направление, если его проектировать: persistent in-app Notification entity как source of truth события, push — канал доставки.
+
+**Sources:** `mobile/src/services/analytics/`; `mobile/src/debug/`; `mobile/src/services/api/client.ts`; `mobile/src/hooks/useMasterNotifications.ts`; `mobile/src/components/master/notifications/notificationsMock.ts`; repository search for push/FCM/APNs packages and permissions.

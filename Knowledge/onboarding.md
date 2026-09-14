@@ -4,7 +4,7 @@ project: DeDato
 knowledge_class: living
 environment: common
 status: active
-last_verified: 2026-08-04
+last_verified: 2026-09-13
 ---
 
 # DeDato onboarding
@@ -15,11 +15,11 @@ last_verified: 2026-08-04
 
 1. [Knowledge governance](README.md) — source priority, confidence and security rules.
 2. [Product roles and business model](product-roles-business-model.md) and [Domain map](domain-map.md).
-3. [Backend architecture](backend.md), [Web architecture](web.md) or [Mobile architecture](mobile.md) for the component being changed.
-4. The owning domain or contract document for the behavior.
-5. The linked Debt document before changing a sensitive boundary.
+3. [Backend architecture](backend.md), [Web architecture](web.md) or [Mobile architecture](mobile.md) for the component being changed. iOS master editing is native app + trusted `ios_app` companion, not a full ordinary web cabinet.
+4. The owning domain or contract document for the behavior. Catalog mutations: [Master catalog](master-catalog.md).
+5. The linked Debt document before changing a sensitive boundary. Open credential rotation is [production credential exposure](production-credential-exposure.md).
 
-Production topology is repository-known only. Do not connect to hosts, run `prod`/deploy/smoke scripts or inspect credential-like artifacts during ordinary onboarding.
+Current production pointers live in [Production topology](production-topology.md). Do not connect to hosts, run `prod`/deploy/smoke scripts or inspect credential-like artifacts during ordinary onboarding. Do not treat `test/apple-iap-handoff`, build 6/7, legacy demo reseed or reverse-phone as current truth.
 
 ## Establish a safe workspace
 

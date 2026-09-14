@@ -4,7 +4,7 @@ project: DeDato
 knowledge_class: living
 environment: common
 status: active
-last_verified: 2026-08-12
+last_verified: 2026-09-13
 ---
 
 # Privacy and data handling
@@ -61,11 +61,13 @@ Provider-side retention, geographic processing, subprocessors and production acc
 
 ## 5. Analytics behavior
 
-Web `MetrikaRouteListener` mounts globally and initializes analytics without a repository-known consent check. Counter is active by default unless environment configuration explicitly disables it. SPA hit URL includes pathname, query and hash; referrer is included when parsable. OAuth callback uses short-lived ticket query parameters and later cleans the URL. Whether the async analytics hit observes ticket-bearing URL before cleanup is runtime-order dependent and UNKNOWN; query minimization is tracked as [Debt](security-and-privacy.md#high-analytics-and-store-declaration-drift).
+Web `MetrikaRouteListener` mounts globally and initializes analytics without a repository-known consent check. Counter is active by default unless environment configuration explicitly disables it. Analytics **не** получает sensitive URL credentials: sanitization (`analyticsSafePath` / `analyticsSafeReferrer`) выполняется на analytics boundary до отправки и не зависит от последующей очистки address bar (в том числе lazy `MobileHandoff`).
+
+Защищаются mobile handoff code, OAuth/onboarding tickets, email verification tokens и password-reset sensitive parameters. Handoff analytics route передаётся canonical без sensitive query/hash. Обычные безопасные query dimensions (utm, tab и т.п.) сохраняются.
 
 Mobile analytics chooses AppMetrica only when configured, otherwise NoOp. The wrapper disables advertising identifiers and location tracking, enables session/crash reporting, sets internal account ID as profile ID and can report events and real payment revenue. Logout clears provider user identity.
 
-**Source:** `frontend/src/App.jsx`, `frontend/src/analytics/MetrikaRouteListener.jsx`, `frontend/src/analytics/metrika.js`, `frontend/src/pages/OAuthCallback.jsx`; `mobile/src/services/analytics/Analytics.ts`, `mobile/src/services/analytics/providers/AppMetricaProvider.ts`, `mobile/src/services/analytics/verifyPendingSubscriptionPayment.ts`.
+**Source:** `frontend/src/analytics/analyticsUrl.js`; `frontend/src/analytics/analyticsUrl.test.js`; `frontend/src/analytics/metrika.test.js`; `frontend/src/App.jsx`, `frontend/src/analytics/MetrikaRouteListener.jsx`, `frontend/src/analytics/metrika.js`, `frontend/src/pages/OAuthCallback.jsx`, `frontend/src/pages/MobileHandoff.jsx`; `mobile/src/services/analytics/Analytics.ts`, `mobile/src/services/analytics/providers/AppMetricaProvider.ts`, `mobile/src/services/analytics/verifyPendingSubscriptionPayment.ts`.
 
 ## 6. Platform privacy and permissions
 

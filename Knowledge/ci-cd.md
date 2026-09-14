@@ -4,7 +4,7 @@ project: DeDato
 knowledge_class: living
 environment: common
 status: active
-last_verified: 2026-09-07
+last_verified: 2026-09-13
 ---
 
 # CI/CD
@@ -38,32 +38,51 @@ Mobile EAS build/submit profiles exist in `mobile/eas.json`, but no root workflo
 
 **Sources:** root workflow job/step inventory; `backend/.github/workflows/ci.yml`; `mkdocs.yml`; `docs.sh`; `frontend/package.json`; `mobile/package.json`; `mobile/eas.json`; [Testing strategy](testing-strategy.md).
 
+## Current production delivery method
+
+GitHub `deploy.yml` остаётся repository-defined manual workflow, но **legacy Docker Compose recreate не считается безопасным canonical production method в текущем окружении**.
+
+Подтверждённые проблемы Compose recreate:
+
+- static `ipv4_address` нельзя применять к `dedato_network`, созданной без explicit user-configured subnet;
+- legacy Compose 1.29.2 имеет ContainerConfig compatibility risk.
+
+Последние успешные production deployments использовали controlled direct container replacement (без фиксации временных container IDs):
+
+1. exact release source/image;
+2. revision label verification;
+3. backup;
+4. pre-create candidate;
+5. preserve env/mounts/network aliases/restart policy;
+6. retain old container as rollback;
+7. controlled rename/start;
+8. health gate;
+9. component rollback при failure;
+10. migrations только при явной необходимости.
+
+Current production runtime is `7c320bd`; `main` tip `61ba4d4` is iOS build-number only. Details of unsuccessful helper implementations are transient and not SSOT.
+
 ## Manual staging release gate
 
-Для текущего release 1.0 действует `REPORTED` branch-specific delivery process:
+Для текущего production cut действует living state в [Production topology](production-topology.md). Ранее для 1.0 существовал `REPORTED` staging gate через `test/apple-iap-handoff`; **эта branch больше не является актуальной release branch**. Staging topology, если контур ещё существует, принадлежит [Staging infrastructure](staging.md) как test environment, не как current production pointer.
+
+Текущий production flow:
 
 ```text
-feature / integration branch
-→ test/apple-iap-handoff
-→ manual staging deploy
-→ manual functional smoke
-→ explicit APPROVE
-→ user-managed merge to main
-→ CI only (no automatic production deploy)
-→ separately authorized manual workflow_dispatch for production
+main (runtime 7c320bd / tip 61ba4d4)
+→ separately authorized manual production cutover
+→ health/integrity gates
 ```
 
-Проверенный staging baseline — `9dcd4ed`. Repository подтверждает, что `deploy/staging/deploy-staging.sh` принимает уже выбранный clean commit, может проверить expected SHA, не fetch/checkout Git и не выполняет production actions. Сам manual smoke, approval и provider checks не являются GitHub Actions gates.
+CI on `main` does not auto-deploy. Agent/automation-initiated commit, push, merge, PR или deploy по-прежнему запрещены без отдельного явного разрешения пользователя.
 
-Процесс запрещает agent/automation-initiated commit, push, merge, PR или deploy: Git mutations и environment actions выполняет пользователь после review и отдельного явного `APPROVE`. Это текущий release contract, но ещё не generalized permanent workflow для следующих релизов. Topology, smoke scope и staging-specific open debt принадлежат [Staging infrastructure](staging.md).
-
-**Sources:** `deploy/staging/deploy-staging.sh`; Git baseline `9dcd4ed`; release handoff dated 2026-08-17.
+**Sources:** [Production topology](production-topology.md); `.github/workflows/deploy.yml` by trigger only; `deploy/staging/deploy-staging.sh` as staging helper, not current production pointer.
 
 ## Deployment
 
-Production deployment is manual-only: push (including tags), pull requests and completion of another workflow do not trigger `deploy.yml`. This safety change does not alter the manual deployment steps or configure a GitHub Environment or secrets. Exact-SHA selection, backup orchestration, deployment receipts, server locking, rollback, environment-scoped secrets and migration redesign are deferred to a separate post-release infrastructure stage.
+Production deployment is manual-only: push (including tags), pull requests and completion of another workflow do not trigger `deploy.yml`. The workflow remains a repository capability, but current operational cutovers used controlled direct container replacement rather than Compose recreate — see above.
 
-The production workflow has one `deploy` job and no `needs` dependency on a separately isolated validation job. It does not run backend or client test suites. Its repository-defined order is:
+The production workflow has one `deploy` job and no `needs` dependency on a separately isolated validation job. It does not run backend or client test suites. The following repository-defined Compose sequence is **capability documentation**, not the proven-safe host method in the current environment:
 
 1. transfer the checkout to the configured host;
 2. build backend and frontend images;

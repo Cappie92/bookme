@@ -4,7 +4,7 @@ project: DeDato
 knowledge_class: living
 environment: common
 status: active
-last_verified: 2026-08-04
+last_verified: 2026-09-13
 ---
 
 # Subscriptions → Payments → Balance
@@ -158,7 +158,7 @@ Source:
 
 `check_feature_access(db, user_id, feature_key, …)` читает effective subscription и `SubscriptionPlan.features`. Полный mapping, fallback и endpoint enforcement принадлежат [feature entitlements contract](feature-entitlements.md).
 
-На read-path при отсутствии подписки и флаге `User.is_always_free` может **создаться** подписка AlwaysFree (side effect). См. [Debt](subscriptions-billing-debt.md).
+На read-path при отсутствии подписки и флаге `User.is_always_free` может **создаться** подписка AlwaysFree (side effect), кроме demo readonly sessions. См. [Debt](subscriptions-billing-debt.md).
 
 Source: `backend/utils/subscription_features.py` — `get_user_subscription_with_plan`, `check_feature_access`
 

@@ -4,7 +4,7 @@ project: DeDato
 knowledge_class: living
 environment: common
 status: active
-last_verified: 2026-08-12
+last_verified: 2026-09-13
 ---
 
 # Web architecture
@@ -29,13 +29,23 @@ Route tree одновременно обслуживает:
 - legacy/compatibility paths и redirects;
 - test/demo/design pages, перечисленные непосредственно в production route tree.
 
+Trusted iOS companion — отдельный web surface, не ordinary web:
+
+- native iOS application + trusted `ios_app` web companion;
+- разрешённые master tabs: Dashboard, Schedule, Services, Settings;
+- из companion исключены commerce/subscription-dependent поверхности: Pricing, My Plan, Finance, Master Loyalty, purchase/upgrade CTA, Robokassa/DeDato payment configuration и прочие monetization surfaces вне утверждённого operational companion;
+- Pricing content не монтируется, pricing catalog не запрашивается (`usePricingCatalog` имеет собственный `commerceAllowed` guard и отменяет незавершённый запрос); route guard не должен зависеть только от скрытия UI;
+- personal-link/domain editing и блок «Оплата через DeDato» закрыты; payment fields не отправляются из Settings. Backend также защищает domain mutation для `ios_app`.
+
+Ordinary web и Android сохраняют обычную функциональность и монетизацию. Failed handoff монтирует изолированный error state и не падает в ordinary cabinet.
+
 `AdminRoute` скрывает admin UI от anonymous/non-admin users и открывает login modal или перенаправляет по локально известной роли. Остальные workspace pages в разной степени опираются на page-level bootstrap и backend responses. Любая client-side проверка является навигационной/UX границей, а не authorization enforcement; серверные boundaries принадлежат [Identity and access](identity-access.md).
 
-**Sources:** `frontend/src/App.jsx` — route declarations and `AdminRoute`; `frontend/src/layouts/`; `frontend/src/pages/`.
+**Sources:** `frontend/src/App.jsx` — route declarations, `AdminRoute` and commerce guard; `frontend/src/utils/iosAppWebEditorPolicy.js`; `frontend/src/hooks/usePricingCatalog.js`; `frontend/src/utils/authSession.js`; `frontend/src/components/AuthSafetyBoundary.jsx`; `frontend/src/layouts/`; `frontend/src/pages/`.
 
 ## Authentication and local state
 
-`AuthProvider` восстанавливает сессию через `/api/auth/users/me`, хранит current user в React state и синхронизирует logout между API wrapper, соседними вкладками и focus events. Bearer token persistence и связанные риски описаны в [Security and privacy Debt](security-and-privacy.md).
+`AuthProvider` восстанавливает сессию через `/api/auth/users/me`, хранит current user в React state и синхронизирует logout между API wrapper, соседними вкладками и focus events. Bootstrap fail-closed определяет origin: stale result не перезаписывает более новую session; unresolved origin ≠ anonymous; auth/origin error закрывает commerce. Bearer token persistence и связанные риски описаны в [Security and privacy Debt](security-and-privacy.md).
 
 Common password registration is verify-first inside `AuthModal`: the first response is an opaque registration-verification ticket, not a JWT session; the modal requests the bound call, confirms digits and only then installs the returned access/refresh pair. Closing or cancelling the flow calls the cancellation endpoint and clears in-memory verification state. Login for a historical unverified account uses the same UI but a distinct server artifact and `verification_kind`.
 
@@ -77,8 +87,18 @@ Web импортирует repository `shared/` через Vite alias или rel
 
 **Sources:** `shared/`; `frontend/vite.config.js`; imports from `shared` under `frontend/src`.
 
+## Pending bookings first load
+
+Dashboard pending count и Pending tab используют один load path: Pending должен заполняться при первом открытии без обходного Past → Pending. Поздний schedule/booking response не должен перезаписывать уже выбранный период — web/mobile используют request-generation/current-period protection.
+
+**Sources:** `frontend/src/components/MasterDashboardStats.jsx`; `frontend/src/components/MasterScheduleCalendar.jsx`; `mobile/app/(master)/master/schedule.tsx`.
+
+## Settings save UX
+
+В trusted `ios_app` Settings informational styling использует фирменное зелёное оформление. После успешного save success-message может исчезнуть из-за parent loading → unmount/remount. Save при этом проходит и данные сохраняются; это known baseline UX debt, не authorization/isolation regression. См. [Client platforms Debt](client-platforms.md).
+
 ## Analytics and diagnostics
 
-Route listener и domain call sites отправляют web analytics; temporary error capture доступен только в development. Consent, URL minimization и sensitive logging boundaries принадлежат [Privacy and data handling](privacy-data-handling.md) и [Security and privacy Debt](security-and-privacy.md).
+Route listener и domain call sites отправляют web analytics. Sanitization URL credentials выполняется на analytics boundary **до** отправки и не зависит от того, успел ли lazy `MobileHandoff` очистить address bar. Consent и store-declaration drift остаются в [Privacy and data handling](privacy-data-handling.md) и [Security and privacy Debt](security-and-privacy.md).
 
-**Sources:** `frontend/src/analytics/`; `frontend/src/tempDebugErrorCapture.js`; `frontend/src/main.jsx`; `frontend/src/App.jsx`.
+**Sources:** `frontend/src/analytics/analyticsUrl.js`; `frontend/src/analytics/MetrikaRouteListener.jsx`; `frontend/src/analytics/`; `frontend/src/tempDebugErrorCapture.js`; `frontend/src/main.jsx`; `frontend/src/App.jsx`.

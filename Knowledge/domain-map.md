@@ -4,7 +4,7 @@ project: DeDato
 knowledge_class: living
 environment: common
 status: active
-last_verified: 2026-08-05
+last_verified: 2026-09-13
 ---
 
 # DeDato — карта доменов
@@ -52,7 +52,7 @@ last_verified: 2026-08-05
 Идентификатор пользователя, роль, факт аутентификации для остальных доменов.
 
 ### Границы
-Не владеет профилем мастера/салона, бронями, тарифами, лояльностью клиента.
+Не владеет профилем мастера/салона, бронями, тарифами, лояльностью клиента. Trusted `ios_app` origin и pre-created readonly demo принадлежат [Identity and access](identity-access.md).
 
 Фактические registration/session/verification/authorization boundaries и подтверждённый critical Debt описаны в [Identity and access](identity-access.md). Privacy lifecycle и third-party data flows принадлежат [Privacy and data handling](privacy-data-handling.md); они не дублируются в Identity.
 
@@ -130,7 +130,7 @@ Profiles (чей каталог).
 `service_id`, длительность и цену для Scheduling (расчёт слотов) и Booking.
 
 ### Границы
-Не расписание и не факт бронирования.
+Не расписание и не факт бронирования. Детальный mutation contract: [Master catalog](master-catalog.md).
 
 ---
 
@@ -330,7 +330,7 @@ Endpoint/service-specific отправка или показ сообщений 
 Доставку сообщений пользователю (побочный эффект, не бизнес-факт записи).
 
 ### Границы
-Не источник истины по статусу брони или платежа.
+Не источник истины по статусу брони или платежа. OS push (APNs/FCM/Expo) **не реализован**; mobile Notifications UI — заготовка с пустым production source. Канон: [Mobile architecture](mobile.md).
 
 ---
 

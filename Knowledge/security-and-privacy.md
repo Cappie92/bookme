@@ -4,7 +4,7 @@ project: DeDato
 knowledge_class: living
 environment: common
 status: active
-last_verified: 2026-08-17
+last_verified: 2026-09-13
 ---
 
 # Debt — security and privacy
@@ -72,6 +72,16 @@ Repository-known security/privacy debt. Документ не содержит c
 - **Validity evidence:** the repository contains credential-shaped assignments, but current provider/account validity is not established. None was introduced by the A–F added-line diff.
 - **Required action:** authorized security owner inventories and rotates/removes or replaces them with environment-only inputs in a separate history-aware remediation.
 
+## Open: production credential exposure
+
+- **Evidence class:** operational incident
+- **Sensitivity:** HIGH
+- **Validity:** exposed values must be treated as compromised
+- **Status:** open follow-up; rotation was not mixed into the stable release cutover
+- **Fact:** production environment values were printed to a terminal during a failed manual backend replacement and entered a conversation transcript.
+- **Required action:** controlled credential rotation by the authorized credential owner. Knowledge does not store, quote or reconstruct the values.
+- **Historical artifact:** [Incident: production credential exposure](production-credential-exposure.md).
+
 ## Critical: admin router root enforcement
 
 - **Severity:** `critical`
@@ -84,17 +94,13 @@ Repository-known security/privacy debt. Документ не содержит c
 - **Status:** active repository-known debt; frontend route guards do not compensate for backend enforcement.
 - **Required action:** separate authorization remediation with endpoint inventory and regression tests.
 
-## Critical: legacy reverse-call verification
+## Closed: legacy reverse-call verification
 
-- **Severity:** `critical`
-- **Confidence:** CONFIRMED
-- **Trust boundary:** untrusted verification request → phone-verified identity state.
-- **Category:** verification decision without a live-provider status check.
-- **Confirmed scope:** the legacy reverse-call status service returns a successful verified result in live mode without contacting the provider; the current code-based verification path uses separately stored server-side state.
-- **Potential impact:** an identity attribute may be marked verified without evidence from the external verification provider.
-- **Sources:** `backend/services/zvonok_service.py` — `check_call_status`, `verify_phone_digits`; `backend/routers/auth.py` — reverse verification handlers and current phone verification handlers.
-- **Status:** active repository-known debt; it is not the intended verification invariant.
-- **Required action:** separate identity/security remediation and deprecation or corrected enforcement.
+- **Severity:** was `critical`
+- **Status:** remediated; not a current verification mechanism
+- **Resolution:** both legacy reverse-phone endpoints and the unused status helper were removed. Current runtime answers `404`.
+- **Historical artifact:** [Reverse-phone verification bypass](reverse-phone-verification-bypass.md).
+- **Remaining related debt:** live Zvonok contract fragmentation below no longer includes reverse endpoints.
 
 ## Critical: live Zvonok verification contract is fragmented
 
@@ -102,12 +108,12 @@ Repository-known security/privacy debt. Документ не содержит c
 - **Confidence:** CONFIRMED for repository behavior; provider/account behavior is UNKNOWN.
 - **Trust boundary:** Zvonok callback data and user-entered digits → verified phone or destructive account action.
 - **Category:** multiple incompatible challenge implementations prevent safe live-provider enablement.
-- **Confirmed scope:** common registration uses `VerificationService` purpose/target/call binding, expiry and attempt limits. Account deletion instead persists a locally generated random code while separately starting a provider call, so the value being checked is not the provider `pincode`. OAuth onboarding stores an ad-hoc ticket challenge rather than consuming the common contract. Phone change performs several binding checks but implements its own non-locking read/check/clear sequence instead of an atomic common challenge consume. Legacy reverse endpoints retain the unsafe status behavior above.
+- **Confirmed scope:** common registration uses `VerificationService` purpose/target/call binding, expiry and attempt limits. Account deletion instead persists a locally generated random code while separately starting a provider call, so the value being checked is not the provider `pincode`. OAuth onboarding stores an ad-hoc ticket challenge rather than consuming the common contract. Phone change performs several binding checks but implements its own non-locking read/check/clear sequence instead of an atomic common challenge consume. Reverse-phone endpoints are not part of this remaining live-Zvonok surface; they are retired (`404`) and recorded in the closed item above.
 - **Additional provider boundary:** the service hard-codes its campaign identifier and live request/response logging includes the request payload and provider response, which may expose API key, phone, call ID and `pincode`.
 - **Potential impact:** enabling `ZVONOK_MODE` live can create unverifiable, replay/race-prone or disclosure-prone identity flows; not every successful call initiation can be safely bound to the later action.
-- **Sources:** `backend/services/verification_service.py` — common challenge contract; `backend/services/zvonok_service.py` — campaign selection, live logging and reverse status; `backend/routers/auth.py` — account deletion, OAuth onboarding, phone change and reverse endpoints.
+- **Sources:** `backend/services/verification_service.py` — common challenge contract; `backend/services/zvonok_service.py` — campaign selection and live logging; `backend/routers/auth.py` — account deletion, OAuth onboarding and phone change.
 - **Status:** live Zvonok is blocked on staging; stub mode is the current staging contract.
-- **Required action:** migrate all phone-proof flows to the unified challenge contract with atomic consume/row locking; retire reverse endpoints with `410 Gone` or migrate them; redact live logs; move campaign selection to `ZVONOK_CAMPAIGN_ID`; add focused concurrency/provider-contract tests before live smoke.
+- **Required action:** migrate remaining phone-proof flows to the unified challenge contract with atomic consume/row locking; redact live logs; move campaign selection to `ZVONOK_CAMPAIGN_ID`; add focused concurrency/provider-contract tests before live smoke.
 
 ## High: remaining session and client token boundaries
 
@@ -144,10 +150,10 @@ Repository-known security/privacy debt. Документ не содержит c
 - **Severity:** `high`
 - **Confidence:** CONFIRMED for repository declarations and data-flow code; production/provider receipt is UNKNOWN.
 - **Category:** runtime analytics data categories are not represented by the tracked iOS privacy manifest; web analytics is initialized without a repository-known consent gate.
-- **Confirmed scope:** mobile analytics can set an internal user profile ID and report role/event context, revenue and crash data, while the iOS manifest declares no collected data. Web analytics is enabled by default unless explicitly disabled and builds page hits from path, query, hash and referrer. OAuth callback tickets are carried in query parameters; whether runtime effect ordering sends a ticket before URL cleanup is UNKNOWN.
+- **Confirmed scope:** mobile analytics can set an internal user profile ID and report role/event context, revenue and crash data, while the iOS manifest declares no collected data. Web analytics is enabled by default unless explicitly disabled. Hit URL sanitization now strips handoff codes, OAuth/onboarding tickets, email verification and password-reset parameters at the analytics boundary before send; ordinary safe query dimensions are kept. Remaining gap is consent/store-declaration alignment, not the former ticket-before-cleanup race.
 - **Potential impact:** privacy/store disclosures or consent behavior may not match runtime data flows; URL query data may cross an analytics boundary.
-- **Sources:** `mobile/src/services/analytics/Analytics.ts`, `mobile/src/services/analytics/providers/AppMetricaProvider.ts`, `mobile/src/services/analytics/verifyPendingSubscriptionPayment.ts`, `mobile/ios/DeDato/PrivacyInfo.xcprivacy`; `frontend/src/analytics/metrika.js`, `frontend/src/analytics/MetrikaRouteListener.jsx`, `frontend/src/App.jsx`, `frontend/src/pages/OAuthCallback.jsx`.
-- **Required action:** separate privacy review covering consent, URL minimization and store declarations.
+- **Sources:** `mobile/src/services/analytics/Analytics.ts`, `mobile/src/services/analytics/providers/AppMetricaProvider.ts`, `mobile/src/services/analytics/verifyPendingSubscriptionPayment.ts`, `mobile/ios/DeDato/PrivacyInfo.xcprivacy`; `frontend/src/analytics/analyticsUrl.js`, `frontend/src/analytics/metrika.js`, `frontend/src/analytics/MetrikaRouteListener.jsx`, `frontend/src/App.jsx`.
+- **Required action:** separate privacy review covering consent and store declarations; URL credential sanitization is already a current analytics-boundary contract.
 
 ## High: sensitive logging surfaces
 

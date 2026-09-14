@@ -4,42 +4,24 @@ project: DeDato
 knowledge_class: living
 environment: test
 status: active
-last_verified: 2026-08-17
+last_verified: 2026-09-13
 ---
 
 # Staging infrastructure
 
 ## Scope and evidence
 
-Этот документ владеет живым контрактом обязательного pre-production контура DeDato: назначением, topology/isolation, effective environment policy, текущей release baseline, состоянием smoke и staging-specific debt.
+Этот документ владеет test-environment контрактом staging-контура DeDato: topology/isolation, effective environment policy и staging-specific debt. Он **не** владеет current production release state — см. [Production topology](production-topology.md).
 
-Факты из tracked Compose, scripts, migrations и tests помечаются `CONFIRMED`. Состояние VPS, базы, DNS/TLS, контейнеров, внешних кабинетов и результаты выполненных проверок получены из release handoff и помечаются `REPORTED`: repository сам по себе их не доказывает. Значения секретов здесь не хранятся.
+`last_verified` в frontmatter — дата Knowledge-review этого документа, **не** повторная проверка staging host. Host/VPS/smoke/reconciliation факты ниже остаются `REPORTED` с release handoff **2026-08-17**, пока отдельно не зафиксирована более поздняя authorized host check. Новая проверка staging host в этом проходе не выполнялась.
+
+Факты из tracked Compose, scripts, migrations и tests помечаются `CONFIRMED`. Состояние VPS, базы, DNS/TLS, контейнеров, внешних кабинетов и результаты выполненных проверок получены из того handoff и помечаются `REPORTED`: repository сам по себе их не доказывает. Значения секретов здесь не хранятся.
 
 ## Purpose and release gate
 
-Staging является обязательным integration/pre-production gate для релиза DeDato 1.0. Действующий flow:
+Staging является test/pre-production контуром DeDato. **Он не является текущей production release branch и не задаёт current production cutover.** `test/apple-iap-handoff` и baseline `9dcd4ed` — исторический 1.0 staging gate; они не current production pointer и не действующий production release process. Current production state принадлежит [Production topology](production-topology.md); delivery method — [CI/CD](ci-cd.md).
 
-```text
-feature / integration branch
-→ test/apple-iap-handoff
-→ deploy to staging
-→ manual smoke
-→ explicit APPROVE
-→ merge to main
-→ production deploy
-```
-
-- Основная staging branch: `test/apple-iap-handoff`.
-- Текущий проверенный baseline: `9dcd4ed` (`merge: integrate admin booking hard delete`).
-- Никакие commit, push, merge, PR, staging deploy или production actions не выполняются автоматически от имени этого процесса. Пользователь выполняет Git и production actions вручную после review и отдельного явного `APPROVE`.
-- Tracked `deploy-staging.sh` также не обновляет Git: он принимает уже выбранный clean commit и может проверить ожидаемый SHA.
-
-Baseline `9dcd4ed` включает как минимум:
-
-- `7ad7b85` — idempotency hardening migrations;
-- `a7747bf` — admin-only clean hard delete booking.
-
-Для интеграции booking delete использовалась временная branch `test/integrate-booking-delete`; единственный conflict был в `backend/routers/bookings.py`. В baseline одновременно сохранены `HTTPBearer`, `IntegrityError`, `get_current_user_optional` и `require_admin`. Commit ancestry и итоговый файл — `CONFIRMED`; branch/conflict resolution и результаты прогонов — `REPORTED`.
+Если staging host ещё используется, его topology ниже остаётся test-environment contract. Никакие commit, push, merge, PR, staging deploy или production actions не выполняются автоматически от имени Knowledge-работы.
 
 ## Current operational state
 
@@ -168,7 +150,7 @@ The staging server template and validator were reportedly corrected manually and
 
 ### Zvonok
 
-`ZVONOK_MODE=stub` is mandatory for the current release smoke. Live Zvonok is `BLOCKED`, even though credentials are present. Repository-confirmed blockers are owned by [Security and privacy Debt](security-and-privacy.md): fragmented verification contracts, unsafe legacy reverse verification, incomplete phone-change challenge semantics, sensitive provider logging and hard-coded campaign ID. Live enablement requires a unified `VerificationService`, retirement (`410 Gone`) or migration of reverse endpoints, atomic/bound challenge consumption, log redaction and environment-owned `ZVONOK_CAMPAIGN_ID`.
+`ZVONOK_MODE=stub` is mandatory for the reported staging smoke. Live Zvonok is `BLOCKED`, even though credentials are present. Remaining repository-confirmed blockers are owned by [Security and privacy Debt](security-and-privacy.md): fragmented live verification contracts, incomplete phone-change challenge semantics, sensitive provider logging and hard-coded campaign ID. Reverse-phone endpoints are retired (`404`) and are not a current staging surface; historical bypass is in [Reverse-phone verification bypass](reverse-phone-verification-bypass.md). Live enablement still requires a unified `VerificationService`, atomic/bound challenge consumption, log redaction and environment-owned `ZVONOK_CAMPAIGN_ID`.
 
 ### Email / Unisender
 
@@ -201,11 +183,11 @@ Current tracked `deploy/staging/nginx-test.dedato.ru.conf` does not contain thes
 
 ## Reproduce / bootstrap staging
 
-This is the repository-confirmed initial/recovery bootstrap capability, not a description of an empty active environment. The current release environment continues to use the production clone documented above.
+This is the repository-confirmed initial/recovery bootstrap capability, not a description of an empty active environment and not the current production release procedure. The 2026-08-17 reported staging host used the production clone documented above; that is test-environment history.
 
 1. Start with a clean Ubuntu 20.04-or-newer VPS with root/sudo access, an operator-controlled SSH public key and enough disk for images, SQLite, uploads, logs, Redis AOF and backups.
 2. Run the separately reviewed `deploy/staging/bootstrap-server.sh`. It installs the host prerequisites (including Docker/Compose, Nginx, UFW and Certbot), creates swap when the host has none and prepares `/opt/dedato-staging`, `/data/dedato-staging` and `/var/log/dedato-staging`. It does not clone the repository, create secrets, start containers, migrate data or request a certificate.
-3. Run `deploy/staging/setup-staging.sh`. It prepares branch `test/apple-iap-handoff`; on first setup it creates ignored `deploy/staging/backend.env` with mode `600` from the tracked template and stops while required values remain placeholders. Fill required secrets manually on the host. Existing Unisender/Zvonok/Yandex credentials may be present, but outbound traffic remains controlled by the effective allowlist rather than credential presence.
+3. Run `deploy/staging/setup-staging.sh`. The tracked helper still prepares branch `test/apple-iap-handoff` as **historical 1.0 repository helper behavior**; that branch is not the current production release pointer and must not be followed as a current production cutover step. On first setup the script creates ignored `deploy/staging/backend.env` with mode `600` from the tracked template and stops while required values remain placeholders. Fill required secrets manually on the host. Existing Unisender/Zvonok/Yandex credentials may be present, but outbound traffic remains controlled by the effective allowlist rather than credential presence.
 4. Re-run setup after env review. `--activate-nginx` explicitly activates the validated tracked HTTP virtual host; activation is not implied by prepare-only setup.
 5. Point the DNS A record for `test.dedato.ru` to the staging VPS and verify that it resolves to this environment. Issue/renew TLS separately on the host with Certbot only after DNS and HTTP reachability are correct. The tracked Nginx template is HTTP-only and contains no certificate paths or certificate material.
 6. Deploy separately and explicitly with `deploy/staging/deploy-staging.sh`, preferably with `--expected-commit`. It refuses a wrong branch or modified tracked files, validates env/Compose, builds and starts the stack, waits for health, shows current Alembic state, runs `alembic upgrade head`, checks health again and prints bounded status/log output. It does not fetch, checkout, commit, push, merge, deploy production or attempt automatic rollback.
@@ -229,7 +211,7 @@ Repository/integration verification is `REPORTED`:
 
 The one failure, `tests/test_dashboard_top_services_statuses.py::test_top_services_consistent_status_filter`, is a pre-existing calendar/timezone-dependent baseline failure and is not attributed to staging/integration changes.
 
-Manual functional web smoke remains required before `APPROVE`:
+Manual functional web smoke was required before the historical 1.0 `APPROVE` gate. That APPROVE-flow is **not** the current production release contract. If staging is still used as a test environment, the checklist below is a functional smoke inventory, not a production cutover gate:
 
 - login with an existing production-clone user;
 - dashboard, profile, services and schedule;
@@ -252,7 +234,7 @@ Only the following staging-specific items remain open:
 6. Keep live Zvonok blocked until verification/security hardening is complete.
 7. Create a separate Robokassa staging test context before real payment smoke.
 8. Clean the dirty production checkout separately after release; do not add it to smoke scope.
-9. Generalize the branch-specific manual staging flow into a permanent documented delivery process for later releases.
+9. The 1.0 branch-specific manual staging flow (`test/apple-iap-handoff` / explicit `APPROVE`) is historical; do not treat it as the current production delivery process. Later staging use is a test-environment question, not a second production pointer.
 
 ## Source anchors
 
@@ -269,8 +251,8 @@ Only the following staging-specific items remain open:
 - `backend/alembic/versions/20260809_apple_iap_subscription_fields.py`.
 - `backend/alembic/versions/20260812_user_session_version.py` — current repository head.
 - `backend/tests/test_alembic_create_all_then_upgrade.py` — compatibility regression.
-- Git commits `7ad7b85`, `a7747bf`, `9dcd4ed` — baseline ancestry/content.
-- Release handoff dated 2026-08-17 — all `REPORTED` VPS, snapshot, reconciliation, smoke and test-run state.
+- Git commits `7ad7b85`, `a7747bf`, `9dcd4ed` — historical baseline ancestry/content for the 2026-08-17 staging handoff, not current production HEAD.
+- Release handoff dated 2026-08-17 — all `REPORTED` VPS, snapshot, reconciliation, smoke and test-run state. This date is the host-evidence baseline; it is not updated by the Knowledge `last_verified` field.
 
 ## Related documents
 

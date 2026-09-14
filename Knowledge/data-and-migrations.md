@@ -4,7 +4,7 @@ project: DeDato
 knowledge_class: living
 environment: common
 status: active
-last_verified: 2026-08-17
+last_verified: 2026-09-13
 ---
 
 # Data and migrations
@@ -54,13 +54,7 @@ Alembic environment:
 - использует `NullPool` для online migration connection;
 - поддерживает online и offline migration modes.
 
-На дату repository-проверки 2026-08-17 Alembic успешно разобрал configured graph:
-
-- graph содержит исторические branch points и поэтому не является строго линейным;
-- разрешён один repository head: `20260812_session_version`;
-- current tail проходит `20260721_account_deletion_fields` → `20260809_apple_iap_fields` → `20260812_session_version`.
-
-Это `CONFIRMED` для текущего repository checkout. Оно не доказывает текущую revision production DB и не подтверждает соответствие physical schema этому head.
+На дату repository-проверки 2026-09-13 Alembic graph имеет один repository head: `20260830_free_booking_limit` (revises `20260812_session_version`). Это `CONFIRMED` для текущего checkout. Host DB revision остаётся отдельным фактом: authorized production check 2026-09-13 reports the same revision — `REPORTED` in [Production topology](production-topology.md). Hardening after that revision did not require additional migrations.
 
 В репозитории присутствуют два Alembic ini entry points с различными fallback SQLite paths: root `alembic.ini` и `backend/alembic.ini`. Production migration helper выполняется внутри backend container, где рабочий каталог и скопированный backend config связывают его с container environment. Во всех случаях заданный `DATABASE_URL` имеет приоритет в `backend/alembic/env.py`.
 

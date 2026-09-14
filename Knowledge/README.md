@@ -4,7 +4,7 @@ project: DeDato
 knowledge_class: living
 environment: common
 status: active
-last_verified: 2026-08-17
+last_verified: 2026-09-13
 ---
 
 # Knowledge — каноническая база знаний DeDato
@@ -82,6 +82,7 @@ last_verified: YYYY-MM-DD
 - [Booking](booking.md)
 - [Booking completion side effects](booking-completion-side-effects.md)
 - [Scheduling and availability](scheduling.md)
+- [Master catalog](master-catalog.md)
 - [Client CRM](client-crm.md)
 - [Client loyalty](loyalty.md)
 - [Promo](promo.md)
@@ -121,7 +122,7 @@ last_verified: YYYY-MM-DD
 
 ### Test / staging
 
-- [Staging infrastructure and release gate](staging.md)
+- [Staging infrastructure](staging.md)
 
 ### Active debt
 
@@ -133,6 +134,15 @@ last_verified: YYYY-MM-DD
 - [Security and privacy debt](security-and-privacy.md)
 - [Subscriptions billing debt](subscriptions-billing-debt.md)
 - [Testing, delivery and onboarding debt](testing-delivery-onboarding.md)
+
+### Retro / historical artifacts
+
+Completed release-adjacent security/operations events. They do not replace living owners above.
+
+- [SEC-01 anonymous test-category](sec-01-anonymous-test-category.md)
+- [Reverse-phone verification bypass](reverse-phone-verification-bypass.md)
+- [Decision: pre-created readonly demo](demo-readonly-redesign.md)
+- [Incident: production credential exposure](production-credential-exposure.md)
 
 ### Retro / non-canonical audit artifacts
 

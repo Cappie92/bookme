@@ -4,7 +4,7 @@ project: DeDato
 knowledge_class: living
 environment: common
 status: active
-last_verified: 2026-07-24
+last_verified: 2026-09-13
 ---
 
 # Debt — subscriptions billing
@@ -147,7 +147,7 @@ last_verified: 2026-07-24
 - **Confidence:** CONFIRMED
 - **Evidence:** `backend/utils/subscription_features.py` — `get_user_subscription_with_plan` создаёт подписку при `is_always_free`
 - **Failure scenario:** GET неожиданно пишет в БД
-- **Existing protection:** флаг пользователя; readonly-вариант `get_active_subscription_readonly` для части admin путей
+- **Existing protection:** флаг пользователя; readonly-вариант `get_active_subscription_readonly` для части admin путей; demo sessions skip the write via `db.info["demo_readonly"]`
 - **Unknowns:** все ли GET используют readonly где нужно
 - **Investigation:** аудит вызовов селектора
 
