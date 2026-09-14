@@ -420,8 +420,23 @@ export default function HomeScreen() {
   const {
     notifications,
     unreadCount,
-    markCurrentAsViewed,
-  } = useMasterNotifications(masterSettings?.master?.id);
+    unreadReady,
+    loading: notificationsLoading,
+    refreshing: notificationsRefreshing,
+    loadingMore: notificationsLoadingMore,
+    error: notificationsError,
+    hasMore: notificationsHasMore,
+    refresh: refreshNotifications,
+    retry: retryNotifications,
+    loadMore: loadMoreNotifications,
+    ensureListLoaded,
+    markRead,
+    markAllRead,
+  } = useMasterNotifications();
+
+  useEffect(() => {
+    if (notificationsVisible) void ensureListLoaded();
+  }, [notificationsVisible, ensureListLoaded]);
 
   if (loading) {
     return (
@@ -462,7 +477,7 @@ export default function HomeScreen() {
             onSocialPost={openSocialPost}
             onCopyLink={() => void copyPublicLink()}
             onNotifications={() => setNotificationsVisible(true)}
-            unreadCount={unreadCount}
+            unreadCount={unreadReady ? unreadCount : 0}
           />
         ) : null}
 
@@ -702,7 +717,16 @@ export default function HomeScreen() {
             visible={notificationsVisible}
             onClose={() => setNotificationsVisible(false)}
             notifications={notifications}
-            onMarkViewed={() => void markCurrentAsViewed()}
+            loading={notificationsLoading}
+            refreshing={notificationsRefreshing}
+            loadingMore={notificationsLoadingMore}
+            error={notificationsError}
+            hasMore={notificationsHasMore}
+            onRefresh={() => void refreshNotifications()}
+            onRetry={() => void retryNotifications()}
+            onLoadMore={() => void loadMoreNotifications()}
+            onPressItem={(item) => void markRead(item.id)}
+            onMarkViewed={() => void markAllRead()}
           />
           <CopyLinkToast message={copyToastMessage} bottomOffset={scrollViewPaddingBottom + 8} />
         </>

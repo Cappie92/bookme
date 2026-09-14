@@ -2,43 +2,31 @@ export type MasterScheduleNotificationType = 'created' | 'updated' | 'cancelled'
 
 export type ClientStatus = 'new' | 'returning';
 
-export type MasterScheduleNotificationBase = {
+/**
+ * Backend-ready view model for the existing master notification cards.
+ * title/body are required; structured extras are optional allowlisted data only.
+ */
+export type MasterScheduleNotification = {
   id: string;
   type: MasterScheduleNotificationType;
-  clientName: string;
-  phone?: string | null;
-  serviceName: string;
-  priceLabel?: string | null;
+  title: string;
+  body: string;
   isUnread: boolean;
   createdAt?: string;
   groupLabel?: string;
+  clientName?: string | null;
+  serviceName?: string | null;
+  clientStatus?: ClientStatus;
+  dateLabel?: string;
+  timeLabel?: string;
+  oldDateLabel?: string;
+  oldTimeLabel?: string;
+  newDateLabel?: string;
+  newTimeLabel?: string;
 };
 
-export type CreatedNotification = MasterScheduleNotificationBase & {
-  type: 'created';
-  clientStatus: ClientStatus;
-  dateLabel: string;
-  timeLabel: string;
-};
-
-export type UpdatedNotification = MasterScheduleNotificationBase & {
-  type: 'updated';
-  oldDateLabel: string;
-  oldTimeLabel: string;
-  newDateLabel: string;
-  newTimeLabel: string;
-};
-
-export type CancelledNotification = MasterScheduleNotificationBase & {
-  type: 'cancelled';
-  clientStatus: ClientStatus;
-  dateLabel: string;
-  timeLabel: string;
-};
-
-export type MasterScheduleNotification =
-  | CreatedNotification
-  | UpdatedNotification
-  | CancelledNotification;
+export type CreatedNotification = MasterScheduleNotification & { type: 'created' };
+export type UpdatedNotification = MasterScheduleNotification & { type: 'updated' };
+export type CancelledNotification = MasterScheduleNotification & { type: 'cancelled' };
 
 export type NotificationFilterKey = 'all' | 'new' | 'updated' | 'cancelled';

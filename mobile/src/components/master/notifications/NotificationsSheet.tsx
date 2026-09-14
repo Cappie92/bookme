@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Modal,
   View,
@@ -8,6 +8,8 @@ import {
   SectionList,
   useWindowDimensions,
   Platform,
+  ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -16,27 +18,56 @@ import { NotificationFilters } from './NotificationFilters';
 import { NotificationSectionHeader } from './NotificationSectionHeader';
 import { NotificationCard } from './NotificationCard';
 import { filterNotifications, groupNotificationsByDate } from '@src/utils/masterNotificationsUtils';
+import type { NotificationFetchErrorKind } from './masterNotificationsMapper';
 
 interface NotificationsSheetProps {
   visible: boolean;
   onClose: () => void;
   notifications: MasterScheduleNotification[];
+  loading?: boolean;
+  refreshing?: boolean;
+  loadingMore?: boolean;
+  error?: NotificationFetchErrorKind | null;
+  hasMore?: boolean;
+  onRefresh?: () => void;
+  onRetry?: () => void;
+  onLoadMore?: () => void;
+  onPressItem?: (item: MasterScheduleNotification) => void;
   onMarkViewed?: () => void;
+}
+
+function errorMessage(kind: NotificationFetchErrorKind): string {
+  if (kind === 'unavailable') return 'Уведомления пока недоступны';
+  if (kind === 'network') return 'Нет соединения. Попробуйте ещё раз';
+  return 'Не удалось загрузить уведомления';
 }
 
 export function NotificationsSheet({
   visible,
   onClose,
   notifications,
+  loading = false,
+  refreshing = false,
+  loadingMore = false,
+  error = null,
+  hasMore = false,
+  onRefresh,
+  onRetry,
+  onLoadMore,
+  onPressItem,
   onMarkViewed,
 }: NotificationsSheetProps) {
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
   const sheetHeight = Math.round(windowHeight * 0.82);
   const [filter, setFilter] = useState<NotificationFilterKey>('all');
+  const closingRef = useRef(false);
 
   useEffect(() => {
-    if (!visible) setFilter('all');
+    if (!visible) {
+      setFilter('all');
+      closingRef.current = false;
+    }
   }, [visible]);
 
   const filtered = useMemo(
@@ -47,9 +78,14 @@ export function NotificationsSheet({
   const sections = useMemo(() => groupNotificationsByDate(filtered), [filtered]);
 
   const handleClose = () => {
+    if (closingRef.current) return;
+    closingRef.current = true;
     onMarkViewed?.();
     onClose();
   };
+
+  const showInitialError = Boolean(error && notifications.length === 0 && !loading);
+  const showEmpty = !loading && !showInitialError && sections.length === 0;
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={handleClose}>
@@ -82,12 +118,26 @@ export function NotificationsSheet({
 
           <NotificationFilters value={filter} onChange={setFilter} />
 
-          {sections.length === 0 ? (
-            <View style={styles.empty}>
+          {loading && notifications.length === 0 ? (
+            <View style={styles.empty} testID="notifications-loading">
+              <ActivityIndicator size="large" color="#4CAF50" />
+            </View>
+          ) : showInitialError && error ? (
+            <View style={styles.empty} testID="notifications-error">
+              <View style={styles.emptyIcon}>
+                <Ionicons name="cloud-offline-outline" size={22} color="#4CAF50" />
+              </View>
+              <Text style={styles.emptyTitle}>{errorMessage(error)}</Text>
+              <TouchableOpacity style={styles.retryBtn} onPress={onRetry} testID="notifications-retry">
+                <Text style={styles.retryText}>Повторить</Text>
+              </TouchableOpacity>
+            </View>
+          ) : showEmpty ? (
+            <View style={styles.empty} testID="notifications-empty">
               <View style={styles.emptyIcon}>
                 <Ionicons name="notifications-off-outline" size={22} color="#4CAF50" />
               </View>
-              <Text style={styles.emptyTitle}>Пока нет уведомлений</Text>
+              <Text style={styles.emptyTitle}>Уведомлений пока нет</Text>
               <Text style={styles.emptyText}>
                 Здесь будут изменения по новым, перенесённым и отменённым записям
               </Text>
@@ -99,10 +149,28 @@ export function NotificationsSheet({
               renderSectionHeader={({ section }) => (
                 <NotificationSectionHeader title={section.title} />
               )}
-              renderItem={({ item }) => <NotificationCard item={item} />}
+              renderItem={({ item }) => (
+                <NotificationCard item={item} onPress={onPressItem} />
+              )}
               stickySectionHeadersEnabled={false}
               showsVerticalScrollIndicator
               contentContainerStyle={styles.listContent}
+              refreshControl={
+                onRefresh ? (
+                  <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#4CAF50" />
+                ) : undefined
+              }
+              onEndReached={() => {
+                if (hasMore && !loadingMore) onLoadMore?.();
+              }}
+              onEndReachedThreshold={0.4}
+              ListFooterComponent={
+                loadingMore ? (
+                  <View style={styles.footer}>
+                    <ActivityIndicator color="#4CAF50" />
+                  </View>
+                ) : null
+              }
             />
           )}
         </View>
@@ -205,5 +273,20 @@ const styles = StyleSheet.create({
     color: '#657065',
     textAlign: 'center',
     lineHeight: 20,
+  },
+  retryBtn: {
+    marginTop: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: '#E8F5E9',
+  },
+  retryText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#2E7D32',
+  },
+  footer: {
+    paddingVertical: 16,
   },
 });

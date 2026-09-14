@@ -1,11 +1,12 @@
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { getNotificationStripeColor } from '@src/utils/masterNotificationsUtils';
 import { ClientStatusChip } from './ClientStatusChip';
 import type { MasterScheduleNotification } from './notificationsTypes';
 
 interface NotificationCardProps {
   item: MasterScheduleNotification;
+  onPress?: (item: MasterScheduleNotification) => void;
 }
 
 function InfoRow({ label, value }: { label: string; value: string }) {
@@ -19,40 +20,52 @@ function InfoRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-export function NotificationCard({ item }: NotificationCardProps) {
+function overlineForType(type: MasterScheduleNotification['type']): string {
+  if (type === 'created') return 'Новая запись';
+  if (type === 'cancelled') return 'Отмена записи';
+  return 'Изменение записи';
+}
+
+export function NotificationCard({ item, onPress }: NotificationCardProps) {
   const stripeColor = getNotificationStripeColor(item.type);
   const unread = item.isUnread;
-
-  const overline =
-    item.type === 'created'
-      ? 'Новая запись'
-      : item.type === 'updated'
-        ? 'Изменение записи'
-        : 'Отмена записи';
+  const heading = item.clientName?.trim() || item.title;
+  const showUpdatedCompare = Boolean(
+    item.type === 'updated' && item.oldDateLabel && item.newDateLabel
+  );
+  const showWhen = Boolean(
+    (item.type === 'created' || item.type === 'cancelled') && item.dateLabel && item.timeLabel
+  );
 
   return (
-    <View style={[styles.card, unread ? styles.cardUnread : styles.cardRead]}>
+    <TouchableOpacity
+      style={[styles.card, unread ? styles.cardUnread : styles.cardRead]}
+      onPress={() => onPress?.(item)}
+      activeOpacity={onPress ? 0.88 : 1}
+      disabled={!onPress}
+      accessibilityRole="button"
+    >
       <View style={[styles.stripe, { backgroundColor: stripeColor }]} />
       <View style={styles.body}>
         <View style={styles.topRow}>
           <View style={styles.topLeft}>
-            <Text style={styles.overline}>{overline}</Text>
-            <Text style={[styles.name, unread && styles.nameUnread]}>{item.clientName}</Text>
-            {item.phone ? <Text style={styles.phone}>{item.phone}</Text> : null}
+            <Text style={styles.overline}>{overlineForType(item.type)}</Text>
+            <Text style={[styles.name, unread && styles.nameUnread]}>{heading}</Text>
+            {item.body ? <Text style={styles.bodyText}>{item.body}</Text> : null}
           </View>
           {unread ? <View style={styles.unreadDot} /> : null}
         </View>
 
-        {item.type === 'created' || item.type === 'cancelled' ? (
+        {showWhen ? (
           <View style={styles.metaRow}>
-            <ClientStatusChip status={item.clientStatus} />
+            {item.clientStatus ? <ClientStatusChip status={item.clientStatus} /> : null}
             <Text style={styles.metaText}>
               {item.dateLabel} · {item.timeLabel}
             </Text>
           </View>
         ) : null}
 
-        {item.type === 'updated' ? (
+        {showUpdatedCompare ? (
           <View style={styles.compare}>
             <View style={styles.compareRow}>
               <Text style={styles.compareTag}>Было</Text>
@@ -69,10 +82,9 @@ export function NotificationCard({ item }: NotificationCardProps) {
           </View>
         ) : null}
 
-        <InfoRow label="Услуга" value={item.serviceName} />
-        {item.priceLabel ? <InfoRow label="Стоимость" value={item.priceLabel} /> : null}
+        {item.serviceName ? <InfoRow label="Услуга" value={item.serviceName} /> : null}
       </View>
-    </View>
+    </TouchableOpacity>
   );
 }
 
@@ -127,9 +139,10 @@ const styles = StyleSheet.create({
   nameUnread: {
     fontWeight: '700',
   },
-  phone: {
-    marginTop: 2,
-    fontSize: 12,
+  bodyText: {
+    marginTop: 4,
+    fontSize: 13,
+    lineHeight: 18,
     color: '#657065',
   },
   unreadDot: {

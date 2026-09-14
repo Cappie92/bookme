@@ -15,7 +15,9 @@ function n(
   partial: Partial<MasterScheduleNotification> & { id: string; type?: MasterScheduleNotification['type'] }
 ): MasterScheduleNotification {
   const type = partial.type ?? 'created';
-  const base = {
+  return {
+    title: 'Уведомление',
+    body: 'Изменение записи',
     clientName: 'Клиент',
     serviceName: 'Услуга',
     isUnread: true,
@@ -23,29 +25,6 @@ function n(
     ...partial,
     type,
   };
-  if (type === 'updated') {
-    return {
-      ...base,
-      oldDateLabel: '1 июня',
-      oldTimeLabel: '10:00',
-      newDateLabel: '2 июня',
-      newTimeLabel: '12:00',
-    } as MasterScheduleNotification;
-  }
-  if (type === 'cancelled') {
-    return {
-      ...base,
-      clientStatus: 'returning',
-      dateLabel: '2 июня',
-      timeLabel: '10:00',
-    } as MasterScheduleNotification;
-  }
-  return {
-    ...base,
-    clientStatus: 'new',
-    dateLabel: '2 июня',
-    timeLabel: '10:00',
-  } as MasterScheduleNotification;
 }
 
 describe('masterNotificationsUtils', () => {
