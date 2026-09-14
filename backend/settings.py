@@ -107,6 +107,12 @@ class Settings(BaseSettings):
     # Только осознанный opt-in: при ROBOKASSA_IS_TEST=true и пустых тестовых паролях в stub разрешить подпись боевыми паролями (небезопасно)
     ROBOKASSA_ALLOW_INSECURE_PROD_PASSWORDS_IN_TEST: str = "false"
 
+    # --- Push notifications (device registration vs future sender) ---
+    # Registration API is on so mobile can upsert tokens before sending is enabled.
+    PUSH_REGISTRATION_ENABLED: str = "true"
+    # Sender / booking event fan-out. Stage 1 has no worker; keep false until Stage 5.
+    PUSH_NOTIFICATIONS_ENABLED: str = "false"
+
     # --- Apple IAP direct (App Store Server API / signed transaction JWS) ---
     APPLE_IAP_ENABLED: str = "false"
     APPLE_IAP_BUNDLE_ID: str = "com.dedato.app"
@@ -261,6 +267,14 @@ class Settings(BaseSettings):
         return _parse_bool(self.ROBOKASSA_ALLOW_INSECURE_PROD_PASSWORDS_IN_TEST)
 
     @property
+    def push_registration_enabled(self) -> bool:
+        return _parse_bool(self.PUSH_REGISTRATION_ENABLED)
+
+    @property
+    def push_notifications_enabled(self) -> bool:
+        return _parse_bool(self.PUSH_NOTIFICATIONS_ENABLED)
+
+    @property
     def apple_iap_enabled(self) -> bool:
         return _parse_bool(self.APPLE_IAP_ENABLED)
 
@@ -333,6 +347,8 @@ class Settings(BaseSettings):
             "EMAIL_ENABLED": self.email_enabled,
             "EMAIL_PROVIDER": self.email_provider,
             "APPLE_IAP_ENABLED": self.apple_iap_enabled,
+            "PUSH_REGISTRATION_ENABLED": self.push_registration_enabled,
+            "PUSH_NOTIFICATIONS_ENABLED": self.push_notifications_enabled,
         }
 
 

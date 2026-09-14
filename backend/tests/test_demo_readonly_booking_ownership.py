@@ -214,6 +214,10 @@ def test_concurrent_demo_access_no_writes_or_500(client, db, world, monkeypatch,
     ("POST", "/api/bookings/public"), ("POST", "/api/bookings/create-with-any-master"),
     ("POST", "/api/client/bookings/temporary/{temporary}/confirm-payment"),
     ("PUT", "/api/client/profile"), ("DELETE", "/api/client/account"),
+    ("PUT", "/api/push/devices"),
+    ("DELETE", "/api/push/devices/11111111-1111-1111-1111-111111111111"),
+    ("POST", "/api/notifications/1/read"),
+    ("POST", "/api/notifications/read-all"),
 ])
 def test_demo_mutation_matrix_zero_delta(client, db, world, method, path):
     h = demo_headers(client)
@@ -240,6 +244,7 @@ def test_demo_mutation_matrix_zero_delta(client, db, world, method, path):
     "/api/master/accounting/expenses", "/api/master/accounting/operations",
     "/api/master/accounting/summary", "/api/master/accounting/pending-confirmations",
     "/api/master/clients", "/api/master/restrictions", "/api/master/restriction-rules",
+    "/api/notifications", "/api/notifications/unread-count",
 ])
 def test_demo_get_no_lazy_persistent_rows(client, db, world, path):
     h = demo_headers(client)

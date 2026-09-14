@@ -94,6 +94,8 @@ class User(Base):
     subscription_price_snapshots = relationship("SubscriptionPriceSnapshot", back_populates="user")
     payments = relationship("Payment", back_populates="user")
     oauth_accounts = relationship("UserOAuthAccount", back_populates="user")
+    notifications = relationship("Notification", back_populates="user")
+    push_devices = relationship("PushDevice", back_populates="user")
 
     @property
     def phone_required(self) -> bool:
@@ -2335,6 +2337,100 @@ class GlobalSettings(Base):
     # Временные метки
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+class Notification(Base):
+    """Persistent in-app notification. Push delivery is a separate outbox row."""
+
+    __tablename__ = "notifications"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    type = Column(String(64), nullable=False)
+    title = Column(String(200), nullable=False)
+    body = Column(String(500), nullable=False)
+    entity_type = Column(String(32), nullable=True)
+    entity_id = Column(Integer, nullable=True)
+    dedup_key = Column(String(128), nullable=True)
+    data_json = Column(JSON, nullable=True)
+    read_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    user = relationship("User", back_populates="notifications")
+    outbox_rows = relationship("NotificationOutbox", back_populates="notification")
+
+    __table_args__ = (
+        Index("idx_notifications_user_created", "user_id", "created_at"),
+        Index("idx_notifications_user_read", "user_id", "read_at"),
+        UniqueConstraint("user_id", "dedup_key", name="uq_notifications_user_dedup_key"),
+    )
+
+
+class PushDevice(Base):
+    """One row per app installation. Token may rotate; user_id may be reassigned on login."""
+
+    __tablename__ = "push_devices"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    installation_id = Column(String(36), nullable=False)
+    token = Column(String(512), nullable=False)
+    provider = Column(String(16), nullable=False, default="expo")
+    platform = Column(String(16), nullable=False)
+    is_active = Column(Boolean, nullable=False, default=True)
+    app_version = Column(String(32), nullable=True)
+    build_number = Column(String(32), nullable=True)
+    locale = Column(String(32), nullable=True)
+    timezone = Column(String(64), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    last_seen_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    invalidated_at = Column(DateTime, nullable=True)
+    invalid_reason = Column(String(64), nullable=True)
+
+    user = relationship("User", back_populates="push_devices")
+    outbox_rows = relationship("NotificationOutbox", back_populates="push_device")
+
+    __table_args__ = (
+        UniqueConstraint("installation_id", name="uq_push_devices_installation_id"),
+        UniqueConstraint("token", name="uq_push_devices_token"),
+        Index("idx_push_devices_user_active", "user_id", "is_active"),
+    )
+
+
+class NotificationOutbox(Base):
+    """Per-device delivery row. Stage 1 schema only — no sender/worker yet."""
+
+    __tablename__ = "notification_outbox"
+
+    STATUS_QUEUED = "queued"
+    STATUS_SENT = "sent"
+    STATUS_RECEIVED = "received"
+    STATUS_FAILED = "failed"
+    STATUS_DEAD_TOKEN = "dead_token"
+
+    id = Column(Integer, primary_key=True, index=True)
+    notification_id = Column(Integer, ForeignKey("notifications.id"), nullable=False)
+    push_device_id = Column(Integer, ForeignKey("push_devices.id"), nullable=False)
+    status = Column(String(32), nullable=False, default="queued")
+    provider_ticket_id = Column(String(128), nullable=True)
+    retry_count = Column(Integer, nullable=False, default=0)
+    next_attempt_at = Column(DateTime, nullable=True)
+    last_error_class = Column(String(32), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    notification = relationship("Notification", back_populates="outbox_rows")
+    push_device = relationship("PushDevice", back_populates="outbox_rows")
+
+    __table_args__ = (
+        UniqueConstraint(
+            "notification_id",
+            "push_device_id",
+            name="uq_notification_outbox_notification_device",
+        ),
+        Index("idx_notification_outbox_status_next", "status", "next_attempt_at"),
+    )
 
 
 # Публичный reference для новых записей (before_insert)
