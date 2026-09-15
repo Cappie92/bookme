@@ -2,6 +2,7 @@ import sys
 import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -19,6 +20,18 @@ engine = create_engine(
     SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}
 )
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+
+@pytest.fixture(scope="function", autouse=True)
+def _forbid_real_expo_http(monkeypatch):
+    original = httpx.AsyncClient.request
+
+    async def guarded(self, method, url, *args, **kwargs):
+        if "exp.host" in str(url):
+            raise AssertionError(f"Unexpected Expo HTTP during tests: {method} {url}")
+        return await original(self, method, url, *args, **kwargs)
+
+    monkeypatch.setattr(httpx.AsyncClient, "request", guarded)
 
 
 @pytest.fixture(scope="session", autouse=True)

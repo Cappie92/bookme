@@ -631,3 +631,37 @@ def test_http_booking_events_fanout_when_allowlisted(client, db, world, monkeypa
     assert {row.push_device_id for row in outbox} == {device_id}
     assert {row.status for row in outbox} == {NotificationOutbox.STATUS_QUEUED}
     assert {row.notification_id for row in outbox} == {row.id for row in notes}
+
+
+def test_booking_request_does_not_send_expo(client, db, world, monkeypatch):
+    calls = []
+
+    async def forbidden(self, messages):
+        calls.append(len(messages))
+        raise AssertionError("Expo send must not run inside booking mutation")
+
+    monkeypatch.setattr("services.push_sender.ExpoPushSender.send_messages", forbidden)
+    monkeypatch.setattr(get_settings(), "PUSH_NOTIFICATIONS_ENABLED", "true")
+    monkeypatch.setattr(
+        get_settings(),
+        "PUSH_NOTIFICATION_USER_ALLOWLIST",
+        str(world["master_user_id"]),
+    )
+    db.add(
+        PushDevice(
+            user_id=world["master_user_id"],
+            installation_id=str(uuid4()),
+            token=f"ExponentPushToken[{uuid4().hex[:20]}]",
+            provider="expo",
+            platform="ios",
+            is_active=True,
+        )
+    )
+    db.commit()
+    headers = _login(client, world["client_phone"])
+    created = client.post("/api/bookings/", json=_payload(world), headers=headers)
+    assert created.status_code == 200, created.text
+    assert db.query(Notification).count() == 1
+    assert db.query(NotificationOutbox).count() == 1
+    assert db.query(NotificationOutbox).one().status == NotificationOutbox.STATUS_QUEUED
+    assert calls == []
