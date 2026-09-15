@@ -130,6 +130,8 @@ async def update_booking_status(
                 detail="Нельзя изменять статус записи, отмененной клиентом"
             )
 
+        old_status = booking.status
+
         # Очистка подтверждений/доходов, если уходим из completed
         if booking.status == BookingStatus.COMPLETED and new_status != "completed":
             confirmation = db.query(BookingConfirmation).filter(BookingConfirmation.booking_id == booking_id).first()
@@ -176,6 +178,10 @@ async def update_booking_status(
                 )
             except ValueError as ve:
                 raise HTTPException(status_code=400, detail=str(ve)) from ve
+
+        from services.notification_events import is_cancel_status, record_booking_cancelled_notification
+        if is_cancel_status(booking.status) and not is_cancel_status(old_status):
+            record_booking_cancelled_notification(db, booking, actor_user_id=current_user.id)
 
         db.commit()
         return {"message": "Статус записи обновлен", "booking_id": booking_id, "new_status": new_status}
@@ -1090,6 +1096,8 @@ async def cancel_booking(
         
         # Обновляем статус бронирования на cancelled
         booking.status = BookingStatus.CANCELLED
+        from services.notification_events import record_booking_cancelled_notification
+        record_booking_cancelled_notification(db, booking, actor_user_id=current_user.id)
         
         db.commit()
         
@@ -1128,9 +1136,11 @@ async def cancel_all_bookings(
         ).all()
         
         cancelled_count = 0
+        from services.notification_events import record_booking_cancelled_notification
         for booking in pending_bookings:
             booking.status = BookingStatus.CANCELLED
             clear_loyalty_points_reserve(booking)
+            record_booking_cancelled_notification(db, booking, actor_user_id=current_user.id)
             cancelled_count += 1
         
         db.commit()

@@ -1022,6 +1022,9 @@ def create_booking(
         )
         db.add(applied_discount)
 
+    from services.notification_events import record_booking_created_notification
+    record_booking_created_notification(db, booking, actor_user_id=current_user.id)
+
     db.commit()
     db.refresh(booking)
     if applied_discount_data:
@@ -1081,8 +1084,19 @@ def update_booking(
         if existing_booking:
             raise HTTPException(status_code=400, detail="This time slot is already booked")
 
+    old_start = booking.start_time
+    old_status = booking.status
     for field, value in updates.items():
         setattr(booking, field, value)
+
+    from services.notification_events import record_booking_mutation_side_effects
+    record_booking_mutation_side_effects(
+        db,
+        booking,
+        actor_user_id=current_user.id,
+        old_start=old_start,
+        old_status=old_status,
+    )
 
     db.commit()
     db.refresh(booking)
@@ -1128,6 +1142,8 @@ def cancel_booking(
     clear_loyalty_points_reserve(booking)
 
     booking.status = BookingStatus.CANCELLED
+    from services.notification_events import record_booking_cancelled_notification
+    record_booking_cancelled_notification(db, booking, actor_user_id=current_user.id)
     db.commit()
     db.refresh(booking)
     return booking
@@ -1341,6 +1357,9 @@ def confirm_temporary_booking_payment(
 
     # Обновляем статус временной брони
     temporary_booking.status = "paid"
+
+    from services.notification_events import record_booking_created_notification
+    record_booking_created_notification(db, booking, actor_user_id=current_user.id)
 
     db.commit()
     db.refresh(booking)

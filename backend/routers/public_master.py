@@ -509,6 +509,8 @@ def create_public_booking(
             discount_percent=applied_discount_data["discount_percent"],
             discount_amount=applied_discount_data["discount_amount"],
         ))
+    from services.notification_events import record_booking_created_notification
+    record_booking_created_notification(db, booking, actor_user_id=current_user.id)
     db.commit()
     db.refresh(booking)
     status_val = getattr(booking.status, "value", str(booking.status))

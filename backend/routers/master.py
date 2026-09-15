@@ -510,8 +510,17 @@ def update_master_booking_time(
     ):
         raise HTTPException(status_code=400, detail="Выбранное время уже занято")
 
+    old_start = booking.start_time
     booking.start_time = body.start_time
     booking.end_time = body.end_time
+    from services.notification_events import record_booking_rescheduled_notification
+    record_booking_rescheduled_notification(
+        db,
+        booking,
+        actor_user_id=current_user.id,
+        old_start=old_start,
+        new_start=booking.start_time,
+    )
     db.commit()
     db.refresh(booking)
     return booking

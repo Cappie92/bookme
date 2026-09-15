@@ -381,6 +381,9 @@ async def create_booking(
         )
         db.add(applied_discount)
 
+    from services.notification_events import record_booking_created_notification
+    record_booking_created_notification(db, db_booking, actor_user_id=current_user.id)
+
     db.commit()
     db.refresh(db_booking)
     if applied_discount_data:
@@ -580,6 +583,8 @@ def _create_specific_public_booking_after_proof(
             discount_amount=discount_data["discount_amount"],
         )
         db.add(applied)
+    from services.notification_events import record_booking_created_notification
+    record_booking_created_notification(db, created, actor_user_id=client.id)
     return created, client, is_new_client, applied
 
 
@@ -739,6 +744,8 @@ async def update_booking(
     
     changes = booking.dict(exclude_unset=True)
     validate_booking_changes(db, current_user, db_booking, changes)
+    old_start = db_booking.start_time
+    old_status = db_booking.status
 
     # Проверяем конфликты
     if booking.start_time and booking.end_time:
@@ -757,6 +764,15 @@ async def update_booking(
 
     for key, value in booking.dict(exclude_unset=True).items():
         setattr(db_booking, key, value)
+
+    from services.notification_events import record_booking_mutation_side_effects
+    record_booking_mutation_side_effects(
+        db,
+        db_booking,
+        actor_user_id=current_user.id,
+        old_start=old_start,
+        old_status=old_status,
+    )
 
     db.commit()
     db.refresh(db_booking)
@@ -891,8 +907,17 @@ async def update_edit_request(
             raise HTTPException(400, "Выбранное время уже занято")
         # Обновляем время бронирования
         db_booking = db_request.booking
+        old_start = db_booking.start_time
         db_booking.start_time = db_request.proposed_start
         db_booking.end_time = db_request.proposed_end
+        from services.notification_events import record_booking_rescheduled_notification
+        record_booking_rescheduled_notification(
+            db,
+            db_booking,
+            actor_user_id=current_user.id,
+            old_start=old_start,
+            new_start=db_booking.start_time,
+        )
 
     db_request.status = update.status
     db.commit()
@@ -1233,4 +1258,6 @@ def _create_any_master_public_booking_after_proof(
     created = Booking(**data, created_at=datetime.utcnow())
     db.add(created)
     db.flush()
+    from services.notification_events import record_booking_created_notification
+    record_booking_created_notification(db, created, actor_user_id=client.id)
     return created, client, is_new_client, best_master["name"]
