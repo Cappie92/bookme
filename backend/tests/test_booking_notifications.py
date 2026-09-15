@@ -1,6 +1,7 @@
 """Stage 4: persistent Notification rows on booking create/cancel/reschedule."""
 
 from datetime import datetime, timedelta, time, timezone as dt_timezone
+from uuid import uuid4
 
 import pytest
 from sqlalchemy.orm import Session
@@ -27,6 +28,7 @@ from services.notification_events import (
     record_booking_created_notification,
     record_booking_rescheduled_notification,
 )
+from settings import get_settings
 from services.zvonok_service import ZVONOK_STUB_DIGITS
 
 
@@ -577,3 +579,55 @@ def test_timezone_wall_clock_and_aware_conversion(db, world):
     master.timezone = "Not/AZone"
     db.commit()
     assert str(_master_zoneinfo(db, world["master_id"])) == "Europe/Moscow"
+
+
+def test_http_booking_events_fanout_when_allowlisted(client, db, world, monkeypatch):
+    monkeypatch.setattr(get_settings(), "PUSH_NOTIFICATIONS_ENABLED", "true")
+    monkeypatch.setattr(
+        get_settings(),
+        "PUSH_NOTIFICATION_USER_ALLOWLIST",
+        str(world["master_user_id"]),
+    )
+    device = PushDevice(
+        user_id=world["master_user_id"],
+        installation_id=str(uuid4()),
+        token=f"ExponentPushToken[{uuid4().hex[:20]}]",
+        provider="expo",
+        platform="ios",
+        is_active=True,
+    )
+    db.add(device)
+    db.commit()
+    device_id = int(device.id)
+
+    headers = _login(client, world["client_phone"])
+    created = client.post("/api/bookings/", json=_payload(world), headers=headers)
+    assert created.status_code == 200, created.text
+    booking_id = created.json()["id"]
+    assert db.query(Notification).filter(Notification.type == "booking_created").count() == 1
+    assert db.query(NotificationOutbox).count() == 1
+
+    moved_start = world["start"] + timedelta(days=1)
+    moved = client.put(
+        f"/api/bookings/{booking_id}",
+        json={
+            "start_time": moved_start.isoformat(),
+            "end_time": (moved_start + timedelta(hours=1)).isoformat(),
+        },
+        headers=headers,
+    )
+    assert moved.status_code == 200, moved.text
+    cancelled = client.delete(f"/api/client/bookings/{booking_id}", headers=headers)
+    assert cancelled.status_code == 200, cancelled.text
+
+    notes = _notes(db, world["master_user_id"])
+    assert [row.type for row in notes] == [
+        "booking_created",
+        "booking_rescheduled",
+        "booking_cancelled",
+    ]
+    outbox = db.query(NotificationOutbox).order_by(NotificationOutbox.id.asc()).all()
+    assert len(outbox) == 3
+    assert {row.push_device_id for row in outbox} == {device_id}
+    assert {row.status for row in outbox} == {NotificationOutbox.STATUS_QUEUED}
+    assert {row.notification_id for row in outbox} == {row.id for row in notes}

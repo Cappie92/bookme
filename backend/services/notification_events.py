@@ -1,4 +1,7 @@
-"""Persistent in-app booking notifications. No outbox, sender, or network."""
+"""Persistent in-app booking notifications plus same-transaction outbox fan-out.
+
+No Expo HTTP, worker, or receipts.
+"""
 
 from __future__ import annotations
 
@@ -10,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from models import Booking, BookingStatus, IndieMaster, Master, Service
 from services.notifications import create_notification
+from services.push_outbox import fanout_notification_to_active_devices
 
 _FALLBACK_TZ = "Europe/Moscow"
 _FALLBACK_SERVICE = "Услуга"
@@ -144,6 +148,13 @@ def _body(service_name: str, date_label: str, time_label: str) -> str:
     return " · ".join(parts) if parts else service_name or _FALLBACK_SERVICE
 
 
+def _create_and_fanout(db: Session, **kwargs) -> tuple[Any, bool]:
+    row, created = create_notification(db, **kwargs)
+    if created:
+        fanout_notification_to_active_devices(db, notification=row)
+    return row, created
+
+
 def record_booking_created_notification(
     db: Session,
     booking: Booking,
@@ -160,7 +171,7 @@ def record_booking_created_notification(
         "date_label": date_label,
         "time_label": time_label,
     }
-    return create_notification(
+    return _create_and_fanout(
         db,
         user_id=recipient,
         type="booking_created",
@@ -191,7 +202,7 @@ def record_booking_cancelled_notification(
         "date_label": date_label,
         "time_label": time_label,
     }
-    return create_notification(
+    return _create_and_fanout(
         db,
         user_id=recipient,
         type="booking_cancelled",
@@ -230,7 +241,7 @@ def record_booking_rescheduled_notification(
         "new_date_label": new_date_label,
         "new_time_label": new_time_label,
     }
-    return create_notification(
+    return _create_and_fanout(
         db,
         user_id=recipient,
         type="booking_rescheduled",

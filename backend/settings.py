@@ -14,6 +14,31 @@ def _parse_bool(val: str) -> bool:
     return v in ("1", "true", "yes")
 
 
+def parse_push_user_allowlist(raw: str) -> tuple[bool, frozenset[int]]:
+    """Parse PUSH_NOTIFICATION_USER_ALLOWLIST.
+
+    Returns ``(allow_all, user_ids)``. Malformed input fails closed: nobody.
+    Standalone ``*`` means all users. Mixed ``*`` or non-positive IDs mean nobody.
+    """
+    text = (raw or "").strip()
+    if not text:
+        return False, frozenset()
+    if text == "*":
+        return True, frozenset()
+    ids: set[int] = set()
+    for part in text.split(","):
+        token = part.strip()
+        if not token:
+            continue
+        if token == "*" or not token.isdigit():
+            return False, frozenset()
+        value = int(token)
+        if value <= 0:
+            return False, frozenset()
+        ids.add(value)
+    return False, frozenset(ids)
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -110,8 +135,10 @@ class Settings(BaseSettings):
     # --- Push notifications (device registration vs future sender) ---
     # Registration API is on so mobile can upsert tokens before sending is enabled.
     PUSH_REGISTRATION_ENABLED: str = "true"
-    # Sender / booking event fan-out. Stage 1 has no worker; keep false until Stage 5.
+    # Outbox fan-out + future worker. Keep false until Stage 5 rollout.
     PUSH_NOTIFICATIONS_ENABLED: str = "false"
+    # empty = nobody; CSV user ids = limited rollout; standalone * = all eligible users.
+    PUSH_NOTIFICATION_USER_ALLOWLIST: str = ""
 
     # --- Apple IAP direct (App Store Server API / signed transaction JWS) ---
     APPLE_IAP_ENABLED: str = "false"
@@ -274,6 +301,29 @@ class Settings(BaseSettings):
     def push_notifications_enabled(self) -> bool:
         return _parse_bool(self.PUSH_NOTIFICATIONS_ENABLED)
 
+    def push_user_allowed(self, user_id: int) -> bool:
+        """True when sender fan-out may target this user. Empty allowlist is nobody."""
+        if not self.push_notifications_enabled:
+            return False
+        if not isinstance(user_id, int) or user_id <= 0:
+            return False
+        allow_all, allowed_ids = parse_push_user_allowlist(
+            self.PUSH_NOTIFICATION_USER_ALLOWLIST
+        )
+        if allow_all:
+            return True
+        return user_id in allowed_ids
+
+    def _push_allowlist_log_label(self) -> str:
+        allow_all, allowed_ids = parse_push_user_allowlist(
+            self.PUSH_NOTIFICATION_USER_ALLOWLIST
+        )
+        if allow_all:
+            return "*"
+        if not allowed_ids:
+            return "empty"
+        return str(len(allowed_ids))
+
     @property
     def apple_iap_enabled(self) -> bool:
         return _parse_bool(self.APPLE_IAP_ENABLED)
@@ -349,6 +399,7 @@ class Settings(BaseSettings):
             "APPLE_IAP_ENABLED": self.apple_iap_enabled,
             "PUSH_REGISTRATION_ENABLED": self.push_registration_enabled,
             "PUSH_NOTIFICATIONS_ENABLED": self.push_notifications_enabled,
+            "PUSH_NOTIFICATION_USER_ALLOWLIST": self._push_allowlist_log_label(),
         }
 
 
