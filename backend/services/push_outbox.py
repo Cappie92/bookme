@@ -1,4 +1,4 @@
-"""Notification outbox fan-out, claim/lease, and retry helpers. No receipts."""
+"""Notification outbox fan-out, send claim/lease, receipt poll helpers."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 
 from models import Notification, NotificationOutbox, PushDevice
 from settings import get_settings
@@ -17,6 +18,10 @@ PUSH_CLAIM_LEASE = timedelta(minutes=2)
 PUSH_MAX_RETRY_COUNT = 8
 PUSH_SENT_RECEIPT_DELAY = timedelta(minutes=15)
 PUSH_CREDENTIALS_COOLDOWN = timedelta(minutes=15)
+PUSH_RECEIPT_RETRY_DELAY = timedelta(minutes=15)
+PUSH_RECEIPT_LEASE = timedelta(minutes=2)
+PUSH_RECEIPT_TTL = timedelta(hours=24)
+PUSH_RECEIPT_BATCH_SIZE = 100
 
 RETRY_BACKOFF = (
     timedelta(seconds=30),
@@ -46,8 +51,18 @@ ERR_PROVIDER_ERROR = "provider_error"
 ERR_INVALID_CREDENTIALS = "invalid_credentials"
 ERR_MALFORMED_RESPONSE = "malformed_response"
 ERR_MESSAGE_TOO_BIG = "message_too_big"
+ERR_RECEIPT_EXPIRED = "receipt_expired"
+ERR_RATE_EXCEEDED_RECEIPT = "rate_exceeded_receipt"
+ERR_MISMATCH_SENDER = "mismatch_sender_id"
 
 INVALID_REASON_UNREGISTERED = "unregistered"
+
+
+def _preserve_send_updated_at(row: NotificationOutbox) -> None:
+    """Keep send-time updated_at so receipt DNR cannot target a rebound token."""
+    sent_at = row.updated_at
+    row.updated_at = sent_at
+    flag_modified(row, "updated_at")
 
 
 def utc_now() -> datetime:
@@ -74,6 +89,13 @@ def is_past_ttl(created_at: datetime | None, now: datetime) -> bool:
     if deadline is None:
         return True
     return as_naive_utc(now) > deadline
+
+
+def is_receipt_expired(created_at: datetime | None, now: datetime) -> bool:
+    created = as_naive_utc(created_at)
+    if created is None:
+        return False
+    return as_naive_utc(now) > created + PUSH_RECEIPT_TTL
 
 
 def fanout_notification_to_active_devices(
@@ -232,3 +254,134 @@ def deactivate_unregistered_device(device: PushDevice, *, now: datetime) -> None
     device.invalidated_at = current
     device.invalid_reason = INVALID_REASON_UNREGISTERED
     device.updated_at = current
+
+
+def claim_due_receipt_rows(
+    db: Session,
+    *,
+    now: datetime | None = None,
+    limit: int = PUSH_RECEIPT_BATCH_SIZE,
+) -> list[int]:
+    """Lease due sent rows that have a ticket id. Does not increment retry_count.
+
+    Preserve updated_at: it is the send-time identity marker for rebind safety.
+    """
+    current = as_naive_utc(now) or utc_now()
+    rows = (
+        db.query(NotificationOutbox)
+        .filter(
+            NotificationOutbox.status == NotificationOutbox.STATUS_SENT,
+            NotificationOutbox.provider_ticket_id.isnot(None),
+            or_(
+                NotificationOutbox.next_attempt_at.is_(None),
+                NotificationOutbox.next_attempt_at <= current,
+            ),
+        )
+        .order_by(NotificationOutbox.id.asc())
+        .limit(limit)
+        .all()
+    )
+    lease_until = current + PUSH_RECEIPT_LEASE
+    ids: list[int] = []
+    for row in rows:
+        row.next_attempt_at = lease_until
+        _preserve_send_updated_at(row)
+        ids.append(int(row.id))
+    if ids:
+        db.flush()
+    return ids
+
+
+def mark_received(row: NotificationOutbox, *, now: datetime) -> None:
+    """Expo receipt ok. Not user-seen, not OS-delivered, not Notification.read_at."""
+    current = as_naive_utc(now)
+    row.status = NotificationOutbox.STATUS_RECEIVED
+    row.next_attempt_at = None
+    row.last_error_class = None
+    row.updated_at = current
+
+
+def schedule_receipt_retry(row: NotificationOutbox, *, now: datetime) -> None:
+    """Keep sent; poll later. Does not increment send retry_count or move send-time updated_at."""
+    current = as_naive_utc(now)
+    row.status = NotificationOutbox.STATUS_SENT
+    row.next_attempt_at = current + PUSH_RECEIPT_RETRY_DELAY
+    _preserve_send_updated_at(row)
+
+
+def mark_receipt_terminal(
+    row: NotificationOutbox,
+    *,
+    now: datetime,
+    error_class: str,
+    status: str = NotificationOutbox.STATUS_FAILED,
+) -> None:
+    current = as_naive_utc(now)
+    row.status = status
+    row.last_error_class = error_class
+    row.next_attempt_at = None
+    row.updated_at = current
+
+
+def device_identity_matches_sent_row(device: PushDevice | None, sent_row: NotificationOutbox) -> bool:
+    """False if the PushDevice row was rebound or retokened after this send.
+
+    Outbox has no token snapshot. Conservative proxy:
+    - notification.user_id must still equal device.user_id
+    - device.updated_at must not be later than this sent row's updated_at
+    """
+    if device is None or sent_row is None:
+        return False
+    notification = sent_row.notification
+    if notification is not None and int(device.user_id) != int(notification.user_id):
+        return False
+    if notification is None:
+        return False
+    device_ts = as_naive_utc(device.updated_at)
+    sent_ts = as_naive_utc(sent_row.updated_at)
+    if device_ts is None or sent_ts is None:
+        return False
+    return device_ts <= sent_ts
+
+
+def apply_dead_token_from_receipt(
+    db: Session,
+    row: NotificationOutbox,
+    *,
+    now: datetime,
+) -> None:
+    """Finalize this ticket as dead_token. Deactivate device + siblings only if identity is unchanged."""
+    device = row.push_device
+    if device is None:
+        device = db.query(PushDevice).filter(PushDevice.id == row.push_device_id).first()
+    identity_ok = device_identity_matches_sent_row(device, row)
+    mark_receipt_terminal(
+        row,
+        now=now,
+        error_class=ERR_DEVICE_NOT_REGISTERED,
+        status=NotificationOutbox.STATUS_DEAD_TOKEN,
+    )
+    if not identity_ok or device is None:
+        return
+    deactivate_unregistered_device(device, now=now)
+    siblings = (
+        db.query(NotificationOutbox)
+        .filter(
+            NotificationOutbox.push_device_id == device.id,
+            NotificationOutbox.id != row.id,
+            NotificationOutbox.status.in_(
+                (
+                    NotificationOutbox.STATUS_QUEUED,
+                    NotificationOutbox.STATUS_SENT,
+                )
+            ),
+        )
+        .all()
+    )
+    for sibling in siblings:
+        mark_receipt_terminal(
+            sibling,
+            now=now,
+            error_class=ERR_DEVICE_NOT_REGISTERED,
+            status=NotificationOutbox.STATUS_DEAD_TOKEN,
+        )

@@ -1,4 +1,4 @@
-"""Stage 5B Expo sender: payload, tickets, HTTP classification. No receipts."""
+"""Stage 5B/5C Expo sender: payload, tickets, receipts, HTTP classification."""
 
 from __future__ import annotations
 
@@ -11,14 +11,17 @@ from models import Notification
 from services.push_outbox import ERR_HTTP_4XX, ERR_INVALID_CREDENTIALS, ERR_RATE_EXCEEDED
 from services.push_sender import (
     EXPO_PUSH_URL,
+    EXPO_RECEIPTS_URL,
     KIND_CREDENTIALS,
     KIND_PERMANENT,
+    KIND_RECEIPTS,
     KIND_TICKETS,
     KIND_TRANSIENT,
     ExpoPushSender,
     classify_http_status,
     classify_ticket,
     is_sendable_expo_token,
+    parse_expo_receipts_response,
     parse_expo_send_response,
     build_expo_message,
 )
@@ -184,3 +187,69 @@ async def test_sender_http_429_and_500_and_400():
     assert (await boom.send_messages([{"to": "x"}])).kind == KIND_TRANSIENT
     bad = ExpoPushSender(client=_FakeClient(response=_FakeResponse(400, {})))
     assert (await bad.send_messages([{"to": "x"}])).kind == KIND_PERMANENT
+
+
+def test_parse_expo_receipts_maps_by_ticket_id_not_order():
+    parsed = parse_expo_receipts_response(
+        _FakeResponse(
+            200,
+            {
+                "data": {
+                    "t-b": {"status": "error", "details": {"error": "MessageTooBig"}},
+                    "t-a": {"status": "ok"},
+                }
+            },
+        ),
+        expected_ids=["t-a", "t-b"],
+    )
+    assert parsed.kind == KIND_RECEIPTS
+    assert parsed.receipts["t-a"].status == "ok"
+    assert parsed.receipts["t-b"].error_code == "MessageTooBig"
+
+
+def test_parse_expo_receipts_malformed_is_transient():
+    invalid_json = parse_expo_receipts_response(_FakeResponse(200, payload=None), expected_ids=["t"])
+    assert invalid_json.kind == KIND_TRANSIENT
+    assert invalid_json.error_class == "malformed_response"
+    missing = parse_expo_receipts_response(_FakeResponse(200, {"errors": []}), expected_ids=["t"])
+    assert missing.kind == KIND_TRANSIENT
+    wrong_type = parse_expo_receipts_response(
+        _FakeResponse(200, {"data": [{"status": "ok"}]}),
+        expected_ids=["t"],
+    )
+    assert wrong_type.kind == KIND_TRANSIENT
+    skipped = parse_expo_receipts_response(
+        _FakeResponse(200, {"data": {"t": "not-an-object", "u": {"status": "ok"}}}),
+        expected_ids=["t", "u"],
+    )
+    assert skipped.kind == KIND_RECEIPTS
+    assert "t" not in skipped.receipts
+    assert skipped.receipts["u"].status == "ok"
+
+
+@pytest.mark.asyncio
+async def test_get_receipts_posts_ids_object_and_handles_network():
+    client = _FakeClient(response=_FakeResponse(200, {"data": {"ticket-1": {"status": "ok"}}}))
+    sender = ExpoPushSender(client=client)
+    result = await sender.get_receipts(["ticket-1", "ticket-1-ignored-empty", ""])
+    assert result.kind == KIND_RECEIPTS
+    assert result.receipts["ticket-1"].status == "ok"
+    assert client.calls[0]["url"] == EXPO_RECEIPTS_URL
+    assert client.calls[0]["json"] == {"ids": ["ticket-1", "ticket-1-ignored-empty"]}
+
+    timeout = await ExpoPushSender(client=_FakeClient(exc=httpx.TimeoutException("slow"))).get_receipts(
+        ["t"]
+    )
+    assert timeout.kind == KIND_TRANSIENT and timeout.error_class == "timeout"
+    network = await ExpoPushSender(client=_FakeClient(exc=httpx.ConnectError("down"))).get_receipts(["t"])
+    assert network.kind == KIND_TRANSIENT and network.error_class == "network"
+    too_many = await ExpoPushSender(client=_FakeClient(response=_FakeResponse(429, {}))).get_receipts(
+        ["t"]
+    )
+    assert too_many.kind == KIND_TRANSIENT
+    boom = await ExpoPushSender(client=_FakeClient(response=_FakeResponse(503, {}))).get_receipts(["t"])
+    assert boom.kind == KIND_TRANSIENT
+    forbidden = await ExpoPushSender(client=_FakeClient(response=_FakeResponse(401, {}))).get_receipts(
+        ["t"]
+    )
+    assert forbidden.kind == KIND_CREDENTIALS

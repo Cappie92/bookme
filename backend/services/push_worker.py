@@ -1,10 +1,9 @@
-"""In-process outbox worker: claim, send-time safety, Expo send, retry.
+"""In-process outbox worker: send, receipts, retry/TTL, dead-token cleanup.
 
-Delivery is at-least-once. If Expo accepts a batch and the process crashes
-before ticket persistence, the lease expires and the same queued row may be
-sent again. There is no distributed lock and no exactly-once claim.
+Delivery is at-least-once. Receipt `received` means Expo accepted the ticket,
+not that the user saw the notification or Notification.read_at was set.
 
-Stage 5B does not poll receipts and never transitions sent → received.
+Stage 5C polls /getReceipts. It never moves receipt-error rows back to queued.
 """
 
 from __future__ import annotations
@@ -22,31 +21,45 @@ from database import SessionLocal
 from models import Notification, NotificationOutbox, PushDevice, User
 from services.push_outbox import (
     ERR_DEVICE_INACTIVE,
+    ERR_DEVICE_NOT_REGISTERED,
     ERR_INVALID_CREDENTIALS,
     ERR_INVALID_TOKEN,
+    ERR_MESSAGE_TOO_BIG,
+    ERR_MISMATCH_SENDER,
     ERR_NOT_ALLOWED,
     ERR_PROVIDER_ERROR,
+    ERR_RATE_EXCEEDED_RECEIPT,
+    ERR_RECEIPT_EXPIRED,
     ERR_RECIPIENT_MISMATCH,
     ERR_STALE,
     ERR_USER_INACTIVE,
     PUSH_CREDENTIALS_COOLDOWN,
     PUSH_WORKER_INTERVAL_SECONDS,
+    apply_dead_token_from_receipt,
     as_naive_utc,
     claim_due_outbox_rows,
+    claim_due_receipt_rows,
     deactivate_unregistered_device,
     is_past_ttl,
+    is_receipt_expired,
+    mark_receipt_terminal,
+    mark_received,
     mark_sent,
     mark_terminal,
     release_to_queued,
+    schedule_receipt_retry,
     schedule_retry,
     utc_now,
 )
 from services.push_sender import (
     KIND_CREDENTIALS,
     KIND_PERMANENT,
+    KIND_RECEIPTS,
     KIND_TICKETS,
     KIND_TRANSIENT,
     ExpoPushSender,
+    ExpoReceipt,
+    ExpoReceiptsResult,
     ExpoSendBatchResult,
     ExpoTicket,
     build_expo_message,
@@ -508,6 +521,253 @@ async def run_push_delivery_once(
     return {"claimed": len(ids), "sent": sent, "http": len(candidates)}
 
 
+@dataclass
+class _ReceiptCandidate:
+    outbox_id: int
+    ticket_id: str
+    push_device_id: int
+    notification_id: int
+    created_at: datetime | None
+
+
+async def _claim_receipt_ids(session_factory, *, now: datetime) -> list[int]:
+    async with _claim_lock:
+        db = _open_session(session_factory)
+        try:
+            ids = claim_due_receipt_rows(db, now=now)
+            db.commit()
+            return ids
+        except Exception:
+            db.rollback()
+            logger.exception("push receipt claim failed")
+            return []
+        finally:
+            _close_quietly(db)
+
+
+def _prepare_receipt_candidates(
+    session_factory,
+    *,
+    ids: list[int],
+    now: datetime,
+) -> list[_ReceiptCandidate]:
+    db = _open_session(session_factory)
+    candidates: list[_ReceiptCandidate] = []
+    try:
+        rows = _load_claimed_rows(db, ids)
+        for row in rows:
+            if row.status != NotificationOutbox.STATUS_SENT or not row.provider_ticket_id:
+                continue
+            notification = row.notification
+            created_at = notification.created_at if notification is not None else None
+            if is_receipt_expired(created_at, now):
+                mark_receipt_terminal(row, now=now, error_class=ERR_RECEIPT_EXPIRED)
+                logger.info(
+                    "push receipt expired outbox_id=%s notification_id=%s",
+                    row.id,
+                    row.notification_id,
+                )
+                continue
+            candidates.append(
+                _ReceiptCandidate(
+                    outbox_id=int(row.id),
+                    ticket_id=str(row.provider_ticket_id),
+                    push_device_id=int(row.push_device_id),
+                    notification_id=int(row.notification_id),
+                    created_at=created_at,
+                )
+            )
+        db.commit()
+        return candidates
+    except Exception:
+        db.rollback()
+        logger.exception("push receipt prepare failed")
+        return []
+    finally:
+        _close_quietly(db)
+
+
+def _receipt_error_outcome(error_code: str | None) -> tuple[str, str]:
+    code = error_code or ""
+    if code == "DeviceNotRegistered":
+        return "dead_token", ERR_DEVICE_NOT_REGISTERED
+    if code == "MessageTooBig":
+        return "failed", ERR_MESSAGE_TOO_BIG
+    if code == "MessageRateExceeded":
+        return "failed", ERR_RATE_EXCEEDED_RECEIPT
+    if code == "InvalidCredentials":
+        return "credentials", ERR_INVALID_CREDENTIALS
+    if code == "MismatchSenderId":
+        return "failed", ERR_MISMATCH_SENDER
+    if code in {"InvalidPushToken", "ValidationError"}:
+        return "failed", ERR_INVALID_TOKEN
+    return "failed", ERR_PROVIDER_ERROR
+
+
+def _apply_receipts(
+    db: Session,
+    candidates: list[_ReceiptCandidate],
+    receipts: dict[str, ExpoReceipt],
+    *,
+    now: datetime,
+) -> str | None:
+    rows = {row.id: row for row in _load_claimed_rows(db, [item.outbox_id for item in candidates])}
+    cooldown = None
+    for item in candidates:
+        row = rows.get(item.outbox_id)
+        if row is None or row.status != NotificationOutbox.STATUS_SENT:
+            continue
+        receipt = receipts.get(item.ticket_id)
+        if receipt is None or receipt.status not in {"ok", "error"}:
+            schedule_receipt_retry(row, now=now)
+            logger.info(
+                "push receipt missing outbox_id=%s ticket_id=%s",
+                row.id,
+                item.ticket_id,
+            )
+            continue
+        if receipt.status == "ok":
+            mark_received(row, now=now)
+            logger.info(
+                "push received outbox_id=%s notification_id=%s ticket_id=%s",
+                row.id,
+                item.notification_id,
+                item.ticket_id,
+            )
+            continue
+        outcome, error_class = _receipt_error_outcome(receipt.error_code)
+        if outcome == "dead_token":
+            apply_dead_token_from_receipt(db, row, now=now)
+            logger.info(
+                "push receipt dead_token outbox_id=%s push_device_id=%s ticket_id=%s",
+                row.id,
+                item.push_device_id,
+                item.ticket_id,
+            )
+            continue
+        if outcome == "credentials":
+            cooldown = ERR_INVALID_CREDENTIALS
+            mark_receipt_terminal(row, now=now, error_class=ERR_INVALID_CREDENTIALS)
+            continue
+        mark_receipt_terminal(row, now=now, error_class=error_class)
+        logger.info(
+            "push receipt failed outbox_id=%s ticket_id=%s error_class=%s",
+            row.id,
+            item.ticket_id,
+            error_class,
+        )
+    return cooldown
+
+
+def _reschedule_receipt_batch(
+    session_factory,
+    candidates: list[_ReceiptCandidate],
+    *,
+    now: datetime,
+) -> None:
+    db = _open_session(session_factory)
+    try:
+        rows = _load_claimed_rows(db, [item.outbox_id for item in candidates])
+        for row in rows:
+            if row.status == NotificationOutbox.STATUS_SENT:
+                schedule_receipt_retry(row, now=now)
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("push receipt reschedule failed")
+    finally:
+        _close_quietly(db)
+
+
+def _persist_receipt_result(
+    session_factory,
+    candidates: list[_ReceiptCandidate],
+    result: ExpoReceiptsResult,
+    *,
+    now: datetime,
+) -> None:
+    db = _open_session(session_factory)
+    try:
+        if result.kind == KIND_RECEIPTS:
+            cooldown = _apply_receipts(db, candidates, result.receipts, now=now)
+            db.commit()
+            if cooldown:
+                trip_provider_cooldown(now)
+            return
+        if result.kind == KIND_CREDENTIALS or result.error_class == ERR_INVALID_CREDENTIALS:
+            rows = _load_claimed_rows(db, [item.outbox_id for item in candidates])
+            for row in rows:
+                if row.status == NotificationOutbox.STATUS_SENT:
+                    schedule_receipt_retry(row, now=now)
+            db.commit()
+            trip_provider_cooldown(now)
+            return
+        db.rollback()
+    except Exception:
+        db.rollback()
+        logger.exception("push receipt persist failed")
+        return
+    finally:
+        _close_quietly(db)
+    _reschedule_receipt_batch(session_factory, candidates, now=now)
+
+
+async def run_push_receipts_once(
+    *,
+    session_factory=None,
+    sender: ExpoPushSender | None = None,
+    now: datetime | None = None,
+) -> dict:
+    """Poll Expo receipts for due sent rows. Allowlist/flag do not gate this."""
+    current = as_naive_utc(now) or utc_now()
+    ids = await _claim_receipt_ids(session_factory, now=current)
+    if not ids:
+        return {"claimed": 0, "http": 0}
+
+    logger.info("push receipts claimed batch_size=%s", len(ids))
+    candidates = _prepare_receipt_candidates(session_factory, ids=ids, now=current)
+    if not candidates:
+        return {"claimed": len(ids), "http": 0}
+
+    active_sender = sender or ExpoPushSender()
+    owns_sender = sender is None
+    try:
+        result = await active_sender.get_receipts([item.ticket_id for item in candidates])
+    except Exception:
+        logger.exception("push receipts request failed unexpectedly")
+        result = ExpoReceiptsResult(kind=KIND_TRANSIENT, error_class="provider_error")
+    finally:
+        if owns_sender:
+            await active_sender.aclose()
+
+    _persist_receipt_result(session_factory, candidates, result, now=current)
+    return {"claimed": len(ids), "http": len(candidates)}
+
+
+async def run_push_tick_once(
+    *,
+    session_factory=None,
+    sender: ExpoPushSender | None = None,
+    now: datetime | None = None,
+    jitter_seconds: JitterFn | float | None = None,
+) -> dict:
+    """One worker tick: send if enabled, always poll due receipts."""
+    send_result = {"claimed": 0, "sent": 0, "http": 0}
+    if get_settings().push_notifications_enabled:
+        send_result = await run_push_delivery_once(
+            session_factory=session_factory,
+            sender=sender,
+            now=now,
+            jitter_seconds=jitter_seconds,
+        )
+    receipt_result = await run_push_receipts_once(
+        session_factory=session_factory,
+        sender=sender,
+        now=now,
+    )
+    return {"send": send_result, "receipts": receipt_result}
+
+
 async def run_push_worker_task(
     *,
     session_factory=None,
@@ -521,11 +781,10 @@ async def run_push_worker_task(
         while True:
             try:
                 await asyncio.sleep(interval_seconds)
-                if get_settings().push_notifications_enabled:
-                    await run_push_delivery_once(
-                        session_factory=session_factory,
-                        sender=active_sender,
-                    )
+                await run_push_tick_once(
+                    session_factory=session_factory,
+                    sender=active_sender,
+                )
             except asyncio.CancelledError:
                 logger.info("push worker stopped")
                 raise
