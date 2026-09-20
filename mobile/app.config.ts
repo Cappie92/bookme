@@ -98,6 +98,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         backgroundColor: '#4CAF50',
       },
       package: 'ru.dedato.mobile',
+      googleServicesFile: './android/app/google-services.json',
       versionCode: 2,
       edgeToEdgeEnabled: true,
       predictiveBackGestureEnabled: false,

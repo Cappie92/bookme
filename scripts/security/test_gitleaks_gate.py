@@ -279,6 +279,109 @@ class GateTests(unittest.TestCase):
         self.commit("wrong checksum section")
         self.assertGreater(self.run_gate()["unresolved"], 0)
 
+    def firebase_config(self):
+        rng = random.Random(17)
+        key = "AI" + "za" + "".join(rng.choice("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_")
+                                    for _ in range(35))
+        return {"project_info": {"project_id": "dedato-3a09b"}, "configuration_version": "1",
+                "client": [{"client_info": {"android_client_info": {"package_name": "ru.dedato.mobile"}},
+                            "api_key": [{"current_key": key}]}]}
+
+    def write_firebase(self, config, path=gate.FIREBASE_CLIENT_PATH):
+        self.write(path, json.dumps(config, indent=2) + "\n")
+
+    def test_firebase_client_exact_context_passes_all_gates(self):
+        config = self.firebase_config()
+        self.write_firebase(config)
+        self.commit("synthetic public Firebase client config")
+        for mode in ["current-tree", "incremental", "history"]:
+            with self.subTest(mode=mode):
+                result = self.run_gate(mode, **({"before": self.base} if mode == "incremental" else {}))
+                self.assertEqual(result["raw"], 1)
+                self.assertEqual(result["suppressed_reviewed"], 1)
+                self.assertEqual(result["unresolved"], 0)
+                self.assertFalse(config["client"][0]["api_key"][0]["current_key"] in json.dumps(result))
+
+    def test_firebase_key_other_paths_still_fail(self):
+        for path in ["google-services.json", "mobile/android/other/google-services.json",
+                     "docs/google-services.json"]:
+            self.write_firebase(self.firebase_config(), path)
+        self.commit("synthetic Google keys outside exact path")
+        for mode in ["current-tree", "incremental"]:
+            result = self.run_gate(mode, **({"before": self.base} if mode == "incremental" else {}))
+            self.assertEqual(result["suppressed_reviewed"], 0)
+            self.assertEqual(result["unresolved"], 3)
+
+    def test_firebase_other_secret_in_same_file_still_fails(self):
+        config = self.firebase_config()
+        config["client"][0]["services"] = {"api_secret": self.canary}
+        self.write_firebase(config)
+        self.commit("unrelated secret inside client file")
+        for mode in ["current-tree", "incremental"]:
+            result = self.run_gate(mode, **({"before": self.base} if mode == "incremental" else {}))
+            self.assertTrue(any(row["rule"] == "generic-api-key" and row["classification"] == "UNRESOLVED"
+                                for row in result["findings"]))
+
+    def test_firebase_other_google_key_in_same_file_still_fails(self):
+        config = self.firebase_config()
+        config["client"][0]["services"] = {"other_key": config["client"][0]["api_key"][0]["current_key"]}
+        self.write_firebase(config)
+        self.commit("Google key outside approved client field")
+        result = self.run_gate()
+        self.assertEqual(result["raw"], 2)
+        self.assertEqual(result["suppressed_reviewed"], 1)
+        self.assertEqual(result["unresolved"], 1)
+
+    def test_firebase_private_markers_fail_even_without_scannable_secret(self):
+        injections = [{"type": "service_account"}, {"private_key": "fake"},
+                      {"private_key_id": "fake"}, {"client_secret": "fake"}]
+        injections += [{"note": "-----BEGIN " + prefix + "PRIVATE KEY-----fake"}
+                       for prefix in ["", "RSA ", "EC ", "ENCRYPTED "]]
+        for index, injection in enumerate(injections):
+            with self.subTest(case=index):
+                config = self.firebase_config()
+                config["client"][0]["services"] = {"nested": [injection]}
+                self.write_firebase(config)
+                with self.assertRaisesRegex(gate.GateError, "^INVALID_FIREBASE_CLIENT_CONFIG$"):
+                    self.run_gate(head="WORKTREE")
+
+    def test_firebase_fake_service_account_rejected_current_and_incremental(self):
+        config = self.firebase_config()
+        config.update({"type": "service_account", "private_key": "-----BEGIN " + "PRIVATE KEY-----fake"})
+        self.write_firebase(config)
+        self.commit("fake service account mixed into client config")
+        with self.assertRaisesRegex(gate.GateError, "^INVALID_FIREBASE_CLIENT_CONFIG$"):
+            self.run_gate()
+        self.assertGreater(self.run_gate("incremental", before=self.base)["unresolved"], 0)
+
+    def test_firebase_wrong_identity_and_invalid_json_fail(self):
+        wrong_project = self.firebase_config()
+        wrong_project["project_info"]["project_id"] = "other-project"
+        wrong_package = self.firebase_config()
+        wrong_package["client"][0]["client_info"]["android_client_info"]["package_name"] = "other.package"
+        wrong_shape = self.firebase_config()
+        wrong_shape["client"] = []
+        for index, text in enumerate([json.dumps(c) for c in [wrong_project, wrong_package, wrong_shape]]
+                                     + ["not JSON", "{}", "null", '{"client": [], "client": []}']):
+            with self.subTest(case=index):
+                self.write(gate.FIREBASE_CLIENT_PATH, text)
+                with self.assertRaisesRegex(gate.GateError, "^INVALID_FIREBASE_CLIENT_CONFIG$"):
+                    self.run_gate(head="WORKTREE")
+
+    def test_firebase_exception_requires_reviewed_rule_path_guard_and_occurrence(self):
+        config = self.firebase_config()
+        text = json.dumps(config, indent=2)
+        line = next(i for i, value in enumerate(text.splitlines(), 1) if '"current_key"' in value)
+        item = {"rule": "gcp-api-key", "file": gate.FIREBASE_CLIENT_PATH, "line": line}
+        row = {"EndLine": line}
+        exceptions = json.loads((self.policy / ".gitleaks-current-exceptions.json").read_text())["exceptions"]
+        self.assertTrue(gate.firebase_client_exception(item, row, text, exceptions))
+        for field, value in [("rule", "generic-api-key"), ("file", "other/google-services.json"), ("line", 1)]:
+            self.assertFalse(gate.firebase_client_exception({**item, field: value}, row, text, exceptions))
+        self.assertFalse(gate.firebase_client_exception(item, {"EndLine": line + 1}, text, exceptions))
+        for entry in [[], [{"rule": "gcp-api-key", "path": gate.FIREBASE_CLIENT_PATH}]]:
+            self.assertFalse(gate.firebase_client_exception(item, row, text, entry))
+
     def test_pr_cannot_expand_policy_to_allow_secret(self):
         self.write(".gitleaks-current-exceptions.json", json.dumps({"version":1,"exceptions":[{"rule":"generic-api-key","path":"settings.txt","classification":"FALSE_POSITIVE_BUILD_CHECKSUM"}]}))
         self.write(".gitleaks.toml", '[extend]\nuseDefault=true\n[allowlist]\npaths=[".*"]\n')

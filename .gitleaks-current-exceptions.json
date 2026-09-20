@@ -12,6 +12,17 @@
         "dependency": "AppMetricaKeychain",
         "hex_length": 40
       }
+    },
+    {
+      "rule": "gcp-api-key",
+      "path": "mobile/android/app/google-services.json",
+      "classification": "PUBLIC_FIREBASE_CLIENT_CONFIG",
+      "rationale": "Reviewed Firebase Android client configuration, not an FCM service-account credential. Only the validated client api_key.current_key occurrence is eligible; all other findings remain blocking.",
+      "guard": {
+        "kind": "firebase_android_client_config",
+        "project_id": "dedato-3a09b",
+        "package_name": "ru.dedato.mobile"
+      }
     }
   ]
 }

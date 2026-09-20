@@ -12,6 +12,7 @@ import tempfile
 import threading
 
 VERSION = "8.21.2"
+FIREBASE_CLIENT_PATH = "mobile/android/app/google-services.json"
 POLICY_FILES = (
     ".gitleaks.toml", ".gitleaks-current-exceptions.json",
     ".gitleaks-history-baseline.json", ".gitleaksignore",
@@ -218,6 +219,67 @@ def checksum_exception(item, row, text, exceptions):
     return bool(headers) and headers[-1] == "SPEC CHECKSUMS:"
 
 
+def firebase_client_key(text):
+    """Validate client-only JSON; return its public key in memory, never in logs."""
+    def unique_object(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError()
+            result[key] = value
+        return result
+
+    def private_material(value):
+        if isinstance(value, dict):
+            return any(key.lower() in {"private_key", "private_key_id", "client_secret"}
+                       or (key.lower() == "type" and item == "service_account")
+                       or private_material(item) for key, item in value.items())
+        if isinstance(value, list):
+            return any(private_material(item) for item in value)
+        return isinstance(value, str) and bool(
+            re.search(r"-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----", value))
+
+    try:
+        config = json.loads(text, object_pairs_hook=unique_object)
+        if private_material(config) or set(config) != {"project_info", "client", "configuration_version"}:
+            raise ValueError()
+        if config["project_info"]["project_id"] != "dedato-3a09b" or config["configuration_version"] != "1":
+            raise ValueError()
+        if not isinstance(config["client"], list) or len(config["client"]) != 1:
+            raise ValueError()
+        client = config["client"][0]
+        if client["client_info"]["android_client_info"]["package_name"] != "ru.dedato.mobile":
+            raise ValueError()
+        keys = client["api_key"]
+        if not isinstance(keys, list) or len(keys) != 1 or set(keys[0]) != {"current_key"}:
+            raise ValueError()
+        key = keys[0]["current_key"]
+        if not isinstance(key, str) or not re.fullmatch(r"AIza[0-9A-Za-z_-]{35}", key):
+            raise ValueError()
+        return key
+    except (ValueError, KeyError, TypeError, RecursionError):
+        raise GateError("INVALID_FIREBASE_CLIENT_CONFIG") from None
+
+
+def firebase_client_exception(item, row, text, exceptions):
+    expected_guard = {"kind": "firebase_android_client_config", "project_id": "dedato-3a09b",
+                      "package_name": "ru.dedato.mobile"}
+    approved = any(e.get("rule") == "gcp-api-key" and e.get("path") == FIREBASE_CLIENT_PATH
+                   and e.get("classification") == "PUBLIC_FIREBASE_CLIENT_CONFIG"
+                   and e.get("guard") == expected_guard and e.get("rationale") for e in exceptions)
+    if not approved or item["rule"] != "gcp-api-key" or item["file"] != FIREBASE_CLIENT_PATH:
+        return False
+    try:
+        key = firebase_client_key(text)
+    except GateError:
+        return False
+    # Exact single client-key line only, not other Google keys in the same file.
+    occurrences = [(number, match.group(1)) for number, line in enumerate(text.splitlines(), 1)
+                   if (match := re.fullmatch(r'\s*"current_key"\s*:\s*"(AIza[0-9A-Za-z_-]{35})"\s*,?\s*', line))]
+    return (len(occurrences) == 1 and occurrences[0] == (item["line"], key)
+            and row.get("EndLine") == item["line"])
+
+
 def history_exception(repo, item, revision, entries):
     for entry in entries:
         if (entry.get("fingerprint") == item["fingerprint"]
@@ -270,6 +332,10 @@ def gate(repo, policy, binary, mode, head="HEAD", before=None, check_policy=Fals
         ignore.write_text("")
         if not historical or check_policy:
             snapshot(repo, head, tree)
+            client_config = tree / FIREBASE_CLIENT_PATH
+            if client_config.exists():
+                # Fail closed even for fake/truncated private material not detected by Gitleaks.
+                firebase_client_key(client_config.read_text())
         source = repo if historical else tree
         opts = None
         if historical:
@@ -286,6 +352,12 @@ def gate(repo, policy, binary, mode, head="HEAD", before=None, check_policy=Fals
                            if historical else (tree / item["file"]).read_text())
                 if checksum_exception(item, row, content, exceptions):
                     item["classification"] = "SUPPRESSED_REVIEWED_FALSE_POSITIVE"
+                    suppressed += 1
+            if item["file"] == FIREBASE_CLIENT_PATH:
+                content = (git(repo, "show", row["Commit"] + ":" + item["file"]).decode()
+                           if historical else (tree / item["file"]).read_text())
+                if firebase_client_exception(item, row, content, exceptions):
+                    item["classification"] = "SUPPRESSED_REVIEWED_PUBLIC_CLIENT_CONFIG"
                     suppressed += 1
             if item["classification"] == "UNRESOLVED" and historical:
                 if history_exception(repo, item, row["Commit"], history):

@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "861795537372",
+    "project_id": "dedato-3a09b",
+    "storage_bucket": "dedato-3a09b.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:861795537372:android:124b6242993e27108e7f19",
+        "android_client_info": {
+          "package_name": "ru.dedato.mobile"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBO69dNYGoiiRYjgnzoHQVw6yTmaErBE-4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
 describe('push expo app config', () => {
@@ -36,5 +36,41 @@ describe('push expo app config', () => {
     expect(entitlementsAssignments.every((line) => line.includes('DeDato/DeDato.entitlements'))).toBe(
       true
     );
+  });
+
+  it('uses one client-only Firebase config at the native app module path', () => {
+    const relative = 'android/app/google-services.json';
+    expect(source('app.config.ts')).toContain(`googleServicesFile: './${relative}'`);
+    expect(existsSync(path.join(root, relative))).toBe(true);
+    expect(existsSync(path.join(root, 'google-services.json'))).toBe(false);
+
+    // Assert only public identity and booleans; never snapshot client config/keys.
+    const raw = source(relative);
+    const config = JSON.parse(raw);
+    expect(config.project_info.project_id).toBe('dedato-3a09b');
+    expect(config.client.length).toBe(1);
+    expect(config.client[0].client_info.android_client_info.package_name).toBe('ru.dedato.mobile');
+    expect(/"(?:private_key|private_key_id)"\s*:|"type"\s*:\s*"service_account"/.test(raw)).toBe(false);
+  });
+
+  it('wires Google Services into committed native Gradle without identity/signing changes', () => {
+    const projectGradle = source('android/build.gradle');
+    const appGradle = source('android/app/build.gradle');
+    expect(projectGradle).toContain("classpath('com.google.gms:google-services:4.4.1')");
+    expect(appGradle).toContain('apply plugin: "com.google.gms.google-services"');
+    expect(appGradle).toContain("applicationId 'ru.dedato.mobile'");
+    expect(appGradle).toContain('versionCode 2');
+    expect(appGradle).toContain('versionName "1.0.1"');
+    expect(appGradle).not.toContain('firebase-bom');
+    expect(appGradle).not.toContain('firebase-messaging');
+  });
+
+  it('keeps one notification permission and the bookings native fallback channel', () => {
+    const manifest = source('android/app/src/main/AndroidManifest.xml');
+    expect(manifest.match(/<uses-permission\b[^>]*android:name="android.permission.POST_NOTIFICATIONS"/g)).toHaveLength(1);
+    expect(manifest.match(/android:name="com.google.firebase.messaging.default_notification_channel_id"/g)).toHaveLength(1);
+    expect(manifest).toMatch(/<meta-data\s+android:name="com.google.firebase.messaging.default_notification_channel_id"\s+android:value="bookings"\s*\/>/);
+    expect(manifest).toContain('android:name="com.google.android.gms.permission.AD_ID" tools:node="remove"');
+    expect(manifest).not.toMatch(/<uses-permission\b[^>]*android:name="android.permission.(?:ACCESS_FINE_LOCATION|ACCESS_COARSE_LOCATION|CAMERA|RECORD_AUDIO)"/);
   });
 });
