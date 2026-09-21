@@ -1,12 +1,10 @@
 import type { MasterScheduleNotification } from '@src/components/master/notifications/notificationsTypes';
 import {
-  applyViewedState,
-  countUnreadNotifications,
   filterNotifications,
+  getNotificationEmptyCopy,
   getNotificationGroupLabel,
   getNotificationStripeColor,
   groupNotificationsByDate,
-  shouldShowNotificationsUnreadIndicator,
 } from '@src/utils/masterNotificationsUtils';
 
 const NOW = new Date('2026-06-02T12:00:00.000Z');
@@ -20,7 +18,6 @@ function n(
     body: 'Изменение записи',
     clientName: 'Клиент',
     serviceName: 'Услуга',
-    isUnread: true,
     createdAt: '2026-06-02T10:00:00.000Z',
     ...partial,
     type,
@@ -42,65 +39,50 @@ describe('masterNotificationsUtils', () => {
 
   describe('filterNotifications', () => {
     const items: MasterScheduleNotification[] = [
-      n({ id: '1', type: 'created', isUnread: true }),
-      n({ id: '2', type: 'updated', isUnread: false }),
-      n({ id: '3', type: 'cancelled', isUnread: true }),
+      n({ id: '1', type: 'created', createdAt: '2026-06-02T09:00:00.000Z' }),
+      n({ id: '2', type: 'updated', createdAt: '2026-06-02T08:00:00.000Z' }),
+      n({ id: '3', type: 'cancelled', createdAt: '2026-06-02T07:00:00.000Z' }),
+      n({ id: '4', type: 'created', createdAt: '2026-06-01T07:00:00.000Z' }),
     ];
 
     it('all returns everything', () => {
-      expect(filterNotifications(items, 'all')).toHaveLength(3);
+      expect(filterNotifications(items, 'all').map((x) => x.id)).toEqual(['1', '2', '3', '4']);
     });
-    it('new returns unread only', () => {
-      expect(filterNotifications(items, 'new').map((x) => x.id)).toEqual(['1', '3']);
+
+    it('Новые/new is booking_created only, not unread', () => {
+      expect(filterNotifications(items, 'new').map((x) => x.id)).toEqual(['1', '4']);
+      expect(filterNotifications(items, 'new').every((x) => x.type === 'created')).toBe(true);
     });
+
+    it('does not put booking_rescheduled into Новые', () => {
+      expect(filterNotifications(items, 'new').some((x) => x.type === 'updated')).toBe(false);
+    });
+
+    it('does not put booking_cancelled into Новые', () => {
+      expect(filterNotifications(items, 'new').some((x) => x.type === 'cancelled')).toBe(false);
+    });
+
     it('updated returns updated type', () => {
       expect(filterNotifications(items, 'updated')).toHaveLength(1);
       expect(filterNotifications(items, 'updated')[0].type).toBe('updated');
     });
+
     it('cancelled returns cancelled type', () => {
       expect(filterNotifications(items, 'cancelled')).toHaveLength(1);
     });
   });
 
-  describe('applyViewedState', () => {
-    it('removes unread dot for viewed ids', () => {
-      const items = [n({ id: 'a', isUnread: true }), n({ id: 'b', isUnread: true })];
-      const next = applyViewedState(items, new Set(['a']));
-      expect(next[0].isUnread).toBe(false);
-      expect(next[1].isUnread).toBe(true);
-    });
-  });
-
-  describe('countUnreadNotifications', () => {
-    it('returns 3 when all mock items unread', () => {
-      const items = [n({ id: '1' }), n({ id: '2' }), n({ id: '3' })];
-      expect(countUnreadNotifications(items)).toBe(3);
-    });
-
-    it('returns 0 when all viewed', () => {
-      const items = [n({ id: '1' }), n({ id: '2' })];
-      const viewed = applyViewedState(items, new Set(['1', '2']));
-      expect(countUnreadNotifications(viewed)).toBe(0);
-    });
-
-    it('returns partial count when some viewed', () => {
-      const items = [n({ id: '1' }), n({ id: '2' }), n({ id: '3' })];
-      const partial = applyViewedState(items, new Set(['1', '2']));
-      expect(countUnreadNotifications(partial)).toBe(1);
-    });
-  });
-
-  describe('shouldShowNotificationsUnreadIndicator', () => {
-    it('true when unreadCount > 0', () => {
-      expect(shouldShowNotificationsUnreadIndicator(3)).toBe(true);
-    });
-    it('false when unreadCount = 0', () => {
-      expect(shouldShowNotificationsUnreadIndicator(0)).toBe(false);
+  describe('getNotificationEmptyCopy', () => {
+    it('has a distinct empty state per filter', () => {
+      expect(getNotificationEmptyCopy('all').title).toBe('Уведомлений пока нет');
+      expect(getNotificationEmptyCopy('new').title).toBe('Новых записей пока нет');
+      expect(getNotificationEmptyCopy('updated').title).toBe('Изменений пока нет');
+      expect(getNotificationEmptyCopy('cancelled').title).toBe('Отмен пока нет');
     });
   });
 
   describe('groupNotificationsByDate', () => {
-    it('groups Today/Yesterday/date labels', () => {
+    it('groups Today/Yesterday/date labels newest first', () => {
       const items: MasterScheduleNotification[] = [
         n({ id: 't', createdAt: '2026-06-02T09:00:00.000Z' }),
         n({ id: 'y', createdAt: '2026-06-01T09:00:00.000Z' }),

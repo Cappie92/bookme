@@ -5,6 +5,7 @@ import {
   mergeNotificationPages,
   parseNotificationId,
 } from '@src/components/master/notifications/masterNotificationsMapper';
+import { filterNotifications } from '@src/utils/masterNotificationsUtils';
 import { AxiosError } from 'axios';
 import type { BackendNotification } from '@src/services/api/notifications';
 
@@ -29,19 +30,19 @@ describe('masterNotificationsMapper', () => {
     expect(mapBackendNotificationType('something_else')).toBe('updated');
   });
 
-  it('maps unread from read_at and keeps title/body', () => {
-    const view = mapBackendNotificationToViewModel(backend());
-    expect(view.id).toBe('11');
-    expect(view.type).toBe('created');
-    expect(view.title).toBe('Новая запись');
-    expect(view.body).toBe('Клиент записался');
-    expect(view.isUnread).toBe(true);
-    expect(view.createdAt).toBe('2026-06-02T10:00:00.000Z');
-  });
-
-  it('treats read_at as read', () => {
-    const view = mapBackendNotificationToViewModel(backend({ read_at: '2026-06-02T11:00:00.000Z' }));
-    expect(view.isUnread).toBe(false);
+  it('keeps title/body and ignores read_at for visual state', () => {
+    const unreadWire = mapBackendNotificationToViewModel(backend());
+    const readWire = mapBackendNotificationToViewModel(
+      backend({ read_at: '2026-06-02T11:00:00.000Z' })
+    );
+    expect(unreadWire.id).toBe('11');
+    expect(unreadWire.type).toBe('created');
+    expect(unreadWire.title).toBe('Новая запись');
+    expect(unreadWire.body).toBe('Клиент записался');
+    expect(unreadWire.createdAt).toBe('2026-06-02T10:00:00.000Z');
+    expect(unreadWire).not.toHaveProperty('isUnread');
+    expect(readWire).not.toHaveProperty('isUnread');
+    expect(readWire.type).toBe(unreadWire.type);
   });
 
   it('allowlists safe data fields and ignores phone/PII keys', () => {
@@ -100,5 +101,22 @@ describe('masterNotificationsMapper', () => {
   it('parses numeric notification ids', () => {
     expect(parseNotificationId('12')).toBe(12);
     expect(parseNotificationId('x')).toBeNull();
+  });
+
+  it('Новые filter uses type even when read_at is set', () => {
+    const createdRead = mapBackendNotificationToViewModel(
+      backend({ id: 1, type: 'booking_created', read_at: '2026-06-02T11:00:00.000Z' })
+    );
+    const createdUnread = mapBackendNotificationToViewModel(
+      backend({ id: 2, type: 'booking_created', read_at: null })
+    );
+    const rescheduled = mapBackendNotificationToViewModel(
+      backend({ id: 3, type: 'booking_rescheduled', read_at: null })
+    );
+    const cancelled = mapBackendNotificationToViewModel(
+      backend({ id: 4, type: 'booking_cancelled', read_at: null })
+    );
+    const news = filterNotifications([createdRead, createdUnread, rescheduled, cancelled], 'new');
+    expect(news.map((x) => x.id)).toEqual(['1', '2']);
   });
 });

@@ -63,7 +63,6 @@ export function mapBackendNotificationToViewModel(
     type: mapBackendNotificationType(item.type),
     title: (item.title ?? '').trim() || 'Уведомление',
     body: (item.body ?? '').trim(),
-    isUnread: item.read_at == null || item.read_at === '',
     createdAt: item.created_at,
     ...extras,
   };

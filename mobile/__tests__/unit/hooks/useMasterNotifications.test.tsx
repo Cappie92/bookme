@@ -134,12 +134,12 @@ describe('useMasterNotifications', () => {
     authState.user = masterA;
     authState.isAuthenticated = true;
     authState.isLoading = false;
-    (getNotificationUnreadCount as jest.Mock).mockResolvedValue({ unread_count: 2 });
     (getNotifications as jest.Mock).mockResolvedValue({
       items: [item(1), item(2, 'booking_cancelled')],
       next_cursor: 'next',
       unread_count: 2,
     });
+    (getNotificationUnreadCount as jest.Mock).mockResolvedValue({ unread_count: 2 });
     (markNotificationRead as jest.Mock).mockResolvedValue(item(1));
     (markAllNotificationsRead as jest.Mock).mockResolvedValue({ updated_count: 2 });
   });
@@ -152,52 +152,54 @@ describe('useMasterNotifications', () => {
     hook.unmount();
   });
 
-  it('loads unread count on ordinary MASTER bootstrap without blocking', async () => {
+  it('does not fetch unread-count or expose mark-read on bootstrap', async () => {
     const hook = await renderHook();
-    expect(getNotificationUnreadCount).toHaveBeenCalled();
-    expect(hook.current.unreadCount).toBe(2);
-    expect(hook.current.unreadReady).toBe(true);
+    expect(getNotificationUnreadCount).not.toHaveBeenCalled();
+    expect(markNotificationRead).not.toHaveBeenCalled();
+    expect(markAllNotificationsRead).not.toHaveBeenCalled();
     expect(getNotifications).not.toHaveBeenCalled();
+    expect(hook.current).not.toHaveProperty('unreadCount');
+    expect(hook.current).not.toHaveProperty('markRead');
+    expect(hook.current).not.toHaveProperty('markAllRead');
     hook.unmount();
   });
 
   it('skips CLIENT, demo, indie and unauthenticated', async () => {
     authState.user = { ...masterA, role: 'client' };
     let hook = await renderHook();
-    expect(getNotificationUnreadCount).not.toHaveBeenCalled();
+    expect(getNotifications).not.toHaveBeenCalled();
     hook.unmount();
 
     jest.clearAllMocks();
     authState.user = { ...masterA, is_demo_session: true };
     hook = await renderHook();
-    expect(getNotificationUnreadCount).not.toHaveBeenCalled();
+    expect(getNotifications).not.toHaveBeenCalled();
     expect(hook.current.notifications).toEqual([]);
     hook.unmount();
 
     jest.clearAllMocks();
     authState.user = { ...masterA, role: 'indie' };
     hook = await renderHook();
-    expect(getNotificationUnreadCount).not.toHaveBeenCalled();
+    expect(getNotifications).not.toHaveBeenCalled();
     hook.unmount();
 
     jest.clearAllMocks();
     authState.user = null;
     authState.isAuthenticated = false;
     hook = await renderHook();
-    expect(getNotificationUnreadCount).not.toHaveBeenCalled();
+    expect(getNotifications).not.toHaveBeenCalled();
     hook.unmount();
   });
 
   it('loads empty list without treating it as an error', async () => {
-    (getNotificationUnreadCount as jest.Mock).mockResolvedValue({ unread_count: 0 });
-    (getNotifications as jest.Mock).mockResolvedValue({ items: [], next_cursor: null, unread_count: 0 });
+    (getNotifications as jest.Mock).mockResolvedValue({ items: [], next_cursor: null, unread_count: 9 });
     const hook = await renderHook();
     await act(async () => {
       await hook.current.ensureListLoaded();
     });
     expect(hook.current.notifications).toEqual([]);
     expect(hook.current.error).toBeNull();
-    expect(hook.current.unreadCount).toBe(0);
+    expect(getNotificationUnreadCount).not.toHaveBeenCalled();
     hook.unmount();
   });
 
@@ -210,6 +212,7 @@ describe('useMasterNotifications', () => {
     expect(hook.current.notifications[0].type).toBe('created');
     expect(hook.current.notifications[1].type).toBe('cancelled');
     expect(hook.current.hasMore).toBe(true);
+    expect(hook.current.notifications[0]).not.toHaveProperty('isUnread');
 
     (getNotifications as jest.Mock).mockResolvedValue({
       items: [item(2, 'booking_cancelled'), item(3, 'booking_rescheduled')],
@@ -222,6 +225,7 @@ describe('useMasterNotifications', () => {
     expect(hook.current.notifications.map((n) => n.id)).toEqual(['1', '2', '3']);
     expect(hook.current.notifications[2].type).toBe('updated');
     expect(hook.current.hasMore).toBe(false);
+    expect(getNotificationUnreadCount).not.toHaveBeenCalled();
     hook.unmount();
   });
 
@@ -239,7 +243,6 @@ describe('useMasterNotifications', () => {
       await hook.current.refresh();
     });
     expect(hook.current.notifications.map((n) => n.id)).toEqual(['9']);
-    expect(hook.current.unreadCount).toBe(1);
     hook.unmount();
   });
 
@@ -269,7 +272,6 @@ describe('useMasterNotifications', () => {
       await firstLoad;
     });
     expect(hook.current.notifications.map((n) => n.id)).toEqual(['50']);
-    expect(hook.current.unreadCount).toBe(1);
     hook.unmount();
   });
 
@@ -288,18 +290,15 @@ describe('useMasterNotifications', () => {
     });
 
     authState.user = masterB;
-    (getNotificationUnreadCount as jest.Mock).mockResolvedValue({ unread_count: 0 });
     (getNotifications as jest.Mock).mockResolvedValue({ items: [item(80)], next_cursor: null, unread_count: 0 });
     await hook.rerender();
     expect(hook.current.notifications).toEqual([]);
-    expect(hook.current.unreadCount).toBe(0);
 
     resolveFirst({ items: [item(1), item(2)], next_cursor: 'old', unread_count: 8 });
     await act(async () => {
       await firstLoad;
     });
     expect(hook.current.notifications.map((n) => n.id)).not.toEqual(['1', '2']);
-    expect(hook.current.unreadCount).not.toBe(8);
     hook.unmount();
   });
 
@@ -332,63 +331,6 @@ describe('useMasterNotifications', () => {
     });
     expect(hook.current.error).toBeNull();
     expect(hook.current.notifications.map((n) => n.id)).toEqual(['4']);
-    hook.unmount();
-  });
-
-  it('markRead is optimistic, decrements once, and rolls back on failure', async () => {
-    const hook = await renderHook();
-    await act(async () => {
-      await hook.current.ensureListLoaded();
-    });
-    await act(async () => {
-      await hook.current.markRead('1');
-    });
-    expect(hook.current.notifications[0].isUnread).toBe(false);
-    expect(hook.current.unreadCount).toBe(1);
-    await act(async () => {
-      await hook.current.markRead('1');
-    });
-    expect(markNotificationRead).toHaveBeenCalledTimes(1);
-
-    (markNotificationRead as jest.Mock).mockRejectedValue(new Error('fail'));
-    await act(async () => {
-      await hook.current.markRead('2');
-    });
-    expect(hook.current.notifications[1].isUnread).toBe(true);
-    expect(hook.current.unreadCount).toBe(1);
-    hook.unmount();
-  });
-
-  it('markAllRead posts once, skips when count is already 0, and restores on failure', async () => {
-    const hook = await renderHook();
-    await act(async () => {
-      await hook.current.ensureListLoaded();
-    });
-    await act(async () => {
-      await hook.current.markAllRead();
-    });
-    expect(hook.current.unreadCount).toBe(0);
-    expect(hook.current.notifications.every((n) => !n.isUnread)).toBe(true);
-    await act(async () => {
-      await hook.current.markAllRead();
-    });
-    expect(markAllNotificationsRead).toHaveBeenCalledTimes(1);
-
-    (getNotifications as jest.Mock).mockResolvedValue({
-      items: [item(1), item(2, 'booking_cancelled')],
-      next_cursor: 'next',
-      unread_count: 2,
-    });
-    await act(async () => {
-      await hook.current.refresh();
-    });
-    (markAllNotificationsRead as jest.Mock).mockRejectedValue(new Error('fail'));
-    (getNotifications as jest.Mock).mockRejectedValue(new Error('network'));
-    await act(async () => {
-      await hook.current.markAllRead();
-    });
-    expect(hook.current.unreadCount).toBe(2);
-    expect(hook.current.notifications.some((n) => n.isUnread)).toBe(true);
     hook.unmount();
   });
 });

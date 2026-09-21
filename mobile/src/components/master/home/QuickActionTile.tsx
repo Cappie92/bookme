@@ -9,7 +9,6 @@ interface QuickActionTileProps {
   accessibilityLabel?: string;
   icon: keyof typeof Ionicons.glyphMap;
   onPress: () => void;
-  unreadCount?: number;
 }
 
 export function QuickActionTile({
@@ -18,10 +17,7 @@ export function QuickActionTile({
   accessibilityLabel,
   icon,
   onPress,
-  unreadCount = 0,
 }: QuickActionTileProps) {
-  const showIndicator = unreadCount > 0;
-  const showCountBadge = unreadCount > 1;
   const a11y = accessibilityLabel ?? (sublabel ? `${label}, ${sublabel}` : label);
 
   return (
@@ -34,12 +30,6 @@ export function QuickActionTile({
     >
       <View style={styles.iconWrap}>
         <Ionicons name={icon} size={20} color="#4CAF50" />
-        {showIndicator && !showCountBadge ? <View style={styles.unreadDotOnIcon} /> : null}
-        {showCountBadge ? (
-          <View style={styles.countBadge}>
-            <Text style={styles.countBadgeText}>{unreadCount > 9 ? '9+' : unreadCount}</Text>
-          </View>
-        ) : null}
       </View>
       <View style={styles.textBlock}>
         <Text
@@ -106,36 +96,5 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: '#657065',
     lineHeight: 12,
-  },
-  unreadDotOnIcon: {
-    position: 'absolute',
-    top: -2,
-    right: -2,
-    width: 9,
-    height: 9,
-    borderRadius: 5,
-    backgroundColor: '#4CAF50',
-    borderWidth: 2,
-    borderColor: '#F7FBF7',
-  },
-  countBadge: {
-    position: 'absolute',
-    top: -4,
-    right: -6,
-    minWidth: 16,
-    height: 16,
-    borderRadius: 8,
-    backgroundColor: '#4CAF50',
-    borderWidth: 2,
-    borderColor: '#F7FBF7',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 3,
-  },
-  countBadgeText: {
-    fontSize: 9,
-    fontWeight: '800',
-    color: '#fff',
-    lineHeight: 11,
   },
 });

@@ -17,7 +17,11 @@ import type { MasterScheduleNotification, NotificationFilterKey } from './notifi
 import { NotificationFilters } from './NotificationFilters';
 import { NotificationSectionHeader } from './NotificationSectionHeader';
 import { NotificationCard } from './NotificationCard';
-import { filterNotifications, groupNotificationsByDate } from '@src/utils/masterNotificationsUtils';
+import {
+  filterNotifications,
+  getNotificationEmptyCopy,
+  groupNotificationsByDate,
+} from '@src/utils/masterNotificationsUtils';
 import type { NotificationFetchErrorKind } from './masterNotificationsMapper';
 
 interface NotificationsSheetProps {
@@ -32,8 +36,6 @@ interface NotificationsSheetProps {
   onRefresh?: () => void;
   onRetry?: () => void;
   onLoadMore?: () => void;
-  onPressItem?: (item: MasterScheduleNotification) => void;
-  onMarkViewed?: () => void;
 }
 
 function errorMessage(kind: NotificationFetchErrorKind): string {
@@ -54,8 +56,6 @@ export function NotificationsSheet({
   onRefresh,
   onRetry,
   onLoadMore,
-  onPressItem,
-  onMarkViewed,
 }: NotificationsSheetProps) {
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
@@ -76,11 +76,11 @@ export function NotificationsSheet({
   );
 
   const sections = useMemo(() => groupNotificationsByDate(filtered), [filtered]);
+  const emptyCopy = getNotificationEmptyCopy(filter);
 
   const handleClose = () => {
     if (closingRef.current) return;
     closingRef.current = true;
-    onMarkViewed?.();
     onClose();
   };
 
@@ -137,10 +137,8 @@ export function NotificationsSheet({
               <View style={styles.emptyIcon}>
                 <Ionicons name="notifications-off-outline" size={22} color="#4CAF50" />
               </View>
-              <Text style={styles.emptyTitle}>Уведомлений пока нет</Text>
-              <Text style={styles.emptyText}>
-                Здесь будут изменения по новым, перенесённым и отменённым записям
-              </Text>
+              <Text style={styles.emptyTitle}>{emptyCopy.title}</Text>
+              <Text style={styles.emptyText}>{emptyCopy.text}</Text>
             </View>
           ) : (
             <SectionList
@@ -149,9 +147,7 @@ export function NotificationsSheet({
               renderSectionHeader={({ section }) => (
                 <NotificationSectionHeader title={section.title} />
               )}
-              renderItem={({ item }) => (
-                <NotificationCard item={item} onPress={onPressItem} />
-              )}
+              renderItem={({ item }) => <NotificationCard item={item} />}
               stickySectionHeadersEnabled={false}
               showsVerticalScrollIndicator
               contentContainerStyle={styles.listContent}

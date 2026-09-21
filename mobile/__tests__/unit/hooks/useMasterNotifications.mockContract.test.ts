@@ -17,5 +17,9 @@ describe('legacy mock is not a production source', () => {
     expect(src).not.toContain('masterNotificationsViewedStorage');
     expect(src).not.toContain('loadViewedNotificationIds');
     expect(src).not.toContain('__DEV__');
+    expect(src).not.toContain('getNotificationUnreadCount');
+    expect(src).not.toContain('markNotificationRead');
+    expect(src).not.toContain('markAllNotificationsRead');
+    expect(src).not.toContain('unreadOnly');
   });
 });

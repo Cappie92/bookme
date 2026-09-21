@@ -3,6 +3,10 @@ import { apiClient } from './client';
 /**
  * Persistent notification center API (Stage 1 backend).
  * 401 follows the shared apiClient session invalidation — do not suppress it here.
+ *
+ * `read_at`, unread-count, mark-read and read-all remain on the wire as dormant
+ * compatibility. Mobile Notification Center is type-based and must not use them
+ * for filters, visual state, badges or sort.
  */
 
 export type BackendNotification = {

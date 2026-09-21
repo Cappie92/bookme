@@ -39,13 +39,17 @@ export function getNotificationGroupLabel(isoDate: string | undefined, now: Date
   return `${d.getDate()} ${MONTHS_GENITIVE[d.getMonth()]}`;
 }
 
+/**
+ * Type-based Notification Center filters.
+ * "Новые" is booking_created (`created`), not unread / read_at.
+ */
 export function filterNotifications(
   items: MasterScheduleNotification[],
   filter: NotificationFilterKey
 ): MasterScheduleNotification[] {
   switch (filter) {
     case 'new':
-      return items.filter((n) => n.isUnread);
+      return items.filter((n) => n.type === 'created');
     case 'updated':
       return items.filter((n) => n.type === 'updated');
     case 'cancelled':
@@ -55,23 +59,29 @@ export function filterNotifications(
   }
 }
 
-export function applyViewedState(
-  notifications: MasterScheduleNotification[],
-  viewedIds: Set<string>
-): MasterScheduleNotification[] {
-  return notifications.map((n) => ({
-    ...n,
-    isUnread: !viewedIds.has(n.id),
-  }));
-}
-
-/** Количество непросмотренных уведомлений (источник для dashboard dot и app badge). */
-export function countUnreadNotifications(notifications: MasterScheduleNotification[]): number {
-  return notifications.filter((n) => n.isUnread).length;
-}
-
-export function shouldShowNotificationsUnreadIndicator(unreadCount: number): boolean {
-  return unreadCount > 0;
+export function getNotificationEmptyCopy(filter: NotificationFilterKey): { title: string; text: string } {
+  switch (filter) {
+    case 'new':
+      return {
+        title: 'Новых записей пока нет',
+        text: 'Здесь появятся уведомления о новых записях',
+      };
+    case 'updated':
+      return {
+        title: 'Изменений пока нет',
+        text: 'Здесь появятся уведомления о переносах записей',
+      };
+    case 'cancelled':
+      return {
+        title: 'Отмен пока нет',
+        text: 'Здесь появятся уведомления об отменах записей',
+      };
+    default:
+      return {
+        title: 'Уведомлений пока нет',
+        text: 'Здесь будут изменения по новым, перенесённым и отменённым записям',
+      };
+  }
 }
 
 export function getNotificationStripeColor(type: MasterScheduleNotification['type']): string {

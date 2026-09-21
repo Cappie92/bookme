@@ -30,6 +30,9 @@ export function NotificationFilters({ value, onChange }: NotificationFiltersProp
             style={[styles.chip, active && styles.chipActive]}
             onPress={() => onChange(f.key)}
             activeOpacity={0.85}
+            accessibilityRole="button"
+            accessibilityLabel={f.label}
+            accessibilityState={{ selected: active }}
           >
             <Text style={[styles.chipText, active && styles.chipTextActive]}>{f.label}</Text>
           </TouchableOpacity>

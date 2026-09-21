@@ -419,8 +419,6 @@ export default function HomeScreen() {
 
   const {
     notifications,
-    unreadCount,
-    unreadReady,
     loading: notificationsLoading,
     refreshing: notificationsRefreshing,
     loadingMore: notificationsLoadingMore,
@@ -430,8 +428,6 @@ export default function HomeScreen() {
     retry: retryNotifications,
     loadMore: loadMoreNotifications,
     ensureListLoaded,
-    markRead,
-    markAllRead,
   } = useMasterNotifications();
 
   useEffect(() => {
@@ -477,7 +473,6 @@ export default function HomeScreen() {
             onSocialPost={openSocialPost}
             onCopyLink={() => void copyPublicLink()}
             onNotifications={() => setNotificationsVisible(true)}
-            unreadCount={unreadReady ? unreadCount : 0}
           />
         ) : null}
 
@@ -725,8 +720,6 @@ export default function HomeScreen() {
             onRefresh={() => void refreshNotifications()}
             onRetry={() => void retryNotifications()}
             onLoadMore={() => void loadMoreNotifications()}
-            onPressItem={(item) => void markRead(item.id)}
-            onMarkViewed={() => void markAllRead()}
           />
           <CopyLinkToast message={copyToastMessage} bottomOffset={scrollViewPaddingBottom + 8} />
         </>

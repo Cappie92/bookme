@@ -114,6 +114,27 @@ def main() -> None:
         print("Wrote:", ios_icon)
 
 
+def sync_android_from_ios_source() -> None:
+    """Committed-native sync: iOS 1024 + adaptive-icon.png → Android mipmaps. Does not rewrite iOS."""
+    ios_icon = (
+        ROOT
+        / "ios"
+        / "DeDato"
+        / "Images.xcassets"
+        / "AppIcon.appiconset"
+        / "App-Icon-1024x1024@1x.png"
+    )
+    adaptive = ASSETS / "adaptive-icon.png"
+    if not ios_icon.exists():
+        raise SystemExit(f"Missing iOS source of truth: {ios_icon}")
+    if not adaptive.exists():
+        raise SystemExit(f"Missing adaptive foreground: {adaptive}")
+    icon = Image.open(ios_icon).convert("RGBA")
+    fg = Image.open(adaptive).convert("RGBA")
+    sync_android_mipmaps(icon, fg)
+    print("Synced Android mipmaps from iOS App Icon + adaptive-icon.png")
+
+
 def sync_android_splash(splash_path: Path) -> None:
     res = ROOT / "android" / "app" / "src" / "main" / "res"
     splash_sizes = {
@@ -169,4 +190,9 @@ def sync_android_mipmaps(icon_rgb: Image.Image, adaptive_fg: Image.Image) -> Non
 
 
 if __name__ == "__main__":
-    main()
+    import sys
+
+    if "--android-from-ios" in sys.argv:
+        sync_android_from_ios_source()
+    else:
+        main()

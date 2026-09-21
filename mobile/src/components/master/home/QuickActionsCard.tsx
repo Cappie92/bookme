@@ -6,14 +6,12 @@ interface QuickActionsCardProps {
   onSocialPost: () => void;
   onCopyLink: () => void;
   onNotifications: () => void;
-  unreadCount?: number;
 }
 
 export function QuickActionsCard({
   onSocialPost,
   onCopyLink,
   onNotifications,
-  unreadCount = 0,
 }: QuickActionsCardProps) {
   return (
     <View style={styles.card}>
@@ -42,7 +40,6 @@ export function QuickActionsCard({
           accessibilityLabel="Уведомления об изменениях"
           icon="notifications-outline"
           onPress={onNotifications}
-          unreadCount={unreadCount}
         />
       </View>
     </View>

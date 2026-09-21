@@ -1,4 +1,6 @@
 import React from 'react';
+import fs from 'fs';
+import path from 'path';
 import type { MasterScheduleNotification } from '@src/components/master/notifications/notificationsTypes';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -29,7 +31,7 @@ jest.mock('react-native', () => {
                 section,
               })
             : null;
-        const items = section.data.map((item, iIdx) =>
+        const items = section.data.map((item) =>
           typeof props.renderItem === 'function'
             ? (props.renderItem as (info: { item: unknown }) => React.ReactNode)({ item })
             : null
@@ -81,13 +83,28 @@ function findByTestId(root: { findByProps: (p: object) => { props: Record<string
   return root.findByProps({ testID });
 }
 
-const sample: MasterScheduleNotification = {
+const created: MasterScheduleNotification = {
   id: '11',
   type: 'created',
   title: 'Новая запись',
   body: 'Клиент записался на стрижку',
-  isUnread: true,
   createdAt: '2026-06-02T10:00:00.000Z',
+};
+
+const rescheduled: MasterScheduleNotification = {
+  id: '12',
+  type: 'updated',
+  title: 'Запись перенесена',
+  body: 'Клиент перенёс окрашивание',
+  createdAt: '2026-06-02T09:00:00.000Z',
+};
+
+const cancelled: MasterScheduleNotification = {
+  id: '13',
+  type: 'cancelled',
+  title: 'Запись отменена',
+  body: 'Клиент отменил укладку',
+  createdAt: '2026-06-02T08:00:00.000Z',
 };
 
 describe('NotificationsSheet UX', () => {
@@ -144,27 +161,77 @@ describe('NotificationsSheet UX', () => {
     expect(onRetry).toHaveBeenCalledTimes(1);
   });
 
-  it('marks all read once on close even if close is pressed twice', () => {
-    const onMarkViewed = jest.fn();
+  it('closes without mark-read / mark-all-read UX', () => {
     const onClose = jest.fn();
-    let tree: { root: { findAllByProps: (p: object) => Array<{ props: Record<string, unknown> }> } };
+    let tree: {
+      root: { findAllByProps: (p: object) => Array<{ props: Record<string, unknown> }>; findAll: (fn: (n: { props?: Record<string, unknown> }) => boolean) => unknown[] };
+    };
     TestRenderer.act(() => {
       tree = TestRenderer.create(
         React.createElement(NotificationsSheet, {
           visible: true,
           onClose,
-          onMarkViewed,
-          notifications: [sample],
+          notifications: [created, rescheduled, cancelled],
         })
       );
     });
+    expect(collectText(tree!.root)).not.toMatch(/Прочитать|прочитан/i);
     const closeBtn = tree!.root.findAllByProps({ accessibilityLabel: 'Закрыть' })[0];
     TestRenderer.act(() => {
       (closeBtn.props.onPress as () => void)();
       (closeBtn.props.onPress as () => void)();
     });
-    expect(onMarkViewed).toHaveBeenCalledTimes(1);
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('Новые keeps booking_created and hides reschedule/cancel', () => {
+    let tree: { root: { findAllByProps: (p: object) => Array<{ props: Record<string, unknown> }>; findAll: (fn: (n: { props?: Record<string, unknown> }) => boolean) => Array<{ props: Record<string, unknown> }> } };
+    TestRenderer.act(() => {
+      tree = TestRenderer.create(
+        React.createElement(NotificationsSheet, {
+          visible: true,
+          onClose: jest.fn(),
+          notifications: [created, rescheduled, cancelled],
+        })
+      );
+    });
+    const chip = tree!.root.findAllByProps({ accessibilityLabel: 'Новые' })[0];
+    TestRenderer.act(() => {
+      (chip.props.onPress as () => void)();
+    });
+    const list = tree!.root.findAll((n) => Array.isArray(n.props?.sections))[0];
+    const ids = ((list.props.sections as Array<{ data: Array<{ id: string; type: string; body: string }> }>) ?? [])
+      .flatMap((section) => section.data)
+      .map((item) => item.id);
+    expect(ids).toEqual(['11']);
+    expect(list.props.sections).toBeTruthy();
+    const bodies = ((list.props.sections as Array<{ data: Array<{ body: string; type: string }> }>) ?? [])
+      .flatMap((section) => section.data);
+    expect(bodies.map((item) => item.type)).toEqual(['created']);
+    expect(bodies.some((item) => item.body.includes('перенёс'))).toBe(false);
+    expect(bodies.some((item) => item.body.includes('отменил'))).toBe(false);
+  });
+
+  it('shows type-specific empty copy for Новые', () => {
+    let tree: { root: { findByProps: (p: object) => { props: Record<string, unknown> } } };
+    TestRenderer.act(() => {
+      tree = TestRenderer.create(
+        React.createElement(NotificationsSheet, {
+          visible: true,
+          onClose: jest.fn(),
+          notifications: [rescheduled, cancelled],
+        })
+      );
+    });
+    const chip = (
+      tree!.root as unknown as {
+        findAllByProps: (p: object) => Array<{ props: Record<string, unknown> }>;
+      }
+    ).findAllByProps({ accessibilityLabel: 'Новые' })[0];
+    TestRenderer.act(() => {
+      (chip.props.onPress as () => void)();
+    });
+    expect(collectText(findByTestId(tree!.root, 'notifications-empty'))).toContain('Новых записей пока нет');
   });
 });
 
@@ -172,7 +239,7 @@ describe('NotificationCard', () => {
   it('renders title/body without requiring a phone', () => {
     let tree: { root: unknown };
     TestRenderer.act(() => {
-      tree = TestRenderer.create(React.createElement(NotificationCard, { item: sample, onPress: jest.fn() }));
+      tree = TestRenderer.create(React.createElement(NotificationCard, { item: created }));
     });
     const text = collectText(tree!.root);
     expect(text).toContain('Новая запись');
@@ -187,7 +254,6 @@ describe('NotificationCard', () => {
       type: 'updated',
       title: 'Служебное',
       body: 'Текст без телефона',
-      isUnread: false,
       createdAt: '2026-06-02T10:00:00.000Z',
     };
     let tree: { root: unknown };
@@ -199,34 +265,49 @@ describe('NotificationCard', () => {
     expect(text).toContain('Служебное');
     expect(text).toContain('Текст без телефона');
   });
+
+  it('has no unread dot or mark-read press handler', () => {
+    const src = fs.readFileSync(
+      path.join(__dirname, '../../../../../src/components/master/notifications/NotificationCard.tsx'),
+      'utf8'
+    );
+    expect(src).not.toContain('unreadDot');
+    expect(src).not.toContain('isUnread');
+    expect(src).not.toContain('cardUnread');
+    expect(src).not.toContain('onPress');
+  });
 });
 
-describe('QuickActionTile unread badge', () => {
-  it('hides indicator at 0 and shows count above 1', () => {
-    let hidden: { root: { findAllByProps: (p: object) => unknown[] } };
+describe('QuickActionTile has no unread badge', () => {
+  it('renders notifications tile without a count badge', () => {
+    let tree: { root: unknown };
     TestRenderer.act(() => {
-      hidden = TestRenderer.create(
+      tree = TestRenderer.create(
         React.createElement(QuickActionTile, {
           label: 'Уведомления',
           icon: 'notifications-outline',
           onPress: jest.fn(),
-          unreadCount: 0,
         })
       );
     });
-    expect(collectText(hidden!.root)).not.toMatch(/^[0-9]/);
+    expect(collectText(tree!.root)).toContain('Уведомления');
+    expect(collectText(tree!.root)).not.toMatch(/\b[1-9]\b/);
+    const src = fs.readFileSync(
+      path.join(__dirname, '../../../../../src/components/master/home/QuickActionTile.tsx'),
+      'utf8'
+    );
+    expect(src).not.toContain('unreadCount');
+    expect(src).not.toContain('unreadDotOnIcon');
+  });
+});
 
-    let shown: { root: unknown };
-    TestRenderer.act(() => {
-      shown = TestRenderer.create(
-        React.createElement(QuickActionTile, {
-          label: 'Уведомления',
-          icon: 'notifications-outline',
-          onPress: jest.fn(),
-          unreadCount: 4,
-        })
-      );
-    });
-    expect(collectText(shown!.root)).toContain('4');
+describe('dashboard does not wire an unread notifications badge', () => {
+  it('master home does not pass unreadCount or mark-read handlers', () => {
+    const src = fs.readFileSync(path.join(__dirname, '../../../../../app/(master)/index.tsx'), 'utf8');
+    expect(src).not.toContain('unreadCount');
+    expect(src).not.toContain('markRead');
+    expect(src).not.toContain('markAllRead');
+    expect(src).not.toContain('onMarkViewed');
+    expect(src).not.toContain('onPressItem');
   });
 });

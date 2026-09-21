@@ -1,12 +1,11 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet } from 'react-native';
 import { getNotificationStripeColor } from '@src/utils/masterNotificationsUtils';
 import { ClientStatusChip } from './ClientStatusChip';
 import type { MasterScheduleNotification } from './notificationsTypes';
 
 interface NotificationCardProps {
   item: MasterScheduleNotification;
-  onPress?: (item: MasterScheduleNotification) => void;
 }
 
 function InfoRow({ label, value }: { label: string; value: string }) {
@@ -26,9 +25,8 @@ function overlineForType(type: MasterScheduleNotification['type']): string {
   return 'Изменение записи';
 }
 
-export function NotificationCard({ item, onPress }: NotificationCardProps) {
+export function NotificationCard({ item }: NotificationCardProps) {
   const stripeColor = getNotificationStripeColor(item.type);
-  const unread = item.isUnread;
   const heading = item.clientName?.trim() || item.title;
   const showUpdatedCompare = Boolean(
     item.type === 'updated' && item.oldDateLabel && item.newDateLabel
@@ -38,22 +36,15 @@ export function NotificationCard({ item, onPress }: NotificationCardProps) {
   );
 
   return (
-    <TouchableOpacity
-      style={[styles.card, unread ? styles.cardUnread : styles.cardRead]}
-      onPress={() => onPress?.(item)}
-      activeOpacity={onPress ? 0.88 : 1}
-      disabled={!onPress}
-      accessibilityRole="button"
-    >
+    <View style={styles.card}>
       <View style={[styles.stripe, { backgroundColor: stripeColor }]} />
       <View style={styles.body}>
         <View style={styles.topRow}>
           <View style={styles.topLeft}>
             <Text style={styles.overline}>{overlineForType(item.type)}</Text>
-            <Text style={[styles.name, unread && styles.nameUnread]}>{heading}</Text>
+            <Text style={styles.name}>{heading}</Text>
             {item.body ? <Text style={styles.bodyText}>{item.body}</Text> : null}
           </View>
-          {unread ? <View style={styles.unreadDot} /> : null}
         </View>
 
         {showWhen ? (
@@ -84,7 +75,7 @@ export function NotificationCard({ item, onPress }: NotificationCardProps) {
 
         {item.serviceName ? <InfoRow label="Услуга" value={item.serviceName} /> : null}
       </View>
-    </TouchableOpacity>
+    </View>
   );
 }
 
@@ -95,12 +86,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     overflow: 'hidden',
     marginBottom: 10,
-  },
-  cardUnread: {
-    backgroundColor: '#FCFFFC',
-    borderColor: '#DCECDD',
-  },
-  cardRead: {
     backgroundColor: '#FFFFFF',
     borderColor: '#E8ECE8',
   },
@@ -136,22 +121,11 @@ const styles = StyleSheet.create({
     color: '#1F2A1F',
     letterSpacing: -0.3,
   },
-  nameUnread: {
-    fontWeight: '700',
-  },
   bodyText: {
     marginTop: 4,
     fontSize: 13,
     lineHeight: 18,
     color: '#657065',
-  },
-  unreadDot: {
-    width: 9,
-    height: 9,
-    borderRadius: 5,
-    backgroundColor: '#4CAF50',
-    marginTop: 4,
-    flexShrink: 0,
   },
   metaRow: {
     flexDirection: 'row',
