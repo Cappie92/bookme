@@ -8,9 +8,9 @@ describe('push expo app config', () => {
   it('keeps identity/version and adds expo-notifications without ATT/IAP drift', () => {
     const appConfig = source('app.config.ts');
     expect(appConfig).toContain("version: '1.1.0'");
-    expect(appConfig).toContain("buildNumber: '10'");
+    expect(appConfig).toContain("buildNumber: '11'");
     expect(appConfig).toContain("bundleIdentifier: 'com.dedato.app'");
-    expect(appConfig).toContain('versionCode: 4');
+    expect(appConfig).toContain('versionCode: 5');
     expect(appConfig).toContain("package: 'ru.dedato.mobile'");
     expect(appConfig).toContain("'expo-notifications'");
     expect(appConfig).toContain("defaultChannel: 'bookings'");
@@ -31,11 +31,11 @@ describe('push expo app config', () => {
     expect(entitlements).not.toContain('remote-notification');
 
     const pbxproj = source('ios/DeDato.xcodeproj/project.pbxproj');
-    expect(pbxproj.match(/CURRENT_PROJECT_VERSION = [^;]+;/g)).toEqual(Array(2).fill('CURRENT_PROJECT_VERSION = 10;'));
+    expect(pbxproj.match(/CURRENT_PROJECT_VERSION = [^;]+;/g)).toEqual(Array(2).fill('CURRENT_PROJECT_VERSION = 11;'));
     expect(pbxproj.match(/MARKETING_VERSION = [^;]+;/g)).toEqual(Array(2).fill('MARKETING_VERSION = 1.1.0;'));
     const plist = source('ios/DeDato/Info.plist');
     expect(plist).toMatch(/<key>CFBundleShortVersionString<\/key>\s*<string>1\.1\.0<\/string>/);
-    expect(plist).toMatch(/<key>CFBundleVersion<\/key>\s*<string>10<\/string>/);
+    expect(plist).toMatch(/<key>CFBundleVersion<\/key>\s*<string>11<\/string>/);
     const entitlementsAssignments = pbxproj.match(/CODE_SIGN_ENTITLEMENTS = [^;]+;/g) || [];
     expect(entitlementsAssignments).toHaveLength(2);
     expect(entitlementsAssignments.every((line) => line.includes('DeDato/DeDato.entitlements'))).toBe(
@@ -64,7 +64,7 @@ describe('push expo app config', () => {
     expect(projectGradle).toContain("classpath('com.google.gms:google-services:4.4.1')");
     expect(appGradle).toContain('apply plugin: "com.google.gms.google-services"');
     expect(appGradle).toContain("applicationId 'ru.dedato.mobile'");
-    expect(appGradle).toContain('versionCode 4');
+    expect(appGradle).toContain('versionCode 5');
     expect(appGradle).toContain('versionName "1.1.0"');
     expect(appGradle).not.toContain('firebase-bom');
     expect(appGradle).not.toContain('firebase-messaging');
