@@ -88,11 +88,15 @@ PODS:
     - AppMetricaLog (= 5.16.1)
   - AppMetricaSynchronization (5.16.1):
     - AppMetricaLogSwift (= 5.16.1)
+  - EXApplication (7.0.8):
+    - ExpoModulesCore
   - EXConstants (18.0.13):
     - ExpoModulesCore
   - EXImageLoader (6.0.0):
     - ExpoModulesCore
     - React-Core
+  - EXNotifications (0.32.17):
+    - ExpoModulesCore
   - Expo (54.0.36):
     - ExpoModulesCore
     - hermes-engine
@@ -2095,8 +2099,10 @@ PODS:
 
 DEPENDENCIES:
   - "appmetrica-react-native-analytics (from `../node_modules/@appmetrica/react-native-analytics`)"
+  - EXApplication (from `../node_modules/expo-application/ios`)
   - EXConstants (from `../node_modules/expo-constants/ios`)
   - EXImageLoader (from `../node_modules/expo-image-loader/ios`)
+  - EXNotifications (from `../node_modules/expo-notifications/ios`)
   - Expo (from `../node_modules/expo`)
   - ExpoAsset (from `../node_modules/expo-asset/ios`)
   - ExpoClipboard (from `../node_modules/expo-clipboard/ios`)
@@ -2219,10 +2225,14 @@ SPEC REPOS:
 EXTERNAL SOURCES:
   appmetrica-react-native-analytics:
     :path: "../node_modules/@appmetrica/react-native-analytics"
+  EXApplication:
+    :path: "../node_modules/expo-application/ios"
   EXConstants:
     :path: "../node_modules/expo-constants/ios"
   EXImageLoader:
     :path: "../node_modules/expo-image-loader/ios"
+  EXNotifications:
+    :path: "../node_modules/expo-notifications/ios"
   Expo:
     :path: "../node_modules/expo"
   ExpoAsset:
@@ -2422,8 +2432,10 @@ SPEC CHECKSUMS:
   AppMetricaProtobufUtils: ff838fedd01329be068074e877a5e0db207d74ee
   AppMetricaStorageUtils: 11812b909635f3c301018433a563af86e1e9f6cb
   AppMetricaSynchronization: 4519548e7cc60ea726dd7413afad5ebf3978c71d
+  EXApplication: 1e98d4b1dccdf30627f92917f4b2c5a53c330e5f
   EXConstants: fce59a631a06c4151602843667f7cfe35f81e271
   EXImageLoader: 189e3476581efe3ad4d1d3fb4735b7179eb26f05
+  EXNotifications: c67e92b9fdfe785ff9dbdc5f4c0ff935de357da7
   Expo: 38ef0f0082a53f9604a48cbab2ab55289c658eaf
   ExpoAsset: 9e5a7c9c0a9fb83ad5b2bb365141f2bd7f289b66
   ExpoClipboard: b36b287d8356887844bb08ed5c84b5979bb4dd1e

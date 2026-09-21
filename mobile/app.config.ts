@@ -58,7 +58,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     ...config,
     name: 'DeDato',
     slug: 'dedato',
-    version: '1.0.1',
+    version: '1.1.0',
     orientation: 'portrait',
     icon: './assets/icon.png',
     userInterfaceStyle: 'light',
@@ -71,7 +71,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     ios: {
       supportsTablet: true,
       bundleIdentifier: 'com.dedato.app',
-      buildNumber: '8',
+      buildNumber: '9',
       associatedDomains,
       config: {
         usesNonExemptEncryption: false,
@@ -99,7 +99,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       },
       package: 'ru.dedato.mobile',
       googleServicesFile: './android/app/google-services.json',
-      versionCode: 2,
+      versionCode: 3,
       edgeToEdgeEnabled: true,
       predictiveBackGestureEnabled: false,
       // AppMetrica подтягивает AD_ID через analytics-identifiers / play-services-ads-identifier.
