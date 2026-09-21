@@ -36,6 +36,36 @@ export function formatPriceDisplay(amount: number | string | null | undefined): 
   return formatPrice(amount)
 }
 
+const DATE_ONLY_RE = /^(\d{4})-(\d{2})-(\d{2})$/
+
+/** Calendar date from a Date or ISO-like backend value. Never uses UTC conversion. */
+export function calendarDateFromValue(value: string | Date | null | undefined): string {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    const year = value.getFullYear()
+    const month = String(value.getMonth() + 1).padStart(2, '0')
+    const day = String(value.getDate()).padStart(2, '0')
+    return `${year}-${month}-${day}`
+  }
+  if (typeof value !== 'string' || !value) return ''
+  const datePart = value.slice(0, 10)
+  return DATE_ONLY_RE.test(datePart) ? datePart : ''
+}
+
+/** YYYY-MM-DD or ISO datetime → DD.MM.YY without `new Date("YYYY-MM-DD")`. */
+export function formatCalendarDateDisplay(value: string | Date | null | undefined): string {
+  const date = calendarDateFromValue(value)
+  const match = DATE_ONLY_RE.exec(date)
+  if (!match) return ''
+  return `${match[3]}.${match[2]}.${match[1].slice(2)}`
+}
+
+/** Local Date at calendar noon-safe midnight from YYYY-MM-DD. */
+export function dateFromCalendarDay(dateStr: string): Date | null {
+  const match = DATE_ONLY_RE.exec(dateStr)
+  if (!match) return null
+  return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]))
+}
+
 /**
  * Форматирует дату в формат ДД.ММ.ГГ
  * @param dateStr ISO datetime string

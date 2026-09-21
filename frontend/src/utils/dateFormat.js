@@ -10,6 +10,11 @@
  */
 export function formatDateShort(value) {
   if (!value) return '—';
+  if (typeof value === 'string') {
+    const datePart = value.slice(0, 10);
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(datePart);
+    if (match) return `${match[3]}.${match[2]}.${match[1].slice(2)}`;
+  }
   const d = typeof value === 'string' ? new Date(value) : value;
   if (Number.isNaN(d.getTime())) return '—';
   const day = String(d.getDate()).padStart(2, '0');

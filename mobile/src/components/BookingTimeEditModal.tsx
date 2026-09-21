@@ -4,6 +4,11 @@ import { Ionicons } from '@expo/vector-icons';
 import { PrimaryButton } from './PrimaryButton';
 import { SecondaryButton } from './SecondaryButton';
 import { getAvailableSlots, updateBooking, AvailableSlot, AvailableSlotsResponse } from '@src/services/api/bookings';
+import {
+  calendarDateFromValue,
+  dateFromCalendarDay,
+  formatCalendarDateDisplay,
+} from '@src/utils/clientDashboard';
 
 interface BookingTimeEditModalProps {
   visible: boolean;
@@ -43,15 +48,6 @@ const formatDate = (date: Date): string => {
   return `${year}-${month}-${day}`;
 };
 
-// Форматировать дату для отображения
-const formatDisplayDate = (date: Date): string => {
-  const day = date.getDate();
-  const monthNames = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
-  const weekdayNames = ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'];
-  const weekday = weekdayNames[date.getDay() === 0 ? 6 : date.getDay() - 1];
-  return `${weekday} ${day} ${monthNames[date.getMonth()]}`;
-};
-
 export function BookingTimeEditModal({
   visible,
   onClose,
@@ -72,17 +68,20 @@ export function BookingTimeEditModal({
   const [dateAvailability, setDateAvailability] = useState<Record<string, boolean>>({});
   const [weekAvailabilityLoading, setWeekAvailabilityLoading] = useState(false);
 
-  // Инициализация: устанавливаем текущую дату бронирования
+  // Инициализация: календарная дата записи без UTC-парсинга naive datetime
   useEffect(() => {
     if (visible && currentStartTime) {
-      const currentDate = new Date(currentStartTime);
+      const dateOnly = calendarDateFromValue(currentStartTime);
+      const currentDate = dateOnly ? dateFromCalendarDay(dateOnly) : null;
       setSelectedDate(currentDate);
       setCurrentWeek(0);
       setSelectedSlot(null);
       setAvailableSlots([]);
       setSlotsData(null);
       setDateAvailability({});
-      loadSlotsForDate(currentDate);
+      if (currentDate) {
+        loadSlotsForDate(currentDate);
+      }
     }
   }, [visible, currentStartTime]);
 
@@ -282,7 +281,7 @@ export function BookingTimeEditModal({
           {selectedDate && (
             <View style={styles.slotsContainer}>
               <Text style={styles.slotsTitle}>
-                Доступное время {selectedDate && formatDisplayDate(selectedDate)}
+                Доступное время {formatCalendarDateDisplay(selectedDate)}
               </Text>
               
               {slotsLoading ? (

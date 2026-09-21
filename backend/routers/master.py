@@ -434,12 +434,12 @@ def get_master_booking_available_slots(
     service = booking.service or db.query(Service).filter(Service.id == booking.service_id).first()
     if not service:
         raise HTTPException(status_code=400, detail="У записи нет услуги")
+    from services.scheduling import get_available_slots, parse_yyyy_mm_dd
+
     try:
-        target_date = datetime.strptime(date, "%Y-%m-%d")
+        target_date = parse_yyyy_mm_dd(date)
     except ValueError as error:
         raise HTTPException(status_code=400, detail="Неверный формат даты. Используйте YYYY-MM-DD") from error
-
-    from services.scheduling import get_available_slots
 
     slots = get_available_slots(
         db=db,
@@ -448,6 +448,7 @@ def get_master_booking_available_slots(
         date=target_date,
         service_duration=service.duration,
         branch_id=booking.branch_id,
+        exclude_booking_id=booking.id,
     )
     return {
         "booking_id": booking.id,

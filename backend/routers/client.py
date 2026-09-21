@@ -44,7 +44,7 @@ from schemas import (
     ClientNoteCreate, ClientNoteUpdate, ClientNoteResponse, ClientFavoriteCreate, ClientFavorite as ClientFavoriteSchema,
     TemporaryBookingCreate, TemporaryBookingOut
 )
-from services.scheduling import check_booking_conflicts, get_available_slots
+from services.scheduling import check_booking_conflicts, get_available_slots, parse_yyyy_mm_dd
 from utils.booking_occupancy import booking_slot_conflict
 from utils.loyalty_discounts import evaluate_and_prepare_applied_discount, build_applied_discount_info
 from utils.master_canon import (
@@ -495,9 +495,8 @@ def get_available_slots_for_booking(
         if not booking.service:
             raise HTTPException(status_code=400, detail="У записи нет услуги")
         
-        # Парсим дату
         try:
-            target_date = datetime.strptime(date, '%Y-%m-%d')
+            target_date = parse_yyyy_mm_dd(date)
         except ValueError:
             raise HTTPException(status_code=400, detail="Неверный формат даты. Используйте YYYY-MM-DD")
         
@@ -527,7 +526,8 @@ def get_available_slots_for_booking(
             owner_id=owner_id,
             date=target_date,
             service_duration=booking.service.duration,
-            branch_id=branch_id
+            branch_id=branch_id,
+            exclude_booking_id=booking.id,
         )
         
         # Фильтруем слоты, исключая текущее время записи
@@ -565,6 +565,8 @@ def get_available_slots_for_booking(
             'available_slots': filtered_slots
         }
         
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -1063,26 +1065,44 @@ def update_booking(
             detail="Use master_id. Indie-masters merged into masters."
         )
 
-    # Проверяем доступность нового времени
-    if hasattr(booking_in, 'start_time') and booking_in.start_time:
-        # Исключаем текущую запись из проверки
-        existing_booking = (
-            db.query(Booking)
-            .filter(
-                Booking.start_time == booking_in.start_time,
-                Booking.status != BookingStatus.CANCELLED,
-                Booking.id != booking_id,
-                (
-                    (Booking.master_id == booking.master_id)
-                    | (Booking.indie_master_id == booking.indie_master_id)
-                    | (Booking.salon_id == booking.salon_id)
-                ),
-            )
-            .first()
-        )
+    # Проверяем доступность нового времени: overlap, не exact start_time.
+    # Текущая запись исключается; семантика как у master PUT /time.
+    if booking_in.start_time:
+        new_start = booking_in.start_time
+        if "end_time" in updates and booking_in.end_time is not None:
+            new_end = booking_in.end_time
+        elif booking.service and booking.service.duration:
+            new_end = new_start + timedelta(minutes=int(booking.service.duration))
+        elif booking.start_time and booking.end_time:
+            new_end = new_start + (booking.end_time - booking.start_time)
+        else:
+            raise HTTPException(status_code=400, detail="Не удалось определить длительность записи")
+        if new_end <= new_start:
+            raise HTTPException(status_code=400, detail="Время окончания должно быть позже времени начала")
+        if "end_time" not in updates:
+            updates["end_time"] = new_end
 
-        if existing_booking:
-            raise HTTPException(status_code=400, detail="This time slot is already booked")
+        master_id = updates.get("master_id", booking.master_id)
+        indie_id = updates.get("indie_master_id", booking.indie_master_id)
+        salon_id = updates.get("salon_id", booking.salon_id)
+        if master_id is not None:
+            owner_type, owner_id = OwnerType.MASTER, master_id
+        elif indie_id is not None:
+            owner_type, owner_id = OwnerType.INDIE_MASTER, indie_id
+        elif salon_id is not None:
+            owner_type, owner_id = OwnerType.SALON, salon_id
+        else:
+            raise HTTPException(status_code=400, detail="Не удалось определить владельца услуги")
+
+        if check_booking_conflicts(
+            db,
+            new_start,
+            new_end,
+            owner_type,
+            owner_id,
+            exclude_booking_id=booking.id,
+        ):
+            raise HTTPException(status_code=400, detail="Выбранное время уже занято")
 
     old_start = booking.start_time
     old_status = booking.status

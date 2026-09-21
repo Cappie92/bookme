@@ -16,6 +16,21 @@ from utils.booking_occupancy import (
 
 logger = logging.getLogger(__name__)
 
+YYYY_MM_DD_FORMAT = "%Y-%m-%d"
+
+
+def parse_yyyy_mm_dd(date: str) -> datetime:
+    """Strict calendar date. Rejects ISO datetimes such as 2026-09-26T12:00:00."""
+    if not isinstance(date, str):
+        raise ValueError("YYYY-MM-DD")
+    try:
+        parsed = datetime.strptime(date, YYYY_MM_DD_FORMAT)
+    except ValueError as exc:
+        raise ValueError("YYYY-MM-DD") from exc
+    if date != parsed.strftime(YYYY_MM_DD_FORMAT):
+        raise ValueError("YYYY-MM-DD")
+    return parsed
+
 
 def _resolve_master_zoneinfo(db: Session, master_id: int) -> ZoneInfo:
     """Часовой пояс мастера для интерпретации расписания и броней (как в public_master._slot_bounds_in_master_tz)."""
@@ -127,6 +142,7 @@ def get_available_slots(
     date: datetime,
     service_duration: int,  # в минутах
     branch_id: Optional[int] = None,
+    exclude_booking_id: Optional[int] = None,
 ) -> List[dict]:
     """
     Получает доступные слоты для бронирования на указанную дату
@@ -334,6 +350,9 @@ def get_available_slots(
         # Если указан филиал, фильтруем по нему
         if branch_id:
             existing_bookings_query = existing_bookings_query.filter(Booking.branch_id == branch_id)
+
+    if exclude_booking_id is not None:
+        existing_bookings_query = existing_bookings_query.filter(Booking.id != exclude_booking_id)
 
     existing_bookings = existing_bookings_query.all()
     

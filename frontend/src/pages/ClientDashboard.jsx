@@ -20,6 +20,15 @@ import {
   sendClientCalendarEmail,
 } from '../utils/clientBookingCalendarActions'
 import { ClientBookingPriceDisplay } from '../utils/clientBookingPrice'
+import {
+  calendarDateFromValue,
+  formatCalendarDateDisplay,
+  formatLocalDate,
+  localCalendarDateStringsForMonth,
+  rescheduleCalendarDate,
+  rescheduleSlotsHeading,
+  timeEditAvailableDateSet as buildTimeEditAvailableDateSet,
+} from '../utils/scheduleDates'
 
 // Вспомогательные функции
 function formatDate(dateStr) {
@@ -214,28 +223,16 @@ export default function ClientDashboard() {
 
   // Адаптеры для CalendarGrid из публичной страницы /m/:slug — переиспользуем
   // тот же визуальный календарь в TimeEdit-модалке. dateAvailability мапится
-  // в Set<YYYY-MM-DD>; выходные и прошедшие даты выпиливаем (как было в inline-календаре).
-  const timeEditAvailableDateSet = useMemo(() => {
-    const set = new Set()
-    const todayStr = new Date().toISOString().split('T')[0]
-    for (const [dateStr, hasSlots] of Object.entries(dateAvailability)) {
-      if (hasSlots !== true) continue
-      if (dateStr < todayStr) continue
-      const d = new Date(dateStr + 'T12:00:00')
-      const dow = d.getDay()
-      if (dow === 0 || dow === 6) continue // воскресенье/суббота — как в исходной логике
-      set.add(dateStr)
-    }
-    return set
-  }, [dateAvailability])
-  const timeEditMinDateStr = useMemo(() => {
-    const t = new Date()
-    return t.toISOString().split('T')[0]
-  }, [])
+  // в Set<YYYY-MM-DD>. Выходные не выкидываем: public booking их отдаёт.
+  const timeEditAvailableDateSet = useMemo(
+    () => buildTimeEditAvailableDateSet(dateAvailability, formatLocalDate(new Date())),
+    [dateAvailability]
+  )
+  const timeEditMinDateStr = useMemo(() => formatLocalDate(new Date()), [])
   const timeEditMaxDateStr = useMemo(() => {
     const t = new Date()
     t.setDate(t.getDate() + 90) // 3 месяца вперёд
-    return t.toISOString().split('T')[0]
+    return formatLocalDate(t)
   }, [])
 
   const navigate = useNavigate()
@@ -951,8 +948,12 @@ export default function ClientDashboard() {
   const handleTimeEdit = async () => {
     if (!selectedBooking) return
 
+    const dateOnly = rescheduleCalendarDate(selectedBooking)
     setShowTimeEditModal(true)
-    setSelectedDate(selectedBooking.date)
+    setSelectedDate(dateOnly)
+    if (dateOnly) {
+      await loadAvailableSlots(dateOnly)
+    }
 
     // CalendarGrid стартует с текущего месяца. Грузим availability на сегодня —
     // чтобы при открытии модалки сразу были подсвечены доступные даты.
@@ -960,8 +961,10 @@ export default function ClientDashboard() {
     // в CalendarGrid с onMonthChange делает остальное при навигации).
     const todayMonth = new Date()
     todayMonth.setDate(1)
-    const bookingMonth = new Date(selectedBooking.date)
-    bookingMonth.setDate(1)
+    const [bookingYear, bookingMonthIndex] = dateOnly
+      ? dateOnly.split('-').map(Number)
+      : [todayMonth.getFullYear(), todayMonth.getMonth() + 1]
+    const bookingMonth = new Date(bookingYear, bookingMonthIndex - 1, 1)
     setCurrentMonth(todayMonth)
     await loadDateAvailabilityForMonth(todayMonth)
     if (bookingMonth.getMonth() !== todayMonth.getMonth() || bookingMonth.getFullYear() !== todayMonth.getFullYear()) {
@@ -971,12 +974,14 @@ export default function ClientDashboard() {
 
   const loadAvailableSlots = async (date) => {
     if (!selectedBooking || !date) return
+    const dateOnly = calendarDateFromValue(date)
+    if (!dateOnly) return
     
     setSlotsLoading(true)
     setAvailableSlots([])
     
     try {
-      const url = `/api/client/bookings/${selectedBooking.id}/available-slots?date=${date}`
+      const url = `/api/client/bookings/${selectedBooking.id}/available-slots?date=${dateOnly}`
       const response = await fetch(url, {
         headers: getAuthHeaders()
       })
@@ -1001,17 +1006,11 @@ export default function ClientDashboard() {
     const availability = {}
     
     try {
-      // Проверяем доступность для указанного месяца
-      const monthStart = new Date(month.getFullYear(), month.getMonth(), 1)
-      const daysInMonth = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate()
       const promises = []
-      
-      for (let day = 1; day <= daysInMonth; day++) {
-        const date = new Date(monthStart.getFullYear(), monthStart.getMonth(), day)
-        const dateStr = date.toISOString().split('T')[0]
-        
+      const todayStr = formatLocalDate(new Date())
+      for (const dateStr of localCalendarDateStringsForMonth(month.getFullYear(), month.getMonth())) {
         // Пропускаем прошедшие даты
-        if (date < new Date()) {
+        if (dateStr < todayStr) {
           continue
         }
         
@@ -1078,15 +1077,10 @@ export default function ClientDashboard() {
     const availability = { ...dateAvailability } // Сохраняем существующие данные
     
     try {
-      const daysInMonth = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate()
       const promises = []
-      
-      for (let day = 1; day <= daysInMonth; day++) {
-        const date = new Date(month.getFullYear(), month.getMonth(), day)
-        const dateStr = date.toISOString().split('T')[0]
-        
-        // Пропускаем прошедшие даты
-        if (date < new Date()) continue
+      const todayStr = formatLocalDate(new Date())
+      for (const dateStr of localCalendarDateStringsForMonth(month.getFullYear(), month.getMonth())) {
+        if (dateStr < todayStr) continue
         
         const promise = apiFetch(`/api/client/bookings/${selectedBooking.id}/available-slots?date=${dateStr}`, {
           headers: getAuthHeaders()
@@ -1134,19 +1128,20 @@ export default function ClientDashboard() {
   }, [showCalendar])
 
   const handleDateChange = async (date) => {
-    setSelectedDate(date)
+    const dateOnly = calendarDateFromValue(date)
+    setSelectedDate(dateOnly)
     setNewDateTime('')
     
     // Показываем загрузку для конкретной даты
-    setLoadingDates(prev => new Set(prev).add(date))
+    setLoadingDates(prev => new Set(prev).add(dateOnly))
     
     try {
-      await loadAvailableSlots(date)
+      await loadAvailableSlots(dateOnly)
     } finally {
       // Убираем индикатор загрузки
       setLoadingDates(prev => {
         const newSet = new Set(prev)
-        newSet.delete(date)
+        newSet.delete(dateOnly)
         return newSet
       })
     }
@@ -2231,11 +2226,7 @@ export default function ClientDashboard() {
                   </label>
                   {selectedDate && (
                     <span className="text-xs text-gray-500 tabular-nums">
-                      {new Date(selectedDate).toLocaleDateString('ru-RU', {
-                        year: 'numeric',
-                        month: 'long',
-                        day: 'numeric',
-                      })}
+                      {formatCalendarDateDisplay(selectedDate)}
                     </span>
                   )}
                 </div>
@@ -2258,7 +2249,7 @@ export default function ClientDashboard() {
 
               {/* Доступные слоты */}
               <div>
-                <h3 className="font-semibold text-gray-900 mb-3">Доступные слоты на {selectedDate}</h3>
+                <h3 className="font-semibold text-gray-900 mb-3">{rescheduleSlotsHeading(selectedDate)}</h3>
                 
                 {slotsLoading ? (
                   <div className="text-center py-4">
