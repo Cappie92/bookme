@@ -1,8 +1,16 @@
 #!/usr/bin/env python3
-"""Generate DeDato mobile launcher assets from assets/dedato_trnsp.png (brand mark only)."""
+"""Generate DeDato mobile launcher assets from assets/dedato_trnsp.png (brand mark only).
+
+Android adaptive foreground is derived from assets/icon.png (visual source of truth).
+Android AdaptiveIconDrawable DEFAULT_VIEW_PORT_SCALE is 2/3: extra 18dp inset on each
+side of the 108dp layer, so the launcher only shows the inner 72dp. Scaling the
+icon.png artwork by 2/3 on the transparent 108dp layer makes the masked glyph match
+the logo footprint inside icon.png.
+"""
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
@@ -15,6 +23,24 @@ SIZE = 1024
 # DeDato design system — Vibrant Green
 BG = (76, 175, 80, 255)  # #4CAF50
 WHITE = (255, 255, 255, 255)
+GREEN_MATCH_THRESH = 18
+# Android AdaptiveIconDrawable DEFAULT_VIEW_PORT_SCALE = 1 / (1 + 2 * 0.25) = 2/3
+ADAPTIVE_VIEWPORT_SCALE = 2 / 3
+ANDROID_RES = ROOT / "android" / "app" / "src" / "main" / "res"
+ANDROID_LEGACY_SIZES = {
+    "mipmap-mdpi": 48,
+    "mipmap-hdpi": 72,
+    "mipmap-xhdpi": 96,
+    "mipmap-xxhdpi": 144,
+    "mipmap-xxxhdpi": 192,
+}
+ANDROID_FG_SIZES = {
+    "mipmap-mdpi": 108,
+    "mipmap-hdpi": 162,
+    "mipmap-xhdpi": 216,
+    "mipmap-xxhdpi": 324,
+    "mipmap-xxxhdpi": 432,
+}
 
 
 def extract_icon_mark(src: Image.Image) -> Image.Image:
@@ -62,6 +88,111 @@ def save_rgb(img: Image.Image, path: Path) -> None:
     img.convert("RGB").save(path, format="PNG", optimize=True)
 
 
+def icon_to_transparent_artwork(icon: Image.Image) -> Image.Image:
+    """Keep only non-green pixels from icon.png on a transparent canvas."""
+    icon = icon.convert("RGBA")
+    pixels = []
+    for r, g, b, a in icon.getdata():
+        if a < 8:
+            pixels.append((0, 0, 0, 0))
+            continue
+        if (
+            abs(r - BG[0]) <= GREEN_MATCH_THRESH
+            and abs(g - BG[1]) <= GREEN_MATCH_THRESH
+            and abs(b - BG[2]) <= GREEN_MATCH_THRESH
+        ):
+            pixels.append((0, 0, 0, 0))
+            continue
+        pixels.append((r, g, b, a))
+    out = Image.new("RGBA", icon.size, (0, 0, 0, 0))
+    out.putdata(pixels)
+    return out
+
+
+def scale_centered(img: Image.Image, scale: float) -> Image.Image:
+    w, h = img.size
+    nw = max(1, round(w * scale))
+    nh = max(1, round(h * scale))
+    scaled = img.resize((nw, nh), Image.Resampling.LANCZOS)
+    canvas = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    canvas.paste(scaled, ((w - nw) // 2, (h - nh) // 2), scaled)
+    return canvas
+
+
+def adaptive_foreground_from_icon(icon: Image.Image) -> Image.Image:
+    """White artwork from icon.png, scaled so post-mask size matches icon.png."""
+    return scale_centered(icon_to_transparent_artwork(icon), ADAPTIVE_VIEWPORT_SCALE)
+
+
+def artwork_metrics(path: Path, treat_green_as_background: bool = True) -> dict:
+    im = Image.open(path).convert("RGBA")
+    w, h = im.size
+    px = im.load()
+    minx, miny, maxx, maxy = w, h, -1, -1
+    for y in range(h):
+        for x in range(w):
+            r, g, b, a = px[x, y]
+            if a < 16:
+                continue
+            if treat_green_as_background and (
+                abs(r - BG[0]) <= GREEN_MATCH_THRESH
+                and abs(g - BG[1]) <= GREEN_MATCH_THRESH
+                and abs(b - BG[2]) <= GREEN_MATCH_THRESH
+            ):
+                continue
+            if x < minx:
+                minx = x
+            if y < miny:
+                miny = y
+            if x > maxx:
+                maxx = x
+            if y > maxy:
+                maxy = y
+    if maxx < 0:
+        raise SystemExit(f"no artwork in {path}")
+    bw = maxx + 1 - minx
+    bh = maxy + 1 - miny
+    corners = [(0, 0), (w - 1, 0), (0, h - 1), (w - 1, h - 1)]
+    return {
+        "path": str(path),
+        "size": [w, h],
+        "bbox": [minx, miny, maxx + 1, maxy + 1],
+        "max_side_pct": 100.0 * max(bw, bh) / max(w, h),
+        "min_side_pct": 100.0 * min(bw, bh) / min(w, h),
+        "left_pct": 100.0 * minx / w,
+        "right_pct": 100.0 * (w - (maxx + 1)) / w,
+        "top_pct": 100.0 * miny / h,
+        "bottom_pct": 100.0 * (h - (maxy + 1)) / h,
+        "cx_pct": 100.0 * ((minx + maxx + 1) / 2) / w,
+        "cy_pct": 100.0 * ((miny + maxy + 1) / 2) / h,
+        "corners_transparent": all(im.getpixel(p)[3] < 16 for p in corners),
+    }
+
+
+def measure_android_icon_geometry() -> dict:
+    icon = artwork_metrics(ASSETS / "icon.png", treat_green_as_background=True)
+    adaptive = artwork_metrics(ASSETS / "adaptive-icon.png", treat_green_as_background=True)
+    densities = {}
+    for folder in ANDROID_LEGACY_SIZES:
+        out_dir = ANDROID_RES / folder
+        densities[folder] = {
+            "legacy": artwork_metrics(out_dir / "ic_launcher.webp", treat_green_as_background=True),
+            "round": artwork_metrics(out_dir / "ic_launcher_round.webp", treat_green_as_background=True),
+            "foreground": artwork_metrics(
+                out_dir / "ic_launcher_foreground.webp", treat_green_as_background=True
+            ),
+        }
+    return {
+        "viewport_scale": ADAPTIVE_VIEWPORT_SCALE,
+        "unsafe_outer_pct": 100.0 * (1 - ADAPTIVE_VIEWPORT_SCALE) / 2,
+        "icon": icon,
+        "adaptive": adaptive,
+        "target_foreground_max_side_pct": icon["max_side_pct"] * ADAPTIVE_VIEWPORT_SCALE,
+        "target_foreground_min_side_pct": icon["min_side_pct"] * ADAPTIVE_VIEWPORT_SCALE,
+        "densities": densities,
+    }
+
+
 def main() -> None:
     if not SRC.exists():
         raise SystemExit(f"Missing brand source: {SRC}")
@@ -76,8 +207,7 @@ def main() -> None:
     icon = Image.alpha_composite(icon, fg)
     save_rgb(icon, ASSETS / "icon.png")
 
-    # Adaptive foreground: white mark, ~66% safe area on transparent
-    adaptive_fg = fit_center(SIZE, white, 0.58)
+    adaptive_fg = adaptive_foreground_from_icon(icon)
     adaptive_fg.save(ASSETS / "adaptive-icon.png", format="PNG", optimize=True)
 
     # Splash: green mark on white (matches splash backgroundColor #fff)
@@ -114,25 +244,21 @@ def main() -> None:
         print("Wrote:", ios_icon)
 
 
-def sync_android_from_ios_source() -> None:
-    """Committed-native sync: iOS 1024 + adaptive-icon.png → Android mipmaps. Does not rewrite iOS."""
-    ios_icon = (
-        ROOT
-        / "ios"
-        / "DeDato"
-        / "Images.xcassets"
-        / "AppIcon.appiconset"
-        / "App-Icon-1024x1024@1x.png"
-    )
-    adaptive = ASSETS / "adaptive-icon.png"
-    if not ios_icon.exists():
-        raise SystemExit(f"Missing iOS source of truth: {ios_icon}")
-    if not adaptive.exists():
-        raise SystemExit(f"Missing adaptive foreground: {adaptive}")
-    icon = Image.open(ios_icon).convert("RGBA")
-    fg = Image.open(adaptive).convert("RGBA")
+def sync_android_from_icon_png() -> None:
+    """Committed-native sync from assets/icon.png. Does not rewrite iOS or splash."""
+    icon_path = ASSETS / "icon.png"
+    if not icon_path.exists():
+        raise SystemExit(f"Missing icon source of truth: {icon_path}")
+    icon = Image.open(icon_path).convert("RGBA")
+    fg = adaptive_foreground_from_icon(icon)
+    fg.save(ASSETS / "adaptive-icon.png", format="PNG", optimize=True)
     sync_android_mipmaps(icon, fg)
-    print("Synced Android mipmaps from iOS App Icon + adaptive-icon.png")
+    print("Synced Android launcher from assets/icon.png (adaptive fg × viewport 2/3)")
+
+
+def sync_android_from_ios_source() -> None:
+    """Legacy flag: Android sync is driven by icon.png, not the iOS 1024 asset."""
+    sync_android_from_icon_png()
 
 
 def sync_android_splash(splash_path: Path) -> None:
@@ -155,34 +281,19 @@ def sync_android_splash(splash_path: Path) -> None:
 
 def sync_android_mipmaps(icon_rgb: Image.Image, adaptive_fg: Image.Image) -> None:
     """Update committed bare-project launcher mipmaps (EAS does not apply app.config icon)."""
-    res = ROOT / "android" / "app" / "src" / "main" / "res"
-    legacy_sizes = {
-        "mipmap-mdpi": 48,
-        "mipmap-hdpi": 72,
-        "mipmap-xhdpi": 96,
-        "mipmap-xxhdpi": 144,
-        "mipmap-xxxhdpi": 192,
-    }
-    fg_sizes = {
-        "mipmap-mdpi": 108,
-        "mipmap-hdpi": 162,
-        "mipmap-xhdpi": 216,
-        "mipmap-xxhdpi": 324,
-        "mipmap-xxxhdpi": 432,
-    }
     icon_rgb = icon_rgb.convert("RGB")
     adaptive_fg = adaptive_fg.convert("RGBA")
 
-    for folder, side in legacy_sizes.items():
-        out_dir = res / folder
+    for folder, side in ANDROID_LEGACY_SIZES.items():
+        out_dir = ANDROID_RES / folder
         if not out_dir.exists():
             continue
         img = icon_rgb.resize((side, side), Image.Resampling.LANCZOS)
         img.save(out_dir / "ic_launcher.webp", format="WEBP", quality=92, method=6)
         img.save(out_dir / "ic_launcher_round.webp", format="WEBP", quality=92, method=6)
 
-    for folder, side in fg_sizes.items():
-        out_dir = res / folder
+    for folder, side in ANDROID_FG_SIZES.items():
+        out_dir = ANDROID_RES / folder
         if not out_dir.exists():
             continue
         fg = adaptive_fg.resize((side, side), Image.Resampling.LANCZOS)
@@ -192,7 +303,9 @@ def sync_android_mipmaps(icon_rgb: Image.Image, adaptive_fg: Image.Image) -> Non
 if __name__ == "__main__":
     import sys
 
-    if "--android-from-ios" in sys.argv:
-        sync_android_from_ios_source()
+    if "--measure-json" in sys.argv:
+        print(json.dumps(measure_android_icon_geometry()))
+    elif "--android-from-icon" in sys.argv or "--android-from-ios" in sys.argv:
+        sync_android_from_icon_png()
     else:
         main()
