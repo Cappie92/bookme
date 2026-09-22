@@ -22,13 +22,14 @@ function iosStatusIsRegisterable(status: number | undefined): boolean {
 export function classifyPushPermission(response: {
   status?: string | null;
   granted?: boolean;
+  canAskAgain?: boolean;
   ios?: { status?: number | null };
 } | null | undefined): PushPermissionKind {
   if (!response) return 'undetermined';
   if (response.granted === true || response.status === 'granted' || iosStatusIsRegisterable(response.ios?.status ?? undefined)) {
     return 'registerable';
   }
-  if (response.status === 'denied' || response.ios?.status === Notifications.IosAuthorizationStatus.DENIED) {
+  if (response.ios?.status === Notifications.IosAuthorizationStatus.DENIED) {
     return 'denied';
   }
   if (
@@ -37,6 +38,14 @@ export function classifyPushPermission(response: {
     response.status == null
   ) {
     return 'undetermined';
+  }
+  // Android 13+ / Expo often report `denied` before the first POST_NOTIFICATIONS prompt.
+  // canAskAgain=true means the system dialog can still be shown — treat as undetermined.
+  if (response.status === 'denied' && response.canAskAgain === true) {
+    return 'undetermined';
+  }
+  if (response.status === 'denied') {
+    return 'denied';
   }
   return 'denied';
 }

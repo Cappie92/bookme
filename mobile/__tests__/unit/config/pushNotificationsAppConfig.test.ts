@@ -75,6 +75,8 @@ describe('push expo app config', () => {
     expect(manifest.match(/<uses-permission\b[^>]*android:name="android.permission.POST_NOTIFICATIONS"/g)).toHaveLength(1);
     expect(manifest.match(/android:name="com.google.firebase.messaging.default_notification_channel_id"/g)).toHaveLength(1);
     expect(manifest).toMatch(/<meta-data\s+android:name="com.google.firebase.messaging.default_notification_channel_id"\s+android:value="bookings"\s*\/>/);
+    expect(source('src/services/push/pushRuntime.ts')).toContain("ANDROID_BOOKINGS_CHANNEL_ID = 'bookings'");
+    expect(source('src/services/push/pushRuntime.ts')).toContain('shouldShowBanner: presentOnAndroid');
     expect(manifest).toContain('android:name="com.google.android.gms.permission.AD_ID" tools:node="remove"');
     expect(manifest).not.toMatch(/<uses-permission\b[^>]*android:name="android.permission.(?:ACCESS_FINE_LOCATION|ACCESS_COARSE_LOCATION|CAMERA|RECORD_AUDIO)"/);
   });

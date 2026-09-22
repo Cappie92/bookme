@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
+import * as Notifications from 'expo-notifications';
 import { useAuth } from '@src/auth/AuthContext';
 import { PushPermissionEducationModal } from '@src/components/push/PushPermissionEducationModal';
 import {
@@ -34,23 +35,13 @@ export function PushRegistrationHost() {
     });
   }, [settled, user, token, isAuthenticated]);
 
-  useEffect(() => {
-    void configurePushNotificationRuntime();
-  }, []);
-
-  useEffect(() => {
-    if (!settled) {
-      setEducationVisible(false);
-      return;
-    }
-    const generation = getPushSessionGeneration();
-    let cancelled = false;
-
-    void (async () => {
-      if (!canRegisterPushForUser(user)) return;
+  const reconcilePushLifecycle = useCallback(
+    async (opts?: { allowEducation?: boolean }) => {
+      if (!settled || !canRegisterPushForUser(user)) return;
+      const generation = getPushSessionGeneration();
       const permission = await getPushPermissionKind();
       const education = await getPushEducationState();
-      if (cancelled || !isPushSessionCurrent(generation)) return;
+      if (!isPushSessionCurrent(generation)) return;
       const decision = evaluatePushPermissionUx({
         eligible: true,
         permission,
@@ -61,24 +52,40 @@ export function PushRegistrationHost() {
         await runSilentRegistration();
         return;
       }
-      if (decision.action === 'show_education') {
+      if (opts?.allowEducation && decision.action === 'show_education') {
+        setEducationVisible(true);
         await setPushEducationState('shown');
-        if (!cancelled && isPushSessionCurrent(generation)) {
-          setEducationVisible(true);
-        }
       }
-    })();
+    },
+    [settled, user, runSilentRegistration]
+  );
 
-    return () => {
-      cancelled = true;
-    };
-  }, [settled, user, runSilentRegistration]);
+  useEffect(() => {
+    void configurePushNotificationRuntime();
+  }, []);
+
+  useEffect(() => {
+    if (!settled) {
+      setEducationVisible(false);
+      return;
+    }
+    void reconcilePushLifecycle({ allowEducation: true });
+  }, [settled, reconcilePushLifecycle]);
 
   useEffect(() => {
     const sub = AppState.addEventListener('change', (next: AppStateStatus) => {
       const previous = appStateRef.current;
       appStateRef.current = next;
       if (!shouldRefreshPushOnAppState(previous, next)) return;
+      if (!settled || !canRegisterPushForUser(user)) return;
+      void reconcilePushLifecycle({ allowEducation: true });
+    });
+    return () => sub.remove();
+  }, [settled, user, reconcilePushLifecycle]);
+
+  useEffect(() => {
+    if (typeof Notifications.addPushTokenListener !== 'function') return;
+    const sub = Notifications.addPushTokenListener(() => {
       if (!settled || !canRegisterPushForUser(user)) return;
       void refreshPushRegistrationIfNeeded({
         user,

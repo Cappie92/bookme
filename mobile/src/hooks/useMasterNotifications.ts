@@ -1,8 +1,9 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AppState, type AppStateStatus } from 'react-native';
 import { isAxiosError } from 'axios';
 import { useAuth } from '@src/auth/AuthContext';
 import { getNotifications } from '@src/services/api/notifications';
-import { canRegisterPushForUser } from '@src/services/push/pushEligibility';
+import { canRegisterPushForUser, shouldRefreshPushOnAppState } from '@src/services/push/pushEligibility';
 import {
   classifyNotificationFetchError,
   mapBackendNotificationToViewModel,
@@ -30,7 +31,8 @@ function isCanceled(error: unknown): boolean {
   return isAxiosError(error) && (error.code === 'ERR_CANCELED' || error.name === 'CanceledError');
 }
 
-export function useMasterNotifications() {
+export function useMasterNotifications(options?: { centerVisible?: boolean }) {
+  const centerVisible = options?.centerVisible === true;
   const { user, isAuthenticated, isLoading: authLoading } = useAuth();
   const eligible = !authLoading && isAuthenticated && canFetchMasterNotifications(user);
   const userId = eligible ? user!.id : null;
@@ -144,6 +146,23 @@ export function useMasterNotifications() {
     if (listLoadedRef.current || listInFlightRef.current) return;
     await loadList('initial');
   }, [eligible, userId, loadList]);
+
+  useEffect(() => {
+    if (!eligible || !centerVisible) return;
+    void loadList(listLoadedRef.current ? 'refresh' : 'initial');
+  }, [centerVisible, eligible, loadList]);
+
+  useEffect(() => {
+    const appStateRef = { current: AppState.currentState as AppStateStatus };
+    const sub = AppState.addEventListener('change', (next: AppStateStatus) => {
+      const previous = appStateRef.current;
+      appStateRef.current = next;
+      if (!centerVisible || !eligible) return;
+      if (!shouldRefreshPushOnAppState(previous, next)) return;
+      void loadList(listLoadedRef.current ? 'refresh' : 'initial');
+    });
+    return () => sub.remove();
+  }, [centerVisible, eligible, loadList]);
 
   const sections = useMemo(() => groupNotificationsByDate(items), [items]);
 

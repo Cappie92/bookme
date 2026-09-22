@@ -6,6 +6,7 @@ import {
   getOrCreateInstallationId,
 } from '@src/services/push/installationIdentity';
 import {
+  __resetPushRegistrationCacheForTests,
   deactivateCurrentPushInstallation,
   ensurePushRegistrationForAuthenticatedUser,
   refreshPushRegistrationIfNeeded,
@@ -49,6 +50,7 @@ describe('push registration', () => {
   beforeEach(() => {
     __resetPushSessionGenerationForTests();
     __resetInstallationIdentityCacheForTests();
+    __resetPushRegistrationCacheForTests();
     jest.clearAllMocks();
     (getOrCreateInstallationId as jest.Mock).mockResolvedValue(INSTALL_ID);
     const identity = jest.requireMock('@src/services/push/installationIdentity') as {
@@ -122,6 +124,7 @@ describe('push registration', () => {
     (Notifications.getPermissionsAsync as jest.Mock).mockResolvedValue({
       status: 'denied',
       granted: false,
+      canAskAgain: false,
     });
     const result = await ensurePushRegistrationForAuthenticatedUser({
       user: master,
@@ -130,7 +133,48 @@ describe('push registration', () => {
     });
     expect(result).toBe('permission_denied');
     expect(Notifications.getExpoPushTokenAsync).not.toHaveBeenCalled();
+    expect(Notifications.requestPermissionsAsync).not.toHaveBeenCalled();
     expect(apiClient.put).not.toHaveBeenCalled();
+  });
+
+  it('does not fetch a token while permission is still undetermined', async () => {
+    (Notifications.getPermissionsAsync as jest.Mock).mockResolvedValue({
+      status: 'denied',
+      granted: false,
+      canAskAgain: true,
+    });
+    const result = await ensurePushRegistrationForAuthenticatedUser({
+      user: master,
+      accessToken: 'access-a',
+      isAuthenticated: true,
+    });
+    expect(result).toBe('skipped');
+    expect(Notifications.getExpoPushTokenAsync).not.toHaveBeenCalled();
+    expect(Notifications.requestPermissionsAsync).not.toHaveBeenCalled();
+    expect(apiClient.put).not.toHaveBeenCalled();
+  });
+
+  it('creates the Android bookings channel before requesting the Expo token', async () => {
+    const { Platform } = require('react-native') as { Platform: { OS: string } };
+    Platform.OS = 'android';
+    await ensurePushRegistrationForAuthenticatedUser({
+      user: master,
+      accessToken: 'access-a',
+      isAuthenticated: true,
+    });
+    expect(Notifications.setNotificationChannelAsync).toHaveBeenCalledWith(
+      'bookings',
+      expect.objectContaining({ importance: Notifications.AndroidImportance.HIGH })
+    );
+    const channelOrder = (Notifications.setNotificationChannelAsync as jest.Mock).mock.invocationCallOrder[0];
+    const tokenOrder = (Notifications.getExpoPushTokenAsync as jest.Mock).mock.invocationCallOrder[0];
+    expect(channelOrder).toBeLessThan(tokenOrder);
+    expect(apiClient.put).toHaveBeenCalledWith(
+      '/api/push/devices',
+      expect.objectContaining({ platform: 'android', token: EXPO_TOKEN }),
+      expect.any(Object)
+    );
+    Platform.OS = 'ios';
   });
 
   it('treats backend 503 as fail-open', async () => {
@@ -165,7 +209,7 @@ describe('push registration', () => {
     ).resolves.toBe('failed');
   });
 
-  it('re-registers the same installation on resume', async () => {
+  it('skips duplicate PUT when AppState refresh has the same granted token', async () => {
     await ensurePushRegistrationForAuthenticatedUser({
       user: master,
       accessToken: 'access-a',
@@ -176,8 +220,27 @@ describe('push registration', () => {
       accessToken: 'access-a',
       isAuthenticated: true,
     });
+    expect(apiClient.put).toHaveBeenCalledTimes(1);
+    expect((apiClient.put as jest.Mock).mock.calls[0][1].installation_id).toBe(INSTALL_ID);
+  });
+
+  it('PUTs again when the Expo token changes', async () => {
+    await ensurePushRegistrationForAuthenticatedUser({
+      user: master,
+      accessToken: 'access-a',
+      isAuthenticated: true,
+    });
+    (Notifications.getExpoPushTokenAsync as jest.Mock).mockResolvedValue({
+      type: 'expo',
+      data: 'ExponentPushToken[newTok]',
+    });
+    await refreshPushRegistrationIfNeeded({
+      user: master,
+      accessToken: 'access-a',
+      isAuthenticated: true,
+    });
     expect(apiClient.put).toHaveBeenCalledTimes(2);
-    expect((apiClient.put as jest.Mock).mock.calls[1][1].installation_id).toBe(INSTALL_ID);
+    expect((apiClient.put as jest.Mock).mock.calls[1][1].token).toBe('ExponentPushToken[newTok]');
   });
 
   it('discards a late user-A token so it cannot register as user B', async () => {

@@ -427,12 +427,7 @@ export default function HomeScreen() {
     refresh: refreshNotifications,
     retry: retryNotifications,
     loadMore: loadMoreNotifications,
-    ensureListLoaded,
-  } = useMasterNotifications();
-
-  useEffect(() => {
-    if (notificationsVisible) void ensureListLoaded();
-  }, [notificationsVisible, ensureListLoaded]);
+  } = useMasterNotifications({ centerVisible: notificationsVisible });
 
   if (loading) {
     return (

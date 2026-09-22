@@ -30,5 +30,7 @@ export async function setPushEducationState(state: Exclude<PushEducationState, '
 }
 
 export function isPushEducationPending(state: PushEducationState): boolean {
-  return state === 'unseen';
+  // `shown` stays pending until the user taps Allow / Не сейчас so an auth-restore
+  // race cannot permanently swallow the first-run prompt.
+  return state === 'unseen' || state === 'shown';
 }

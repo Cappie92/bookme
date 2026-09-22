@@ -12,8 +12,12 @@ import {
   getPushSessionGeneration,
   isPushSessionCurrent,
 } from './pushSessionGuard';
+import { ensureAndroidBookingsChannel } from './pushRuntime';
 
 const DEACTIVATE_TIMEOUT_MS = 2500;
+
+let lastRegistrationKey: string | null = null;
+let registrationChain: Promise<unknown> = Promise.resolve();
 
 export type EnsurePushRegistrationResult =
   | 'skipped'
@@ -85,6 +89,18 @@ async function resolveAccessToken(explicit?: string | null): Promise<string | nu
 export async function ensurePushRegistrationForAuthenticatedUser(
   input: EnsurePushRegistrationInput
 ): Promise<EnsurePushRegistrationResult> {
+  const run = () => ensurePushRegistrationUnlocked(input);
+  const pending = registrationChain.then(run, run);
+  registrationChain = pending.then(
+    () => undefined,
+    () => undefined
+  );
+  return pending;
+}
+
+async function ensurePushRegistrationUnlocked(
+  input: EnsurePushRegistrationInput
+): Promise<EnsurePushRegistrationResult> {
   const generation = getPushSessionGeneration();
   const platform = nativePlatform();
   if (!platform) return 'skipped';
@@ -101,6 +117,9 @@ export async function ensurePushRegistrationForAuthenticatedUser(
       return permission === 'denied' ? 'permission_denied' : 'skipped';
     }
 
+    await ensureAndroidBookingsChannel();
+    if (!isPushSessionCurrent(generation)) return 'skipped';
+
     const installationId = await getOrCreateInstallationId();
     if (!isPushSessionCurrent(generation)) return 'skipped';
 
@@ -111,6 +130,11 @@ export async function ensurePushRegistrationForAuthenticatedUser(
     if (!tokenResult.ok) {
       pushDiag(`token_unavailable:${tokenResult.reason}`);
       return 'failed';
+    }
+
+    const registrationKey = `${generation}:${expectedUserId}:${installationId}:${tokenResult.token}`;
+    if (lastRegistrationKey === registrationKey) {
+      return 'registered';
     }
 
     await registerPushDevice(
@@ -130,6 +154,7 @@ export async function ensurePushRegistrationForAuthenticatedUser(
       }
     );
     if (!isPushSessionCurrent(generation)) return 'skipped';
+    lastRegistrationKey = registrationKey;
     return 'registered';
   } catch {
     if (!isPushSessionCurrent(generation)) return 'skipped';
@@ -142,6 +167,11 @@ export async function refreshPushRegistrationIfNeeded(
   input: EnsurePushRegistrationInput
 ): Promise<EnsurePushRegistrationResult> {
   return ensurePushRegistrationForAuthenticatedUser(input);
+}
+
+export function __resetPushRegistrationCacheForTests(): void {
+  lastRegistrationKey = null;
+  registrationChain = Promise.resolve();
 }
 
 /**

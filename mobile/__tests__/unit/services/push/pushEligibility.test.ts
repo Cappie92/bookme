@@ -22,6 +22,9 @@ describe('push education + eligibility', () => {
   it('treats missing storage as unseen', async () => {
     await expect(getPushEducationState()).resolves.toBe('unseen');
     expect(isPushEducationPending('unseen')).toBe(true);
+    expect(isPushEducationPending('shown')).toBe(true);
+    expect(isPushEducationPending('dismissed')).toBe(false);
+    expect(isPushEducationPending('accepted')).toBe(false);
   });
 
   it('persists dismissed and accepted', async () => {
@@ -63,7 +66,7 @@ describe('push education + eligibility', () => {
         education: 'shown',
         foreground: true,
       })
-    ).toEqual({ action: 'idle' });
+    ).toEqual({ action: 'show_education' });
   });
 
   it('registers when permission is already granted', () => {
@@ -98,6 +101,12 @@ describe('push education + eligibility', () => {
     expect(classifyPushPermission({ status: 'undetermined', granted: false, ios: { status: 0 } })).toBe(
       'undetermined'
     );
+    expect(
+      classifyPushPermission({ status: 'denied', granted: false, canAskAgain: true })
+    ).toBe('undetermined');
+    expect(
+      classifyPushPermission({ status: 'denied', granted: false, canAskAgain: false })
+    ).toBe('denied');
   });
 
   it('refreshes once per background → active transition', () => {

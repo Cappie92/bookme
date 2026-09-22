@@ -10,7 +10,26 @@ import { useMasterNotifications } from '@src/hooks/useMasterNotifications';
 import type { User } from '@src/services/api/auth';
 import { NOTIFICATIONS_USE_DEV_MOCK } from '@src/components/master/notifications/notificationsMock';
 
-jest.mock('react-native', () => ({ Platform: { OS: 'ios' } }));
+jest.mock('react-native', () => {
+  const listeners: Array<(state: string) => void> = [];
+  const AppState = {
+    currentState: 'active',
+    addEventListener: jest.fn((_event: string, cb: (state: string) => void) => {
+      listeners.push(cb);
+      return {
+        remove: jest.fn(() => {
+          const index = listeners.indexOf(cb);
+          if (index >= 0) listeners.splice(index, 1);
+        }),
+      };
+    }),
+    emit(next: string) {
+      listeners.slice().forEach((cb) => cb(next));
+    },
+  };
+  (globalThis as { __masterNotificationsAppState?: typeof AppState }).__masterNotificationsAppState = AppState;
+  return { Platform: { OS: 'ios' }, AppState };
+});
 
 (globalThis as typeof globalThis & { __DEV__: boolean; IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT =
   true;
@@ -84,14 +103,15 @@ function Harness({ tick }: { tick: number }) {
   return null;
 }
 
-async function renderHook(): Promise<{
+async function renderHook(centerVisible = false): Promise<{
   current: ReturnType<typeof useMasterNotifications>;
-  rerender: () => Promise<void>;
+  rerender: (nextVisible?: boolean) => Promise<void>;
   unmount: () => void;
 }> {
   let current: ReturnType<typeof useMasterNotifications> | undefined;
+  let visible = centerVisible;
   function Probe({ tick }: { tick: number }) {
-    current = useMasterNotifications();
+    current = useMasterNotifications({ centerVisible: visible });
     return <Harness tick={tick} />;
   }
   let root: { unmount: () => void; update: (element: React.ReactElement) => void };
@@ -108,7 +128,8 @@ async function renderHook(): Promise<{
     get current() {
       return current!;
     },
-    rerender: async () => {
+    rerender: async (nextVisible?: boolean) => {
+      if (typeof nextVisible === 'boolean') visible = nextVisible;
       harnessTick += 1;
       await act(async () => {
         root.update(<Probe tick={harnessTick} />);
@@ -134,6 +155,9 @@ describe('useMasterNotifications', () => {
     authState.user = masterA;
     authState.isAuthenticated = true;
     authState.isLoading = false;
+    const AppState = (globalThis as { __masterNotificationsAppState?: { currentState: string } })
+      .__masterNotificationsAppState;
+    if (AppState) AppState.currentState = 'active';
     (getNotifications as jest.Mock).mockResolvedValue({
       items: [item(1), item(2, 'booking_cancelled')],
       next_cursor: 'next',
@@ -331,6 +355,71 @@ describe('useMasterNotifications', () => {
     });
     expect(hook.current.error).toBeNull();
     expect(hook.current.notifications.map((n) => n.id)).toEqual(['4']);
+    hook.unmount();
+  });
+
+  it('fetches on center open and refetches when the sheet is opened again', async () => {
+    const hook = await renderHook(false);
+    expect(getNotifications).not.toHaveBeenCalled();
+    await hook.rerender(true);
+    expect(getNotifications).toHaveBeenCalledTimes(1);
+    (getNotifications as jest.Mock).mockResolvedValue({
+      items: [item(9)],
+      next_cursor: null,
+      unread_count: 1,
+    });
+    await hook.rerender(false);
+    await hook.rerender(true);
+    expect(getNotifications).toHaveBeenCalledTimes(2);
+    expect(hook.current.notifications.map((n) => n.id)).toEqual(['9']);
+    hook.unmount();
+  });
+
+  it('refetches on AppState background → active only while the center is visible', async () => {
+    const AppState = (
+      globalThis as unknown as {
+        __masterNotificationsAppState: { currentState: string; emit: (state: string) => void };
+      }
+    ).__masterNotificationsAppState;
+    const hidden = await renderHook(false);
+    await act(async () => {
+      AppState.currentState = 'background';
+      AppState.emit('background');
+      AppState.currentState = 'active';
+      AppState.emit('active');
+    });
+    expect(getNotifications).not.toHaveBeenCalled();
+    hidden.unmount();
+
+    const visible = await renderHook(true);
+    expect(getNotifications).toHaveBeenCalledTimes(1);
+    (getNotifications as jest.Mock).mockResolvedValue({
+      items: [item(11)],
+      next_cursor: null,
+      unread_count: 1,
+    });
+    await act(async () => {
+      AppState.currentState = 'background';
+      AppState.emit('background');
+      AppState.currentState = 'active';
+      AppState.emit('active');
+    });
+    expect(getNotifications).toHaveBeenCalledTimes(2);
+    expect(visible.current.notifications.map((n) => n.id)).toEqual(['11']);
+    visible.unmount();
+  });
+
+  it('keeps manual refresh working after an automatic refetch', async () => {
+    const hook = await renderHook(true);
+    (getNotifications as jest.Mock).mockResolvedValue({
+      items: [item(21)],
+      next_cursor: null,
+      unread_count: 1,
+    });
+    await act(async () => {
+      await hook.current.refresh();
+    });
+    expect(hook.current.notifications.map((n) => n.id)).toEqual(['21']);
     hook.unmount();
   });
 });

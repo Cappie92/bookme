@@ -5,6 +5,7 @@ No Expo HTTP, worker, or receipts.
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from typing import Any, Mapping, Optional
 from zoneinfo import ZoneInfo
@@ -14,6 +15,8 @@ from sqlalchemy.orm import Session
 from models import Booking, BookingStatus, IndieMaster, Master, Service
 from services.notifications import create_notification
 from services.push_outbox import fanout_notification_to_active_devices
+
+logger = logging.getLogger("dedato.notifications")
 
 _FALLBACK_TZ = "Europe/Moscow"
 _FALLBACK_SERVICE = "Услуга"
@@ -148,8 +151,22 @@ def _body(service_name: str, date_label: str, time_label: str) -> str:
     return " · ".join(parts) if parts else service_name or _FALLBACK_SERVICE
 
 
-def _create_and_fanout(db: Session, **kwargs) -> tuple[Any, bool]:
+def _create_and_fanout(
+    db: Session,
+    *,
+    actor_user_id: Optional[int] = None,
+    **kwargs,
+) -> tuple[Any, bool]:
     row, created = create_notification(db, **kwargs)
+    logger.info(
+        "booking_notification type=%s created=%s recipient_user_id=%s actor_user_id=%s entity_id=%s dedup=%s",
+        kwargs.get("type"),
+        created,
+        kwargs.get("user_id"),
+        actor_user_id,
+        kwargs.get("entity_id"),
+        kwargs.get("dedup_key"),
+    )
     if created:
         fanout_notification_to_active_devices(db, notification=row)
     return row, created
@@ -173,6 +190,7 @@ def record_booking_created_notification(
     }
     return _create_and_fanout(
         db,
+        actor_user_id=actor_user_id,
         user_id=recipient,
         type="booking_created",
         title="Новая запись",
@@ -204,6 +222,7 @@ def record_booking_cancelled_notification(
     }
     return _create_and_fanout(
         db,
+        actor_user_id=actor_user_id,
         user_id=recipient,
         type="booking_cancelled",
         title="Запись отменена",
@@ -243,6 +262,7 @@ def record_booking_rescheduled_notification(
     }
     return _create_and_fanout(
         db,
+        actor_user_id=actor_user_id,
         user_id=recipient,
         type="booking_rescheduled",
         title="Запись перенесена",

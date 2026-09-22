@@ -17,6 +17,7 @@ const mockExpoNotifications = {
     data: 'ExponentPushToken[testtoken]',
   })),
   setNotificationChannelAsync: jest.fn(async () => null),
+  addPushTokenListener: jest.fn(() => ({ remove: jest.fn() })),
   AndroidImportance: {
     UNKNOWN: 0,
     UNSPECIFIED: 1,
@@ -26,6 +27,12 @@ const mockExpoNotifications = {
     DEFAULT: 5,
     HIGH: 6,
     MAX: 7,
+  },
+  AndroidNotificationVisibility: {
+    UNKNOWN: 0,
+    PUBLIC: 1,
+    PRIVATE: 2,
+    SECRET: 3,
   },
   IosAuthorizationStatus: {
     NOT_DETERMINED: 0,
