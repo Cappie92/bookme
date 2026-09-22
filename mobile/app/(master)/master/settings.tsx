@@ -31,7 +31,6 @@ import { BOTTOM_NAV_CONTENT_FALLBACK_HEIGHT } from '@src/constants/bottomNavLayo
 import { completePasswordMutationLogout } from '@src/auth/passwordMutationLogout';
 import { AccountDeletionSubscriptionWarningHost } from '@src/components/AccountDeletionSubscriptionWarningHost';
 import { checkSubscriptionBeforeAccountDeletion } from '@src/services/accountDeletionSubscriptionGuard';
-import { WebEditorButton } from '@src/components/WebEditorButton';
 
 export default function MasterSettingsScreen() {
   const pathname = usePathname();
@@ -415,11 +414,6 @@ export default function MasterSettingsScreen() {
             title="Управление сайтом"
             onEdit={() => setEditWebsiteVisible(true)}
           >
-            <WebEditorButton
-              destination="settings"
-              title="Настроить адрес страницы в браузере"
-              testID="ios-web-editor-settings"
-            />
             <View style={styles.infoBlock}>
               {settings.master.domain && (
                 <View style={styles.infoRow}>

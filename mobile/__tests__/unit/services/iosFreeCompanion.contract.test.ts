@@ -16,6 +16,9 @@ describe('fixed-feature iOS master contract', () => {
       schedule: true,
       services: true,
       settings: true,
+      browserScheduleEditor: false,
+      browserServicesEditor: false,
+      browserPublicPageEditor: false,
       clientsCrm: false,
       finance: false,
       masterLoyalty: false,
@@ -53,23 +56,36 @@ describe('fixed-feature iOS master contract', () => {
     expect(source('src/screens/WelcomeScreen.android.tsx')).toContain('WelcomePricingModal');
   });
 
-  it('uses operational iOS handoff buttons without native domain mutation', () => {
+  it('has no iOS browser-editor CTA on operational screens', () => {
     const schedule = source('app/(master)/master/schedule.tsx');
     const services = source('app/(master)/master/services.tsx');
-    expect(schedule).toContain('destination="schedule"');
-    expect(services).toContain('destination="services"');
-    expect(source('app/(master)/master/settings.tsx')).toContain('destination="settings"');
-    expect(schedule).toContain("from '@src/components/WebEditorButton'");
-    expect(services).toContain("from '@src/components/WebEditorButton'");
-    expect(services).toContain('parentHasPagePadding');
-    expect(services).not.toMatch(/margin(?:Left|Right|Top):\s*-\d+/);
+    const settings = source('app/(master)/master/settings.tsx');
+    expect(schedule).not.toContain('WebEditorButton');
+    expect(services).not.toContain('WebEditorButton');
+    expect(settings).not.toContain('WebEditorButton');
+    expect(schedule).not.toContain('в браузере');
+    expect(services).not.toContain('в браузере');
+    expect(settings).not.toContain('в браузере');
+    expect(settings).not.toContain('Настроить адрес страницы в браузере');
     const website = source('src/components/modals/EditWebsiteModal.tsx');
     expect(website).toContain("Platform.OS !== 'ios' ? <View");
     expect(website).toContain("if (Platform.OS !== 'ios') formData.append('domain', slug)");
+    expect(source('src/components/WebEditorButton.ios.tsx')).toContain('return null');
+    expect(source('src/components/WebEditorButton.tsx')).toContain('return null');
   });
 
   it('keeps the client route tree outside removed master routes', () => {
     expect(source('app/(client)/_layout.tsx')).toContain('<Stack');
     expect(IOS_REMOVED_MASTER_ROUTES.every((route) => !route.startsWith('/client'))).toBe(true);
+  });
+
+  it('does not advertise subscriptions in iOS client settings copy', () => {
+    const clientSettings = source('app/(client)/settings/index.tsx');
+    expect(clientSettings).toContain("Platform.OS === 'ios'");
+    expect(clientSettings).toContain('DeDato Mobile - управление бронированиями');
+    expect(clientSettings).toContain('DeDato Mobile - управление бронированиями и подписками');
+    expect(clientSettings).toMatch(
+      /Platform\.OS === 'ios'\s*\?[\s\S]*управление бронированиями'/
+    );
   });
 });

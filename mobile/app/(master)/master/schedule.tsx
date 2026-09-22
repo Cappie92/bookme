@@ -8,7 +8,6 @@ import { WeekView } from '@src/components/schedule/WeekView';
 import { DayView } from '@src/components/schedule/DayView';
 import { RulesView } from '@src/components/schedule/RulesView';
 import { getWeeklySchedule, getDetailedBookings, getMasterSettings, ScheduleWeek, Booking, MasterSettings } from '@src/services/api/master';
-import { WebEditorButton } from '@src/components/WebEditorButton';
 
 type TabIndex = 0 | 1 | 2;
 
@@ -115,11 +114,6 @@ export default function MasterScheduleScreen() {
 
   return (
     <View style={[styles.container, { paddingTop: Math.max(insets.top, 8) }]}>
-      <WebEditorButton
-        destination="schedule"
-        title="Редактировать расписание в браузере"
-        testID="ios-web-editor-schedule"
-      />
       <View style={styles.tabsContainer}>
         <SegmentedControl
           segments={tabs}

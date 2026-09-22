@@ -5,24 +5,29 @@ import type { WelcomeIllustrationType } from '@src/data/welcomeSlidesData';
 type WelcomeSlideIllustrationProps = {
   type: WelcomeIllustrationType;
   large?: boolean;
+  hideRevenueKpi?: boolean;
 };
 
-export function WelcomeSlideIllustration({ type, large = true }: WelcomeSlideIllustrationProps) {
+export function WelcomeSlideIllustration({
+  type,
+  large = true,
+  hideRevenueKpi = false,
+}: WelcomeSlideIllustrationProps) {
   const frameStyle = large ? styles.frameLarge : styles.frame;
 
   switch (type) {
     case 'public-page':
       return <PublicPageIllustration frameStyle={frameStyle} />;
     case 'schedule-services':
-      return <ScheduleIllustration frameStyle={frameStyle} />;
+      return <ScheduleIllustration frameStyle={frameStyle} hideRevenueKpi={hideRevenueKpi} />;
     case 'analytics':
-      return <AnalyticsIllustration frameStyle={frameStyle} />;
+      return <AnalyticsIllustration frameStyle={frameStyle} hideRevenueKpi={hideRevenueKpi} />;
     case 'loyalty':
       return <LoyaltyIllustration frameStyle={frameStyle} />;
     case 'social-post':
       return <SocialPostIllustration frameStyle={frameStyle} />;
     case 'master-dashboard':
-      return <MasterDashboardIllustration frameStyle={frameStyle} />;
+      return <MasterDashboardIllustration frameStyle={frameStyle} hideRevenueKpi={hideRevenueKpi} />;
     case 'client-masters':
       return <ClientMastersIllustration frameStyle={frameStyle} />;
     case 'client-loyalty':
@@ -36,7 +41,7 @@ export function WelcomeSlideIllustration({ type, large = true }: WelcomeSlideIll
   }
 }
 
-type FrameProps = { frameStyle: object };
+type FrameProps = { frameStyle: object; hideRevenueKpi?: boolean };
 
 type AvatarTone = 'green' | 'beige' | 'mint' | 'sand' | 'slate';
 
@@ -160,7 +165,7 @@ function PublicPageIllustration({ frameStyle }: FrameProps) {
   );
 }
 
-function ScheduleIllustration({ frameStyle }: FrameProps) {
+function ScheduleIllustration({ frameStyle, hideRevenueKpi = false }: FrameProps) {
   return (
     <View style={frameStyle}>
       <PillTabs tabs={['День', 'Неделя']} activeIndex={0} />
@@ -185,7 +190,7 @@ function ScheduleIllustration({ frameStyle }: FrameProps) {
       </View>
       {[
         { time: '10:00', title: 'Анна', sub: 'Подтверждено', tone: 'default' as const },
-        { time: '13:30', title: 'Окрашивание', sub: '4 200 ₽', tone: 'yellow' as const },
+        { time: '13:30', title: 'Окрашивание', sub: hideRevenueKpi ? '1 ч 30 мин' : '4 200 ₽', tone: 'yellow' as const },
         { time: '16:30', title: 'Свободно', sub: 'Открыт', tone: 'gray' as const },
       ].map((a) => (
         <View
@@ -207,8 +212,12 @@ function ScheduleIllustration({ frameStyle }: FrameProps) {
       ))}
       <View style={[styles.sectionCard, styles.sectionCardCompact]}>
         <Text style={styles.sectionLabelCompact}>Услуги</Text>
-        <Text style={styles.mockBodySm}>Женская стрижка · 1 500 ₽ · 1ч</Text>
-        <Text style={styles.mockBodySm}>Окрашивание · 4 200 ₽ · 2ч</Text>
+        <Text style={styles.mockBodySm}>
+          {hideRevenueKpi ? 'Женская стрижка · 1ч' : 'Женская стрижка · 1 500 ₽ · 1ч'}
+        </Text>
+        <Text style={styles.mockBodySm}>
+          {hideRevenueKpi ? 'Окрашивание · 2ч' : 'Окрашивание · 4 200 ₽ · 2ч'}
+        </Text>
       </View>
       <View style={styles.summaryStrip}>
         <View style={styles.miniStat}>
@@ -217,15 +226,17 @@ function ScheduleIllustration({ frameStyle }: FrameProps) {
         </View>
         <View style={styles.mockDividerV} />
         <View style={[styles.miniStat, styles.flex1]}>
-          <Text style={[styles.miniStatValue, styles.textGreen]}>+92 400 ₽</Text>
-          <Text style={styles.miniStatLabel}>за апрель</Text>
+          <Text style={[styles.miniStatValue, styles.textGreen]}>
+            {hideRevenueKpi ? '12 слотов' : '+92 400 ₽'}
+          </Text>
+          <Text style={styles.miniStatLabel}>{hideRevenueKpi ? 'открыто' : 'за апрель'}</Text>
         </View>
       </View>
     </View>
   );
 }
 
-function AnalyticsIllustration({ frameStyle }: FrameProps) {
+function AnalyticsIllustration({ frameStyle, hideRevenueKpi = false }: FrameProps) {
   const revenueBars = [52, 74, 62, 82, 70, 92];
   const loadBars = [45, 58, 50, 68, 56, 82, 54];
   const days = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
@@ -234,8 +245,8 @@ function AnalyticsIllustration({ frameStyle }: FrameProps) {
     <View style={[frameStyle, styles.analyticsBody]}>
       <View style={styles.kpiRow3}>
         <View style={styles.miniStat}>
-          <Text style={styles.miniStatValue}>92 400 ₽</Text>
-          <Text style={styles.miniStatLabel}>выручка</Text>
+          <Text style={styles.miniStatValue}>{hideRevenueKpi ? '18' : '92 400 ₽'}</Text>
+          <Text style={styles.miniStatLabel}>{hideRevenueKpi ? 'записей' : 'выручка'}</Text>
         </View>
         <View style={styles.miniStat}>
           <Text style={styles.miniStatValue}>38%</Text>
@@ -249,7 +260,7 @@ function AnalyticsIllustration({ frameStyle }: FrameProps) {
       <View style={[styles.sectionCard, styles.analyticsChartCard]}>
         <View style={styles.chartHeader}>
           <Text style={[styles.mockTitle, styles.chartTitleFlex]} numberOfLines={1}>
-            Выручка за 6 недель
+            {hideRevenueKpi ? 'Загрузка за 6 недель' : 'Выручка за 6 недель'}
           </Text>
           <View style={[styles.chip, styles.chipSuccess, styles.chartTrendChip]}>
             <Text style={styles.chipSuccessText}>+14%</Text>
@@ -380,7 +391,7 @@ function SocialPostIllustration({ frameStyle }: FrameProps) {
   );
 }
 
-function MasterDashboardIllustration({ frameStyle }: FrameProps) {
+function MasterDashboardIllustration({ frameStyle, hideRevenueKpi = false }: FrameProps) {
   return (
     <View style={[frameStyle, styles.dashBody]}>
       <View style={styles.dashHeader}>
@@ -401,8 +412,10 @@ function MasterDashboardIllustration({ frameStyle }: FrameProps) {
           <Text style={styles.kpiValueLg}>5 записей</Text>
         </View>
         <View style={styles.kpiLg}>
-          <Text style={styles.kpiLabel}>Выручка</Text>
-          <Text style={[styles.kpiValueLg, styles.textGreen]}>24 800 ₽</Text>
+          <Text style={styles.kpiLabel}>{hideRevenueKpi ? 'Ближайшие' : 'Выручка'}</Text>
+          <Text style={[styles.kpiValueLg, hideRevenueKpi ? undefined : styles.textGreen]}>
+            {hideRevenueKpi ? '2 визита' : '24 800 ₽'}
+          </Text>
         </View>
       </View>
       <Text style={styles.sectionLabel}>Ближайшие записи</Text>

@@ -22,7 +22,7 @@ export function WelcomeCardCarousel({ slides, resetKey }: { slides: WelcomeSlide
 
   const renderItem: ListRenderItem<WelcomeSlide> = ({ item }) => (
     <View style={styles.slidePage}>
-      {item.type === 'registration' ? <WelcomeRegistrationPreviewCard slide={item} /> : <WelcomeFeatureCard slide={item} />}
+      {item.type === 'registration' ? <WelcomeRegistrationPreviewCard slide={item} hideRevenueKpi /> : <WelcomeFeatureCard slide={item} />}
     </View>
   );
 

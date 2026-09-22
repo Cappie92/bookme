@@ -2,55 +2,14 @@ import React from 'react';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-const linkingReceivers: unknown[] = [];
-const mockLinking: { openURL?: jest.Mock } = {};
-mockLinking.openURL = jest.fn(function (this: unknown) {
-  linkingReceivers.push(this);
-  if (this !== mockLinking) {
-    throw new TypeError('undefined is not a function');
-  }
-  return Promise.resolve();
-});
-const mockAlert = jest.fn();
-
-jest.mock('react-native', () => ({
-  Alert: { alert: mockAlert },
-  Linking: mockLinking,
-  StyleSheet: { create: (styles: Record<string, unknown>) => styles },
-}));
-
-jest.mock('@src/components/SecondaryButton', () => {
-  const ReactLib = require('react');
-  return {
-    SecondaryButton: (props: Record<string, unknown>) =>
-      ReactLib.createElement('SecondaryButton', props),
-  };
-});
-
-const mockCreateWebHandoff = jest.fn();
-jest.mock('@src/services/api/auth', () => ({
-  createWebHandoff: mockCreateWebHandoff,
-}));
-
-jest.mock('@src/utils/logger', () => ({
-  logger: { error: jest.fn() },
-}));
-
 const TestRenderer = require('react-test-renderer');
 const { WebEditorButton } = require('@src/components/WebEditorButton.ios');
+const { WebEditorButton: AndroidWebEditorButton } = require('@src/components/WebEditorButton.tsx');
 
 describe('WebEditorButton iOS browser boundary', () => {
-  beforeEach(() => {
-    jest.clearAllMocks();
-    linkingReceivers.length = 0;
-  });
-
-  it.each(['schedule', 'services', 'settings'] as const)(
-    'opens the authenticated %s destination with the native Linking receiver intact',
-    async (destination) => {
-      const url = `https://dedato.ru/auth/mobile-handoff?code=opaque-${destination}`;
-      mockCreateWebHandoff.mockResolvedValue({ code: 'opaque', url, expires_in: 60 });
-      let tree: any;
+  it('renders nothing for schedule, services and settings destinations', () => {
+    for (const destination of ['schedule', 'services', 'settings'] as const) {
+      let tree: { toJSON: () => unknown };
       TestRenderer.act(() => {
         tree = TestRenderer.create(
           React.createElement(WebEditorButton, {
@@ -60,57 +19,32 @@ describe('WebEditorButton iOS browser boundary', () => {
           })
         );
       });
-
-      await TestRenderer.act(async () => {
-        const button = tree.root
-          .findAllByProps({ testID: `ios-web-editor-${destination}` })
-          .find((node: any) => typeof node.props.onPress === 'function');
-        await button.props.onPress();
-      });
-
-      expect(mockCreateWebHandoff).toHaveBeenCalledTimes(1);
-      expect(mockCreateWebHandoff).toHaveBeenCalledWith('ios_app', destination);
-      expect(mockLinking.openURL).toHaveBeenCalledTimes(1);
-      expect(mockLinking.openURL).toHaveBeenCalledWith(url);
-      expect(linkingReceivers).toEqual([mockLinking]);
-      expect(mockAlert).not.toHaveBeenCalled();
+      expect(tree!.toJSON()).toBeNull();
     }
-  );
+  });
 
-  it('keeps one button contract while avoiding a double inset in padded parents', () => {
-    let scheduleTree: any;
-    let servicesTree: any;
+  it('does not import Linking, handoff helpers or browser CTA copy', () => {
+    const { readFileSync } = require('node:fs');
+    const { join } = require('node:path');
+    const source = readFileSync(join(__dirname, '../../../src/components/WebEditorButton.ios.tsx'), 'utf8');
+    expect(source).toContain('return null');
+    expect(source).not.toContain('Linking');
+    expect(source).not.toContain('openWebHandoff');
+    expect(source).not.toContain('createWebHandoff');
+    expect(source).not.toContain('в браузере');
+  });
+
+  it('keeps the Android WebEditorButton implementation as a no-op', () => {
+    let tree: { toJSON: () => unknown };
     TestRenderer.act(() => {
-      scheduleTree = TestRenderer.create(
-        React.createElement(WebEditorButton, {
+      tree = TestRenderer.create(
+        React.createElement(AndroidWebEditorButton, {
           destination: 'schedule',
           title: 'Редактировать расписание в браузере',
-          testID: 'schedule-button',
-        })
-      );
-      servicesTree = TestRenderer.create(
-        React.createElement(WebEditorButton, {
-          destination: 'services',
-          title: 'Редактировать услуги в браузере',
-          testID: 'services-button',
-          parentHasPagePadding: true,
+          testID: 'android-web-editor-schedule',
         })
       );
     });
-
-    const scheduleButton = scheduleTree.root
-      .findAllByProps({ testID: 'schedule-button' })
-      .find((node: any) => typeof node.props.onPress === 'function');
-    const servicesButton = servicesTree.root
-      .findAllByProps({ testID: 'services-button' })
-      .find((node: any) => typeof node.props.onPress === 'function');
-    expect(scheduleButton.props.style).toEqual({
-      marginHorizontal: 16,
-      marginBottom: 12,
-    });
-    expect(servicesButton.props.style).toEqual({
-      marginHorizontal: 0,
-      marginBottom: 12,
-    });
+    expect(tree!.toJSON()).toBeNull();
   });
 });

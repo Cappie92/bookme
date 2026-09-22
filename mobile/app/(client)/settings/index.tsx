@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, ActivityIndicator, Alert, TouchableOpacity, Modal, TextInput, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, ActivityIndicator, Alert, TouchableOpacity, Modal, TextInput, ScrollView, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Constants from 'expo-constants';
 import { useAuth } from '@src/auth/AuthContext';
@@ -393,7 +393,11 @@ export default function SettingsScreen() {
         />
         <SettingsRow
           label="О приложении"
-          description="DeDato Mobile - управление бронированиями и подписками"
+          description={
+            Platform.OS === 'ios'
+              ? 'DeDato Mobile - управление бронированиями'
+              : 'DeDato Mobile - управление бронированиями и подписками'
+          }
           onPress={() => Alert.alert('О приложении', 'DeDato Mobile\nВерсия: ' + getAppVersion())}
         />
       </SettingsSection>

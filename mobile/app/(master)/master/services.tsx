@@ -39,7 +39,6 @@ import { PlatformFeatureLock } from '@src/components/PlatformFeatureLock';
 import { CategoryAccordion } from '@src/components/services/CategoryAccordion';
 import { ServiceRow } from '@src/components/services/ServiceRow';
 import { EntityActionSheet } from '@src/components/services/EntityActionSheet';
-import { WebEditorButton } from '@src/components/WebEditorButton';
 const PLACEHOLDER_COLOR = '#999';
 const INPUT_TEXT_COLOR = '#333';
 const WINDOW_HEIGHT = Dimensions.get('window').height;
@@ -555,12 +554,6 @@ export default function MasterServicesScreen() {
 
   return (
     <ScreenContainer scrollable>
-      <WebEditorButton
-        destination="services"
-        title="Редактировать услуги в браузере"
-        testID="ios-web-editor-services"
-        parentHasPagePadding
-      />
       <View style={styles.header}>
         <Text style={styles.title}>Мои услуги</Text>
         <View style={styles.actions}>

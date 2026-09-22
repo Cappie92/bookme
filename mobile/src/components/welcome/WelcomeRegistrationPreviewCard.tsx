@@ -7,9 +7,13 @@ import { WelcomeSlideIllustration } from './WelcomeSlideIllustration';
 
 type WelcomeRegistrationPreviewCardProps = {
   slide: WelcomeSlide;
+  hideRevenueKpi?: boolean;
 };
 
-export function WelcomeRegistrationPreviewCard({ slide }: WelcomeRegistrationPreviewCardProps) {
+export function WelcomeRegistrationPreviewCard({
+  slide,
+  hideRevenueKpi = false,
+}: WelcomeRegistrationPreviewCardProps) {
   const isMaster = slide.role === 'master';
   const route = slide.ctaRoute ?? (isMaster ? '/login?tab=register&role=master' : '/login?tab=register&role=client');
   const ctaLabel = slide.ctaLabel ?? (isMaster ? 'Создать аккаунт мастера' : 'Создать аккаунт клиента');
@@ -35,7 +39,7 @@ export function WelcomeRegistrationPreviewCard({ slide }: WelcomeRegistrationPre
           Нажмите кнопку ниже, чтобы перейти к регистрации.
         </Text>
         <View style={styles.illustrationWrap}>
-          <WelcomeSlideIllustration type={slide.illustration} large />
+          <WelcomeSlideIllustration type={slide.illustration} large hideRevenueKpi={hideRevenueKpi} />
         </View>
         <PrimaryButton
           title={ctaLabel}

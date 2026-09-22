@@ -1,5 +1,5 @@
 /**
- * Product model for the 1.0.1 iOS release line.
+ * Product model for the current iOS free-companion line.
  *
  * This is intentionally source-controlled and cannot be changed by remote config,
  * build secrets, the backend, or reviewer-specific behavior.

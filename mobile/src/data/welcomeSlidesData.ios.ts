@@ -49,11 +49,11 @@ const MASTER_SLIDES: Omit<WelcomeSlide, 'role'>[] = [
   },
   {
     id: 'master-dashboard',
-    title: 'Записи и показатели',
-    description: 'Просматривайте, подтверждайте и переносите записи, следите за недельной динамикой.',
+    title: 'Записи и рабочий день',
+    description: 'Просматривайте, подтверждайте и переносите записи прямо в приложении.',
     badge: 'Дашборд',
-    icon: 'stats-chart-outline',
-    illustration: 'analytics',
+    icon: 'calendar-outline',
+    illustration: 'master-dashboard',
     type: 'feature',
   },
   {

@@ -14,7 +14,7 @@ export function WelcomeFeatureCard({ slide }: { slide: WelcomeSlide }) {
         </View>
         <Text style={styles.title}>{slide.title}</Text>
         <Text style={styles.description} numberOfLines={3}>{slide.description}</Text>
-        <View style={styles.illustrationWrap}><WelcomeSlideIllustration type={slide.illustration} large /></View>
+        <View style={styles.illustrationWrap}><WelcomeSlideIllustration type={slide.illustration} large hideRevenueKpi /></View>
       </View>
     </Card>
   );
