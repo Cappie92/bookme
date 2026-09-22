@@ -4,7 +4,7 @@ project: DeDato
 knowledge_class: living
 environment: common
 status: active
-last_verified: 2026-09-13
+last_verified: 2026-09-22
 ---
 
 # Backend architecture
@@ -77,11 +77,11 @@ Router-level dependencies используются не везде; часть h
 
 ## Startup and shutdown
 
-Startup логирует optional route/config diagnostics и создаёт пять process-local asyncio tasks. Shutdown отменяет и awaits каждую сохранённую task. Их cadence, failure isolation и multi-process semantics находятся в [Background jobs](background-jobs.md).
+Startup логирует optional route/config diagnostics и создаёт шесть process-local asyncio tasks. Shutdown отменяет и awaits каждую сохранённую task. Их cadence, failure isolation и multi-process semantics находятся в [Background jobs](background-jobs.md).
 
 `/health` возвращает статический process response и не проверяет database, migration revision, external providers или task liveness.
 
-**Sources:** `backend/main.py`; `backend/route_diagnostics.py`; five job modules.
+**Sources:** `backend/main.py`; `backend/route_diagnostics.py`; six job modules.
 
 ## HTTP and static boundaries
 

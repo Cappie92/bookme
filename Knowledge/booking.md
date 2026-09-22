@@ -4,7 +4,7 @@ project: DeDato
 knowledge_class: living
 environment: common
 status: active
-last_verified: 2026-09-13
+last_verified: 2026-09-22
 ---
 
 # Booking
@@ -77,6 +77,19 @@ Runtime использует общий `cancelled` и две client cancellatio
 ### Reschedule
 
 В репозитории сосуществуют direct `BookingUpdate` и `BookingEditRequest`. Direct update и edit-request acceptance меняют `start_time`/`end_time`; enforcement и conflict semantics различаются по router family. Единого runtime state machine или единого reschedule service нет.
+
+Current client reschedule path (web + mobile) is **closed / smoke PASS**:
+
+- selected date normalized to `YYYY-MM-DD`; no UTC `toISOString` date shift;
+- initial slots load immediately;
+- weekend hard-ban removed;
+- display `DD.MM.YY`;
+- backend date query is strict `YYYY-MM-DD`; invalid datetime → 4xx, not 500;
+- current booking is excluded from GET collision checks;
+- client PUT uses the common overlap conflict checker;
+- adjacent half-open slot is allowed.
+
+Do not describe web/mobile reschedule as currently broken.
 
 **Source:** `backend/routers/accounting.py` — `update_booking_status`, `confirm_booking`, `confirm_all_bookings`, cancellation endpoints, `auto_confirm_awaiting_on_manual_switch`; `backend/routers/master.py` — settings update and `get_past_appointments`; `backend/routers/client.py`; `backend/routers/bookings.py`; `backend/utils/booking_loyalty_reserve.py`.
 

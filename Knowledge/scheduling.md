@@ -4,7 +4,7 @@ project: DeDato
 knowledge_class: living
 environment: common
 status: active
-last_verified: 2026-09-13
+last_verified: 2026-09-22
 ---
 
 # Scheduling and availability
@@ -30,7 +30,7 @@ Current HTTP surface: weekly, monthly, day, rules, create/update/bulk. Legacy `G
 
 ## 2. Slot generation
 
-`get_available_slots` принимает owner, date, service duration и optional branch. Candidate starts выравниваются на `:00`/`:30` и идут с шагом 30 минут. Конец услуги должен помещаться в availability window.
+`get_available_slots` принимает owner, date, service duration и optional branch. Candidate starts выравниваются на `:00`/`:30` и идут с шагом 30 минут. Конец услуги должен помещаться в availability window. Date argument for HTTP availability/reschedule is strict `YYYY-MM-DD`. Adjacent half-open occupancy is allowed; current booking is excluded from GET collision checks on reschedule. Weekend is not a hard-ban at this layer.
 
 Для date-specific master schedule service duration округляется вверх до числа последовательных 30-minute rows, после чего из найденного окна снова генерируются starts с реальной duration. Несмежные rows не образуют общее окно.
 

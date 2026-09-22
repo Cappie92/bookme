@@ -4,7 +4,7 @@ project: DeDato
 knowledge_class: living
 environment: common
 status: active
-last_verified: 2026-09-13
+last_verified: 2026-09-22
 ---
 
 # DeDato — роли и бизнес-модель
@@ -310,7 +310,7 @@ Source: `subscriptions-billing.md`.
 | Indie master | **Legacy compatibility**, выключен default-настройкой |
 | Reviews | **Флаг без доменной модели Review** |
 | Произвольный deposit balance API | **Отключён** (410) |
-| Direct StoreKit / Apple IAP | **Реализовано для iOS-подписок мастера** |
+| Direct StoreKit / Apple IAP | **Реализовано в коде** для iOS-подписок мастера; **не** текущее planned solution для App Review 3.1.1 |
 | Оплата услуги клиентом через Robokassa end-to-end как основной путь | **UNKNOWN / не канонизировать** без отдельного Domain — поля на Booking есть |
 
 ### Mobile Yandex Auth configuration (не бизнес-инвариант)
@@ -318,6 +318,12 @@ Source: `subscriptions-billing.md`.
 Tracked mobile preview/production EAS profiles устанавливают `YANDEX_MOBILE_AUTH_VISIBLE=0`, поэтому соответствующая кнопка скрыта в этих repository-defined build profiles. Это build configuration, а не бизнес-правило о допустимых способах входа. Фактическая конфигурация опубликованного store build — `UNKNOWN` без внешней проверки.
 
 Source: `mobile/eas.json` — `YANDEX_MOBILE_AUTH_VISIBLE`.
+
+---
+
+## Текущий App Review constraint
+
+Следующий major product track — iOS App Review Guideline 3.1.1. IAP / RevenueCat **не** являются planned solution. Канон: true free companion — внешне оплаченная подписка не должна открывать дополнительные digital capabilities внутри iOS app относительно Free. StoreKit path в репозитории остаётся historical/code fact, не current release plan. Audit list: [Feature entitlements](feature-entitlements.md#9-ios-app-review-isolation).
 
 ---
 

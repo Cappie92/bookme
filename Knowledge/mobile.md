@@ -4,14 +4,14 @@ project: DeDato
 knowledge_class: living
 environment: common
 status: active
-last_verified: 2026-09-13
+last_verified: 2026-09-22
 ---
 
 # Mobile architecture
 
 Живой канон repository-known Expo/React Native client и его связь с trusted iOS web companion.
 
-Tracked application versions in `mobile/app.config.ts`: **iOS 1.0.1 (build 8)** и **Android 1.0.1 (versionCode 2)**. Это current product versions, не snapshots build 6/7. App Store Connect / TestFlight / App Review status — `REPORTED` operational fact в [Production topology](production-topology.md).
+Marketing version **1.1.0**. Tracked native versions in `mobile/app.config.ts`: **iOS 1.1.0 (12)** и **Android 1.1.0 (6)**. Это current smoke-passed product builds, не исторические 10/11 или 4/5. App Store Connect listing / review status — отдельный `REPORTED` operational fact в [Production topology](production-topology.md); текущий major track — iOS App Review Guideline 3.1.1.
 
 ## Runtime and route composition
 
@@ -95,16 +95,28 @@ Metro aliases selected repository `shared/` modules for semantic colors, feature
 
 **Sources:** `mobile/babel.config.js`; `mobile/tsconfig.json`; imports from `shared` under `mobile/src`; `shared/`.
 
-## Analytics, notifications and incomplete surfaces
+## Analytics, notifications and diagnostics
 
 App analytics initializes independently of route bootstrap failure and records acquisition/payment/domain events. Development flags can expose auth traces, full effective API URLs and buffered response previews in a copyable debug panel. Sensitive-data/logging remediation is tracked in [Security and privacy Debt](security-and-privacy.md) and [Client platforms Debt](client-platforms.md).
 
 ### OS push notifications
 
-Настоящие OS push notifications **не реализованы** ни на iOS, ни на Android. Repository не содержит `expo-notifications`, Firebase Messaging/FCM, APNs integration, Expo/device push token registration, backend device-token API/sender, iOS `aps-environment` или Android `POST_NOTIFICATIONS` permission/listener flow.
+Push v1 **operational**. Smoke PASS на iOS и Android: permission lifecycle, system presentation, in-app Notification Center, create/reschedule/cancel fan-out. Это не unimplemented feature и не current blocker.
 
-Existing Notifications UI (`NotificationsSheet`, cards, filters, grouping, unread/viewed, types created/updated/cancelled) — заготовка. `useMasterNotifications()` использует DEV mock только при специальном flag, иначе production source = `[]`. Это не непройденный smoke текущего iOS build: функция пока отсутствует.
+Backend source of truth события — `Notification`; доставка — `PushDevice` + `NotificationOutbox` + in-process Expo sender, receipt polling и dead-token handling. Booking event types: `booking_created`, `booking_rescheduled`, `booking_cancelled`. Sender rollout остаётся controlled: production `PUSH_REGISTRATION_ENABLED=true`, `PUSH_NOTIFICATIONS_ENABLED=true`, allowlist `user_id 11`. Global sender rollout не канонизировать без отдельного runtime evidence.
 
-Push Notifications v1 — отдельный будущий track после текущего release, не текущая архитектура. Предпочтительное направление, если его проектировать: persistent in-app Notification entity как source of truth события, push — канал доставки.
+Android fresh-install: Expo `denied` + `canAskAgain=true` трактуется как askable first-run, не как terminal denial. Path: education → system permission → granted → channel → Expo token → PUT device registration. Manual Settings grant: `AppState` active re-checks permission and restores registration. Android notification handler **не** подавляет banner/list/sound. iOS handler behavior остаётся намеренно неизменным.
 
-**Sources:** `mobile/src/services/analytics/`; `mobile/src/debug/`; `mobile/src/services/api/client.ts`; `mobile/src/hooks/useMasterNotifications.ts`; `mobile/src/components/master/notifications/notificationsMock.ts`; repository search for push/FCM/APNs packages and permissions.
+Notification Center refetch на open/focus и релевантный `AppState` active; manual pull-to-refresh остаётся, но не является единственным способом увидеть новые события.
+
+Stale-token behavior: старый Android token может быть помечен `dead_token` через Expo receipt; новая installation остаётся active. Исторический token id=2 не описывать как current device.
+
+`Notification` schema не хранит `actor_user_id`. Commit `3639e74` добавляет structured actor logging без migration; этот backend change есть в `main` и в mobile 12/6, но **ещё не** в production backend image `96f3f27`. Историческая неоднозначность `booking_cancelled` (notification id=9 / booking 1069) — не active release blocker.
+
+**Sources:** `mobile/src/notifications/`; `mobile/src/hooks/useMasterNotifications.ts`; `backend/models.py` — `Notification`, `PushDevice`, `NotificationOutbox`; `backend/services/push_worker.py`; `backend/services/notification_events.py`; [Configuration](configuration.md); [Production topology](production-topology.md).
+
+### Android launcher icon
+
+Canonical visual source: `mobile/assets/icon.png`. Adaptive foreground раньше занимал ~60% canvas и после Android inner viewport (~2/3) выглядел ~90%. Current target: adaptive foreground ≈ footprint `icon.png` × 2/3 ≈ 40% full foreground canvas. Android build 6 smoke PASS. Иконка не является active blocker.
+
+**Sources:** `mobile/assets/icon.png`; `mobile/assets/adaptive-icon.png`; `mobile/scripts/generate_app_icons.py`.

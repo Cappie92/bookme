@@ -4,7 +4,7 @@ project: DeDato
 knowledge_class: living
 environment: common
 status: active
-last_verified: 2026-09-13
+last_verified: 2026-09-22
 ---
 
 # Data and migrations
@@ -54,7 +54,7 @@ Alembic environment:
 - использует `NullPool` для online migration connection;
 - поддерживает online и offline migration modes.
 
-На дату repository-проверки 2026-09-13 Alembic graph имеет один repository head: `20260830_free_booking_limit` (revises `20260812_session_version`). Это `CONFIRMED` для текущего checkout. Host DB revision остаётся отдельным фактом: authorized production check 2026-09-13 reports the same revision — `REPORTED` in [Production topology](production-topology.md). Hardening after that revision did not require additional migrations.
+На дату repository-проверки 2026-09-22 Alembic graph имеет один repository head: `20260914_push_notifications_v1` (revises `20260830_free_booking_limit`). Это `CONFIRMED` для текущего checkout. Latest production deploy `96f3f27` не требовал migration delta относительно предыдущего backend `1579f36`: push v1 schema already present. Host DB revision остаётся отдельным фактом и принадлежит [Production topology](production-topology.md).
 
 В репозитории присутствуют два Alembic ini entry points с различными fallback SQLite paths: root `alembic.ini` и `backend/alembic.ini`. Production migration helper выполняется внутри backend container, где рабочий каталог и скопированный backend config связывают его с container environment. Во всех случаях заданный `DATABASE_URL` имеет приоритет в `backend/alembic/env.py`.
 
@@ -145,7 +145,7 @@ Backend `/health` не обращается к database и поэтому не �
 |---------|------------------|--------------|
 | Production DB identity | SQLite URL `/data/bookme.db`, volume `dedato_data` | Фактический container environment, mount и file identity |
 | ORM schema | Metadata, импортируемая из repository models | Соответствие physical schema текущим models |
-| Alembic graph | Один repository head `20260812_session_version` и исторические branches | Current production host DB revision и migration history |
+| Alembic graph | Один repository head `20260914_push_notifications_v1` и исторические branches | Current production host DB revision и migration history |
 | Schema ownership | `create_all()` и Alembic оба исполняемы; current create-all → head path regression-tested | Происходили ли иные конфликты или ручные schema changes |
 | Ordering | Workflow запускает services до Alembic | Фактический активный deploy path и время доступности трафика |
 | SQLite behavior | `check_same_thread=False`; один file path | Journal mode, timeout, active locks и integrity |
@@ -164,7 +164,9 @@ Backend `/health` не обращается к database и поэтому не �
 - `backend/alembic/versions/838e2b24a042_add_pending_contact_verification.py` — guarded contact-verification additions.
 - `backend/alembic/versions/20260721_account_deletion_fields.py` — guarded account-deletion additions.
 - `backend/alembic/versions/20260809_apple_iap_subscription_fields.py` — guarded Apple IAP additions.
-- `backend/alembic/versions/20260812_user_session_version.py` — current repository head and guarded session-version addition.
+- `backend/alembic/versions/20260812_user_session_version.py` — guarded session-version addition.
+- `backend/alembic/versions/20260830_free_active_booking_limit_20.py` — Free-20 limit revision.
+- `backend/alembic/versions/20260914_push_notifications_v1.py` — current repository head: `notifications`, `push_devices`, `notification_outbox`.
 - `backend/tests/test_alembic_create_all_then_upgrade.py` — supported compatibility path regression.
 - `scripts/prod/migrate.sh` — Alembic execution inside running backend container.
 - `.github/workflows/deploy.yml` — repository-confirmed start-before-migrate ordering.

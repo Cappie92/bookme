@@ -4,7 +4,7 @@ project: DeDato
 knowledge_class: living
 environment: common
 status: active
-last_verified: 2026-09-13
+last_verified: 2026-09-22
 ---
 
 # Debt — client platforms
@@ -68,13 +68,13 @@ last_verified: 2026-09-13
 - **Sources:** `mobile/src/services/analytics/pendingSubscriptionPayment.ts`; `mobile/src/services/analytics/verifyPendingSubscriptionPayment.ts`.
 - **Required action:** financial/reconciliation analytics requiring delivery guarantees must originate from a durable backend path.
 
-## Notification UI is a stub, not OS push
+## Closed: Notification UI stub / missing OS push
 
-- **Confidence:** CONFIRMED.
-- **Evidence:** `useMasterNotifications()` uses a DEV mock only under an explicit flag; otherwise production source is `[]`. Repository has no Expo/FCM/APNs push transport, device-token model or backend sender. Existing NotificationsSheet UI is a prototype.
-- **Failure scenario:** missing push during iOS smoke may be misread as a failed build rather than an unimplemented feature.
-- **Sources:** `mobile/src/hooks/useMasterNotifications.ts`; `mobile/src/components/master/notifications/`; [Mobile architecture](mobile.md).
-- **Required action:** design Push Notifications v1 as a separate post-release track; do not treat push as current product capability.
+- **Status:** closed / superseded by current architecture.
+- **Historical residual:** `useMasterNotifications()` previously used a DEV mock or empty production source; OS push was unimplemented.
+- **Current living contract:** Push v1 is operational. In-app Notification Center is API-backed. Smoke PASS on iOS and Android. See [Mobile architecture](mobile.md).
+- **Residual (not a release blocker):** `Notification` schema does not persist `actor_user_id`; structured actor logging exists on `main` (`3639e74`) and is not yet in production backend `96f3f27`.
+- **Required action:** do not treat missing OS push as current product gap. Next iOS work is App Review 3.1.1, not Push v1 design.
 
 ## Settings save success-message unmount
 

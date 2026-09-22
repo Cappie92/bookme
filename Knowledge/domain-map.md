@@ -4,7 +4,7 @@ project: DeDato
 knowledge_class: living
 environment: common
 status: active
-last_verified: 2026-09-13
+last_verified: 2026-09-22
 ---
 
 # DeDato — карта доменов
@@ -312,25 +312,25 @@ Operational income/expense views и derived totals для кабинета ма�
 ## Notifications
 
 ### Назначение
-Сопровождение записи и аккаунта каналами связи (in-app / email / SMS — по фактическим сценариям).
+Сопровождение записи каналами связи: in-app Notification Center и OS push (Expo → APNs/FCM), плюс разрозненные email/SMS сценарии.
 
 ### Владелец данных
-**INFERRED / частичный:** нет единого агрегата «Notification» как ядра домена. Есть preferences клиента и разрозненные отправки.
+**CONFIRMED** для Push v1: `Notification` — source of truth in-app события; `PushDevice` — device token; `NotificationOutbox` — delivery work. Client notification preferences остаются отдельным store.
 
 ### Основные сущности
-Предпочтения уведомлений клиента (хранилище preferences); триггеры из Booking/Identity — CONFIRMED existence каналов, **не** единая модель Notification.
+`Notification`, `PushDevice`, `NotificationOutbox`; booking types `booking_created` / `booking_rescheduled` / `booking_cancelled`. Schema не хранит `actor_user_id`.
 
 ### Основные процессы
-Endpoint/service-specific отправка или показ сообщений в поддерживаемых сценариях; хранение preferences. Единого notification event consumer не подтверждено.
+Booking mutation создаёт Notification + outbox rows; in-process push worker отправляет Expo messages, polls receipts и помечает dead tokens. Production sender — controlled allowlist, не global rollout.
 
 ### Что получает извне
-Прямые вызовы и контекст Booking/Identity; иногда Profiles. Наличие business fact не означает опубликованное domain event.
+Booking/Identity context и registered device tokens.
 
 ### Что публикует наружу
-Доставку сообщений пользователю (побочный эффект, не бизнес-факт записи).
+In-app list и OS push delivery (побочный эффект, не бизнес-факт записи).
 
 ### Границы
-Не источник истины по статусу брони или платежа. OS push (APNs/FCM/Expo) **не реализован**; mobile Notifications UI — заготовка с пустым production source. Канон: [Mobile architecture](mobile.md).
+Не источник истины по статусу брони или платежа. OS push **operational** (smoke PASS). Канон: [Mobile architecture](mobile.md); rollout: [Production topology](production-topology.md).
 
 ---
 

@@ -4,16 +4,16 @@ project: DeDato
 knowledge_class: living
 environment: common
 status: active
-last_verified: 2026-08-04
+last_verified: 2026-09-22
 ---
 
 # Background jobs
 
-Канон пяти repository-known long-running jobs created by the FastAPI process. There is no separate scheduler service, queue worker or leader election in tracked production Compose.
+Канон шести repository-known long-running jobs created by the FastAPI process. There is no separate scheduler service, queue worker or leader election in tracked production Compose.
 
 ## 1. Lifecycle
 
-FastAPI startup creates five `asyncio` tasks and stores handles on `app.state`. Shutdown cancels and awaits each task, swallowing only expected `CancelledError`. Each service owns an infinite loop and catches ordinary exceptions before sleeping/retrying.
+FastAPI startup creates six `asyncio` tasks and stores handles on `app.state`. Shutdown cancels and awaits each task, swallowing only expected `CancelledError`. Each service owns an infinite loop and catches ordinary exceptions before sleeping/retrying.
 
 The production backend command has no explicit multi-worker option and Compose declares one backend service instance. This is repository-known single-process intent, not proof of host state. Every additional process/replica would run another full set of jobs.
 
@@ -28,10 +28,11 @@ The production backend command has no explicit multi-worker option and Compose d
 | bookings limit monitor | sleep first | next process-local 00:00 daily | read Free-plan subscriptions/bookings and log at/over-limit details; no enforcement mutation |
 | temporary booking cleanup | immediately scan | every 300 seconds | change expired pending `TemporaryBooking` rows to `expired` |
 | pending payment cleanup | immediately scan | every 300 seconds | expire stale pending subscription `Payment` rows and release their balance soft-hold |
+| push worker | immediately scan | every 20 seconds | claim `NotificationOutbox`, send Expo messages, poll receipts, mark dead tokens |
 
 The three calendar jobs use naive `datetime.now()` / `date.today()`, so their schedule follows process/container local time. The two TTL cleanup functions compare UTC-naive timestamps. Exact production timezone is UNKNOWN from repository topology.
 
-**Source:** the five modules under `backend/services/`; `backend/settings.py` — timezone/config category.
+**Source:** the six modules under `backend/services/`; `backend/settings.py` — timezone/config category.
 
 ## 3. Daily subscription charges
 
@@ -66,6 +67,12 @@ Temporary-booking cleanup changes only pending rows whose `expires_at` is before
 Payment cleanup has targeted tests. No dedicated repository tests were found for the temporary-booking task loop/cleanup function.
 
 **Source:** `backend/services/temporary_bookings_cleanup.py`; `backend/services/expired_payments_cleanup.py`; `backend/tests/test_expired_payments_cleanup.py`.
+
+## 6.1 Push worker
+
+The sixth startup task claims queued `NotificationOutbox` rows, filters by `PUSH_NOTIFICATIONS_ENABLED` and user allowlist, sends Expo messages, polls receipts and can mark devices `dead_token`. Cadence is 20 seconds. Production rollout remains allowlisted; architecture: [Mobile architecture](mobile.md).
+
+**Source:** `backend/services/push_worker.py`; `backend/services/push_outbox.py`; `backend/main.py`.
 
 ## 7. Execution and transaction model
 

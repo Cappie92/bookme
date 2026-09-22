@@ -4,7 +4,7 @@ project: DeDato
 knowledge_class: living
 environment: common
 status: active
-last_verified: 2026-09-13
+last_verified: 2026-09-22
 ---
 
 # Contract: Feature entitlements
@@ -113,3 +113,23 @@ Disabling/deleting a `ServiceFunction` row without removing its already assigned
 - Plan `is_active` controls catalog visibility but effective entitlement helper loads the linked plan without checking `plan.is_active`; disabling a plan does not revoke existing subscriptions by itself.
 - UNKNOWN: external consumers and intended commercial policy for currently unguarded surfaces.
 - UNKNOWN: production plan/service-function data and whether static IDs have drifted; repository migrations/tests establish expected mapping only.
+
+## 9. iOS App Review isolation
+
+Current major release track: **Guideline 3.1.1**. IAP is **not** currently an option and must not be revived as the planned review solution. Strategy: true free companion.
+
+An externally paid subscription must **not** unlock additional digital capabilities inside the iOS app compared with Free.
+
+Next READ-ONLY audit must verify:
+
+1. iOS Welcome / pre-auth
+2. paid / tariff / premium messaging
+3. finance / CRM / loyalty / customization / domains / unlimited features
+4. subscription / payment references
+5. web handoff wording
+6. legal / help wording visible in iOS
+7. backend / mobile paid-vs-free capability isolation
+8. Review Notes
+9. App Store metadata / screenshots if relevant
+
+Previous Apple rejection topics included Guideline 3.1.1. This is the next gate, not a completed audit. Living operational pointer: [Production topology](production-topology.md). Trusted iOS companion surface: [Web architecture](web.md).

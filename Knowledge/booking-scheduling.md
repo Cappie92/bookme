@@ -4,7 +4,7 @@ project: DeDato
 knowledge_class: living
 environment: common
 status: active
-last_verified: 2026-09-13
+last_verified: 2026-09-22
 ---
 
 # Debt — booking and scheduling
@@ -24,6 +24,14 @@ last_verified: 2026-09-13
 - **Required action:** none for current policy; do not re-describe the retired unauthenticated mutation surface as open debt.
 
 Эксплуатационные шаги и углублённый exploitability analysis намеренно не входят в Knowledge.
+
+## Closed: reschedule date-shift / weekend hard-ban
+
+- **Status:** closed / remediated.
+- **Historical residual:** web/mobile reschedule could shift the calendar day via UTC `toISOString`, delay initial slot load and hard-ban weekends; backend date query and overlap checks could 500 or collide with the current booking.
+- **Resolution:** date-only `YYYY-MM-DD` clients, display `DD.MM.YY`, strict date query, 4xx on invalid datetime, current booking excluded from GET collisions, common overlap checker on client PUT, adjacent half-open allowed. Production smoke PASS.
+- **Living current contract:** [Booking](booking.md#reschedule).
+- **Required action:** none; do not describe web/mobile reschedule as currently broken.
 
 ## Divergent create semantics
 

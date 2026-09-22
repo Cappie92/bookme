@@ -4,14 +4,14 @@ project: DeDato
 knowledge_class: living
 environment: prod
 status: active
-last_verified: 2026-09-13
+last_verified: 2026-09-22
 ---
 
 # Production topology
 
 ## Scope
 
-Документ владеет repository-known описанием production-топологии DeDato и текущим operational release state. Compose/network/volume facts без host access остаются repository-CONFIRMED. Отдельная разрешённая проверка 2026-09-13 зафиксировала current production pointers ниже как `REPORTED`; это living current state, не snapshots build 6/7 или промежуточных revisions.
+Документ владеет repository-known описанием production-топологии DeDato и текущим operational release state. Compose/network/volume facts без host access остаются repository-CONFIRMED. Отдельная разрешённая проверка 2026-09-22 зафиксировала current production pointers ниже как `REPORTED`; это living current state, не snapshots build 10/11 или промежуточных revisions.
 
 Deploy procedure принадлежит [CI/CD](ci-cd.md) и [Deployment artifact inventory](deployment-artifact-inventory.md). Секреты и container IDs в Knowledge не хранятся.
 
@@ -26,24 +26,51 @@ Deploy procedure принадлежит [CI/CD](ci-cd.md) и [Deployment artifac
 
 ## Current production release state
 
-Это единственная current release truth. Не хранить параллельные snapshots build 6/7/8 или старых production revisions.
+Это единственная current release truth. Не хранить параллельные snapshots build 10/11/12 или старых production revisions.
 
 | Pointer | Current value | Confidence |
 |---------|---------------|------------|
-| Git `main` | `61ba4d492b48637f5e20bd8bb30253d700389a19` | CONFIRMED repository; `61ba4d4` меняет только iOS build number 7 → 8 |
-| Runtime-functional commit deployed to production | `7c320bd0d4561cace41ef0c84bff4f6950767a7d` | REPORTED authorized host/cutover check 2026-09-13 |
-| iOS | 1.0.1 (8) | CONFIRMED `mobile/app.config.ts`; EAS build, App Store Connect upload, device smoke and re-review submission — REPORTED |
-| Android | 1.0.1 (2) | CONFIRMED `mobile/app.config.ts` |
+| Public site | `https://dedato.ru` | REPORTED |
+| Production server | `193.160.208.206` | REPORTED |
+| Canonical git `main` / `origin/main` | `93bf2ae` | CONFIRMED repository; `chore: bump mobile builds to 12 and 6` |
+| Production backend image | `dedato_backend:96f3f27` | REPORTED authorized deploy 2026-09-22 |
+| Production frontend image | `dedato_frontend:96f3f27-prod` | REPORTED authorized deploy 2026-09-22 |
+| Clean release worktree used for latest deploy | `/opt/dedato-release-96f3f27` | REPORTED |
+| iOS smoke-passed | 1.1.0 (12) | CONFIRMED `mobile/app.config.ts` |
+| Android smoke-passed | 1.1.0 (6) | CONFIRMED `mobile/app.config.ts` |
 | Production HTTP | `/` → 200; `/api/health` → 200 | REPORTED |
-| SQLite | `integrity_check = ok` | REPORTED |
-| Alembic on production DB | `20260830_free_booking_limit` | REPORTED host; CONFIRMED as repository head |
+| SQLite | pre-deploy backup `integrity_check = ok` | REPORTED |
+| Alembic on production DB | push v1 schema already present; no delta `1579f36` → `96f3f27` | REPORTED |
 | Redis | unchanged by the cutover | REPORTED |
 | `DEMO_MASTER_USER_ID` | configured | REPORTED; category only, value never stored here |
-| Hardening migrations after the Free-20 revision | not required | REPORTED |
+| Push sender | registration+notifications enabled; allowlist `user_id 11` | REPORTED; not global rollout |
 
-iOS 1.0.1 (8) is the current App Store companion cut: previously reproduced TestFlight issues were confirmed fixed on a real iPhone before re-review. That is current release state, not a historical build ledger.
+Marketing version **1.1.0**. Production images are built from `96f3f27`. Do **not** state that production backend/frontend are at `93bf2ae`.
+
+Backend delta after the production release includes `backend/services/notification_events.py` from `3639e74`: structured `actor_user_id` logging for booking notification events. Observability-only; no schema migration. **Not yet deployed** to production. Mobile builds 12 / 6 **do** include the Android push lifecycle fix from `3639e74`.
+
+`/opt/dedato` git worktree is dirty/legacy and **must not** be used as a clean release checkout.
+
+Verified pre-deploy SQLite backup: `/opt/dedato/backups/bookme-pre-96f3f27-20260922_130851.db` (`integrity_check: ok`). Latest rollback containers were retained:
+
+- `dedato_backend_1_rollback_20260922_132751`
+- `dedato_frontend_1_rollback_20260922_132751`
+
+Do not state they were deleted.
+
+Push / reschedule / Android icon smoke tracks are **CLOSED / PASS**. Next major track: iOS App Review Guideline 3.1.1 (true free companion; IAP is not the planned solution). Priority and App Review audit list belong in [Feature entitlements](feature-entitlements.md#9-ios-app-review-isolation) and the next-steps paragraph below.
 
 `test/apple-iap-handoff` is not the current production release branch.
+
+### Next steps
+
+1. Final READ-ONLY iOS App Review 3.1.1 audit against the free-companion model.
+2. Identify paid-feature leakage in iOS UI/runtime.
+3. Decide exact remediation.
+4. If iOS-only code changes are required, next iOS build is likely 1.1.0 (13).
+5. Android build 6 stays untouched unless shared code actually changes.
+6. After the iOS release track: Android production AAB / RuStore release gate.
+7. Production repo cleanup / Docker cleanup / old rollback cleanup only after release, as a separate engineering hygiene stage.
 
 ## Repository-confirmed components
 
@@ -121,13 +148,14 @@ Runtime settings требуют часть категорий только пр�
 
 Backend image запускает Uvicorn командой без явного multi-worker option. При импорте application module создаются upload directories и регистрируются routes; schema lifecycle описан отдельно в [Data and migrations](data-and-migrations.md).
 
-FastAPI startup handler создаёт пять in-process `asyncio` tasks:
+FastAPI startup handler создаёт шесть in-process `asyncio` tasks:
 
 - daily charges;
 - recurring expenses;
 - bookings limit monitor;
 - temporary bookings cleanup;
-- expired payments cleanup.
+- expired payments cleanup;
+- push worker (Expo outbox + receipt polling).
 
 Shutdown handler отменяет эти tasks. Отдельный scheduler service, leader election или distributed coordination для их запуска Compose не задаёт. Следовательно, каждый дополнительный backend process запустил бы собственный комплект tasks — `INFERRED` из runtime startup code.
 
@@ -176,5 +204,5 @@ Shutdown handler отменяет эти tasks. Отдельный scheduler ser
 
 - [Data and migrations](data-and-migrations.md) — production database identity, schema lifecycle and Alembic.
 - [Configuration and feature flags](configuration.md) — process/build/DB configuration layers and precedence.
-- [Background jobs](background-jobs.md) — cadence, side effects and reliability of the five in-process tasks.
+- [Background jobs](background-jobs.md) — cadence, side effects and reliability of the six in-process tasks.
 - [Debt — subscriptions billing](subscriptions-billing-debt.md) — billing-specific failure scenarios and reliability constraints.

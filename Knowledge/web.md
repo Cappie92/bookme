@@ -4,7 +4,7 @@ project: DeDato
 knowledge_class: living
 environment: common
 status: active
-last_verified: 2026-09-13
+last_verified: 2026-09-22
 ---
 
 # Web architecture
@@ -92,6 +92,10 @@ Web импортирует repository `shared/` через Vite alias или rel
 Dashboard pending count и Pending tab используют один load path: Pending должен заполняться при первом открытии без обходного Past → Pending. Поздний schedule/booking response не должен перезаписывать уже выбранный период — web/mobile используют request-generation/current-period protection.
 
 **Sources:** `frontend/src/components/MasterDashboardStats.jsx`; `frontend/src/components/MasterScheduleCalendar.jsx`; `mobile/app/(master)/master/schedule.tsx`.
+
+## Reschedule date handling
+
+Web reschedule is **closed / smoke PASS**. `selectedDate` is normalized to `YYYY-MM-DD`; initial slots load immediately; weekend hard-ban is removed; the reschedule path does not use UTC `toISOString` date shift; display is `DD.MM.YY`. Living contract: [Booking](booking.md#reschedule).
 
 ## Settings save UX
 

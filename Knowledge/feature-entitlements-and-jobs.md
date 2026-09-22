@@ -4,7 +4,7 @@ project: DeDato
 knowledge_class: living
 environment: common
 status: active
-last_verified: 2026-08-04
+last_verified: 2026-09-22
 ---
 
 # Debt — feature entitlements and background jobs
@@ -63,10 +63,10 @@ Repository-known gaps in flag propagation, paid capability enforcement and in-pr
 ## In-process jobs and multiple processes
 
 - **Confidence:** CONFIRMED for process behavior; actual production process count is UNKNOWN.
-- **Evidence:** every FastAPI startup creates all five tasks; no lease, leader election or external scheduler exists in repository Compose.
-- **Failure scenario:** additional workers/replicas duplicate charges, expenses, monitoring and cleanup work.
+- **Evidence:** every FastAPI startup creates all six tasks; no lease, leader election or external scheduler exists in repository Compose.
+- **Failure scenario:** additional workers/replicas duplicate charges, expenses, monitoring, cleanup and push-delivery work.
 - **Existing protection:** current Compose declares one backend service and Uvicorn command has no explicit worker count; some domain operations are status/idempotency guarded.
-- **Sources:** `backend/main.py`; five job modules; `backend/Dockerfile`; `docker-compose.prod.yml`.
+- **Sources:** `backend/main.py`; six job modules; `backend/Dockerfile`; `docker-compose.prod.yml`.
 - **Related:** [subscriptions billing Debt](subscriptions-billing-debt.md#in-process-background-jobs).
 
 ## Daily charge concurrency
@@ -106,7 +106,7 @@ Repository-known gaps in flag propagation, paid capability enforcement and in-pr
 - **Confidence:** CONFIRMED
 - **Evidence:** synchronous DB/business functions execute directly inside async task loops; health endpoint is static and does not expose task state/last success. Inner functions often return error dicts after logging rather than raising.
 - **Failure scenario:** long DB work can delay request event loop; a repeatedly failing or unexpectedly ended task is not visible through health/readiness.
-- **Sources:** `backend/main.py`; five job modules.
+- **Sources:** `backend/main.py`; six job modules.
 - **Required action:** separate reliability/observability design for execution isolation, durable state and alerts.
 
 ## Calendar timezone is process-local

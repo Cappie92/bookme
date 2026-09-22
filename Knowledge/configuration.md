@@ -4,7 +4,7 @@ project: DeDato
 knowledge_class: living
 environment: common
 status: active
-last_verified: 2026-09-13
+last_verified: 2026-09-22
 ---
 
 # Configuration and feature flags
@@ -33,7 +33,7 @@ Main categories:
 
 - environment gates: development test-data and E2E routers;
 - business compatibility: salon visibility fallback and legacy indie ownership mode;
-- external features: OAuth, email, payment and telephony modes;
+- external features: OAuth, email, payment, telephony and push notification modes;
 - diagnostics: master/subscription/payment/daily-charge/mobile-oriented debug switches;
 - database and public/internal URL coordinates;
 - auth/provider credential categories, whose values are always outside Knowledge;
@@ -76,6 +76,24 @@ OAuth and email use explicit enable flags. Payment and telephony select stub/liv
 The active staging environment has a stricter operational allowlist: email disabled, Zvonok/Robokassa in stub mode, Robokassa test flag enabled and Yandex OAuth enabled only with the staging callback. Credentials present in an ignored env file do not authorize outbound traffic. Effective values, provider smoke gates and current tracked-vs-server drift belong to [Staging infrastructure](staging.md).
 
 **Source:** `backend/settings.py`; provider factories/services; [production topology](production-topology.md).
+
+### Push notifications
+
+Repository defaults in `backend/settings.py`:
+
+- `PUSH_REGISTRATION_ENABLED` default `true` — device token PUT API;
+- `PUSH_NOTIFICATIONS_ENABLED` default `false` — outbox fan-out and Expo sender;
+- `PUSH_NOTIFICATION_USER_ALLOWLIST` default empty — nobody, even when sending is enabled. CSV user ids = limited rollout; `*` = all eligible users.
+
+Production REPORTED sender configuration remains controlled, not global:
+
+- `PUSH_REGISTRATION_ENABLED=true`
+- `PUSH_NOTIFICATIONS_ENABLED=true`
+- allowlist: `user_id 11`
+
+Code defaults are not proof of host values. Living production pointer: [Production topology](production-topology.md). Architecture and smoke: [Mobile architecture](mobile.md).
+
+**Source:** `backend/settings.py` — `PUSH_*`, `parse_push_user_allowlist`, `push_user_allowed`; `backend/.env.example`; `backend/services/push_worker.py`; `backend/services/push_outbox.py`.
 
 ## 4. DB-backed global settings
 

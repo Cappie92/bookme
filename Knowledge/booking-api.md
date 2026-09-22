@@ -4,7 +4,7 @@ project: DeDato
 knowledge_class: living
 environment: common
 status: active
-last_verified: 2026-09-13
+last_verified: 2026-09-22
 ---
 
 # Contract: Booking API
@@ -55,7 +55,9 @@ There is no globally enforced transition function. Accounting routes enforce the
 
 Primary public availability returns ISO with master timezone and excludes started slots. Generic slot endpoints return scheduling service values and include compatibility variants. Create always needs server revalidation because availability is not a reservation and concurrent requests can race.
 
-Duration comes from selected service on primary public path; generic paths also accept client-supplied service snapshot fields. Working-hours and overlap behavior is route-specific; see [Scheduling](scheduling.md).
+Date query for availability/reschedule is strict `YYYY-MM-DD`; invalid datetime is 4xx, not 500. Current booking is excluded from GET collision checks. Client PUT reschedule uses the common overlap conflict checker; adjacent half-open slots are allowed. Weekend is not a hard API ban.
+
+Duration comes from selected service on primary public path; generic paths also accept client-supplied service snapshot fields. Working-hours and overlap behavior is route-specific; see [Scheduling](scheduling.md). Living reschedule client contract: [Booking](booking.md#reschedule).
 
 ## 6. Temporary/prepayment boundary
 
