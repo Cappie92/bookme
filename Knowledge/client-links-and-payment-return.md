@@ -4,7 +4,7 @@ project: DeDato
 knowledge_class: living
 environment: common
 status: active
-last_verified: 2026-09-13
+last_verified: 2026-09-24
 ---
 
 # Client links and payment return contract
@@ -31,7 +31,7 @@ HTTPS app links require two independent conditions:
 1. OS/native association delivers the link using associated domains or verified intent filters built from `app.config.ts`;
 2. runtime parser accepts the hostname from `WEB_URL`/extra trusted hosts.
 
-Custom scheme `dedato:` supports public `/m/{slug}` and the current internal `subscriptions` route. Scheme links do not replace backend authorization or entitlement checks.
+Custom scheme `dedato:` supports public `/m/{slug}`. Internal commerce routes: Android may still map `subscriptions` to the master subscriptions screen; **iOS** maps `subscriptions` / pricing / tariff / payment / web-handoff and related retired segments to the dashboard (`parseAppInternalRoute.ios.ts`). Scheme links do not replace backend authorization or entitlement checks.
 
 **Sources:** `mobile/app.config.ts`; `mobile/android/app/src/main/AndroidManifest.xml`; `mobile/ios/DeDato/DeDato.entitlements`; `mobile/src/utils/parsePublicMasterDeepLink.ts`; `mobile/src/utils/parseAppInternalRoute.ts`; `mobile/app/_layout.tsx`.
 

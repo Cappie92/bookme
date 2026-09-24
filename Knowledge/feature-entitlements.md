@@ -4,7 +4,7 @@ project: DeDato
 knowledge_class: living
 environment: common
 status: active
-last_verified: 2026-09-22
+last_verified: 2026-09-24
 ---
 
 # Contract: Feature entitlements
@@ -116,20 +116,19 @@ Disabling/deleting a `ServiceFunction` row without removing its already assigned
 
 ## 9. iOS App Review isolation
 
-Current major release track: **Guideline 3.1.1**. IAP is **not** currently an option and must not be revived as the planned review solution. Strategy: true free companion.
+iOS 1.1.0 (13) submitted under **true free companion**. Status: **SUBMITTED / IN APP REVIEW PROCESS**, not approved and not released. IAP is **not** the current release solution and remains dormant/unreachable.
 
-An externally paid subscription must **not** unlock additional digital capabilities inside the iOS app compared with Free.
+An externally paid subscription must **not** unlock additional digital capabilities inside the iOS app compared with Free. Paid and Free iOS share the same native operational graph (Dashboard / Schedule / Services / Settings / Bookings).
 
-Next READ-ONLY audit must verify:
+Free-companion remediation for this submission is **CLOSED**:
 
-1. iOS Welcome / pre-auth
-2. paid / tariff / premium messaging
-3. finance / CRM / loyalty / customization / domains / unlimited features
-4. subscription / payment references
-5. web handoff wording
-6. legal / help wording visible in iOS
-7. backend / mobile paid-vs-free capability isolation
-8. Review Notes
-9. App Store metadata / screenshots if relevant
+- no iOS-visible browser/editor CTA;
+- pricing / subscription / tariff / payment surfaces unreachable;
+- iOS Welcome cleaned of monetization and revenue KPI;
+- retired commerce/deep-link routes redirect to dashboard;
+- User Agreement and Privacy Policy updated for the iOS-visible legal surface;
+- Privacy push-token fact corrected to current runtime.
 
-Previous Apple rejection topics included Guideline 3.1.1. This is the next gate, not a completed audit. Living operational pointer: [Production topology](production-topology.md). Trusted iOS companion surface: [Web architecture](web.md).
+Owner decision: backend Free-20 (`FREE_ACTIVE_FUTURE_BOOKINGS_LIMIT = 20`) remains unchanged and is **not** a blocker for this submission.
+
+Next gate is Apple's review result, not another speculative free-companion rebuild. Living operational pointer: [Production topology](production-topology.md). Fail-closed `ios_app` web isolation, if such a session appears: [Web architecture](web.md).

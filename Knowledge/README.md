@@ -4,7 +4,7 @@ project: DeDato
 knowledge_class: living
 environment: common
 status: active
-last_verified: 2026-09-22
+last_verified: 2026-09-24
 ---
 
 # Knowledge — каноническая база знаний DeDato

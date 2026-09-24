@@ -4,14 +4,14 @@ project: DeDato
 knowledge_class: living
 environment: prod
 status: active
-last_verified: 2026-09-22
+last_verified: 2026-09-24
 ---
 
 # Production topology
 
 ## Scope
 
-Документ владеет repository-known описанием production-топологии DeDato и текущим operational release state. Compose/network/volume facts без host access остаются repository-CONFIRMED. Отдельная разрешённая проверка 2026-09-22 зафиксировала current production pointers ниже как `REPORTED`; это living current state, не snapshots build 10/11 или промежуточных revisions.
+Документ владеет repository-known описанием production-топологии DeDato и текущим operational release state. Compose/network/volume facts без host access остаются repository-CONFIRMED. Current store/review and runtime pointers ниже — living state на 2026-09-24, не snapshots iOS (12), frontend `96f3f27-prod` или «ещё не submitted».
 
 Deploy procedure принадлежит [CI/CD](ci-cd.md) и [Deployment artifact inventory](deployment-artifact-inventory.md). Секреты и container IDs в Knowledge не хранятся.
 
@@ -26,51 +26,52 @@ Deploy procedure принадлежит [CI/CD](ci-cd.md) и [Deployment artifac
 
 ## Current production release state
 
-Это единственная current release truth. Не хранить параллельные snapshots build 10/11/12 или старых production revisions.
+Это единственная current release truth. Не хранить параллельные snapshots iOS (12), frontend `96f3f27-prod` или «ещё не submitted».
 
 | Pointer | Current value | Confidence |
 |---------|---------------|------------|
 | Public site | `https://dedato.ru` | REPORTED |
 | Production server | `193.160.208.206` | REPORTED |
-| Canonical git `main` / `origin/main` | `93bf2ae` | CONFIRMED repository; `chore: bump mobile builds to 12 and 6` |
-| Production backend image | `dedato_backend:96f3f27` | REPORTED authorized deploy 2026-09-22 |
-| Production frontend image | `dedato_frontend:96f3f27-prod` | REPORTED authorized deploy 2026-09-22 |
-| Clean release worktree used for latest deploy | `/opt/dedato-release-96f3f27` | REPORTED |
-| iOS smoke-passed | 1.1.0 (12) | CONFIRMED `mobile/app.config.ts` |
-| Android smoke-passed | 1.1.0 (6) | CONFIRMED `mobile/app.config.ts` |
-| Production HTTP | `/` → 200; `/api/health` → 200 | REPORTED |
+| Canonical git `main` / `origin/main` | `fde8033` | CONFIRMED repository; `chore: bump iOS build to 13` |
+| Production backend image | `dedato_backend:96f3f27` | REPORTED authorized deploy 2026-09-22; **not** redeployed for free-companion; **not** equal to current `main` |
+| Production frontend image | `dedato_frontend:fde8033-prod` | REPORTED authorized frontend update for UA / Privacy / free-companion legal surface |
+| Backend release worktree | `/opt/dedato-release-96f3f27` | REPORTED; backend cut pointer, not proof that frontend is still `96f3f27-prod` |
+| iOS | **1.1.0 (13) SUBMITTED / IN APP REVIEW PROCESS** | Version CONFIRMED `mobile/app.config.ts`; store status REPORTED. Not approved. Not released. |
+| Android | **1.1.0 (6) RuStore SUBMITTED FOR MODERATION** | Version CONFIRMED `mobile/app.config.ts`; store status REPORTED. Not published. Not approved. Not released. |
+| Android production AAB | EAS `e3b8e3ec-d3d7-405b-bb65-212e96309248`; package `ru.dedato.mobile`; versionName `1.1.0`; versionCode `6` | REPORTED; built from current `main` with EAS production |
+| Production HTTP | `/` → 200; `/api/health` → 200 | REPORTED frontend deploy smoke PASS |
 | SQLite | pre-deploy backup `integrity_check = ok` | REPORTED |
 | Alembic on production DB | push v1 schema already present; no delta `1579f36` → `96f3f27` | REPORTED |
-| Redis | unchanged by the cutover | REPORTED |
+| Redis | unchanged by the backend cutover | REPORTED |
 | `DEMO_MASTER_USER_ID` | configured | REPORTED; category only, value never stored here |
 | Push sender | registration+notifications enabled; allowlist `user_id 11` | REPORTED; not global rollout |
 
-Marketing version **1.1.0**. Production images are built from `96f3f27`. Do **not** state that production backend/frontend are at `93bf2ae`.
+Marketing version **1.1.0**. Production runtime is **intentionally split**: backend `96f3f27`, frontend `fde8033-prod`. Do **not** state that production backend equals current `main` (`fde8033`). Do **not** state that production frontend is still `96f3f27-prod`.
 
-Backend delta after the production release includes `backend/services/notification_events.py` from `3639e74`: structured `actor_user_id` logging for booking notification events. Observability-only; no schema migration. **Not yet deployed** to production. Mobile builds 12 / 6 **do** include the Android push lifecycle fix from `3639e74`.
+Backend `backend/services/notification_events.py` from `3639e74` (structured `actor_user_id` logging) remains in `main` and is **still not** in production backend `96f3f27`. Observability-only; no schema migration. Mobile 1.1.0 (13)/(6) include the Android push lifecycle from `3639e74` plus later free-companion iOS work.
 
 `/opt/dedato` git worktree is dirty/legacy and **must not** be used as a clean release checkout.
 
-Verified pre-deploy SQLite backup: `/opt/dedato/backups/bookme-pre-96f3f27-20260922_130851.db` (`integrity_check: ok`). Latest rollback containers were retained:
+Verified pre-deploy SQLite backup: `/opt/dedato/backups/bookme-pre-96f3f27-20260922_130851.db` (`integrity_check: ok`). Rollback containers retained (do not state they were deleted):
 
 - `dedato_backend_1_rollback_20260922_132751`
 - `dedato_frontend_1_rollback_20260922_132751`
+- latest frontend rollback: `dedato_frontend_1_rollback_20260923_122405`
 
-Do not state they were deleted.
-
-Push / reschedule / Android icon smoke tracks are **CLOSED / PASS**. Next major track: iOS App Review Guideline 3.1.1 (true free companion; IAP is not the planned solution). Priority and App Review audit list belong in [Feature entitlements](feature-entitlements.md#9-ios-app-review-isolation) and the next-steps paragraph below.
+Closed for this submission cycle (not store-approved): Android adaptive icon; Android push permission/presentation/Notification Center; booking/reschedule regression; iOS true free-companion remediation. IAP remains dormant/unreachable and is **not** the current release solution. Owner decision: backend Free-20 booking limit is unchanged and is **not** a blocker for this submission.
 
 `test/apple-iap-handoff` is not the current production release branch.
 
 ### Next steps
 
-1. Final READ-ONLY iOS App Review 3.1.1 audit against the free-companion model.
-2. Identify paid-feature leakage in iOS UI/runtime.
-3. Decide exact remediation.
-4. If iOS-only code changes are required, next iOS build is likely 1.1.0 (13).
-5. Android build 6 stays untouched unless shared code actually changes.
-6. After the iOS release track: Android production AAB / RuStore release gate.
-7. Production repo cleanup / Docker cleanup / old rollback cleanup only after release, as a separate engineering hygiene stage.
+Primary work is no longer implementation.
+
+1. Wait for Apple App Review result for iOS 1.1.0 (13).
+2. Wait for RuStore moderation result for Android 1.1.0 (6).
+
+On rejection: capture exact reviewer/moderator feedback, audit only that issue, avoid speculative rebuilds. On approval: proceed with release/publishing controls, then post-release engineering hygiene.
+
+Deferred post-release: production dirty-repo cleanup; old rollback container cleanup; Docker image cleanup; repository/deploy hygiene; backend observability deploy reconciliation (`3639e74` vs prod `96f3f27`); broader Android distribution / store follow-up if needed.
 
 ## Repository-confirmed components
 

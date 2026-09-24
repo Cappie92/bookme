@@ -4,7 +4,7 @@ project: DeDato
 knowledge_class: living
 environment: common
 status: active
-last_verified: 2026-09-13
+last_verified: 2026-09-24
 ---
 
 # DeDato onboarding
@@ -15,7 +15,7 @@ last_verified: 2026-09-13
 
 1. [Knowledge governance](README.md) — source priority, confidence and security rules.
 2. [Product roles and business model](product-roles-business-model.md) and [Domain map](domain-map.md).
-3. [Backend architecture](backend.md), [Web architecture](web.md) or [Mobile architecture](mobile.md) for the component being changed. iOS master editing is native app + trusted `ios_app` companion, not a full ordinary web cabinet.
+3. [Backend architecture](backend.md), [Web architecture](web.md) or [Mobile architecture](mobile.md) for the component being changed. iOS master product is a native-only operational companion, not a full ordinary web cabinet and not a user-visible web-editor handoff.
 4. The owning domain or contract document for the behavior. Catalog mutations: [Master catalog](master-catalog.md).
 5. The linked Debt document before changing a sensitive boundary. Open credential rotation is [production credential exposure](production-credential-exposure.md).
 

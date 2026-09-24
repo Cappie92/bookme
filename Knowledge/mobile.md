@@ -4,14 +4,14 @@ project: DeDato
 knowledge_class: living
 environment: common
 status: active
-last_verified: 2026-09-22
+last_verified: 2026-09-24
 ---
 
 # Mobile architecture
 
-Живой канон repository-known Expo/React Native client и его связь с trusted iOS web companion.
+Живой канон repository-known Expo/React Native client. Текущий iOS product — native-only operational companion; Android/web сохраняют полный cabinet/monetization.
 
-Marketing version **1.1.0**. Tracked native versions in `mobile/app.config.ts`: **iOS 1.1.0 (12)** и **Android 1.1.0 (6)**. Это current smoke-passed product builds, не исторические 10/11 или 4/5. App Store Connect listing / review status — отдельный `REPORTED` operational fact в [Production topology](production-topology.md); текущий major track — iOS App Review Guideline 3.1.1.
+Marketing version **1.1.0**. Tracked native versions in `mobile/app.config.ts`: **iOS 1.1.0 (13)** и **Android 1.1.0 (6)**. Store/review status — `REPORTED` operational fact в [Production topology](production-topology.md): iOS **SUBMITTED / IN APP REVIEW PROCESS**, Android/RuStore **SUBMITTED FOR MODERATION**. Не писать approved / released, пока нет moderation result.
 
 ## Runtime and route composition
 
@@ -55,19 +55,25 @@ Dynamic Expo config independently формирует native scheme, associated d
 
 ## iOS companion versus native
 
-Текущий master-flow на iOS: **native application + trusted `ios_app` web companion**. Native app не является полным дублем ordinary web cabinet.
+Текущий iOS master product (submission 1.1.0 (13)): **native-only operational companion**. User-visible surfaces: Dashboard, Schedule, Services, Settings, Bookings. Paid и Free iOS видят один и тот же native graph.
 
-Companion surfaces (Dashboard / Schedule / Services / Settings) принадлежат [Web architecture](web.md). Native сохраняет public booking, client cabinet и Android monetization. Ordinary web/Android не наследуют iOS presentation isolation.
+Free-companion remediation для этой submission **CLOSED** (это не Apple approval):
 
-Free-20 — backend business rule бесплатного тарифа, не часть iOS presentation isolation; см. [Feature entitlements](feature-entitlements.md).
+- browser/editor CTA сняты; `WebEditorButton.ios` возвращает `null`;
+- pricing / subscription / tariff / Restore / IAP UI unreachable;
+- iOS Welcome без monetization и revenue KPI;
+- retired commerce / browser-editor deep links редиректятся на dashboard;
+- IAP остаётся dormant и **не** является current release solution.
 
-iOS → web handoff выдаёт server-trusted `web_session_origin=ios_app`. Failed/expired handoff не должен открывать ordinary web cabinet. Demo → web handoff запрещён.
+Android и ordinary web **не** наследуют эту iOS presentation isolation. Trusted `ios_app` web-editor policy остаётся fail-closed isolation в frontend/backend, если такая сессия появится; это не user-visible iOS CTA текущей submission.
 
-**Sources:** `mobile/src/services/auth/openWebHandoffMoreDetails.ts`; `mobile/src/services/api/auth.ts`; `frontend/src/pages/MobileHandoff.jsx`; `frontend/src/utils/iosAppWebEditorPolicy.js`.
+Free-20 — backend business rule бесплатного тарифа, не iOS presentation isolation и не blocker этой submission; см. [Feature entitlements](feature-entitlements.md).
+
+**Sources:** `mobile/src/config/iosMasterCapabilities.ts`; `mobile/src/components/WebEditorButton.ios.tsx`; `mobile/src/utils/parseAppInternalRoute.ios.ts`; `mobile/src/screens/WelcomeScreen.ios.tsx`; `mobile/src/data/welcomeSlidesData.ios.ts`; `frontend/src/utils/iosAppWebEditorPolicy.js`.
 
 ## Deep links and public booking
 
-Root handles cold `Linking.getInitialURL()` and warm `Linking` events. Public parser accepts the app scheme, development Expo links and `/m/{slug}` only on runtime-trusted HTTPS hosts; HTTP is development-only. Internal parser currently maps the subscriptions app link to the master subscriptions route. Module-level guards prevent repeated cold navigation and give a recent warm event priority.
+Root handles cold `Linking.getInitialURL()` and warm `Linking` events. Public parser accepts the app scheme, development Expo links and `/m/{slug}` only on runtime-trusted HTTPS hosts; HTTP is development-only. Internal parser: Android still maps the subscriptions app link to the master subscriptions route; **iOS** treats subscriptions/pricing/tariff/payment/web-handoff and related retired segments as dashboard `/` (`parseAppInternalRoute.ios.ts`). Module-level guards prevent repeated cold navigation and give a recent warm event priority.
 
 Native association determines whether OS delivers an HTTPS link; parser trust determines whether runtime accepts it. Both layers must align. Canonical cross-platform rules are in [Client links and payment return](client-links-and-payment-return.md).
 
@@ -81,9 +87,11 @@ Subscription checkout initializes payment with `payment_source=mobile_app`, open
 
 ## Welcome pricing display fallback
 
-Unauthenticated welcome запрашивает публичный backend pricing catalog. Непустой успешный ответ преобразуется в API-mapped display plans; при request error или пустом mapped catalog hook переключается на локальный набор welcome plans. Этот fallback компилируется в приложение и является production error/display behavior, а не mock. UI явно показывает сообщение о fallback-режиме.
+Unauthenticated Android welcome запрашивает публичный backend pricing catalog. Непустой успешный ответ преобразуется в API-mapped display plans; при request error или пустом mapped catalog hook переключается на локальный набор welcome plans. Этот fallback компилируется в приложение и является production error/display behavior, а не mock. UI явно показывает сообщение о fallback-режиме.
 
-Локальный набор независимо хранит display names, package prices, feature/limit text и marketing copy, поэтому может устареть относительно backend catalog. Mobile при ошибке продолжает показывать эти plan cards, тогда как web public Pricing сообщает об ошибке и не показывает cards. Независимый mobile catalog и эта web/mobile divergence являются подтверждённым `P1` client-display drift (`RC-010`), но не финансовой или entitlement authority.
+**iOS Welcome** (`WelcomeScreen.ios`) не монтирует pricing UI, не показывает «Цены» и не рекламирует тариф/подписку/выручку. iOS welcome copy — operational booking/schedule/services/workflow only.
+
+Локальный Android набор независимо хранит display names, package prices, feature/limit text и marketing copy, поэтому может устареть относительно backend catalog. Mobile при ошибке продолжает показывать эти plan cards, тогда как web public Pricing сообщает об ошибке и не показывает cards. Независимый mobile catalog и эта web/mobile divergence являются подтверждённым `P1` client-display drift (`RC-010`) для Android/web, но не финансовой или entitlement authority.
 
 Выбор plan/period на welcome не переносится в authenticated purchase: CTA открывает регистрацию без fallback plan ID, периода или цены. После authentication purchase modal повторно загружает backend plans, а фактическую сумму определяют backend calculation и `SubscriptionPriceSnapshot`; денежный lifecycle принадлежит [Subscriptions billing](subscriptions-billing.md). Effective access определяется backend subscription/plan и guards, а не welcome feature list; authority описана в [Feature entitlements](feature-entitlements.md).
 
@@ -111,7 +119,7 @@ Notification Center refetch на open/focus и релевантный `AppState`
 
 Stale-token behavior: старый Android token может быть помечен `dead_token` через Expo receipt; новая installation остаётся active. Исторический token id=2 не описывать как current device.
 
-`Notification` schema не хранит `actor_user_id`. Commit `3639e74` добавляет structured actor logging без migration; этот backend change есть в `main` и в mobile 12/6, но **ещё не** в production backend image `96f3f27`. Историческая неоднозначность `booking_cancelled` (notification id=9 / booking 1069) — не active release blocker.
+`Notification` schema не хранит `actor_user_id`. Commit `3639e74` добавляет structured actor logging без migration; этот backend change есть в `main`, но **ещё не** в production backend image `96f3f27`. Историческая неоднозначность `booking_cancelled` (notification id=9 / booking 1069) — не active release blocker.
 
 **Sources:** `mobile/src/notifications/`; `mobile/src/hooks/useMasterNotifications.ts`; `backend/models.py` — `Notification`, `PushDevice`, `NotificationOutbox`; `backend/services/push_worker.py`; `backend/services/notification_events.py`; [Configuration](configuration.md); [Production topology](production-topology.md).
 

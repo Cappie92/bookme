@@ -4,7 +4,7 @@ project: DeDato
 knowledge_class: living
 environment: common
 status: active
-last_verified: 2026-09-22
+last_verified: 2026-09-24
 ---
 
 # CI/CD
@@ -60,7 +60,7 @@ GitHub `deploy.yml` остаётся repository-defined manual workflow, но **
 9. component rollback при failure;
 10. migrations только при явной необходимости.
 
-Current production runtime images are `96f3f27`; `main` tip `93bf2ae` is mobile build-number 12/6 plus already-committed push/icon/reschedule history. Production backend is **not** at `93bf2ae`. Details of unsuccessful helper implementations are transient and not SSOT.
+Current production runtime is split: backend `dedato_backend:96f3f27`, frontend `dedato_frontend:fde8033-prod`. Canonical `main` tip is `fde8033` (iOS 1.1.0 (13) / Android 1.1.0 (6) plus committed free-companion/legal history). Production backend is **not** at `fde8033`. Details of unsuccessful helper implementations are transient and not SSOT.
 
 ## Manual staging release gate
 
@@ -69,7 +69,7 @@ Current production runtime images are `96f3f27`; `main` tip `93bf2ae` is mobile 
 Текущий production flow:
 
 ```text
-main (runtime images 96f3f27 / tip 93bf2ae)
+main (backend runtime 96f3f27 / frontend runtime fde8033-prod / tip fde8033)
 → separately authorized manual production cutover
 → health/integrity gates
 ```

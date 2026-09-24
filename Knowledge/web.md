@@ -4,7 +4,7 @@ project: DeDato
 knowledge_class: living
 environment: common
 status: active
-last_verified: 2026-09-22
+last_verified: 2026-09-24
 ---
 
 # Web architecture
@@ -29,11 +29,10 @@ Route tree одновременно обслуживает:
 - legacy/compatibility paths и redirects;
 - test/demo/design pages, перечисленные непосредственно в production route tree.
 
-Trusted iOS companion — отдельный web surface, не ordinary web:
+Trusted `ios_app` web isolation — отдельный fail-closed web surface, не ordinary web. Текущий iOS 1.1.0 (13) submission **не** показывает user-visible browser-editor/handoff CTA; native operational product описан в [Mobile architecture](mobile.md). Если `ios_app` web session всё же появится:
 
-- native iOS application + trusted `ios_app` web companion;
 - разрешённые master tabs: Dashboard, Schedule, Services, Settings;
-- из companion исключены commerce/subscription-dependent поверхности: Pricing, My Plan, Finance, Master Loyalty, purchase/upgrade CTA, Robokassa/DeDato payment configuration и прочие monetization surfaces вне утверждённого operational companion;
+- из этой сессии исключены commerce/subscription-dependent поверхности: Pricing, My Plan, Finance, Master Loyalty, purchase/upgrade CTA, Robokassa/DeDato payment configuration и прочие monetization surfaces вне утверждённого operational set;
 - Pricing content не монтируется, pricing catalog не запрашивается (`usePricingCatalog` имеет собственный `commerceAllowed` guard и отменяет незавершённый запрос); route guard не должен зависеть только от скрытия UI;
 - personal-link/domain editing и блок «Оплата через DeDato» закрыты; payment fields не отправляются из Settings. Backend также защищает domain mutation для `ios_app`.
 

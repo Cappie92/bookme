@@ -4,7 +4,7 @@ project: DeDato
 knowledge_class: living
 environment: common
 status: active
-last_verified: 2026-09-22
+last_verified: 2026-09-24
 ---
 
 # Debt — client platforms
@@ -74,7 +74,7 @@ last_verified: 2026-09-22
 - **Historical residual:** `useMasterNotifications()` previously used a DEV mock or empty production source; OS push was unimplemented.
 - **Current living contract:** Push v1 is operational. In-app Notification Center is API-backed. Smoke PASS on iOS and Android. See [Mobile architecture](mobile.md).
 - **Residual (not a release blocker):** `Notification` schema does not persist `actor_user_id`; structured actor logging exists on `main` (`3639e74`) and is not yet in production backend `96f3f27`.
-- **Required action:** do not treat missing OS push as current product gap. Next iOS work is App Review 3.1.1, not Push v1 design.
+- **Required action:** do not treat missing OS push as current product gap. Current next step is store moderation results (iOS App Review / RuStore), not Push v1 design and not a new free-companion implementation pass.
 
 ## Settings save success-message unmount
 
