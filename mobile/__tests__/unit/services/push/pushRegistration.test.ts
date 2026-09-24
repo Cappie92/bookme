@@ -1,3 +1,4 @@
+import Constants from 'expo-constants';
 import * as Notifications from 'expo-notifications';
 import { apiClient } from '@src/services/api/client';
 import { acquireExpoPushToken, resolveEasProjectId } from '@src/services/push/expoPushToken';
@@ -85,8 +86,8 @@ describe('push registration', () => {
         token: EXPO_TOKEN,
         provider: 'expo',
         platform: 'ios',
-        app_version: '1.0.0',
-        build_number: '1',
+        app_version: Constants.expoConfig?.version,
+        build_number: String(Constants.expoConfig?.ios?.buildNumber ?? ''),
       }),
       expect.objectContaining({
         headers: { Authorization: 'Bearer access-a' },

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+import uuid
 
 import pytest
 
@@ -18,10 +19,11 @@ def _auth_headers(client, phone: str, password: str) -> dict:
 
 @pytest.fixture
 def master_user(db):
+    n = uuid.uuid4().int % 10_000_000
     user = User(
-        email="top_svc@test.com",
+        email=f"top_svc_{n}@test.com",
         hashed_password=get_password_hash("test123"),
-        phone="+79001112244",
+        phone=f"+7902{n:07d}",
         full_name="Top Services",
         role=UserRole.MASTER,
         is_active=True,

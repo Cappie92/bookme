@@ -129,8 +129,7 @@ def completed_booking(db, master_record, client_user, service, salon):
 @pytest.fixture
 def master_token(client, master_user):
     r = client.post("/api/auth/login", json={"phone": master_user.phone, "password": "test123"})
-    if r.status_code != 200:
-        pytest.skip("Auth setup failed")
+    assert r.status_code == 200, r.text
     return r.json()["access_token"]
 
 

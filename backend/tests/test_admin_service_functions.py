@@ -5,16 +5,13 @@
 """
 from datetime import datetime
 
-import pytest
-
 from auth import get_password_hash
 from models import Master, ServiceFunction, Subscription, SubscriptionPlan, SubscriptionStatus, SubscriptionType, User, UserRole
 
 
 def _auth_admin(client, phone="+79001234568", password="testpassword"):
     r = client.post("/api/auth/login", json={"phone": phone, "password": password})
-    if r.status_code != 200:
-        pytest.skip("Admin login failed")
+    assert r.status_code == 200, r.text
     return {"Authorization": f"Bearer {r.json()['access_token']}"}
 
 
@@ -26,8 +23,6 @@ def test_admin_can_list_subscription_functions(client, db, test_admin):
         db.commit()
     headers = _auth_admin(client, test_admin.phone, "testpassword")
     r = client.get("/api/admin/service-functions?function_type=subscription&is_active=true", headers=headers)
-    if r.status_code == 404:
-        pytest.skip("Admin service-functions endpoint not mounted")
     assert r.status_code == 200, r.text
     data = r.json()
     assert isinstance(data, list)

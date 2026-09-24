@@ -63,6 +63,9 @@ describe('fixed-feature iOS master contract', () => {
     expect(schedule).not.toContain('WebEditorButton');
     expect(services).not.toContain('WebEditorButton');
     expect(settings).not.toContain('WebEditorButton');
+    expect(schedule).not.toContain('openWebHandoffDestination');
+    expect(services).not.toContain('openWebHandoffDestination');
+    expect(settings).not.toContain('openWebHandoffDestination');
     expect(schedule).not.toContain('в браузере');
     expect(services).not.toContain('в браузере');
     expect(settings).not.toContain('в браузере');

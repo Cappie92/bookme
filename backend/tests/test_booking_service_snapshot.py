@@ -215,7 +215,13 @@ def test_master_service_price_change_does_not_repoint_booking_service(db):
     assert booking.service.duration == 60
 
 
-@pytest.mark.skip(reason="SQLite test DB may not enforce FK on services.id")
+@pytest.mark.skip(
+    reason=(
+        "SQLite leaves foreign_keys OFF unless PRAGMA is set on the connection. "
+        "The test engine and production sqlite URL do not enable it, so DELETE "
+        "does not raise IntegrityError here. Keep as a platform skip, not a pass."
+    )
+)
 def test_cannot_hard_delete_service_with_bookings(db):
     from sqlalchemy.exc import IntegrityError
 

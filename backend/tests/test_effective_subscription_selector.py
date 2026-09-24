@@ -1,7 +1,6 @@
 from datetime import datetime, timedelta
 from typing import Optional
 
-import pytest
 from sqlalchemy.orm import Session
 
 from models import Subscription, SubscriptionPlan, SubscriptionStatus, SubscriptionType
@@ -135,8 +134,8 @@ def test_two_active_choose_max_end_date(db: Session, test_master):
     assert chosen.id != a.id
 
 
-@pytest.mark.skip(reason="get_effective_subscription не обновляет статус подписки на EXPIRED при end_date в прошлом; тест ожидает side-effect логику.")
-def test_active_but_end_date_passed_becomes_expired(db: Session, test_master):
+def test_expired_window_is_not_selected_and_row_is_not_mutated(db: Session, test_master):
+    """Selector is read-only: an ACTIVE row past end_date is ignored and not rewritten."""
     now = datetime.utcnow()
     plan = _create_plan(db, "Pro")
     sub = _create_sub(
@@ -149,17 +148,14 @@ def test_active_but_end_date_passed_becomes_expired(db: Session, test_master):
         is_active=True,
     )
     chosen = get_effective_subscription(db, test_master.id, SubscriptionType.MASTER, now_utc=now)
-    fixes = (db.info.get("effective_subscription") or {}).get("fixes") or []
-    assert any(f.get("subscription_id") == sub.id and f.get("to_status") == "expired" for f in fixes)
-    db.commit()
     db.refresh(sub)
-    assert sub.status == SubscriptionStatus.EXPIRED
-    assert sub.is_active is False
     assert chosen is None
+    assert sub.status == SubscriptionStatus.ACTIVE
+    assert sub.is_active is True
 
 
-@pytest.mark.skip(reason="get_effective_subscription не переводит PENDING в ACTIVE при start_date <= now <= end_date; тест ожидает side-effect логику.")
-def test_pending_but_active_now_becomes_active(db: Session, test_master):
+def test_pending_in_window_is_not_auto_activated(db: Session, test_master):
+    """Selector is read-only: PENDING in the date window stays PENDING and is not selected."""
     now = datetime.utcnow()
     plan = _create_plan(db, "Pro")
     sub = _create_sub(
@@ -172,12 +168,8 @@ def test_pending_but_active_now_becomes_active(db: Session, test_master):
         is_active=False,
     )
     chosen = get_effective_subscription(db, test_master.id, SubscriptionType.MASTER, now_utc=now)
-    assert chosen is not None
-    assert chosen.id == sub.id
-    fixes = (db.info.get("effective_subscription") or {}).get("fixes") or []
-    assert any(f.get("subscription_id") == sub.id and f.get("to_status") == "active" for f in fixes)
-    db.commit()
     db.refresh(sub)
-    assert sub.status == SubscriptionStatus.ACTIVE
-    assert sub.is_active is True
+    assert chosen is None
+    assert sub.status == SubscriptionStatus.PENDING
+    assert sub.is_active is False
 

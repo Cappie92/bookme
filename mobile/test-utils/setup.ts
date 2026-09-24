@@ -87,14 +87,14 @@ jest.mock('expo-constants', () => ({
   __esModule: true,
   default: {
     expoConfig: {
-      version: '1.0.0',
-      ios: { buildNumber: '1' },
-      android: { versionCode: 1 },
+      version: '1.1.0',
+      ios: { buildNumber: '13' },
+      android: { versionCode: 6 },
       extra: { eas: { projectId: '004c94fb-d208-42c6-9baa-1ad147fd3011' } },
     },
     easConfig: { projectId: '004c94fb-d208-42c6-9baa-1ad147fd3011' },
-    nativeAppVersion: '1.0.0',
-    nativeBuildVersion: '1',
+    nativeAppVersion: '1.1.0',
+    nativeBuildVersion: '13',
   },
 }));
 

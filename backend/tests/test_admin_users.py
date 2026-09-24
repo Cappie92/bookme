@@ -1,6 +1,5 @@
 """Список пользователей админки: контракт JSON (в т.ч. is_phone_verified)."""
 
-import pytest
 from sqlalchemy import event
 
 from auth import get_password_hash
@@ -19,8 +18,7 @@ def test_admin_json_bool_normalizes_db_driver_values():
 
 def _auth_admin(client, phone="+79001234568", password="testpassword"):
     r = client.post("/api/auth/login", json={"phone": phone, "password": password})
-    if r.status_code != 200:
-        pytest.skip("Admin login failed")
+    assert r.status_code == 200, r.text
     return {"Authorization": f"Bearer {r.json()['access_token']}"}
 
 

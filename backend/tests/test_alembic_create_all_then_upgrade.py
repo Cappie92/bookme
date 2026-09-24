@@ -165,6 +165,11 @@ def _run_backend(database_url: str, *args: str) -> subprocess.CompletedProcess[s
 
 
 def test_create_all_then_alembic_upgrade_head(tmp_path):
+    """SQLite contract: ORM create_all, then Alembic upgrade head.
+
+    Empty-DB ``alembic upgrade head`` is not a supported lineage: the root
+    revision is additive on an existing ``masters`` table (production SQLite).
+    """
     database_path = tmp_path / "create-all-then-upgrade.db"
     database_url = f"sqlite:///{database_path}"
 

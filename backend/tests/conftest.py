@@ -1,5 +1,10 @@
+import atexit
+import shutil
 import sys
 import os
+import tempfile
+from pathlib import Path
+
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import httpx
@@ -14,10 +19,14 @@ from database import Base, get_db
 from main import app
 from models import User, UserRole
 
-# Создаем тестовую базу данных в памяти
-SQLALCHEMY_DATABASE_URL = "sqlite:///./test.db"
+# Per-process tempfile SQLite: isolates parallel pytest invocations from each
+# other without StaticPool, which livelocks threaded tests (Robokassa InvId).
+_TEST_DB_DIR = tempfile.mkdtemp(prefix="dedato-pytest-")
+atexit.register(shutil.rmtree, _TEST_DB_DIR, ignore_errors=True)
+SQLALCHEMY_DATABASE_URL = f"sqlite:///{Path(_TEST_DB_DIR) / 'test.db'}"
 engine = create_engine(
-    SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}
+    SQLALCHEMY_DATABASE_URL,
+    connect_args={"check_same_thread": False},
 )
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 

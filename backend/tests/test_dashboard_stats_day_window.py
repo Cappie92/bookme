@@ -1,6 +1,7 @@
 """
 Тесты для day window mode: anchor_date, window_before, window_after.
 """
+import uuid
 from datetime import date, datetime, timedelta
 
 import pytest
@@ -17,10 +18,11 @@ def _auth_headers(client, phone: str, password: str) -> dict:
 
 @pytest.fixture
 def master_user(db):
+    n = uuid.uuid4().int % 10_000_000
     user = User(
-        email="stats_day@test.com",
+        email=f"stats_day_{n}@test.com",
         hashed_password=get_password_hash("test123"),
-        phone="+79001112233",
+        phone=f"+7901{n:07d}",
         full_name="Stats Day",
         role=UserRole.MASTER,
         is_active=True,
