@@ -1,19 +1,22 @@
+const expoPreset = require('jest-expo/jest-preset');
+
 module.exports = {
-  preset: 'jest-expo',
+  ...expoPreset,
+  setupFiles: [
+    ...(expoPreset.setupFiles || []),
+    '<rootDir>/test-utils/setup.integration.winter.js',
+  ],
   setupFilesAfterEnv: ['<rootDir>/test-utils/setup.integration.ts'],
   moduleNameMapper: {
+    ...(expoPreset.moduleNameMapper || {}),
     '^@src/(.*)$': '<rootDir>/src/$1',
     '^@assets/(.*)$': '<rootDir>/assets/$1',
     '^@env$': '<rootDir>/test-utils/mocks/env.mock.ts',
     '^shared/(.*)$': '<rootDir>/../shared/$1',
-    '^react-native-vector-icons/(.*)$': '@expo/vector-icons/$1',
+    '^react-native-vector-icons$': '@expo/vector-icons',
+    '^react-native-vector-icons/(.*)': '@expo/vector-icons/$1',
   },
-  testMatch: [
-    '**/__tests__/integration/**/*.test.{ts,tsx}',
-  ],
-  transformIgnorePatterns: [
-    'node_modules/(?!((jest-)?react-native|@react-native(-community)?)|expo(nent)?|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|@unimodules/.*|unimodules|sentry-expo|native-base|react-native-svg|react-native-vector-icons)',
-  ],
+  testMatch: ['**/__tests__/integration/**/*.test.{ts,tsx}'],
   collectCoverageFrom: [
     'src/components/**/*.{ts,tsx}',
     '!**/*.d.ts',
@@ -21,4 +24,3 @@ module.exports = {
     '!**/__tests__/**',
   ],
 };
-

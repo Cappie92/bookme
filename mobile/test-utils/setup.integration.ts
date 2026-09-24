@@ -4,17 +4,6 @@ jest.mock('expo', () => ({
   default: {},
 }));
 
-jest.mock('expo/src/winter/installGlobal', () => ({
-  __esModule: true,
-  default: {},
-  getValue: jest.fn(() => ({})),
-}));
-
-jest.mock('expo/src/winter/runtime.native', () => ({
-  __esModule: true,
-  default: {},
-}));
-
 import '@testing-library/jest-native/extend-expect';
 
 // Мок для env конфига
@@ -82,4 +71,11 @@ jest.mock('@react-native-async-storage/async-storage', () => ({
 }));
 
 jest.mock('expo-notifications', () => require('./mocks/expo-notifications.mock'));
+
+jest.mock('@expo/vector-icons', () => {
+  const React = require('react');
+  const { Text } = require('react-native');
+  const Icon = (props: { name?: string }) => React.createElement(Text, props, props.name);
+  return { Ionicons: Icon };
+});
 

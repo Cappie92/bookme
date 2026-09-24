@@ -4,7 +4,14 @@ import { FavoritesModal } from '@src/components/FavoritesModal';
 import { removeFromFavorites } from '@src/services/api/favorites';
 import { mockFavorites } from '../../../test-utils/helpers/test-data';
 
-jest.mock('@src/services/api/favorites');
+jest.mock('@src/services/api/favorites', () => {
+  const actual = jest.requireActual('@src/services/api/favorites');
+  return {
+    ...actual,
+    removeFromFavorites: jest.fn(),
+    getAllFavorites: jest.fn(),
+  };
+});
 
 describe('FavoritesModal', () => {
   beforeEach(() => {
@@ -140,7 +147,7 @@ describe('FavoritesModal', () => {
     );
 
     const prevButton = getByTestId('favorites-modal-prev');
-    expect(prevButton.props.disabled).toBe(true);
+    expect(prevButton).toBeDisabled();
   });
 
   it('should disable next button on last page', () => {
@@ -161,7 +168,7 @@ describe('FavoritesModal', () => {
     const nextButton = getByTestId('favorites-modal-next');
     fireEvent.press(nextButton);
 
-    expect(nextButton.props.disabled).toBe(true);
+    expect(nextButton).toBeDisabled();
   });
 
   it('should remove favorite', async () => {
