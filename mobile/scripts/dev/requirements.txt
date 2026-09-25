@@ -1,0 +1,4 @@
+# Dev/test tooling for scripts/dev/generate_app_icons.py
+# and androidAppIcon.contract.test.ts (--measure-json).
+# Not a mobile/backend runtime dependency.
+Pillow>=10.1.0,<12
