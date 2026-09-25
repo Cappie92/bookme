@@ -4,7 +4,7 @@ project: DeDato
 knowledge_class: living
 environment: common
 status: active
-last_verified: 2026-09-24
+last_verified: 2026-09-25
 ---
 
 # CI/CD
@@ -13,30 +13,47 @@ Repository-known GitHub Actions and delivery boundary. Host state, branch protec
 
 ## Root GitHub Actions workflows
 
-GitHub Actions discovers the four workflow files under the repository-root `.github/workflows/`:
+GitHub Actions discovers workflow files only under repository-root `.github/workflows/`:
 
 | Workflow | Trigger | Repository-known action |
 |----------|---------|-------------------------|
+| `tests.yml` | `pull_request`; push to `main` | Application regression: backend pytest, frontend Vitest, mobile Jest unit + integration. Parallel independent jobs. `contents: read`. No deploy. |
 | `gitleaks.yml` | `pull_request_target`; push to `main`/`master`; manual | Checksum-pinned Gitleaks 8.21.2: directed history plus mandatory exact-tree scan; manual full history including merge diffs |
 | `mkdocs.yml` | every push; pull request | Prepares and builds MkDocs in strict mode, then uploads the generated site artifact |
 | `arch-overview.yml` | daily schedule; manual `workflow_dispatch` | Regenerates architecture overview and commits selected generated outputs when they differ |
 | `deploy.yml` | manual `workflow_dispatch` only | Transfers the checkout, rebuilds/recreates Compose application services, runs the migration helper and performs an external HTTP health check |
 
-Only the deploy job declares concurrency: one active run in the fixed `production` group across refs, with `cancel-in-progress: false`. The deploy workflow explicitly grants only `contents: read` to its repository token. Branch protection, required-check selection, environment approvals and external CI remain `UNKNOWN` without external access.
+Only the deploy job declares concurrency: one active run in the fixed `production` group across refs, with `cancel-in-progress: false`. Application tests on `main`/PRs do not auto-deploy. Branch protection, required-check selection, environment approvals and external CI remain `UNKNOWN` without external access.
 
-**Sources:** `.github/workflows/gitleaks.yml`; `.github/workflows/mkdocs.yml`; `.github/workflows/arch-overview.yml`; `.github/workflows/deploy.yml`.
+**Sources:** `.github/workflows/tests.yml`; `.github/workflows/gitleaks.yml`; `.github/workflows/mkdocs.yml`; `.github/workflows/arch-overview.yml`; `.github/workflows/deploy.yml`.
 
-## Pull-request gates
+## Application test workflow
 
-Root repository workflows do not run backend pytest/lint, frontend Vitest/Playwright/lint/build or mobile Jest/Maestro/EAS build as PR jobs. Root PR automation consists of directed-history/current-tree secret gates with trusted security regression tests, and strict MkDocs build. These workflow runs are repository capabilities; whether either is configured as a required branch-protection gate is `UNKNOWN`.
+`.github/workflows/tests.yml` is the current repository-hosted application gate. Clean-checkout GitHub Actions runs of all three jobs have **passed**.
+
+| Job | Runtime | Install | Command |
+|-----|---------|---------|---------|
+| `backend` | Python 3.9 | `pip install -r requirements.txt` from `backend/` | `python -m pytest` |
+| `frontend` | Node 20 | `npm ci` in `frontend/` | `npm test` |
+| `mobile` | Node 20; Python 3.9 for icon tooling only | `pip install -r scripts/dev/requirements.txt` then `npm ci` in `mobile/` | `npm test` then `npm run test:integration` |
+
+Mobile icon tooling is `Pillow>=10.1.0,<12` in `mobile/scripts/dev/requirements.txt`. It exists so `androidAppIcon.contract.test.ts` can run `scripts/dev/generate_app_icons.py --measure-json`. It is **not** a backend or mobile runtime dependency.
+
+Not current root CI jobs: Playwright, Maestro, EAS, Docker deploy, black/isort/flake8/mypy, coverage/Codecov, Redis service. Lint/typecheck/coverage are deferred quality tooling, not present gates. Suite ownership and local commands: [Testing strategy](testing-strategy.md).
+
+A nested `backend/.github/workflows/ci.yml` previously described pytest-cov, Redis, black/isort/flake8/mypy and Codecov on Python 3.11. GitHub never executed it. The file was **removed**. Those extra checks were never functioning GitHub checks.
+
+**Sources:** `.github/workflows/tests.yml`; `mobile/scripts/dev/requirements.txt`; `backend/Dockerfile`; `backend/pyproject.toml`; `frontend/Dockerfile.prod`; `frontend/package.json`; `mobile/package.json`; [Testing strategy](testing-strategy.md).
+
+## Other pull-request / push gates
+
+Gitleaks (directed history + current tree) and strict MkDocs build remain separate workflows. Whether `tests.yml` or any other workflow is a required branch-protection check is `UNKNOWN`.
 
 MkDocs uses `docs_dir: docs`; canonical `Knowledge/` is outside that build and therefore is not validated by Docs CI. Package-local Knowledge link/source checks currently depend on the documentation workflow used during this Knowledge track, not a repository action.
 
-`backend/.github/workflows/ci.yml` describes backend pytest-with-coverage plus black/isort/flake8/mypy steps, but its nested location is outside the repository-root workflow discovery directory. It is therefore repository workflow-shaped capability, not an executed GitHub Actions gate for this repository. The actual executable test suites remain catalogued in [Testing strategy](testing-strategy.md).
-
 Mobile EAS build/submit profiles exist in `mobile/eas.json`, but no root workflow invokes EAS. They are build capability, not a root CI or deployment gate.
 
-**Sources:** root workflow job/step inventory; `backend/.github/workflows/ci.yml`; `mkdocs.yml`; `docs.sh`; `frontend/package.json`; `mobile/package.json`; `mobile/eas.json`; [Testing strategy](testing-strategy.md).
+**Sources:** `.github/workflows/gitleaks.yml`; `.github/workflows/mkdocs.yml`; `mkdocs.yml`; `docs.sh`; `mobile/eas.json`.
 
 ## Current production delivery method
 
@@ -60,7 +77,7 @@ GitHub `deploy.yml` остаётся repository-defined manual workflow, но **
 9. component rollback при failure;
 10. migrations только при явной необходимости.
 
-Current production runtime is split: backend `dedato_backend:96f3f27`, frontend `dedato_frontend:fde8033-prod`. Canonical `main` tip is `fde8033` (iOS 1.1.0 (13) / Android 1.1.0 (6) plus committed free-companion/legal history). Production backend is **not** at `fde8033`. Details of unsuccessful helper implementations are transient and not SSOT.
+Current production runtime is split: backend `dedato_backend:96f3f27`, frontend `dedato_frontend:fde8033-prod`. Canonical `main` / `origin/main` tip is `3aba6d7` (`ci: install mobile icon tooling dependency`). Store versions remain iOS 1.1.0 (13) / Android 1.1.0 (6). Production backend is **not** at current `main`. Details of unsuccessful helper implementations are transient and not SSOT.
 
 ## Manual staging release gate
 
@@ -69,7 +86,7 @@ Current production runtime is split: backend `dedato_backend:96f3f27`, frontend 
 Текущий production flow:
 
 ```text
-main (backend runtime 96f3f27 / frontend runtime fde8033-prod / tip fde8033)
+main (backend runtime 96f3f27 / frontend runtime fde8033-prod / tip 3aba6d7)
 → separately authorized manual production cutover
 → health/integrity gates
 ```

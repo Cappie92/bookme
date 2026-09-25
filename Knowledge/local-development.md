@@ -4,7 +4,7 @@ project: DeDato
 knowledge_class: living
 environment: common
 status: active
-last_verified: 2026-08-04
+last_verified: 2026-09-25
 ---
 
 # Local development
@@ -66,12 +66,13 @@ Use the package platform scripts only after local Expo/native prerequisites are 
 ## Routine validation
 
 ```bash
-(cd backend && python3 -m pytest tests)
+(cd backend && .venv/bin/python -m pytest)
 (cd frontend && npm test)
-(cd mobile && npm run test:unit)
+(cd mobile && npm test)
+(cd mobile && npm run test:integration)
 ```
 
-Run package install first. Mobile integration and web/mobile E2E are separate commands and have additional environment/data prerequisites described in [Testing strategy](testing-strategy.md). Targeted tests are preferred during iteration; expand before handoff according to affected boundaries.
+Prefer the package venv/lockfile. Mobile integration and `androidAppIcon.contract.test.ts` need Pillow: `pip install -r mobile/scripts/dev/requirements.txt`. Playwright/Maestro and named FAST/FULL/RELEASE tiers are in [Testing strategy](testing-strategy.md). Root application CI is [CI/CD](ci-cd.md).
 
 ## Local E2E and destructive data
 

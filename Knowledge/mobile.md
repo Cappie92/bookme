@@ -4,7 +4,7 @@ project: DeDato
 knowledge_class: living
 environment: common
 status: active
-last_verified: 2026-09-24
+last_verified: 2026-09-25
 ---
 
 # Mobile architecture
@@ -127,4 +127,4 @@ Stale-token behavior: старый Android token может быть помеч�
 
 Canonical visual source: `mobile/assets/icon.png`. Adaptive foreground раньше занимал ~60% canvas и после Android inner viewport (~2/3) выглядел ~90%. Current target: adaptive foreground ≈ footprint `icon.png` × 2/3 ≈ 40% full foreground canvas. Android build 6 smoke PASS. Иконка не является active blocker.
 
-**Sources:** `mobile/assets/icon.png`; `mobile/assets/adaptive-icon.png`; `mobile/scripts/generate_app_icons.py`.
+**Sources:** `mobile/assets/icon.png`; `mobile/assets/adaptive-icon.png`; `mobile/scripts/dev/generate_app_icons.py`.

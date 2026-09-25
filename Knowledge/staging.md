@@ -203,7 +203,7 @@ Infrastructure smoke is `REPORTED PASSED`:
 - production clone loaded;
 - migrations applied through `20260812_session_version` with integrity check `ok`.
 
-Repository/integration verification is `REPORTED`:
+Repository/integration verification is `REPORTED` from the **2026-08-17** staging handoff (not the current canonical pytest baseline in [Testing strategy](testing-strategy.md)):
 
 - focused integration: `81 passed`;
 - migration regression: `6 passed`;

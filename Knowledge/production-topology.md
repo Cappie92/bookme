@@ -4,7 +4,7 @@ project: DeDato
 knowledge_class: living
 environment: prod
 status: active
-last_verified: 2026-09-24
+last_verified: 2026-09-25
 ---
 
 # Production topology
@@ -32,7 +32,7 @@ Deploy procedure принадлежит [CI/CD](ci-cd.md) и [Deployment artifac
 |---------|---------------|------------|
 | Public site | `https://dedato.ru` | REPORTED |
 | Production server | `193.160.208.206` | REPORTED |
-| Canonical git `main` / `origin/main` | `fde8033` | CONFIRMED repository; `chore: bump iOS build to 13` |
+| Canonical git `main` / `origin/main` | `3aba6d7` | CONFIRMED repository; `ci: install mobile icon tooling dependency`. iOS 1.1.0 (13) / Android 1.1.0 (6) unchanged. |
 | Production backend image | `dedato_backend:96f3f27` | REPORTED authorized deploy 2026-09-22; **not** redeployed for free-companion; **not** equal to current `main` |
 | Production frontend image | `dedato_frontend:fde8033-prod` | REPORTED authorized frontend update for UA / Privacy / free-companion legal surface |
 | Backend release worktree | `/opt/dedato-release-96f3f27` | REPORTED; backend cut pointer, not proof that frontend is still `96f3f27-prod` |
@@ -46,7 +46,7 @@ Deploy procedure принадлежит [CI/CD](ci-cd.md) и [Deployment artifac
 | `DEMO_MASTER_USER_ID` | configured | REPORTED; category only, value never stored here |
 | Push sender | registration+notifications enabled; allowlist `user_id 11` | REPORTED; not global rollout |
 
-Marketing version **1.1.0**. Production runtime is **intentionally split**: backend `96f3f27`, frontend `fde8033-prod`. Do **not** state that production backend equals current `main` (`fde8033`). Do **not** state that production frontend is still `96f3f27-prod`.
+Marketing version **1.1.0**. Production runtime is **intentionally split**: backend `96f3f27`, frontend `fde8033-prod`. Do **not** state that production backend equals current `main` (`3aba6d7`). Do **not** state that production frontend is still `96f3f27-prod`.
 
 Backend `backend/services/notification_events.py` from `3639e74` (structured `actor_user_id` logging) remains in `main` and is **still not** in production backend `96f3f27`. Observability-only; no schema migration. Mobile 1.1.0 (13)/(6) include the Android push lifecycle from `3639e74` plus later free-companion iOS work.
 

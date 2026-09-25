@@ -4,21 +4,21 @@ project: DeDato
 knowledge_class: living
 environment: common
 status: active
-last_verified: 2026-08-17
+last_verified: 2026-09-25
 ---
 
 # Debt — testing, delivery and onboarding
 
 Confirmed gaps in executable quality gates and developer entrypoints.
 
-## Application tests are not PR gates
+## Application CI does not include Playwright, Maestro, lint, or coverage
 
-- **Severity:** `high`.
+- **Severity:** `medium`.
 - **Confidence:** CONFIRMED for repository workflows; external branch protection is UNKNOWN.
-- **Evidence:** pull requests run incremental gitleaks and MkDocs only. Backend pytest, web lint/build/Vitest/Playwright and mobile Jest/build have no repository workflow jobs.
-- **Failure scenario:** application regressions can reach merge/deploy without an automated repository-hosted application gate.
-- **Sources:** `.github/workflows/`; backend/frontend/mobile test manifests.
-- **Required action:** separate CI design/implementation defines required suites by change scope.
+- **Evidence:** `.github/workflows/tests.yml` runs backend `python -m pytest`, frontend `npm test`, and mobile `npm test` plus `npm run test:integration` on `pull_request` and push to `main`. Clean-checkout GitHub Actions jobs have passed. Playwright, Maestro, EAS, black/isort/flake8/mypy and Codecov are **not** current root jobs. Nested `backend/.github/workflows/ci.yml` was removed; it was never a functioning GitHub check.
+- **Failure scenario:** E2E, native device, and static-analysis regressions can still merge without a repository-hosted gate; whether `tests.yml` is required on the branch is UNKNOWN.
+- **Sources:** `.github/workflows/tests.yml`; [CI/CD](ci-cd.md); [Testing strategy](testing-strategy.md).
+- **Required action:** optional later gates for Playwright/Maestro/lint/coverage; confirm branch-protection required checks.
 
 ## Deployment starts without an application validation gate
 
@@ -66,10 +66,16 @@ Confirmed gaps in executable quality gates and developer entrypoints.
 ## Test discovery and coverage are fragmented
 
 - **Confidence:** CONFIRMED.
-- **Evidence:** canonical backend config excludes 29 top-level `backend/test_*.py`; web has no coverage threshold; mobile package scripts bypass the generic Jest config that declares 70% thresholds; mobile integration/Maestro are separate opt-in suites.
+- **Evidence:** canonical backend config excludes 29 top-level `backend/test_*.py`; web has no coverage threshold; mobile package scripts bypass the generic Jest config that declares 70% thresholds; Maestro remains a separate device opt-in suite. Mobile integration is part of root CI and local `npm run test:integration`.
 - **Failure scenario:** `make test` or `npm test` is reported as “all tests” although substantial suites/thresholds were not exercised.
 - **Sources:** `backend/pyproject.toml`; `backend/Makefile`; test file inventory; frontend/mobile manifests and test configs.
 - **Required action:** define named test tiers and machine-readable aggregate gates.
+
+## Jest worker leak, Playwright/Maestro, and other test-infra debt
+
+- **Confidence:** CONFIRMED; not store/release blockers.
+- **Evidence:** unit Jest can force-exit a worker after `mobile/__tests__/unit/components/build7Stabilization.test.tsx`; Playwright and Maestro are not root CI; `time.sleep(1.1)` remains in subscription points redemption; `can_add_page_module` tests stay skipped; react-test-renderer deprecation warnings are warnings only.
+- **Required action:** separate tracks (next: Jest worker leak audit). Do not treat as App Review / RuStore blockers.
 
 ## Native E2E application identifier drift
 
