@@ -1,14 +1,18 @@
 # -*- coding: utf-8 -*-
 """Тесты публичного API записи к мастеру: GET /api/public/masters/{slug}."""
 import pytest
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
+from zoneinfo import ZoneInfo
 
 from auth import get_password_hash
 from models import (
+    AvailabilitySlot,
     LoyaltyDiscount,
     LoyaltyDiscountType,
     Master,
+    MasterSchedule,
     MasterService,
+    OwnerType,
     PersonalDiscount,
     Service,
     User,
@@ -357,3 +361,116 @@ def test_booking_price_preview_client_loyalty_cap_percent(
     assert d["final_price"] == 750.0
     assert d["use_loyalty_points"] is True
     assert d["points_payment_available"] is True
+
+
+WORK_DATE = date(2030, 7, 1)  # Monday; AvailabilitySlot day_of_week = 1
+
+
+def _login_client(client, phone, password="testpassword"):
+    login = client.post(
+        "/api/auth/login",
+        json={"phone": phone, "password": password},
+    )
+    assert login.status_code == 200, login.text
+    return {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+
+def _add_personal_calendar_granules(db, master_id, work_date, start_hour=10, end_hour=20):
+    cursor = datetime.combine(work_date, time(start_hour, 0))
+    day_end = datetime.combine(work_date, time(end_hour, 0))
+    while cursor < day_end:
+        nxt = cursor + timedelta(minutes=30)
+        db.add(
+            MasterSchedule(
+                master_id=master_id,
+                salon_id=None,
+                date=work_date,
+                start_time=cursor.time(),
+                end_time=nxt.time(),
+                is_available=True,
+            )
+        )
+        cursor = nxt
+    db.flush()
+
+
+def test_public_availability_weekly_only_does_not_expose_unbookable_slot(
+    client, db, public_master, public_master_service, test_user
+):
+    """GET must not show a weekly AvailabilitySlot that POST create would reject."""
+    phone = test_user.phone
+    for dow in range(1, 8):
+        db.add(
+            AvailabilitySlot(
+                owner_type=OwnerType.MASTER,
+                owner_id=public_master.id,
+                day_of_week=dow,
+                start_time=time(10, 0),
+                end_time=time(20, 0),
+            )
+        )
+    db.commit()
+
+    r = client.get(
+        "/api/public/masters/test-slug/availability",
+        params={
+            "from_date": WORK_DATE.isoformat(),
+            "to_date": WORK_DATE.isoformat(),
+            "service_id": public_master_service.id,
+        },
+    )
+    assert r.status_code == 200, r.text
+    slots = r.json().get("slots") or []
+    assert slots == []
+
+    tz = ZoneInfo("Europe/Moscow")
+    st = datetime(WORK_DATE.year, WORK_DATE.month, WORK_DATE.day, 11, 0, tzinfo=tz)
+    et = st + timedelta(minutes=public_master_service.duration or 60)
+    post = client.post(
+        "/api/public/masters/test-slug/bookings",
+        json={
+            "service_id": public_master_service.id,
+            "start_time": st.isoformat(),
+            "end_time": et.isoformat(),
+        },
+        headers=_login_client(client, phone),
+    )
+    assert post.status_code == 400, post.text
+    detail = (post.json().get("detail") or "").lower()
+    assert "не работает" in detail
+
+
+def test_public_availability_dated_schedule_get_then_post_succeeds(
+    client, db, public_master, public_master_service, test_user
+):
+    """Dated personal MasterSchedule: GET slot is accepted by POST create."""
+    phone = test_user.phone
+    _add_personal_calendar_granules(db, public_master.id, WORK_DATE)
+    db.commit()
+
+    r = client.get(
+        "/api/public/masters/test-slug/availability",
+        params={
+            "from_date": WORK_DATE.isoformat(),
+            "to_date": WORK_DATE.isoformat(),
+            "service_id": public_master_service.id,
+        },
+    )
+    assert r.status_code == 200, r.text
+    slots = r.json().get("slots") or []
+    assert len(slots) > 0
+    slot = slots[0]
+
+    post = client.post(
+        "/api/public/masters/test-slug/bookings",
+        json={
+            "service_id": public_master_service.id,
+            "start_time": slot["start_time"],
+            "end_time": slot["end_time"],
+        },
+        headers=_login_client(client, phone),
+    )
+    assert post.status_code == 200, post.text
+    body = post.json()
+    assert body.get("id") is not None
+    assert str(body.get("public_reference") or "").strip()

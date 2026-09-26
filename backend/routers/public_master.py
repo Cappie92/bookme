@@ -345,7 +345,12 @@ def get_public_availability(
     service_id: int,
     db: Session = Depends(get_db),
 ) -> Any:
-    """Доступные слоты в диапазоне дат. Единый источник: get_available_slots."""
+    """Доступные слоты в диапазоне дат.
+
+    Кандидаты из get_available_slots, затем каждый интервал проходит
+    check_master_working_hours — ту же dated MasterSchedule-проверку, что POST create.
+    Weekly AvailabilitySlot без личного календаря на дату не попадает в ответ.
+    """
     master = _get_master_by_slug(db, slug)
     if not master:
         raise HTTPException(status_code=404, detail="Мастер не найден")
@@ -384,6 +389,15 @@ def get_public_availability(
                 st_a, et_a = _slot_bounds_in_master_tz(st, et, tz)
                 # Не отдаём уже начавшиеся слоты (единая логика для календаря и списка времён)
                 if st_a <= now_master:
+                    continue
+                if not check_master_working_hours(
+                    db,
+                    master.id,
+                    st_a,
+                    et_a,
+                    is_salon_work=False,
+                    salon_id=None,
+                ):
                     continue
                 slots_out.append(
                     PublicSlotOut(

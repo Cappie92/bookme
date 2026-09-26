@@ -20,6 +20,17 @@ import {
   sendClientCalendarEmail,
 } from '../../utils/clientBookingCalendarActions'
 import { CalendarGrid } from './PublicBookingCalendarGrid'
+import {
+  adoptOrStartPublicBookingCreate,
+  findServiceByDraftId,
+  isServerConfirmedBookingReceipt,
+  masterServiceIdsEqual,
+  normalizeMasterServiceId,
+  publicBookingCreateKey,
+  releasePublicBookingCreateAttempt,
+  shouldRestorePublicBookingSuccess,
+  shouldRestoreSuccessFromOccupiedConflict,
+} from './publicBookingCreateLifecycle'
 
 const DRAFT_KEY = 'public_booking_draft'
 const DAYS_AHEAD = 14
@@ -67,13 +78,6 @@ function hhmmToMinutes(hhmm) {
   const m = parseInt(parts[1], 10)
   if (Number.isNaN(h) || Number.isNaN(m)) return null
   return h * 60 + m
-}
-
-/** Единый числовой id для сопоставления услуги из профиля с loyalty_visual.service_discounts[].master_service_id. */
-function normalizeMasterServiceId(raw) {
-  if (raw === null || raw === undefined) return null
-  const n = typeof raw === 'string' ? parseInt(raw, 10) : Number(raw)
-  return Number.isFinite(n) ? n : null
 }
 
 /** Карта master_service_id → запись скидки (ключи только number — без string/number рассинхрона). */
@@ -203,6 +207,7 @@ function writeLastBookingSuccess(payload) {
     rule_name,
     condition_type,
   } = payload
+  if (!isServerConfirmedBookingReceipt({ id, public_reference })) return
   try {
     sessionStorage.setItem(
       LAST_BOOKING_SUCCESS_KEY,
@@ -234,11 +239,6 @@ function clearLastBookingSuccess() {
   } catch {
     /* ignore */
   }
-}
-
-function lastBookingSuccessMatchesSlot(rec, serviceId, slot) {
-  if (!rec || !slot || serviceId == null) return false
-  return rec.service_id === serviceId && rec.start_time === slot.start_time && rec.end_time === slot.end_time
 }
 
 const LOYALTY_HINT_TITLE_BY_TYPE = {
@@ -486,11 +486,10 @@ export default function PublicBookingWizard({
 }) {
   const { openAuthModal } = useAuth()
   const navigate = useNavigate()
-  const autoSubmitSeqRef = useRef(0)
   const mountedRef = useRef(true)
-  /** Один исходящий POST create на /bookings: блокирует гонку auto-submit × ручной «Записаться» (второй POST → 400). */
+  /** Один исходящий POST create на /bookings: same-tab inFlight + draft.submitted до fetch. */
   const publicBookingCreateInFlightRef = useRef(false)
-  /** Актуальный profile: читать в post-login effect из ref, чтобы не включать `profile` в deps (там новый объект с каждого fetch → abort in-flight). */
+  /** Актуальный profile: читать в post-login effect из ref, чтобы не включать `profile` в deps. */
   const profileForAutoRef = useRef(profile)
   profileForAutoRef.current = profile
   const [selectedService, setSelectedService] = useState(null)
@@ -823,15 +822,12 @@ export default function PublicBookingWizard({
     }
     if (!draft || draft.slug !== slug) return
     if (draft.intent !== 'create_after_auth') return
-    // Идемпотентность: если auto-submit уже стартовал (submitted) — не стартуем второй раз
+    // submitted: не выходим — adoptOrStart подхватит in-flight POST после StrictMode remount.
     if (draft.status === 'submitted') {
       const submittedAt = typeof draft.submitted_at === 'number' ? draft.submitted_at : 0
-      const ageMs = submittedAt ? Date.now() - submittedAt : 0
-      // safety valve: если submitted завис слишком давно — разрешаем повтор как pending
-      if (ageMs > 30_000) {
+      const submittedAgeMs = submittedAt ? Date.now() - submittedAt : 0
+      if (submittedAgeMs > 30_000) {
         updateDraftStatus({ status: 'pending', submitted_at: null })
-      } else {
-        return
       }
     }
     if (draft.status === 'done' && (draft.created_booking_id || draft.created_public_reference)) {
@@ -858,7 +854,7 @@ export default function PublicBookingWizard({
       setSelectedSlot(null)
       return
     }
-    const svc = p.services?.find((s) => s.id === draft.service_id)
+    const svc = findServiceByDraftId(p.services, draft.service_id)
     if (!svc) {
       clearDraft()
       return
@@ -885,9 +881,6 @@ export default function PublicBookingWizard({
       return
     }
 
-    const ac = new AbortController()
-    const requestSeq = ++autoSubmitSeqRef.current
-    const isActive = () => mountedRef.current && autoSubmitSeqRef.current === requestSeq
     const url = `/api/public/masters/${encodeURIComponent(slug)}/bookings`
     const payload = {
       service_id: draft.service_id,
@@ -899,16 +892,12 @@ export default function PublicBookingWizard({
       console.debug('[public-booking] POST booking (draft fresh, auto after login)', { url, payload, ageMs })
     }
 
-    ;(async () => {
-      publicBookingCreateInFlightRef.current = true
-      if (isActive()) {
-        setSubmitting(true)
-        setSubmitError(null)
-      }
-      // помечаем, что auto-submit начался, чтобы не сделать второй POST при повторных эффектах
-      updateDraftStatus({ status: 'submitted', submitted_at: Date.now() })
-      metrikaGoal(M.PUBLIC_BOOKING_FORM_SUBMIT, { slug, context: 'public_wizard_post_login' })
-      try {
+    const { promise: createPromise, claimed } = adoptOrStartPublicBookingCreate({
+      key: publicBookingCreateKey(slug, payload),
+      inFlightRef: publicBookingCreateInFlightRef,
+      draft,
+      markSubmitted: (ts) => updateDraftStatus({ status: 'submitted', submitted_at: ts }),
+      startFn: async () => {
         const res = await fetch(url, {
           method: 'POST',
           headers: {
@@ -916,7 +905,6 @@ export default function PublicBookingWizard({
             Authorization: `Bearer ${localStorage.getItem('access_token')}`,
           },
           body: JSON.stringify(payload),
-          signal: ac.signal,
         })
         const errBody = !res.ok ? await res.json().catch(() => ({})) : null
         if (!res.ok) {
@@ -941,6 +929,9 @@ export default function PublicBookingWizard({
             preview: pricePreviewRef.current,
           }
         )
+        if (!isServerConfirmedBookingReceipt(normalizedResult)) {
+          throw new Error('Сервер вернул 200 без номера записи. Обновите страницу и попробуйте ещё раз.')
+        }
         devLogPublicBookingCreateSuccess('post_login_auto_submit', result, normalizedResult)
         writeLastBookingSuccess(
           bookingSuccessPayloadForStorage(slug, normalizedResult, {
@@ -950,20 +941,33 @@ export default function PublicBookingWizard({
           })
         )
         {
-          // Успех на сервере не должен теряться из‑за гонки isActive: снимаем «submitted» с draft,
-          // если в storage всё ещё тот же create_after_auth payload.
           const d = getDraft()
           if (
             d &&
             d.slug === slug &&
             d.intent === 'create_after_auth' &&
-            d.service_id === payload.service_id &&
+            masterServiceIdsEqual(d.service_id, payload.service_id) &&
             d.start_time === payload.start_time &&
             d.end_time === payload.end_time
           ) {
             clearDraft()
           }
         }
+        return normalizedResult
+      },
+    })
+    if (!createPromise) return
+
+    ;(async () => {
+      if (mountedRef.current) {
+        setSubmitting(true)
+        setSubmitError(null)
+      }
+      if (claimed) {
+        metrikaGoal(M.PUBLIC_BOOKING_FORM_SUBMIT, { slug, context: 'public_wizard_post_login' })
+      }
+      try {
+        const normalizedResult = await createPromise
         if (mountedRef.current) {
           setPostLoginRestoreNotice(false)
           setSuccess(normalizedResult)
@@ -971,29 +975,18 @@ export default function PublicBookingWizard({
           setSelectedDate(null)
           setSelectedSlot(null)
           onBookingSuccess?.(normalizedResult)
-          // Если effect уже rerun'нулся, finally не снимет submitting — снимаем вручную.
-          if (!isActive()) setSubmitting(false)
         }
       } catch (err) {
-        if (err?.name === 'AbortError') return
-        if (!isActive()) return
-        const msg = (err.message || '').toString()
-        const busy =
-          msg.includes('уже занято') ||
-          msg.includes('уже занят') ||
-          msg.toLowerCase().includes('already') ||
-          msg.includes('занят')
         const last = readLastBookingSuccess(slug)
         if (
-          busy &&
-          last &&
-          lastBookingSuccessMatchesSlot(last, payload.service_id, {
-            start_time: payload.start_time,
-            end_time: payload.end_time,
+          shouldRestoreSuccessFromOccupiedConflict({
+            message: err?.message,
+            receipt: last,
+            serviceId: payload.service_id,
+            slot: { start_time: payload.start_time, end_time: payload.end_time },
           })
         ) {
           clearDraft()
-          setSubmitError(null)
           const restored = normalizePublicBookingCreateResponse({
             id: last.id,
             public_reference: last.public_reference || '',
@@ -1007,34 +1000,43 @@ export default function PublicBookingWizard({
             rule_name: last.rule_name,
             condition_type: last.condition_type,
           })
-          setSuccess(restored)
-          setSelectedService(null)
-          setSelectedDate(null)
-          setSelectedSlot(null)
-          onBookingSuccess?.(restored)
+          if (mountedRef.current) {
+            setSubmitError(null)
+            setSuccess(restored)
+            setSelectedService(null)
+            setSelectedDate(null)
+            setSelectedSlot(null)
+            onBookingSuccess?.(restored)
+          }
           return
         }
         updateDraftStatus({ status: 'pending', submitted_at: null })
-        setSubmitError(err.message || 'Ошибка создания записи')
-        onBookingError?.(err.message)
+        if (mountedRef.current) {
+          setSubmitError(err.message || 'Ошибка создания записи')
+          onBookingError?.(err.message)
+        }
       } finally {
-        publicBookingCreateInFlightRef.current = false
-        if (isActive()) setSubmitting(false)
+        if (claimed) releasePublicBookingCreateAttempt(publicBookingCreateInFlightRef)
+        if (mountedRef.current) setSubmitting(false)
       }
     })()
 
-    return () => {
-      ac.abort()
-    }
   }, [slug, currentUser, success, profile?.master_id ?? 0]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  /** Если запись уже создана, но React-state успеха потерян — восстановить success-screen по sessionStorage + текущему слоту. */
+  /** Если запись уже создана, но React-state успеха потерян — восстановить success-screen по sessionStorage. */
   useEffect(() => {
     if (success || !slug) return
     const r = readLastBookingSuccess(slug)
-    if (!r) return
-    if (!selectedService || !selectedSlot) return
-    if (!lastBookingSuccessMatchesSlot(r, selectedService.id, selectedSlot)) return
+    if (
+      !shouldRestorePublicBookingSuccess({
+        selectedService,
+        selectedSlot,
+        hasActiveDraft: !!getDraft(),
+        receipt: r,
+      })
+    ) {
+      return
+    }
     clearDraft()
     setPostLoginRestoreNotice(false)
     setSubmitError(null)
@@ -1060,7 +1062,7 @@ export default function PublicBookingWizard({
 
   const handleSelectService = (s) => {
     const prevLast = readLastBookingSuccess(slug)
-    if (prevLast && prevLast.service_id !== s.id) clearLastBookingSuccess()
+    if (prevLast && !masterServiceIdsEqual(prevLast.service_id, s.id)) clearLastBookingSuccess()
     setSelectedService(s)
     setSelectedDate(null)
     setSelectedSlot(null)
@@ -1099,20 +1101,9 @@ export default function PublicBookingWizard({
     if (!canSubmit || bookingBlocked) return
     if (!currentUser) return
     if (success) return
-    if (publicBookingCreateInFlightRef.current) return
     const dBlock = getDraft()
-    if (
-      dBlock &&
-      dBlock.slug === slug &&
-      dBlock.intent === 'create_after_auth' &&
-      dBlock.status === 'submitted'
-    ) {
-      return
-    }
-    setSubmitError(null)
-    publicBookingCreateInFlightRef.current = true
-    setSubmitting(true)
-    metrikaGoal(M.PUBLIC_BOOKING_FORM_SUBMIT, { slug, context: 'public_wizard' })
+    const draftForClaim =
+      dBlock && dBlock.slug === slug && dBlock.intent === 'create_after_auth' ? dBlock : null
     const url = `/api/public/masters/${encodeURIComponent(slug)}/bookings`
     const useLoyalty =
       !!(usePoints && eligibility && eligibility.points != null && eligibility.points > 0)
@@ -1125,54 +1116,73 @@ export default function PublicBookingWizard({
     if (typeof __DEV__ !== 'undefined' && __DEV__) {
       console.debug('[public-booking] POST booking', { url, payload })
     }
-    try {
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('access_token')}`,
-        },
-        body: JSON.stringify(payload),
-      })
-      if (typeof __DEV__ !== 'undefined' && __DEV__) {
-        console.debug('[public-booking] POST response', { status: res.status, ok: res.ok })
-      }
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}))
-        const msg = errData.detail || errData.message
-        if (typeof __DEV__ !== 'undefined' && __DEV__) {
-          console.debug('[public-booking] POST booking error', { status: res.status, body: errData })
-        }
-        throw new Error(
-          typeof msg === 'string' && msg.trim()
-            ? msg
-            : 'Не удалось создать запись. Попробуйте выбрать другое время или повторите позже.'
-        )
-      }
-      let result
-      try {
-        result = await res.json()
-      } catch {
-        throw new Error('Сервер вернул 200, но ответ не удалось прочитать. Обновите страницу и попробуйте ещё раз.')
-      }
-      const normalizedResult = fillPublicBookingCreateSummaryGaps(
-        normalizePublicBookingCreateResponse(result),
-        {
-          serviceName: selectedService?.name,
-          startTime: selectedSlot?.start_time,
-          endTime: selectedSlot?.end_time,
-          preview: pricePreviewRef.current,
-        }
-      )
-      devLogPublicBookingCreateSuccess('wizard_submit', result, normalizedResult)
-      writeLastBookingSuccess(
-        bookingSuccessPayloadForStorage(slug, normalizedResult, {
-          service_id: selectedService.id,
-          start_time: selectedSlot.start_time,
-          end_time: selectedSlot.end_time,
+    const { promise: createPromise, claimed } = adoptOrStartPublicBookingCreate({
+      key: publicBookingCreateKey(slug, payload),
+      inFlightRef: publicBookingCreateInFlightRef,
+      draft: draftForClaim,
+      markSubmitted: (ts) => {
+        if (draftForClaim) updateDraftStatus({ status: 'submitted', submitted_at: ts })
+      },
+      startFn: async () => {
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${localStorage.getItem('access_token')}`,
+          },
+          body: JSON.stringify(payload),
         })
-      )
-      clearDraft()
+        if (typeof __DEV__ !== 'undefined' && __DEV__) {
+          console.debug('[public-booking] POST response', { status: res.status, ok: res.ok })
+        }
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}))
+          const msg = errData.detail || errData.message
+          if (typeof __DEV__ !== 'undefined' && __DEV__) {
+            console.debug('[public-booking] POST booking error', { status: res.status, body: errData })
+          }
+          throw new Error(
+            typeof msg === 'string' && msg.trim()
+              ? msg
+              : 'Не удалось создать запись. Попробуйте выбрать другое время или повторите позже.'
+          )
+        }
+        let result
+        try {
+          result = await res.json()
+        } catch {
+          throw new Error('Сервер вернул 200, но ответ не удалось прочитать. Обновите страницу и попробуйте ещё раз.')
+        }
+        const normalizedResult = fillPublicBookingCreateSummaryGaps(
+          normalizePublicBookingCreateResponse(result),
+          {
+            serviceName: selectedService?.name,
+            startTime: selectedSlot?.start_time,
+            endTime: selectedSlot?.end_time,
+            preview: pricePreviewRef.current,
+          }
+        )
+        if (!isServerConfirmedBookingReceipt(normalizedResult)) {
+          throw new Error('Сервер вернул 200 без номера записи. Обновите страницу и попробуйте ещё раз.')
+        }
+        devLogPublicBookingCreateSuccess('wizard_submit', result, normalizedResult)
+        writeLastBookingSuccess(
+          bookingSuccessPayloadForStorage(slug, normalizedResult, {
+            service_id: selectedService.id,
+            start_time: selectedSlot.start_time,
+            end_time: selectedSlot.end_time,
+          })
+        )
+        clearDraft()
+        return normalizedResult
+      },
+    })
+    if (!createPromise) return
+    setSubmitError(null)
+    setSubmitting(true)
+    if (claimed) metrikaGoal(M.PUBLIC_BOOKING_FORM_SUBMIT, { slug, context: 'public_wizard' })
+    try {
+      const normalizedResult = await createPromise
       setPostLoginRestoreNotice(false)
       setSuccess(normalizedResult)
       setSelectedService(null)
@@ -1180,19 +1190,14 @@ export default function PublicBookingWizard({
       setSelectedSlot(null)
       onBookingSuccess?.(normalizedResult)
     } catch (err) {
-      const msg = (err.message || '').toString()
-      const busy =
-        msg.includes('уже занято') ||
-        msg.includes('уже занят') ||
-        msg.toLowerCase().includes('already') ||
-        msg.includes('занят')
       const last = readLastBookingSuccess(slug)
       if (
-        busy &&
-        last &&
-        selectedService &&
-        selectedSlot &&
-        lastBookingSuccessMatchesSlot(last, selectedService.id, selectedSlot)
+        shouldRestoreSuccessFromOccupiedConflict({
+          message: err?.message,
+          receipt: last,
+          serviceId: selectedService?.id,
+          slot: selectedSlot,
+        })
       ) {
         clearDraft()
         setSubmitError(null)
@@ -1215,13 +1220,14 @@ export default function PublicBookingWizard({
         setSelectedSlot(null)
         onBookingSuccess?.(restored)
       } else {
+        updateDraftStatus({ status: 'pending', submitted_at: null })
         setSubmitError(
           err.message || 'Не удалось создать запись. Попробуйте выбрать другое время или повторите позже.'
         )
         onBookingError?.(err.message)
       }
     } finally {
-      publicBookingCreateInFlightRef.current = false
+      if (claimed) releasePublicBookingCreateAttempt(publicBookingCreateInFlightRef)
       setSubmitting(false)
     }
   }, [
