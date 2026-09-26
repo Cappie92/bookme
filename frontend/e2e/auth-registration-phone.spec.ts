@@ -83,6 +83,8 @@ test.describe('common web registration phone verification', () => {
     expect(await page.evaluate(() => localStorage.getItem('refresh_token'))).toBeNull()
 
     await page.getByTestId('header-login').first().click()
+    await expect(modal).toBeVisible()
+    await expect(modal.locator('input[name="phone"]')).toBeVisible()
     await modal.locator('input[name="phone"]').fill(PHONE)
     await modal.locator('input[name="password"]').fill('testpassword')
     await page.getByTestId('auth-login-submit').click()

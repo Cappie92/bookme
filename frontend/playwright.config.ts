@@ -1,13 +1,16 @@
 import { defineConfig, devices } from '@playwright/test'
+import { resolveE2eBackendURL, resolveE2eBaseURL } from './e2e/localGuard'
 
-const baseURL = process.env.E2E_BASE_URL ?? process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost:5173'
+const baseURL = resolveE2eBaseURL()
+resolveE2eBackendURL()
 
 export default defineConfig({
   testDir: './e2e',
+  testMatch: '**/*.spec.ts',
   globalSetup: './e2e/globalSetup.ts',
-  fullyParallel: true,
+  fullyParallel: false,
   forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 0 : 0,
+  retries: 0,
   workers: 1,
   reporter: 'list',
   timeout: 60000,

@@ -1,6 +1,23 @@
-import { Page } from '@playwright/test'
+import { APIRequestContext, Page } from '@playwright/test'
 import { expect } from '@playwright/test'
 import * as path from 'path'
+import { resolveE2eBackendURL } from './localGuard'
+
+export async function ensureE2eSeed(request: APIRequestContext) {
+  const backend = resolveE2eBackendURL()
+  const res = await request.post(`${backend}/api/dev/e2e/seed`, {
+    data: { reset: true },
+    failOnStatusCode: false,
+  })
+  if (!res.ok()) {
+    const body = await res.text().catch(() => '')
+    throw new Error(
+      `E2E seed failed (${res.status()}) at ${backend}/api/dev/e2e/seed. ` +
+        'Start local backend with DEV_E2E=true ZVONOK_MODE=stub ROBOKASSA_MODE=stub. ' +
+        body.slice(0, 300)
+    )
+  }
+}
 
 const LOGIN_TIMEOUT_MS = 45000
 const NAV_DASHBOARD_TIMEOUT_MS = 20000

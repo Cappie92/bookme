@@ -27,6 +27,10 @@ from models import (
     BookingStatus,
     BookingConfirmation,
     Service,
+    MasterService,
+    MasterSchedule,
+    AvailabilitySlot,
+    OwnerType,
     Subscription,
     SubscriptionPlan,
     SubscriptionType,
@@ -70,6 +74,51 @@ class SeedBody(BaseModel):
     reset: Optional[bool] = False
 
 
+def _ensure_e2e_plans(db: Session) -> tuple[SubscriptionPlan, SubscriptionPlan]:
+    """E2E-only: disposable DBs may lack catalog rows after a schema-only migrate."""
+    free_plan = db.query(SubscriptionPlan).filter(
+        SubscriptionPlan.name == "Free",
+        SubscriptionPlan.subscription_type == SubscriptionType.MASTER,
+    ).first()
+    pro_plan = db.query(SubscriptionPlan).filter(
+        SubscriptionPlan.name == "Pro",
+        SubscriptionPlan.subscription_type == SubscriptionType.MASTER,
+    ).first()
+    if not free_plan:
+        free_plan = SubscriptionPlan(
+            name="Free",
+            display_name="Free",
+            subscription_type=SubscriptionType.MASTER,
+            price_1month=0.0,
+            price_3months=0.0,
+            price_6months=0.0,
+            price_12months=0.0,
+            features={"service_functions": [1], "max_page_modules": 0},
+            limits={"max_future_bookings": 20},
+            is_active=True,
+            display_order=1,
+        )
+        db.add(free_plan)
+        db.flush()
+    if not pro_plan:
+        pro_plan = SubscriptionPlan(
+            name="Pro",
+            display_name="Pro",
+            subscription_type=SubscriptionType.MASTER,
+            price_1month=700.0,
+            price_3months=1890.0,
+            price_6months=3780.0,
+            price_12months=6960.0,
+            features={"service_functions": [1, 2, 5, 6, 7], "has_extended_stats": True},
+            limits={},
+            is_active=True,
+            display_order=3,
+        )
+        db.add(pro_plan)
+        db.flush()
+    return free_plan, pro_plan
+
+
 def _reset_e2e_data(db: Session) -> None:
     """
     Удаляет только E2E-сущности перед новым seed.
@@ -111,6 +160,13 @@ def _reset_e2e_data(db: Session) -> None:
         | (ClientFavorite.master_id.in_(master_ids))
         | (ClientFavorite.indie_master_id.in_(indie_master_ids))
     ).delete(synchronize_session=False)
+    if master_ids:
+        db.query(MasterService).filter(MasterService.master_id.in_(master_ids)).delete(synchronize_session=False)
+        db.query(AvailabilitySlot).filter(
+            AvailabilitySlot.owner_type == OwnerType.MASTER,
+            AvailabilitySlot.owner_id.in_(master_ids),
+        ).delete(synchronize_session=False)
+        db.query(MasterSchedule).filter(MasterSchedule.master_id.in_(master_ids)).delete(synchronize_session=False)
     db.query(Service).filter(Service.indie_master_id.in_(indie_master_ids)).delete(synchronize_session=False)
     db.query(IndieMasterSchedule).filter(
         IndieMasterSchedule.indie_master_id.in_(indie_master_ids)
@@ -144,20 +200,7 @@ async def seed_e2e(
     now = datetime.utcnow()
     today = now.date()
 
-    # Планы
-    free_plan = db.query(SubscriptionPlan).filter(
-        SubscriptionPlan.name == "Free",
-        SubscriptionPlan.subscription_type == SubscriptionType.MASTER,
-    ).first()
-    pro_plan = db.query(SubscriptionPlan).filter(
-        SubscriptionPlan.name == "Pro",
-        SubscriptionPlan.subscription_type == SubscriptionType.MASTER,
-    ).first()
-    if not free_plan or not pro_plan:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Subscription plans Free and Pro must exist. Run migrations.",
-        )
+    free_plan, pro_plan = _ensure_e2e_plans(db)
 
     def get_or_create_user(
         phone: str,
@@ -312,8 +355,75 @@ async def seed_e2e(
             result.append(svc)
         return result
 
+    def ensure_master_services(master: Master, names: list[tuple[str, int, float]]) -> list[MasterService]:
+        existing = db.query(MasterService).filter(MasterService.master_id == master.id).all()
+        result = []
+        for name, duration, price in names:
+            svc = next((s for s in existing if s.name == name), None)
+            if not svc:
+                svc = MasterService(
+                    master_id=master.id,
+                    name=name,
+                    duration=duration,
+                    price=price,
+                )
+                db.add(svc)
+                db.flush()
+            result.append(svc)
+        return result
+
+    def ensure_master_availability(master: Master) -> None:
+        for dow in range(1, 8):
+            existing_slot = db.query(AvailabilitySlot).filter(
+                AvailabilitySlot.owner_type == OwnerType.MASTER,
+                AvailabilitySlot.owner_id == master.id,
+                AvailabilitySlot.day_of_week == dow,
+            ).first()
+            if existing_slot:
+                existing_slot.start_time = time(10, 0)
+                existing_slot.end_time = time(20, 0)
+            else:
+                db.add(AvailabilitySlot(
+                    owner_type=OwnerType.MASTER,
+                    owner_id=master.id,
+                    day_of_week=dow,
+                    start_time=time(10, 0),
+                    end_time=time(20, 0),
+                ))
+            db.flush()
+
+    def ensure_master_calendar(master: Master) -> None:
+        # Public availability+create use dated 30-minute MasterSchedule rows (same as POST /schedule/rules).
+        for i in range(16):
+            d = today + timedelta(days=i)
+            db.query(MasterSchedule).filter(
+                MasterSchedule.master_id == master.id,
+                MasterSchedule.salon_id.is_(None),
+                MasterSchedule.date == d,
+            ).delete(synchronize_session=False)
+            cursor = datetime.combine(d, time(10, 0))
+            day_end = datetime.combine(d, time(20, 0))
+            while cursor < day_end:
+                nxt = cursor + timedelta(minutes=30)
+                db.add(MasterSchedule(
+                    master_id=master.id,
+                    salon_id=None,
+                    date=d,
+                    start_time=cursor.time(),
+                    end_time=nxt.time(),
+                    is_available=True,
+                ))
+                cursor = nxt
+            db.flush()
+
     svcs_a = ensure_services(im_a, [("E2E Стрижка", 30, 1000), ("E2E Окрашивание", 60, 2000)])
     svcs_b = ensure_services(im_b, [("E2E Укладка", 45, 1500)])
+    ensure_master_services(m_a, [("E2E Стрижка", 30, 1000), ("E2E Окрашивание", 60, 2000)])
+    ensure_master_services(m_b, [("E2E Укладка", 45, 1500)])
+    ensure_master_availability(m_a)
+    ensure_master_availability(m_b)
+    ensure_master_calendar(m_a)
+    ensure_master_calendar(m_b)
 
     # Расписание: все дни 1–7 (пн–вс), чтобы слоты были всегда (get_available_slots: day_of_week = date.weekday()+1)
     for im in [im_a, im_b]:

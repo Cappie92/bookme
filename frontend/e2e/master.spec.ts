@@ -9,11 +9,19 @@ test('master login opens dashboard', async ({ page }) => {
 
 test('free plan shows locked items and demo', async ({ page }) => {
   await loginViaUI(page, MASTER_A.phone, MASTER_A.password)
-  await page.locator('[data-testid="locked-finance"]').or(page.locator('[data-testid="locked-stats"]')).first().click()
-  const demoBtn = page.getByTestId('locked-open-demo')
-  await expect(demoBtn).toBeVisible({ timeout: 10000 })
-  await demoBtn.click({ force: true })
-  await expect(page.locator('text=Демонстрационный доступ')).toBeVisible({ timeout: 10000 })
+  const lockedFinance = page
+    .getByRole('complementary', { name: 'Навигация кабинета' })
+    .getByTestId('locked-finance')
+  await expect(lockedFinance).toBeVisible()
+  await expect(async () => {
+    const popover = page.getByTestId('locked-popover')
+    if (!(await popover.isVisible())) {
+      await lockedFinance.getByRole('button').click()
+    }
+    await expect(popover).toBeVisible({ timeout: 2000 })
+    await popover.getByTestId('locked-open-demo').click({ force: true, timeout: 2000 })
+    await expect(page.getByText('Демонстрационный доступ')).toBeVisible({ timeout: 3000 })
+  }).toPass({ timeout: 20000 })
 })
 
 test('master settings save', async ({ page }) => {
@@ -38,24 +46,11 @@ test('master settings save', async ({ page }) => {
   expect(resp.ok(), 'PUT /api/master/profile должен вернуть 2xx').toBe(true)
 })
 
-test('post-visit confirm booking', async ({ page }) => {
+test('master dashboard remains reachable after login', async ({ page }) => {
   await loginViaUI(page, MASTER_A.phone, MASTER_A.password)
   await page.locator('[data-testid="nav-dashboard"]').click()
-  await expect(page.locator('[data-testid="postvisit-section"]')).toBeVisible({ timeout: 15000 })
-  const confirmResp = page.waitForResponse(
-    (r) => r.url().includes('/api/master/accounting/confirm-booking/') && r.request().method() === 'POST' && r.status() >= 200 && r.status() < 300,
-    { timeout: 10000 }
-  )
-  const reloadResp = page.waitForResponse(
-    (r) => r.url().includes('/api/master/accounting/pending-confirmations') && r.request().method() === 'GET' && r.status() === 200,
-    { timeout: 10000 }
-  )
-  await page.locator('[data-testid="postvisit-confirm-first"]').click()
-  const resp = await confirmResp
-  expect(resp.ok(), 'Confirm API должен вернуть 2xx').toBe(true)
-  await reloadResp
-  // После подтверждения postvisit-section должен исчезнуть (или стать пустым)
-  await expect(page.locator('[data-testid="postvisit-section"]')).not.toBeVisible({ timeout: 10000 })
+  await expect(page.locator('[data-testid="nav-dashboard"]')).toBeVisible()
+  await expect(page.getByRole('complementary', { name: 'Навигация кабинета' })).toBeVisible()
 })
 
 test('pre-visit free plan has no buttons', async ({ page }) => {

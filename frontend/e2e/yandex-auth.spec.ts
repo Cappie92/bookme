@@ -1,11 +1,21 @@
 import { test, expect } from '@playwright/test'
 
 async function navigateSpa(page, path: string) {
-  await page.goto('/')
-  await page.evaluate((nextPath) => {
-    window.history.pushState({}, '', nextPath)
-    window.dispatchEvent(new PopStateEvent('popstate'))
-  }, path)
+  await page.goto(path)
+}
+
+function oauthUser(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 100,
+    email: 'oauth-client@example.com',
+    phone: '+79005550001',
+    phone_required: false,
+    phone_verified: true,
+    role: 'client',
+    full_name: 'OAuth Client',
+    web_session_origin: null,
+    ...overrides,
+  }
 }
 
 test.describe('Yandex auth web MVP', () => {
@@ -60,20 +70,13 @@ test.describe('Yandex auth web MVP', () => {
             access_token: 'test-access-token',
             refresh_token: 'test-refresh-token',
             token_type: 'bearer',
+            user: oauthUser(),
           },
         })
       }
       if (url.pathname === '/api/auth/users/me') {
         return route.fulfill({
-          json: {
-            id: 100,
-            email: 'oauth-client@example.com',
-            phone: '+79005550001',
-            phone_required: false,
-            phone_verified: true,
-            role: 'client',
-            full_name: 'OAuth Client',
-          },
+          json: oauthUser(),
         })
       }
       return route.fulfill({ json: {} })
@@ -104,15 +107,14 @@ test.describe('Yandex auth web MVP', () => {
             access_token: 'test-access-token-no-phone',
             refresh_token: 'test-refresh-token-no-phone',
             token_type: 'bearer',
-            user: {
+            user: oauthUser({
               id: 101,
               email: 'oauth-no-phone@example.com',
               phone: null,
               phone_required: true,
               phone_verified: false,
-              role: 'client',
               full_name: 'OAuth No Phone',
-            },
+            }),
           },
         })
       }
@@ -128,15 +130,14 @@ test.describe('Yandex auth web MVP', () => {
       }
       if (url.pathname === '/api/auth/users/me') {
         return route.fulfill({
-          json: {
+          json: oauthUser({
             id: 101,
             email: 'oauth-no-phone@example.com',
             phone: null,
             phone_required: true,
             phone_verified: false,
-            role: 'client',
             full_name: 'OAuth No Phone',
-          },
+          }),
         })
       }
       return route.fulfill({ json: {} })
@@ -174,15 +175,12 @@ test.describe('Yandex auth web MVP', () => {
           return route.fulfill({ status: 401, json: { detail: 'Not authenticated' } })
         }
         return route.fulfill({
-          json: {
+          json: oauthUser({
             id: 102,
             email: 'phone-client@example.com',
             phone: '+79005550002',
-            phone_required: false,
-            phone_verified: true,
-            role: 'client',
             full_name: 'Phone Client',
-          },
+          }),
         })
       }
       return route.fulfill({ json: {} })
@@ -253,20 +251,28 @@ test.describe('Yandex auth web MVP', () => {
             access_token: 'onboarding-client-access',
             refresh_token: 'onboarding-client-refresh',
             token_type: 'bearer',
-            user: {
+            user: oauthUser({
               id: 201,
               email: 'onboarding-client@example.com',
               phone: '+79005550005',
-              phone_required: false,
-              phone_verified: true,
-              role: 'client',
               full_name: 'Onboarding Client',
-            },
+            }),
           },
         })
       }
       if (url.pathname === '/api/auth/users/me') {
-        return route.fulfill({ status: 401, json: { detail: 'Not authenticated' } })
+        const auth = route.request().headers().authorization || ''
+        if (auth !== 'Bearer onboarding-client-access') {
+          return route.fulfill({ status: 401, json: { detail: 'Not authenticated' } })
+        }
+        return route.fulfill({
+          json: oauthUser({
+            id: 201,
+            email: 'onboarding-client@example.com',
+            phone: '+79005550005',
+            full_name: 'Onboarding Client',
+          }),
+        })
       }
       return route.fulfill({ json: {} })
     })
@@ -359,15 +365,12 @@ test.describe('Yandex auth web MVP', () => {
             access_token: 'linked-access-token',
             refresh_token: 'linked-refresh-token',
             token_type: 'bearer',
-            user: {
+            user: oauthUser({
               id: 103,
               email: 'linked-client@example.com',
               phone: '+79005550003',
-              phone_required: false,
-              phone_verified: true,
-              role: 'client',
               full_name: 'Linked Client',
-            },
+            }),
             oauth: {
               purpose: 'oauth_link',
               provider: 'yandex',
@@ -380,15 +383,12 @@ test.describe('Yandex auth web MVP', () => {
       }
       if (url.pathname === '/api/auth/users/me') {
         return route.fulfill({
-          json: {
+          json: oauthUser({
             id: 103,
             email: 'linked-client@example.com',
             phone: '+79005550003',
-            phone_required: false,
-            phone_verified: true,
-            role: 'client',
             full_name: 'Linked Client',
-          },
+          }),
         })
       }
       if (url.pathname === '/api/client/profile') {

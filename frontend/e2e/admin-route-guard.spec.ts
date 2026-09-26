@@ -15,6 +15,7 @@ async function mockApi(page, role: string | null) {
           role,
           phone: '+79990000000',
           full_name: `${role} User`,
+          web_session_origin: null,
         },
       })
     }
@@ -47,11 +48,7 @@ async function mockApi(page, role: string | null) {
 }
 
 async function navigateSpa(page, path: string) {
-  await page.goto('/')
-  await page.evaluate((nextPath) => {
-    window.history.pushState({}, '', nextPath)
-    window.dispatchEvent(new PopStateEvent('popstate'))
-  }, path)
+  await page.goto(path)
 }
 
 test.describe('admin route guard', () => {

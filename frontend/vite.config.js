@@ -101,7 +101,10 @@ export default defineConfig({
       '/admin': {
         target: process.env.VITE_API_BASE_URL || 'http://localhost:8000',
         changeOrigin: true,
-        secure: false
+        secure: false,
+        bypass(req) {
+          if (req.headers.accept?.includes('text/html')) return '/index.html'
+        },
       },
       '/bookings': {
         target: process.env.VITE_API_BASE_URL || 'http://localhost:8000',

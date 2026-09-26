@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test'
+import { localAppOrigins } from './localGuard'
 
 const forbidden = /pricing-catalog|subscription-plans|subscription|balance|payment\/init|loyalty|invitations/
 const commerceLinks = 'a[href="/pricing"], a[href="/master/tariff"], a[href="/master/subscription/plans"]'
@@ -474,7 +475,8 @@ async function fixture(page: Page, { origin = 'ios_app' as string | null, plan =
   await page.route('**/*', async (route) => {
     const url = new URL(route.request().url())
     if (url.hostname === 'mc.yandex.ru' && url.pathname.endsWith('tag.js')) return route.fulfill({ contentType: 'application/javascript', body: '/* Local analytics stub: no external network. */' })
-    if (url.origin !== 'http://127.0.0.1:5197') return route.abort()
+    const appOrigins = localAppOrigins(test.info().project.use.baseURL ?? 'http://localhost:5173')
+    if (!appOrigins.has(url.origin)) return route.abort()
     if (!url.pathname.startsWith('/api/')) return route.continue()
     requests.push(url.pathname + url.search)
     if (url.pathname === '/api/auth/users/me') {
