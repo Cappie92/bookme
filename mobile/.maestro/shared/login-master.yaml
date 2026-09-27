@@ -1,12 +1,9 @@
 appId: "${APP_ID}"
 tags:
-  - smoke
-  - gate
+  - helper
 ---
-# Wrong password must stay on login. Alert title is «Ошибка входа», not «Ошибка».
-- launchApp:
-    clearState: true
-    clearKeychain: true
+# Assumes unauthenticated welcome after launchApp clearState.
+# Credentials: DEV_E2E Master A. Digits-only phone input (field already prefixes +7).
 - extendedWaitUntil:
     visible:
       id: "welcome-nav-auth"
@@ -20,20 +17,22 @@ tags:
       id: "phone-input"
     timeout: 10000
 - tapOn:
+    id: "login-tab"
+    optional: true
+- tapOn:
     id: "phone-input"
 - eraseText: 20
-- inputText: "9999999999"
+- inputText: "${E2E_PHONE_DIGITS}"
 - tapOn:
     id: "password-input"
 - eraseText: 20
-- inputText: "wrongpassword"
+- inputText: "${E2E_PASSWORD}"
 - tapOn:
     id: "login-button"
+- tapOn:
+    id: "push-permission-education-dismiss"
+    optional: true
 - extendedWaitUntil:
     visible:
-      text: "Ошибка входа"
-    timeout: 15000
-- assertVisible:
-    id: "login-tab"
-- assertVisible:
-    id: "login-screen-title"
+      id: "bottom-nav-dashboard"
+    timeout: 20000

@@ -1,27 +1,34 @@
-appId: host.exp.Exponent
+appId: "${APP_ID}"
+tags:
+  - smoke
+  - gate
 ---
-# Тест выхода из аккаунта
-# Использование: maestro test .maestro/flows/05-logout.yaml
-- launchApp
-# Логинимся
-- runFlow: "01-login-success.yaml"
-# Переходим в настройки через нижнюю навигацию
+# Master logout from settings. Master settings has no logout-button testID;
+# label is «Выйти из аккаунта», confirm alert button is «Выйти».
+# After logout AuthGate returns to welcome, not login-tab.
+- launchApp:
+    clearState: true
+    clearKeychain: true
+- runFlow:
+    file: ../shared/login-master.yaml
 - tapOn:
     id: "bottom-nav-settings"
-- waitForAnimationToEnd
-- assertVisible:
-    text: "Настройки"
-# Нажимаем кнопку выхода
+- extendedWaitUntil:
+    visible:
+      text: "Настройки"
+    timeout: 15000
+- scrollUntilVisible:
+    element:
+      text: "Выйти из аккаунта"
+    direction: DOWN
+    timeout: 15000
 - tapOn:
-    id: "logout-button"
-# Подтверждаем выход в Alert
+    text: "Выйти из аккаунта"
 - tapOn:
     text: "Выйти"
-    optional: true
-# Проверяем, что вернулись на экран входа
-- waitForAnimationToEnd
+- extendedWaitUntil:
+    visible:
+      id: "welcome-nav-auth"
+    timeout: 20000
 - assertVisible:
-    id: "login-tab"
-- assertVisible:
-    id: "login-screen-title"
-
+    id: "welcome-nav-auth"

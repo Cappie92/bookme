@@ -1,26 +1,54 @@
-appId: host.exp.Exponent
+appId: "${APP_ID}"
+tags:
+  - smoke
+  - gate
 ---
-# Тест открытия деталей бронирования
-# Использование: maestro test .maestro/flows/04-open-booking-details.yaml
-- launchApp
-# Логинимся
-- runFlow: "01-login-success.yaml"
-# Переходим в бронирования
-- runFlow: "03-navigate-to-bookings.yaml"
-# Ждем загрузки списка бронирований
-- waitForAnimationToEnd
+# Operational schedule/services navigation.
+# iOS: four-tab bottom nav (dashboard / schedule / services / settings).
+# Android: dashboard / menu / settings; schedule and services live in the menu sheet.
+# Master dashboard cards do not open booking-detail-screen; that route remains a coverage gap.
+- launchApp:
+    clearState: true
+    clearKeychain: true
+- runFlow:
+    file: ../shared/login-master.yaml
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - tapOn:
+          id: "bottom-nav-schedule"
+      - extendedWaitUntil:
+          visible:
+            text: "Неделя"
+          timeout: 15000
+      - assertVisible:
+          text: "День"
+      - tapOn:
+          id: "bottom-nav-services"
+      - extendedWaitUntil:
+          visible:
+            text: "Мои услуги"
+          timeout: 15000
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - tapOn:
+          id: "bottom-nav-menu"
+      - tapOn:
+          text: "Расписание"
+      - extendedWaitUntil:
+          visible:
+            text: "Неделя"
+          timeout: 15000
+      - tapOn:
+          id: "bottom-nav-menu"
+      - tapOn:
+          text: "Услуги"
+      - extendedWaitUntil:
+          visible:
+            text: "Мои услуги"
+          timeout: 15000
 - assertVisible:
-    id: "bookings-list"
-# Тапаем на первое бронирование (если есть)
-- tapOn:
-    id: "booking-item-*"
-    index: 0
-    optional: true
-# Проверяем, что открылся экран деталей
-- waitForAnimationToEnd
-- assertVisible:
-    id: "booking-detail-screen"
-# Проверяем наличие информации о бронировании
-- assertVisible:
-    text: "Основная информация"
-
+    text: "Мои услуги"

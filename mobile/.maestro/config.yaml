@@ -1,6 +1,7 @@
-# Maestro Configuration для DeDato Mobile
-# Используйте переменную окружения APP_ID или укажите напрямую
-# Для iOS: com.yourcompany.dedato
-# Для Android: com.yourcompany.dedato
-name: DeDato Mobile E2E Tests
-
+# Workspace config for `maestro test --config .maestro/config.yaml .maestro/flows`
+# Do not put appId here: iOS is com.dedato.app, Android is ru.dedato.mobile.
+# Pass APP_ID via scripts/run-maestro-e2e.sh. Expo Go and legacy placeholder IDs are rejected.
+name: DeDato Mobile Maestro
+excludeTags:
+  - debug
+  - helper

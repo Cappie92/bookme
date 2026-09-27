@@ -14,9 +14,9 @@
     "test:coverage": "jest --config jest.unit.config.js --coverage",
     "test:unit": "jest --config jest.unit.config.js",
     "test:integration": "jest --config jest.integration.config.js",
-    "test:e2e": "maestro test .maestro/flows/",
-    "test:e2e:ios": "maestro test .maestro/flows/ --env APP_ID=com.yourcompany.dedato",
-    "test:e2e:android": "maestro test .maestro/flows/ --env APP_ID=com.yourcompany.dedato"
+    "test:e2e": "../scripts/run-maestro-e2e.sh",
+    "test:e2e:ios": "../scripts/run-maestro-e2e.sh ios",
+    "test:e2e:android": "../scripts/run-maestro-e2e.sh android"
   },
   "dependencies": {
     "@appmetrica/react-native-analytics": "^4.1.0",

@@ -1,0 +1,18 @@
+appId: "${APP_ID}"
+tags:
+  - helper
+---
+# Optional reset if a previous run left a logged-in session.
+# Not part of the default suite; each gate flow uses launchApp clearState instead.
+- tapOn:
+    id: "bottom-nav-settings"
+    optional: true
+- tapOn:
+    text: "Выйти из аккаунта"
+    optional: true
+- tapOn:
+    id: "logout-button"
+    optional: true
+- tapOn:
+    text: "Выйти"
+    optional: true

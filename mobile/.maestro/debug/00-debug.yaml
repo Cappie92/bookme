@@ -1,0 +1,9 @@
+appId: "${APP_ID}"
+tags:
+  - debug
+---
+# Manual screenshot helper. Not part of the default suite.
+- launchApp:
+    clearState: false
+- waitForAnimationToEnd
+- takeScreenshot: "debug-screen"
