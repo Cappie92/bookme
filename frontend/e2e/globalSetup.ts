@@ -33,6 +33,11 @@ async function globalSetup() {
     )
   }
 
+  const requireSeed =
+    process.env.CI === 'true' ||
+    process.env.E2E_REQUIRE_SEED === '1' ||
+    process.env.E2E_REQUIRE_SEED === 'true'
+
   try {
     const seedRes = await fetch(`${backendURL}/api/dev/e2e/seed`, {
       method: 'POST',
@@ -41,8 +46,8 @@ async function globalSetup() {
     })
     if (seedRes.ok) return
     const detail = await seedRes.text().catch(() => '')
-    if (seedRes.status === 404) {
-      // DEV_E2E router not mounted — mocked specs can still run; live specs will fail with a clear login error.
+    if (!requireSeed && seedRes.status === 404) {
+      // DEV_E2E router not mounted — mocked specs can still run locally.
       return
     }
     throw new Error(
@@ -50,7 +55,12 @@ async function globalSetup() {
     )
   } catch (e) {
     if (e instanceof Error && e.message.startsWith('E2E seed failed')) throw e
-    // Backend down: mocked API specs still run.
+    if (requireSeed) {
+      throw new Error(
+        `E2E seed is required (CI/E2E_REQUIRE_SEED): cannot reach ${backendURL}/api/dev/e2e/seed. ${e}`
+      )
+    }
+    // Backend down: mocked API specs still run locally.
   }
 }
 

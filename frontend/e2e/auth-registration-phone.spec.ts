@@ -84,9 +84,13 @@ test.describe('common web registration phone verification', () => {
 
     await page.getByTestId('header-login').first().click()
     await expect(modal).toBeVisible()
-    await expect(modal.locator('input[name="phone"]')).toBeVisible()
-    await modal.locator('input[name="phone"]').fill(PHONE)
-    await modal.locator('input[name="password"]').fill('testpassword')
+    const loginPhone = modal.locator('form').locator('input[name="phone"]')
+    await expect(loginPhone).toBeVisible()
+    // Controlled +7 mask: a single fill() can lose the race and leave "+7".
+    await loginPhone.click()
+    await loginPhone.pressSequentially('9005550001')
+    await expect(loginPhone).toHaveValue(PHONE)
+    await modal.locator('form').locator('input[name="password"]').fill('testpassword')
     await page.getByTestId('auth-login-submit').click()
 
     await expect(page.getByTestId('auth-login-error')).toContainText('Неверный номер телефона или пароль')
