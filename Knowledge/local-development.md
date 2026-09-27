@@ -4,7 +4,7 @@ project: DeDato
 knowledge_class: living
 environment: common
 status: active
-last_verified: 2026-09-25
+last_verified: 2026-09-27
 ---
 
 # Local development
@@ -72,11 +72,13 @@ Use the package platform scripts only after local Expo/native prerequisites are 
 (cd mobile && npm run test:integration)
 ```
 
-Prefer the package venv/lockfile. Mobile integration and `androidAppIcon.contract.test.ts` need Pillow: `pip install -r mobile/scripts/dev/requirements.txt`. Playwright/Maestro and named FAST/FULL/RELEASE tiers are in [Testing strategy](testing-strategy.md). Root application CI is [CI/CD](ci-cd.md).
+Prefer the package venv/lockfile. Mobile integration and `androidAppIcon.contract.test.ts` need Pillow: `pip install -r mobile/scripts/dev/requirements.txt`. Named FAST/FULL/RELEASE/WEB E2E tiers are in [Testing strategy](testing-strategy.md). Root application CI (backend, frontend, mobile, playwright) is [CI/CD](ci-cd.md).
 
 ## Local E2E and destructive data
 
-`./scripts/e2e_full.sh` owns local service startup plus reset/seed/cleanup. Run it only against disposable local test state. `./scripts/test_e2e.sh` assumes services/data are already prepared. Neither command authorizes production or shared-environment access.
+Canonical web E2E orchestration is `./scripts/run-playwright-e2e.sh`: loopback backend/Vite, disposable SQLite under `/tmp`, synthetic `DEV_E2E` seed, Playwright, guaranteed cleanup. It refuses production/staging URLs and `bookme.db`. Do not run empty-DB `alembic upgrade head` for this path.
+
+`./scripts/e2e_full.sh` is a legacy local helper, not the CI contract; it can reuse already-running servers. `./scripts/test_e2e.sh` assumes services/data are already prepared. Neither command authorizes production or shared-environment access.
 
 ## Compose boundary
 

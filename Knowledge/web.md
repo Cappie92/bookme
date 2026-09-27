@@ -4,7 +4,7 @@ project: DeDato
 knowledge_class: living
 environment: common
 status: active
-last_verified: 2026-09-24
+last_verified: 2026-09-27
 ---
 
 # Web architecture
@@ -71,6 +71,23 @@ Repository не использует единую application-wide server-state 
 Межплатформенные правила принадлежат [Client links and payment return](client-links-and-payment-return.md).
 
 **Sources:** `frontend/src/pages/MasterPublicBookingPage.jsx`; `frontend/src/pages/PaymentSuccess.jsx`; `frontend/src/pages/PaymentFailed.jsx`; `frontend/src/utils/paymentPublicStatus.js`; `frontend/src/utils/paymentReturnFlow.js`.
+
+## Public booking create lifecycle
+
+Primary `/m/:slug` wizard create is owned by `publicBookingCreateLifecycle.js` (used from `PublicBookingWizard`). Current contract after `4e219cc`:
+
+- post-auth create is not aborted on React remount;
+- same logical in-flight create shares one promise;
+- StrictMode/remount does not issue a second POST;
+- failed create returns the draft to pending;
+- success receipt is written only after server-confirmed 200 with id/`public_reference`;
+- refresh of an empty success-state can restore that receipt;
+- an older success receipt does not overlay a newly started booking flow;
+- service ID comparisons are normalized safely.
+
+Deferred, not current release blockers: backend `Idempotency-Key`; PostgreSQL conflict locking; DB-level interval exclusion; server re-fetch of the receipt.
+
+**Sources:** `frontend/src/components/booking/publicBookingCreateLifecycle.js`; `frontend/src/components/booking/PublicBookingWizard.jsx`; `frontend/src/components/booking/publicBookingCreateLifecycle.test.js`.
 
 ## Build and delivery
 

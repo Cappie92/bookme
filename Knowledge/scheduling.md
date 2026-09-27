@@ -4,7 +4,7 @@ project: DeDato
 knowledge_class: living
 environment: common
 status: active
-last_verified: 2026-09-22
+last_verified: 2026-09-27
 ---
 
 # Scheduling and availability
@@ -34,9 +34,9 @@ Current HTTP surface: weekly, monthly, day, rules, create/update/bulk. Legacy `G
 
 Для date-specific master schedule service duration округляется вверх до числа последовательных 30-minute rows, после чего из найденного окна снова генерируются starts с реальной duration. Несмежные rows не образуют общее окно.
 
-Public master availability использует `MasterService.duration`, вызывает общий `get_available_slots` по каждой дате и отбрасывает уже начавшиеся slots.
+Public master availability использует `MasterService.duration`, вызывает общий `get_available_slots` по каждой дате, отбрасывает уже начавшиеся slots и дополнительно отфильтровывает candidate slots, которые `check_master_working_hours` отвергнет на create. Это закрывает weekly-only GET slot, который public MASTER POST гарантированно отклонит. Изменение ограничено public MASTER availability route; salon/private scheduling consumers не менялись.
 
-**Source:** `backend/services/scheduling.py` — `_get_slots_for_duration`, `get_available_slots`; `backend/routers/public_master.py` — `get_public_availability`; `backend/models.py` — `MasterService`.
+**Source:** `backend/services/scheduling.py` — `_get_slots_for_duration`, `get_available_slots`; `backend/routers/public_master.py` — `get_public_availability`; `backend/models.py` — `MasterService`; `backend/tests/test_public_master.py`.
 
 ## 3. Working hours
 
@@ -45,9 +45,9 @@ Public master availability использует `MasterService.duration`, выз
 - salon work — хотя бы одним date-specific salon interval;
 - personal work — одним или несколькими строго последовательными personal intervals.
 
-Отсутствие соответствующего расписания означает `false`; weekly `AvailabilitySlot` здесь не является fallback. Поэтому create path, использующий working-hours guard, может быть строже availability path с weekly fallback.
+Отсутствие соответствующего расписания означает `false`; weekly `AvailabilitySlot` здесь не является fallback. Public MASTER GET availability now applies the same working-hours guard before returning a slot; salon/private consumers of `get_available_slots` were not changed. Remaining deferred mismatch: a long single `MasterSchedule` window can still be accepted by POST while GET slot-generation does not present it. Weekly `AvailabilitySlot` as a second scheduling source of truth still requires a separate redesign. These are not current release blockers.
 
-**Source:** `backend/services/scheduling.py` — `check_master_working_hours`.
+**Source:** `backend/services/scheduling.py` — `check_master_working_hours`; `backend/routers/public_master.py` — public availability filter.
 
 ## 4. Timezone semantics
 

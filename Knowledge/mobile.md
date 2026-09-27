@@ -4,14 +4,14 @@ project: DeDato
 knowledge_class: living
 environment: common
 status: active
-last_verified: 2026-09-25
+last_verified: 2026-09-27
 ---
 
 # Mobile architecture
 
 Живой канон repository-known Expo/React Native client. Текущий iOS product — native-only operational companion; Android/web сохраняют полный cabinet/monetization.
 
-Marketing version **1.1.0**. Tracked native versions in `mobile/app.config.ts`: **iOS 1.1.0 (13)** и **Android 1.1.0 (6)**. Store/review status — `REPORTED` operational fact в [Production topology](production-topology.md): iOS **SUBMITTED / IN APP REVIEW PROCESS**, Android/RuStore **SUBMITTED FOR MODERATION**. Не писать approved / released, пока нет moderation result.
+Marketing version **1.1.0**. Tracked native versions in `mobile/app.config.ts`: **iOS 1.1.0 (13)** и **Android 1.1.0 (6)**. Store/review status — `REPORTED` operational fact в [Production topology](production-topology.md): iOS **SUBMITTED / IN APP REVIEW PROCESS**, Android/RuStore **SUBMITTED FOR MODERATION**. Не писать approved / released, пока нет moderation result. Native Maestro E2E is not a root CI gate; web Playwright is — [Testing strategy](testing-strategy.md).
 
 ## Runtime and route composition
 

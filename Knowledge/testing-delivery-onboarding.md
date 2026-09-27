@@ -4,21 +4,29 @@ project: DeDato
 knowledge_class: living
 environment: common
 status: active
-last_verified: 2026-09-25
+last_verified: 2026-09-27
 ---
 
 # Debt — testing, delivery and onboarding
 
 Confirmed gaps in executable quality gates and developer entrypoints.
 
-## Application CI does not include Playwright, Maestro, lint, or coverage
+## Application CI does not include Maestro, lint, or coverage
 
 - **Severity:** `medium`.
 - **Confidence:** CONFIRMED for repository workflows; external branch protection is UNKNOWN.
-- **Evidence:** `.github/workflows/tests.yml` runs backend `python -m pytest`, frontend `npm test`, and mobile `npm test` plus `npm run test:integration` on `pull_request` and push to `main`. Clean-checkout GitHub Actions jobs have passed. Playwright, Maestro, EAS, black/isort/flake8/mypy and Codecov are **not** current root jobs. Nested `backend/.github/workflows/ci.yml` was removed; it was never a functioning GitHub check.
-- **Failure scenario:** E2E, native device, and static-analysis regressions can still merge without a repository-hosted gate; whether `tests.yml` is required on the branch is UNKNOWN.
+- **Evidence:** `.github/workflows/tests.yml` now runs four jobs: backend `python -m pytest`, frontend `npm test`, mobile `npm test` plus `npm run test:integration`, and Playwright via `./scripts/run-playwright-e2e.sh`. Clean-checkout GitHub Actions jobs have passed. Maestro, EAS, black/isort/flake8/mypy and Codecov are **not** current root jobs. Nested `backend/.github/workflows/ci.yml` was removed; it was never a functioning GitHub check.
+- **Failure scenario:** native device E2E and static-analysis regressions can still merge without a repository-hosted gate; whether `tests.yml` is required on the branch is UNKNOWN.
 - **Sources:** `.github/workflows/tests.yml`; [CI/CD](ci-cd.md); [Testing strategy](testing-strategy.md).
-- **Required action:** optional later gates for Playwright/Maestro/lint/coverage; confirm branch-protection required checks.
+- **Required action:** optional later gates for Maestro/lint/coverage; confirm branch-protection required checks.
+
+## Closed: Playwright local/CI orchestration
+
+- **Status:** closed.
+- **Historical residual:** Playwright existed locally but was not a root CI job and could be documented as manual-only / environment-blocked.
+- **Resolution:** `scripts/run-playwright-e2e.sh` plus job `playwright` in `.github/workflows/tests.yml`. Loopback-only, disposable SQLite, mandatory CI seed, no production secrets. GitHub verified green.
+- **Living current contract:** [Testing strategy](testing-strategy.md#web-end-to-end-tests); [CI/CD](ci-cd.md).
+- **Required action:** none; do not describe Playwright as absent from root CI.
 
 ## Deployment starts without an application validation gate
 
@@ -71,11 +79,17 @@ Confirmed gaps in executable quality gates and developer entrypoints.
 - **Sources:** `backend/pyproject.toml`; `backend/Makefile`; test file inventory; frontend/mobile manifests and test configs.
 - **Required action:** define named test tiers and machine-readable aggregate gates.
 
-## Jest worker leak, Playwright/Maestro, and other test-infra debt
+## Closed: Jest worker leak
+
+- **Status:** closed.
+- **Historical residual:** unit Jest could force-exit a worker after `mobile/__tests__/unit/components/build7Stabilization.test.tsx`.
+- **Required action:** none; do not list this as open test-infra debt.
+
+## Remaining: Maestro and other test-infra debt
 
 - **Confidence:** CONFIRMED; not store/release blockers.
-- **Evidence:** unit Jest can force-exit a worker after `mobile/__tests__/unit/components/build7Stabilization.test.tsx`; Playwright and Maestro are not root CI; `time.sleep(1.1)` remains in subscription points redemption; `can_add_page_module` tests stay skipped; react-test-renderer deprecation warnings are warnings only.
-- **Required action:** separate tracks (next: Jest worker leak audit). Do not treat as App Review / RuStore blockers.
+- **Evidence:** Maestro / mobile E2E is not a CI-capable gate; package scripts still use placeholder application identifiers. `time.sleep(1.1)` remains in subscription points redemption; `can_add_page_module` tests stay skipped; react-test-renderer deprecation warnings are warnings only. Playwright browser coverage is Chromium only by design.
+- **Required action:** next track is Maestro / mobile E2E audit. Do not treat as App Review / RuStore blockers.
 
 ## Native E2E application identifier drift
 

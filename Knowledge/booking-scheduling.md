@@ -4,7 +4,7 @@ project: DeDato
 knowledge_class: living
 environment: common
 status: active
-last_verified: 2026-09-22
+last_verified: 2026-09-27
 ---
 
 # Debt — booking and scheduling
@@ -32,6 +32,25 @@ last_verified: 2026-09-22
 - **Resolution:** date-only `YYYY-MM-DD` clients, display `DD.MM.YY`, strict date query, 4xx on invalid datetime, current booking excluded from GET collisions, common overlap checker on client PUT, adjacent half-open allowed. Production smoke PASS.
 - **Living current contract:** [Booking](booking.md#reschedule).
 - **Required action:** none; do not describe web/mobile reschedule as currently broken.
+
+## Closed: public MASTER weekly-only GET vs POST mismatch
+
+- **Status:** closed / remediated (`4e219cc`).
+- **Historical residual:** public availability could show a weekly-only slot that `check_master_working_hours` on public MASTER create would reject.
+- **Resolution:** public MASTER GET filters candidates with the same working-hours guard. Salon/private scheduling consumers unchanged.
+- **Living current contract:** [Scheduling](scheduling.md#2-slot-generation).
+- **Required action:** none; do not describe that public weekly-only GET/POST mismatch as currently open.
+
+## Deferred scheduling/create hardening (not release blockers)
+
+- backend `Idempotency-Key` for create;
+- PostgreSQL conflict check / locking;
+- DB-level interval uniqueness/exclusion (see also schema-level overlap item below);
+- server re-fetch of a public booking success receipt;
+- long single `MasterSchedule` window accepted by POST but not presented by GET slot-generation;
+- weekly `AvailabilitySlot` as a second scheduling source of truth (redesign).
+
+Do not treat these as current App Review / RuStore / production-cut blockers.
 
 ## Divergent create semantics
 

@@ -4,7 +4,7 @@ project: DeDato
 knowledge_class: living
 environment: common
 status: active
-last_verified: 2026-09-25
+last_verified: 2026-09-27
 ---
 
 # Testing strategy
@@ -13,19 +13,20 @@ Repository-known map of executable test suites and their current guarantees. A f
 
 ## Canonical commands and latest pass state
 
-CONFIRMED local/CI baselines after test-layer cleanup (`7b13f81`) and root application CI (`4a5145f`, `3aba6d7`). Counts are current inventory, not a coverage target.
+CONFIRMED local/CI baselines after public-booking product fix (`4e219cc`), Playwright local stabilization (`a465ed3`) and the self-contained Playwright CI job (`aa37b54`). Counts are current inventory, not a coverage target.
 
 | Layer | Command (from package root) | Latest verified |
 |-------|-----------------------------|-----------------|
 | Backend full | `cd backend && .venv/bin/python -m pytest` | 1347 passed / 7 skipped / 0 failed |
-| Frontend unit | `cd frontend && npm test` (`vitest run`) | 253 passed / 0 failed |
-| Mobile unit | `cd mobile && npm test` (`jest.unit.config.js`) | 94 suites / 800 passed / 0 failed |
+| Frontend unit | `cd frontend && npm test` (`vitest run`) | 267 passed / 0 failed |
+| Mobile unit | `cd mobile && npm test` (`jest.unit.config.js`) | 95 suites / 802 passed / 0 failed |
 | Mobile integration | `cd mobile && npm run test:integration` | 2 suites / 17 passed / 0 failed |
+| Playwright E2E | `./scripts/run-playwright-e2e.sh` | 139 passed / 0 failed (10 Chromium specs) |
 | Migration focused | pytest on `test_alembic_create_all_then_upgrade.py`, `test_migration_*.py`, `test_session_version_migration.py` | 12 passed / 1 skipped (Postgres-only `skipif`) |
 
-Root GitHub Actions `.github/workflows/tests.yml` runs backend full, frontend unit, and mobile unit + integration on `pull_request` and push to `main`. Clean-checkout jobs have passed. Details: [CI/CD](ci-cd.md).
+Root GitHub Actions `.github/workflows/tests.yml` runs four independent jobs on `pull_request` and push to `main`: backend, frontend, mobile, playwright. Clean-checkout jobs have passed. Details: [CI/CD](ci-cd.md).
 
-Playwright and Maestro exist locally and are **not** mandatory root CI gates.
+Playwright is a real CI regression gate. Maestro exists locally and is **not** a root CI gate.
 
 ## FAST / pre-commit
 
@@ -51,9 +52,17 @@ cd mobile && npm run test:integration
 
 Mobile integration and `androidAppIcon.contract.test.ts` require Pillow from `mobile/scripts/dev/requirements.txt` (`python3 scripts/dev/generate_app_icons.py --measure-json`). Not a runtime dependency.
 
+## WEB E2E
+
+```bash
+./scripts/run-playwright-e2e.sh
+```
+
+Owns isolated backend + Vite + disposable SQLite + Playwright. Equivalent documented command: `cd frontend && npm run test:e2e` only against an already-running loopback stack that matches `localGuard`.
+
 ## RELEASE
 
-Full regression above, plus migration contracts and platform/release contracts (iOS free companion, Android icon/push config, AppMetrica privacy, legal documents). Playwright (`cd frontend && npm run test:e2e`) and Maestro (`cd mobile && npm run test:e2e`) only when a local stack/device exists; they are not current CI.
+Full regression above, plus migration contracts and platform/release contracts (iOS free companion, Android icon/push config, AppMetrica privacy, legal documents). Web E2E is `./scripts/run-playwright-e2e.sh` (canonical local/CI orchestration). Maestro (`cd mobile && npm run test:e2e`) only when a device/app exists; it is not current CI.
 
 ## Backend
 
@@ -67,21 +76,23 @@ Twenty-nine `backend/test_*.py` files outside `backend/tests/` remain excluded b
 
 ## Web unit tests
 
-Vite/Vitest discovers `frontend/src/**/*.test.js` in Node. Inventory: **23** modules / 253 tests. Package scripts `test` and `test:unit` are the same `vitest run`. No coverage threshold in this config.
+Vite/Vitest discovers `frontend/src/**/*.test.js` in Node. Inventory: **24** modules / 267 tests. Package scripts `test` and `test:unit` are the same `vitest run`. No coverage threshold in this config.
 
 **Sources:** `frontend/package.json`; `frontend/src/**/*.test.js`.
 
 ## Web end-to-end tests
 
-Playwright discovers **10** Chromium specs under `frontend/e2e/`. Config uses one worker, no retries, retained trace/video on failure and a global preflight that the base URL serves SPA HTML. It does not reset or seed data. **Not** a root CI job.
+Playwright discovers **10** Chromium specs / **139** tests under `frontend/e2e/`. Config uses one worker, no retries, retained trace/screenshot/video on failure. `frontend/e2e/localGuard.ts` refuses production/staging origins. Global setup requires loopback SPA HTML; in CI (`CI=true` or `E2E_REQUIRE_SEED=1`) `POST /api/dev/e2e/seed` must succeed. Local mocked-only `npm run test:e2e` may still skip seed if the backend E2E router is absent.
 
-`scripts/e2e_full.sh` launches local backend/frontend, enables the development E2E surface, resets/seeds local test data, runs Playwright and cleans up. Treat it as destructive to that local dataset. `scripts/test_e2e.sh` assumes services are already prepared. Do not point either harness at production.
+Canonical stack orchestration is `./scripts/run-playwright-e2e.sh`: disposable SQLite `/tmp/dedato-playwright-e2e.db` (never `bookme.db`), loopback uvicorn + Vite, readiness polling, Playwright, process cleanup. Schema is `Base.metadata.create_all` on backend import, not empty-DB `alembic upgrade head`. `DEV_E2E` seed router cannot mount when `ENVIRONMENT=production`.
 
-**Sources:** `frontend/playwright.config.ts`; `frontend/e2e/`; `scripts/e2e_full.sh`; `scripts/test_e2e.sh`.
+`scripts/e2e_full.sh` is **not** the CI contract and can reuse existing servers or a non-temp SQLite path. `scripts/test_e2e.sh` assumes services are already prepared. Do not point any harness at production.
+
+**Sources:** `frontend/playwright.config.ts`; `frontend/e2e/`; `frontend/e2e/localGuard.ts`; `frontend/e2e/globalSetup.ts`; `scripts/run-playwright-e2e.sh`; `backend/routers/dev_e2e.py`; `backend/settings.py` — `dev_e2e`; `.github/workflows/tests.yml`.
 
 ## Mobile tests
 
-- **94** unit files under `mobile/__tests__/unit/`, default `npm test` / `test:unit` via `jest.unit.config.js` (`ts-jest`, Node, mocked env).
+- **95** unit files under `mobile/__tests__/unit/`, default `npm test` / `test:unit` via `jest.unit.config.js` (`ts-jest`, Node, mocked env).
 - **2** files under `mobile/__tests__/integration/`, `npm run test:integration` via `jest.integration.config.js` (`jest-expo`). These are RTL component tests with mocked API, not full-stack E2E. Collect was repaired for Expo SDK 54 / Jest 30 (WinterCG lazy globals evaluated during setupFiles).
 - Maestro flows under `mobile/.maestro/`, `test:e2e*` against an installed app. **Not** in CI. Package scripts still use placeholder application identifiers.
 
@@ -96,13 +107,13 @@ Use the smallest suite that owns a changed contract, then expand:
 1. pure helper/model contract tests;
 2. router/service tests using canonical backend fixtures;
 3. web/mobile unit or mobile integration;
-4. local Playwright/Maestro only when the end-user flow or cross-process wiring changed.
+4. Playwright (web E2E) or Maestro (device) only when the end-user flow or cross-process wiring changed; Playwright is also the root CI web E2E gate.
 
 Production smoke scripts and unclassified top-level `backend/test_*.py` are not routine validation.
 
 ## Known reliability boundary
 
-Remaining test-infra debt (not store/release blockers): Jest worker/open-handle leak in `mobile/__tests__/unit/components/build7Stabilization.test.tsx`; Playwright/Maestro not in CI; `time.sleep(1.1)` in subscription points redemption; `can_add_page_module` skips; react-test-renderer deprecation warnings as warnings only.
+Remaining test-infra debt (not store/release blockers): Maestro / mobile E2E is not a CI gate; `time.sleep(1.1)` in subscription points redemption; `can_add_page_module` skips; react-test-renderer deprecation warnings as warnings only. Playwright stays Chromium-only by design. Jest worker leak, mobile integration collection, root application CI absence, and Playwright local/CI orchestration are **closed**.
 
 The generic backend booking fixture can still derive a near-future timestamp from wall clock near 23:59. Treat residual time-boundary failures as fixture issues, not permission to weaken Scheduling runtime checks.
 

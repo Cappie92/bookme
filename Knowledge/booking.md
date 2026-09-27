@@ -4,7 +4,7 @@ project: DeDato
 knowledge_class: living
 environment: common
 status: active
-last_verified: 2026-09-22
+last_verified: 2026-09-27
 ---
 
 # Booking
@@ -36,7 +36,9 @@ Create paths не являются взаимозаменяемыми:
 
 Цена создаваемой записи хранится в `payment_amount` после скидки. `loyalty_points_used` является резервом до отмены или completion; это синхронная зависимость Booking path от Loyalty, а не событие.
 
-**Source:** `backend/routers/public_master.py` — `create_public_booking`; `backend/routers/client.py` — `create_booking`, temporary routes; `backend/routers/bookings.py` — create functions; `frontend/src/App.jsx`; `frontend/src/components/booking/PublicBookingWizard.jsx`; `mobile/app/(public)/m/[slug].tsx`; `backend/utils/public_booking_loyalty.py`.
+**Source:** `backend/routers/public_master.py` — `create_public_booking`; `backend/routers/client.py` — `create_booking`, temporary routes; `backend/routers/bookings.py` — create functions; `frontend/src/App.jsx`; `frontend/src/components/booking/PublicBookingWizard.jsx`; `frontend/src/components/booking/publicBookingCreateLifecycle.js`; `mobile/app/(public)/m/[slug].tsx`; `backend/utils/public_booking_loyalty.py`.
+
+Web post-auth public create recovery is documented in [Web architecture](web.md#public-booking-create-lifecycle). That frontend lifecycle does not replace server occupancy/working-hours checks.
 
 ## 3. Raw и effective status
 

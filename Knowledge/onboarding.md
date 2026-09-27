@@ -4,7 +4,7 @@ project: DeDato
 knowledge_class: living
 environment: common
 status: active
-last_verified: 2026-09-24
+last_verified: 2026-09-27
 ---
 
 # DeDato onboarding
@@ -44,7 +44,7 @@ If correct documentation would require revealing a credential-like value, stop t
 
 ## Verification and handoff
 
-Use [Testing strategy](testing-strategy.md) to select the smallest owning suite and expand across affected boundaries. Before committing documentation, validate relative links/source paths, run `git diff --check`, inspect `git diff --stat` and confirm only intended files changed.
+Use [Testing strategy](testing-strategy.md) to select the smallest owning suite and expand across affected boundaries. Root application CI is backend + frontend + mobile + Playwright; Maestro is not yet a CI gate. Before committing documentation, validate relative links/source paths, run `git diff --check`, inspect `git diff --stat` and confirm only intended files changed.
 
 Product code, migrations, generated files, Knowledge and deployment are separate change scopes unless the task explicitly combines them. A client route guard, passing UI test or successful HTTP health response never substitutes for backend authorization, migration correctness or readiness.
 
