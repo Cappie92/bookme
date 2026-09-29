@@ -6,9 +6,7 @@ tags:
 # Master logout from settings. Master settings has no logout-button testID;
 # label is «Выйти из аккаунта», confirm alert button is «Выйти».
 # After logout AuthGate returns to welcome, not login-tab.
-- launchApp:
-    clearState: true
-    clearKeychain: true
+- runFlow: ../shared/launch-local.yaml
 - runFlow:
     file: ../shared/login-master.yaml
 - tapOn:

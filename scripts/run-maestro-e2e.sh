@@ -47,6 +47,10 @@ case "$PLATFORM" in
     ;;
 esac
 
+if [ "$PLATFORM" = "android" ]; then
+  exec python3 "$ROOT/scripts/maestro_android.py" "$@"
+fi
+
 export PATH="${PATH}:${HOME}/.maestro/bin"
 
 if ! command -v maestro >/dev/null 2>&1; then

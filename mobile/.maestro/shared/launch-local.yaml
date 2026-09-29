@@ -1,0 +1,33 @@
+appId: "${APP_ID}"
+tags:
+  - helper
+---
+# Reset also loses the debug client's Metro URL. Restore it before any app assertion.
+- launchApp:
+    clearState: true
+    clearKeychain: true
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - openLink: "${DEVELOPMENT_CLIENT_URL}"
+- extendedWaitUntil:
+    visible:
+      id: "welcome-nav-auth"
+    timeout: 120000
+# Debug-only RN warning toast overlaps Android bottom-nav tap targets.
+# Dismiss its close control, not app errors; retain logs and all app assertions.
+- runFlow:
+    when:
+      platform: Android
+      visible:
+        text: "Open debugger to view warnings."
+    commands:
+      - tapOn:
+          rightOf:
+            text: "Open debugger to view warnings."
+          childOf:
+            containsChild:
+              text: "Open debugger to view warnings."
+      - assertNotVisible:
+          text: "Open debugger to view warnings."

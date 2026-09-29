@@ -4,9 +4,7 @@ tags:
   - gate
 ---
 # Wrong password must stay on login. Alert title is «Ошибка входа», not «Ошибка».
-- launchApp:
-    clearState: true
-    clearKeychain: true
+- runFlow: ../shared/launch-local.yaml
 - extendedWaitUntil:
     visible:
       id: "welcome-nav-auth"
@@ -23,16 +21,20 @@ tags:
     id: "phone-input"
 - eraseText: 20
 - inputText: "9999999999"
+- hideKeyboard
 - tapOn:
     id: "password-input"
 - eraseText: 20
 - inputText: "wrongpassword"
+- hideKeyboard
 - tapOn:
     id: "login-button"
 - extendedWaitUntil:
     visible:
       text: "Ошибка входа"
     timeout: 15000
+- tapOn:
+    text: "OK"
 - assertVisible:
     id: "login-tab"
 - assertVisible:

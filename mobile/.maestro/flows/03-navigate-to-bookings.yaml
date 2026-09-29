@@ -6,9 +6,7 @@ tags:
 # Master dashboard opens the future-bookings modal. Current UI is AllBookingsModal
 # (title «Будущие записи»), not the legacy bookings-screen / all-bookings-button path.
 # Dashboard compact cards do not open booking-detail-screen.
-- launchApp:
-    clearState: true
-    clearKeychain: true
+- runFlow: ../shared/launch-local.yaml
 - runFlow:
     file: ../shared/login-master.yaml
 - scrollUntilVisible:

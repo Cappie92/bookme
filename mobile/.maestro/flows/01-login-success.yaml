@@ -4,9 +4,7 @@ tags:
   - gate
 ---
 # Master login (DEV_E2E Master A). Native artifact only. Local backend required.
-- launchApp:
-    clearState: true
-    clearKeychain: true
+- runFlow: ../shared/launch-local.yaml
 - runFlow:
     file: ../shared/login-master.yaml
 - assertVisible:

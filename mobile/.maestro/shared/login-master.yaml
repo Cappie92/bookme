@@ -23,10 +23,12 @@ tags:
     id: "phone-input"
 - eraseText: 20
 - inputText: "${E2E_PHONE_DIGITS}"
+- hideKeyboard
 - tapOn:
     id: "password-input"
 - eraseText: 20
 - inputText: "${E2E_PASSWORD}"
+- hideKeyboard
 - tapOn:
     id: "login-button"
 - tapOn:

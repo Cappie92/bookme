@@ -7,9 +7,7 @@ tags:
 # iOS: four-tab bottom nav (dashboard / schedule / services / settings).
 # Android: dashboard / menu / settings; schedule and services live in the menu sheet.
 # Master dashboard cards do not open booking-detail-screen; that route remains a coverage gap.
-- launchApp:
-    clearState: true
-    clearKeychain: true
+- runFlow: ../shared/launch-local.yaml
 - runFlow:
     file: ../shared/login-master.yaml
 - runFlow:
