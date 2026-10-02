@@ -71,7 +71,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     ios: {
       supportsTablet: true,
       bundleIdentifier: 'com.dedato.app',
-      buildNumber: '13',
+      buildNumber: '14',
       associatedDomains,
       config: {
         usesNonExemptEncryption: false,
