@@ -8,7 +8,7 @@ describe('push expo app config', () => {
   it('keeps identity/version and adds expo-notifications without ATT/IAP drift', () => {
     const appConfig = source('app.config.ts');
     expect(appConfig).toContain("version: '1.1.0'");
-    expect(appConfig).toContain("buildNumber: '13'");
+    expect(appConfig).toContain("buildNumber: '14'");
     expect(appConfig).toContain("bundleIdentifier: 'com.dedato.app'");
     expect(appConfig).toContain('versionCode: 6');
     expect(appConfig).toContain("package: 'ru.dedato.mobile'");
