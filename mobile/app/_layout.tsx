@@ -2,16 +2,24 @@
  * AuthGate: Splash при загрузке, редирект по роли в useEffect.
  * Master/Client ветки монтируются раздельно — client никогда не импортирует master-компоненты.
  *
- * Стабильность cold start deeplink: getInitialURL и router.replace('/m/<slug>') выполняются
- * ровно один раз за запуск приложения за счёт module-level guard'ов (переживают remount).
+ * Cold start deeplink: getInitialURL один раз за запуск (module-level initialUrlResult).
+ * Переход на /m/<slug> выполняет usePendingPublicBooking и только пока navigator готов.
+ * Intent снят, когда текущий маршрут совпал со slug, либо попытка replace бросила исключение.
  */
 import { Stack } from 'expo-router';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AuthProvider, useAuth } from '@src/auth/AuthContext';
 import {
+  acceptPublicBookingSlug,
+  currentPublicBookingSlug,
+  isCurrentPublicBookingRoute,
+  publicIntentPreemptsRoleRouting,
   resolvePasswordResetAuthGateRoute,
   resolvePhoneVerificationAuthGateRoute,
+  resolveUnauthenticatedWelcomeAction,
 } from '@src/auth/authFlowRouting';
+import { useUnauthenticatedWelcomeRedirect } from '@src/auth/useUnauthenticatedWelcomeRedirect';
+import { usePendingPublicBooking, useExpoNavigationReady } from '@src/auth/usePendingPublicBooking';
 import {
   PasswordResetRecoveryProvider,
   usePasswordResetRecovery,
@@ -19,12 +27,11 @@ import {
 import { TabBarHeightProvider } from '@src/contexts/TabBarHeightContext';
 import { View, Text, ActivityIndicator, StyleSheet, TouchableOpacity, Linking } from 'react-native';
 import { useEffect, useRef, useState } from 'react';
-import { router, useSegments, usePathname } from 'expo-router';
+import { router, useNavigationContainerRef, useSegments, usePathname } from 'expo-router';
 import { getPublicBookingDraft, isDraftValidForPostLoginRedirect } from '@src/stores/publicBookingDraftStore';
 import { logger } from '@src/utils/logger';
 import { env } from '@src/config/env';
 import { withTimeout } from '@src/utils/promiseWithTimeout';
-import { parsePublicMasterSlugFromUrl } from '@src/utils/parsePublicMasterDeepLink';
 import {
   appInternalRouteToPath,
   parseAppInternalRouteFromUrl,
@@ -47,12 +54,8 @@ const DRAFT_TIMEOUT_MS = 2000;
 // ——— Module-level guards: переживают remount; warm deeplink имеет приоритет над initial ———
 type InitialUrlResult = { isPublic: boolean; slug: string | null; url?: string; source?: 'initial' | 'event' };
 let initialUrlResult: InitialUrlResult | null = null;
-/** Последний slug, на который уже выполнили router.replace; при новом slug (warm/cold) навигируем и обновляем. */
-let didNavigateSlugOnce: string | null = null;
-/** Warm deeplink: последний обработанный slug и время; initial-effect не навигирует, если недавно был warm (приоритет warm). */
-let lastDeeplinkSlug: string | null = null;
-let lastDeeplinkAtMs: number = 0;
-const WARM_PRIORITY_MS = 10000;
+/** Public booking slug whose screen has already been reached. A warm link clears this. */
+let consumedPublicSlug: string | null = null;
 
 function navigateToSubscriptionsRoute(source: string) {
   const target = appInternalRouteToPath('subscriptions');
@@ -101,16 +104,6 @@ function FailsafeScreen({
   );
 }
 
-/** Проверка: маршрут публичный (/(public)/m/[slug] или path /m/...) — без авторизации показываем экран записи, редирект на /login не делаем. */
-function isPublicRoute(pathStr: string, segments: string[]): boolean {
-  const first = segments[0];
-  if (first === '(public)' || first === 'm') return true;
-  if (pathStr.startsWith('/m/') || pathStr.startsWith('m/') || pathStr.includes('/m/')) return true;
-  if (pathStr.includes('(public)')) return true;
-  if (segments.includes('m')) return true;
-  return false;
-}
-
 function AuthGate({ children, rootInstanceId }: { children: React.ReactNode; rootInstanceId: string }) {
   const {
     isAuthenticated,
@@ -152,9 +145,17 @@ function AuthGate({ children, rootInstanceId }: { children: React.ReactNode; roo
   }, [ready, isAuthenticated, isLoading]);
 
   const showSplash = isLoading || isPasswordResetLoading || (isAuthenticated && !ready);
+  const navigationRef = useNavigationContainerRef();
+  const navigationReady = useExpoNavigationReady(navigationRef);
   const pathStr = (pathname != null ? String(pathname) : '') || '';
   const segmentsArr = (Array.isArray(segments) ? segments : []) as string[];
-  const inPublic = isPublicRoute(pathStr, segmentsArr) || initialUrlIsPublic === true;
+  const publicSlugNow = currentPublicBookingSlug(pathStr, segmentsArr);
+  const onCurrentPublicBooking = isCurrentPublicBookingRoute(pathStr, segmentsArr);
+  const { pendingSlug: pendingPublicSlug, requestUrl: requestPublicUrl } = usePendingPublicBooking({
+    navigationReady,
+    currentSlug: publicSlugNow,
+    onConsumed: (slug) => { consumedPublicSlug = slug; },
+  });
 
   const INITIAL_URL_TIMEOUT_MS = 2500;
   const initialUrlSlugRef = useRef<string | null>(null);
@@ -163,8 +164,14 @@ function AuthGate({ children, rootInstanceId }: { children: React.ReactNode; roo
   // Cold start: getInitialURL ровно один раз за запуск (module-level initialUrlResult переживает remount).
   useEffect(() => {
     if (initialUrlResult !== null) {
+      if (initialUrlIsPublic !== null) return;
       setInitialUrlIsPublic(initialUrlResult.isPublic);
-      if (initialUrlResult.slug) initialUrlSlugRef.current = initialUrlResult.slug;
+      if (initialUrlResult.slug) {
+        initialUrlSlugRef.current = initialUrlResult.slug;
+        if (acceptPublicBookingSlug(initialUrlResult.slug) && initialUrlResult.slug !== consumedPublicSlug) {
+          requestPublicUrl(initialUrlResult.url);
+        }
+      }
       return;
     }
     if (initialUrlIsPublic !== null) return;
@@ -194,7 +201,7 @@ function AuthGate({ children, rootInstanceId }: { children: React.ReactNode; roo
           }
           return;
         }
-        const parsedSlug = parsePublicMasterSlugFromUrl(url);
+        const parsedSlug = requestPublicUrl(url);
         if (parsedSlug) {
           initialUrlResult = { isPublic: true, slug: parsedSlug, url: url ?? undefined, source: 'initial' };
           setInitialUrlIsPublic(true);
@@ -219,32 +226,7 @@ function AuthGate({ children, rootInstanceId }: { children: React.ReactNode; roo
       cancelled = true;
       clearTimeout(t);
     };
-  }, [initialUrlIsPublic]);
-
-  // Cold start only: router.replace('/m/<slug>') по initialUrlResult. Не выполнять, если недавно был warm deeplink или уже на /m/.
-  useEffect(() => {
-    if (initialUrlIsPublic !== true) return;
-    const result = initialUrlResult;
-    if (!result?.isPublic || !result.slug) return;
-    const now = Date.now();
-    if (lastDeeplinkSlug != null && now - lastDeeplinkAtMs < WARM_PRIORITY_MS) {
-      if (__DEV__ && (env.DEBUG_AUTH || env.DEBUG_LOGS)) logger.debug('auth', '[DEEPLINK] initial effect skipped reason=recent_warm_event', { lastDeeplinkSlug, lastDeeplinkAtMs });
-      return;
-    }
-    if (pathStr.startsWith('/m/') || pathStr.includes('/m/')) {
-      if (__DEV__ && (env.DEBUG_AUTH || env.DEBUG_LOGS)) logger.debug('auth', '[DEEPLINK] initial effect skipped reason=already_on_public', { pathStr });
-      return;
-    }
-    if (didNavigateSlugOnce === result.slug) return;
-    if (pathStr.includes(result.slug)) return;
-    didNavigateSlugOnce = result.slug;
-    try {
-      if (__DEV__ && (env.DEBUG_AUTH || env.DEBUG_LOGS)) logger.debug('auth', '[DEEPLINK] navigate -> /m/' + result.slug);
-      router.replace(`/m/${result.slug}` as any);
-    } catch (e) {
-      if (__DEV__ && env.DEBUG_AUTH) logger.debug('auth', '[AuthGate] router.replace deeplink error', e);
-    }
-  }, [initialUrlIsPublic, pathname, pathStr]);
+  }, [initialUrlIsPublic, requestPublicUrl]);
 
   // Warm deeplink: приоритет над initial; синхронизируем initialUrlResult чтобы не откатиться на старый slug.
   useEffect(() => {
@@ -252,32 +234,75 @@ function AuthGate({ children, rootInstanceId }: { children: React.ReactNode; roo
       void AcquisitionService.recordTouchFromUrl(url);
       const internalRoute = parseAppInternalRouteFromUrl(url);
       if (internalRoute) {
+        requestPublicUrl(null);
+        initialUrlResult = { isPublic: false, slug: null, url, source: 'event' };
+        setInitialUrlIsPublic(false);
         setPendingMasterRoute(appInternalRouteToPath(internalRoute) as '/' | '/subscriptions');
         navigateToSubscriptionsRoute('event');
         return;
       }
-      const parsedSlug = parsePublicMasterSlugFromUrl(url);
-      if (!parsedSlug) return;
+      const parsedSlug = requestPublicUrl(url);
+      if (!parsedSlug) {
+        initialUrlResult = { isPublic: false, slug: null, source: 'event' };
+        setInitialUrlIsPublic(false);
+        return;
+      }
       const currentPath = pathStr || '';
-      if (currentPath.includes('/m/') && currentPath.includes(parsedSlug)) {
+      initialUrlResult = { isPublic: true, slug: parsedSlug, url, source: 'event' };
+      consumedPublicSlug = null;
+      setInitialUrlIsPublic(true);
+      if (currentPublicBookingSlug(currentPath, segmentsArr) === parsedSlug) {
         if (__DEV__ && (env.DEBUG_AUTH || env.DEBUG_LOGS)) logger.debug('auth', '[DEEPLINK] event handled slug=', parsedSlug, 'currentPath=', currentPath, 'skip=already_on_slug');
         return;
       }
-      lastDeeplinkSlug = parsedSlug;
-      lastDeeplinkAtMs = Date.now();
-      initialUrlResult = { isPublic: true, slug: parsedSlug, url, source: 'event' };
-      didNavigateSlugOnce = parsedSlug;
       if (__DEV__ && (env.DEBUG_AUTH || env.DEBUG_LOGS)) logger.debug('auth', '[DEEPLINK] event handled slug=', parsedSlug, 'currentPath=', currentPath);
-      try {
-        if (__DEV__ && (env.DEBUG_AUTH || env.DEBUG_LOGS)) logger.debug('auth', '[DEEPLINK] navigate -> /m/' + parsedSlug);
-        router.replace(`/m/${parsedSlug}` as any);
-      } catch (e) {
-        if (__DEV__ && env.DEBUG_AUTH) logger.debug('auth', '[DEEPLINK] replace error', e);
-      }
     };
     const sub = Linking.addEventListener('url', handler);
     return () => sub.remove();
-  }, [pathStr]);
+  }, [pathStr, requestPublicUrl]);
+
+  const startupSegments = segmentsArr.join(',');
+  const phoneVerificationRoute = resolvePhoneVerificationAuthGateRoute({
+    isAuthenticated,
+    hasPendingVerification: !!pendingPhoneVerification,
+    pendingVerificationNeedsLogin,
+  });
+  const passwordResetRoute = resolvePasswordResetAuthGateRoute({
+    isAuthenticated,
+    pending: pendingPasswordReset,
+    passwordResetNeedsLogin,
+  });
+  const higherPriorityRoute = phoneVerificationRoute ?? passwordResetRoute;
+  const welcomeAction = resolveUnauthenticatedWelcomeAction({
+    bootstrapComplete: !isLoading,
+    passwordResetBootstrapComplete: !isPasswordResetLoading,
+    navigationReady,
+    isAuthenticated,
+    pathname: pathStr,
+    segments: segmentsArr,
+    higherPriorityRoute,
+    initialUrlResolved: initialUrlIsPublic !== null,
+    pendingPublicSlug:
+      acceptPublicBookingSlug(pendingPublicSlug) && publicSlugNow !== pendingPublicSlug
+        ? pendingPublicSlug
+        : null,
+  });
+
+  useUnauthenticatedWelcomeRedirect({
+    action: welcomeAction,
+    pathname: pathStr,
+    navigationReady,
+    didRedirect: didRedirectRef.current,
+    revision: [
+      isLoading,
+      isPasswordResetLoading,
+      isAuthenticated,
+      String(initialUrlIsPublic),
+      pendingPublicSlug ?? '',
+      higherPriorityRoute ?? '',
+      startupSegments,
+    ].join('|'),
+  });
 
   const isAlreadyOnRoute = (target: string) => {
     const t = target.replace(/^\//, '');
@@ -354,7 +379,7 @@ function AuthGate({ children, rootInstanceId }: { children: React.ReactNode; roo
     }
     const willCallEnsure = onLoginScreen && !isAuthenticated && !token;
     authTrace(
-      `[AuthGate] path=${pathStr} firstSeg=${String(first)} onLoginScreen=${onLoginScreen} isLoading=false isAuthenticated=${isAuthenticated} tokenInContext=${!!token} userPresent=${!!user} willCallEnsureNoTokenOnLogin=${willCallEnsure} initialUrlIsPublic=${String(initialUrlIsPublic)} inPublic=${inPublic}`
+      `[AuthGate] path=${pathStr} firstSeg=${String(first)} onLoginScreen=${onLoginScreen} isLoading=false isAuthenticated=${isAuthenticated} tokenInContext=${!!token} userPresent=${!!user} willCallEnsureNoTokenOnLogin=${willCallEnsure} initialUrlIsPublic=${String(initialUrlIsPublic)} inPublic=${onCurrentPublicBooking}`
     );
     // ensureNoTokenOnLogin только если в context нет токена: иначе ломается partial restore (token есть, user ещё null).
     // Плюс: при полной сессии на /login до редиректа — не трогать storage.
@@ -379,31 +404,13 @@ function AuthGate({ children, rootInstanceId }: { children: React.ReactNode; roo
 
     didEnsureRef.current = false;
 
-    if (inPublic) {
-      setReadyWithReason(true, 'inPublic');
+    if (onCurrentPublicBooking || publicIntentPreemptsRoleRouting(pendingPublicSlug, publicSlugNow)) {
+      setReadyWithReason(true, onCurrentPublicBooking ? 'inPublic' : 'pending public target');
       return;
     }
 
     if (!isAuthenticated) {
-      if (initialUrlIsPublic === null) {
-        setReadyWithReason(true, 'notAuth: initialUrlIsPublic still null');
-        return;
-      }
-      if (!inPublic && !didRedirectRef.current) {
-        const onWelcomeScreen = first === 'welcome' || pathStr.includes('welcome');
-        const onLoginScreenUnauth = first === 'login' || pathStr.includes('login');
-        if (!onWelcomeScreen && !onLoginScreenUnauth) {
-          didRedirectRef.current = true;
-          authTrace('[AuthGate] redirect → /welcome (not authenticated)');
-          logger.debug('auth', '[AuthGate] redirect → /welcome (not authenticated)');
-          try {
-            router.replace('/welcome');
-          } catch (e) {
-            logger.debug('auth', '[AuthGate] router.replace error', e);
-          }
-        }
-      }
-      setReadyWithReason(true, 'notAuth: finally');
+      setReadyWithReason(true, `notAuth: ${welcomeAction}`);
       return;
     }
 
@@ -473,6 +480,11 @@ function AuthGate({ children, rootInstanceId }: { children: React.ReactNode; roo
     segments,
     pathname,
     initialUrlIsPublic,
+    navigationReady,
+    pendingPublicSlug,
+    welcomeAction,
+    onCurrentPublicBooking,
+    publicSlugNow,
   ]);
 
   // Failsafe: если > 8 сек на Splash — показываем экран восстановления (только __DEV__)

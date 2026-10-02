@@ -51,8 +51,8 @@ Gradle runs offline: missing dependencies require a separate reviewed setup.
 7. Stop only owned process sessions and remove only an adb reverse created by this
    run. Preserve DB/WAL/SHM, logs, JUnit and failure screenshots.
 
-Every flow uses `shared/launch-local.yaml`: `launchApp clearState`, then on
-Android the explicit local development-client URL. The helper waits for original
+Every flow uses `shared/launch-local.yaml`: `launchApp clearState`, then the
+explicit local development-client URL on Android and iOS. The helper waits for original
 `welcome-nav-auth` before login (bounded 120-second cold-start readiness).
 Clearing native data loses the Metro URL;
 plain launchApp does not prove that the React Native app loaded.
@@ -139,22 +139,72 @@ Fixtures: Master A `+79991111111`, Master B `+79992222222`, Client C
 ## Harness regression tests
 
 ```bash
-python3 -m unittest discover -s scripts -p test_maestro_android.py -v
+python3 -m unittest discover -s scripts -p 'test_maestro_*.py' -v
 bash -n scripts/run-maestro-e2e.sh
 git diff --check
 ```
 
-## iOS — separate manual readiness gate
+## iOS — canonical command
 
-Android automation does not install Xcode runtimes or build iOS. Inspect first:
+Run from the repository root:
+
 ```bash
-xcrun simctl list runtimes
-xcrun simctl list devices booted
+./scripts/run-maestro-e2e.sh ios .maestro/flows/01-login-success.yaml
+./scripts/run-maestro-e2e.sh ios
 ```
 
-Existing `./scripts/run-maestro-e2e.sh ios` still requires an operator-owned local
-backend and installed **local-API** Simulator artifact (`com.dedato.app`).
-It is **not** self-contained and does not attest binary/API provenance.
-Before execution, separately verify a usable Simulator/runtime, local artifact
-and JS bootstrap strategy. Do not use store/TestFlight binaries.
-Android bootstrap proof does not count as iOS validation.
+`npm run test:e2e:ios` from `mobile/` delegates to the same wrapper.
+Do not invoke Maestro directly: that skips the local stack, owned-simulator and artifact guards.
+Physical Apple devices are refused.
+
+### Prerequisites — never automatically installed/upgraded
+
+- Same repo/branch/`main` rules as Android. Dirty files are reported, never reset/stashed.
+- macOS with Xcode, `xcrun`, `xcodebuild`, and an **already installed** iOS Simulator runtime.
+  Compatible iPhone simulator device types must already exist. No runtime/SDK download.
+- Node **20.19.4**, Java **17**, Maestro version in `MAESTRO_VERSION` (**2.0.10**).
+- Installed locked `mobile/node_modules`, `backend/.venv`, and `mobile/ios/DeDato.xcworkspace`.
+- Free ports **8000** and **8081**. Stop previous manual servers yourself.
+
+### What one invocation owns
+
+1. Validate tools, canonical repo, exact local URL overrides and synthetic identity.
+2. Look up an installed iOS Simulator runtime and iPhone device type. Create a uniquely
+   named temporary simulator (`DeDato-Maestro-*`) and boot **only that device**.
+   Pre-existing simulators, including any developer iPhone 17 Pro, are never selected,
+   keychain-reset, erased or deleted.
+3. Build one local **Debug-iphonesimulator** `DeDato.app` via `xcodebuild` into the run
+   directory. Validate bundle id `com.dedato.app` and simulator SDK. No EAS/TestFlight
+   artifact, version bump, or device/iphoneos product.
+4. Create a unique `/private/tmp/dedato-maestro-*` directory. Start backend from there
+   with fresh `e2e.db`, no repo `.env`, provider stubs, email/IAP/push disabled.
+   Bind **127.0.0.1:8000** only. Require health and seed **HTTP 200**.
+5. Start owned localhost Metro **8081** with iOS API **http://127.0.0.1:8000**.
+6. For **each** selected flow, on the owned simulator only: terminate the app, reset that
+   simulator keychain, uninstall/reinstall the already built `.app`, open the local
+   development-client URL, then run that one Maestro flow. Full gate is sequential 01–05.
+7. Cleanup attempts independently: terminate the owned app, stop owned process groups,
+   shutdown and **delete only the simulator this run created**, close logs.
+
+Application API and host health/seed: **http://127.0.0.1:8000**. Metro: **http://127.0.0.1:8081**.
+`10.0.2.2` is Android-only and rejected on iOS. Runtime API evidence must be loopback.
+Maestro `clearState`/`clearKeychain` alone is not the iOS isolation mechanism.
+
+The iOS harness is available for local infrastructure checks. Maestro 2.0.10 does not
+reliably deliver a full secure-field password into React state, so automated iOS login
+is not a release-blocking gate. Confirm product login for this release with a manual
+iOS smoke. Android remains the automated release gate.
+
+On Maestro non-zero exit, timeout, interrupt, or observed runtime network error, a
+**one-shot** `failure-snapshot.json` is written **before** cleanup. A passing gate does
+not write it. If tests pass but mandatory cleanup fails, the gate fails and does not
+print PASS. Diagnostic/cleanup failures never replace a primary Maestro failure.
+
+Artifacts printed at startup include `backend.log`, `metro.log`, `xcodebuild.log`,
+`maestro.log`, `app-runtime.log`, `seed.json`, per-flow JUnit/debug/output, `e2e.db`,
+`owned-simulator.json`. On failure also: `failure-snapshot.json`, bounded log tails,
+optional simulator screenshot. Treat artifacts as private.
+
+The local machine should not have extreme external network or ephemeral-socket
+pressure during the gate. That is an operator environment concern; the harness
+does not configure host routing or VPN.

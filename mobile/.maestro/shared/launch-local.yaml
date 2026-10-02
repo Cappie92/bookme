@@ -11,6 +11,27 @@ tags:
       platform: Android
     commands:
       - openLink: "${DEVELOPMENT_CLIENT_URL}"
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - openLink: "${DEVELOPMENT_CLIENT_URL}"
+      # System confirmation may cover the already-rendered welcome screen.
+      # Accept only that alert; skip the block when it is absent.
+      - runFlow:
+          when:
+            visible:
+              text: "^Открыть$"
+          commands:
+            - tapOn:
+                text: "^Открыть$"
+      - runFlow:
+          when:
+            visible:
+              text: "^Open$"
+          commands:
+            - tapOn:
+                text: "^Open$"
 - extendedWaitUntil:
     visible:
       id: "welcome-nav-auth"

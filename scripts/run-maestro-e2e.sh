@@ -50,6 +50,9 @@ esac
 if [ "$PLATFORM" = "android" ]; then
   exec python3 "$ROOT/scripts/maestro_android.py" "$@"
 fi
+if [ "$PLATFORM" = "ios" ]; then
+  exec python3 "$ROOT/scripts/maestro_ios.py" "$@"
+fi
 
 export PATH="${PATH}:${HOME}/.maestro/bin"
 
