@@ -31,11 +31,11 @@ describe('push expo app config', () => {
     expect(entitlements).not.toContain('remote-notification');
 
     const pbxproj = source('ios/DeDato.xcodeproj/project.pbxproj');
-    expect(pbxproj.match(/CURRENT_PROJECT_VERSION = [^;]+;/g)).toEqual(Array(2).fill('CURRENT_PROJECT_VERSION = 13;'));
+    expect(pbxproj.match(/CURRENT_PROJECT_VERSION = [^;]+;/g)).toEqual(Array(2).fill('CURRENT_PROJECT_VERSION = 14;'));
     expect(pbxproj.match(/MARKETING_VERSION = [^;]+;/g)).toEqual(Array(2).fill('MARKETING_VERSION = 1.1.0;'));
     const plist = source('ios/DeDato/Info.plist');
     expect(plist).toMatch(/<key>CFBundleShortVersionString<\/key>\s*<string>1\.1\.0<\/string>/);
-    expect(plist).toMatch(/<key>CFBundleVersion<\/key>\s*<string>13<\/string>/);
+    expect(plist).toMatch(/<key>CFBundleVersion<\/key>\s*<string>14<\/string>/);
     const entitlementsAssignments = pbxproj.match(/CODE_SIGN_ENTITLEMENTS = [^;]+;/g) || [];
     expect(entitlementsAssignments).toHaveLength(2);
     expect(entitlementsAssignments.every((line) => line.includes('DeDato/DeDato.entitlements'))).toBe(
