@@ -18,6 +18,7 @@ import { PasswordInput } from '@src/components/ui/PasswordInput';
 import { completePasswordMutationLogout } from '@src/auth/passwordMutationLogout';
 import { AccountDeletionSubscriptionWarningHost } from '@src/components/AccountDeletionSubscriptionWarningHost';
 import { checkSubscriptionBeforeAccountDeletion } from '@src/services/accountDeletionSubscriptionGuard';
+import { IosFreeCompanionNotice } from '@src/components/ios/IosFreeCompanionNotice';
 
 export default function SettingsScreen() {
   const pathname = usePathname();
@@ -395,12 +396,14 @@ export default function SettingsScreen() {
           label="О приложении"
           description={
             Platform.OS === 'ios'
-              ? 'DeDato Mobile - управление бронированиями'
+              ? 'DeDato для iOS — бесплатный компаньон'
               : 'DeDato Mobile - управление бронированиями и подписками'
           }
           onPress={() => Alert.alert('О приложении', 'DeDato Mobile\nВерсия: ' + getAppVersion())}
         />
       </SettingsSection>
+
+      {Platform.OS === 'ios' ? <IosFreeCompanionNotice variant="client" /> : null}
 
       {/* Секция "Опасная зона" */}
       <SettingsSection title="Опасная зона">

@@ -24,6 +24,7 @@ const pageFiles = [
   'UserAgreement.jsx',
   'PersonalDataConsentPage.jsx',
   'AccountDeletionPage.jsx',
+  'IosFreeCompanionPage.jsx',
 ]
 const tempDirs = []
 
@@ -35,7 +36,7 @@ describe('production legal robots', () => {
   it('sets index, follow in the hydrated Helmet metadata for every public legal page', () => {
     for (const file of pageFiles) {
       const source = readFileSync(path.join(here, file), 'utf8')
-      expect(source).toMatch(/robots=["']index, follow["']/)
+      expect(source).toMatch(/robots=["']index, follow["']|content=["']index, follow["']/)
       expect(source).not.toMatch(/robots=["']noindex\s*,\s*nofollow["']/)
     }
   })

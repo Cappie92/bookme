@@ -5,6 +5,7 @@ import { WelcomeTopNav } from '@src/components/welcome/WelcomeTopNav';
 import { WelcomeRoleSelector } from '@src/components/welcome/WelcomeRoleSelector.ios';
 import { WelcomeCardCarousel } from '@src/components/welcome/WelcomeCardCarousel.ios';
 import { WelcomeAuthSheet } from '@src/components/welcome/WelcomeAuthSheet';
+import { IosFreeCompanionNotice } from '@src/components/ios/IosFreeCompanionNotice';
 import { getWelcomeSlidesForRole, type WelcomeRole } from '@src/data/welcomeSlidesData.ios';
 import { analytics, AnalyticsEvent } from '@src/services/analytics';
 
@@ -31,6 +32,7 @@ export default function IosWelcomeScreen() {
           showPricing={false}
         />
         <WelcomeRoleSelector role={role} onRoleChange={handleRoleChange} />
+        <IosFreeCompanionNotice variant="welcome" />
       </View>
       <WelcomeCardCarousel slides={getWelcomeSlidesForRole(role)} resetKey={role} />
       <WelcomeAuthSheet visible={authVisible} onClose={() => setAuthVisible(false)} />

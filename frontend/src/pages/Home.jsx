@@ -107,8 +107,8 @@ export default function Home() {
               </span>
             </h1>
             <p className="mt-4 text-base md:text-lg text-neutral-600 max-w-lg leading-relaxed">
-              Расписание, онлайн-бронирование, клиентская база, скидки и финансовый учёт. Работает в браузере, на iPhone
-              и Android.
+              Расписание, онлайн-бронирование, клиентская база, скидки и финансовый учёт доступны в браузере и на Android.
+              Версия для iOS — бесплатный компаньон с базовыми функциями записи, расписания и услуг.
             </p>
             <div className="mt-6 flex flex-col sm:flex-row gap-3">
               <Button variant="primary" size="lg" onClick={handleTryFreeClick} className="w-full sm:w-auto">
@@ -125,7 +125,7 @@ export default function Home() {
               {[
                 'Личная страница записи — клиенты бронируют сами',
                 'Расписание, клиенты, скидки и финансы в одном месте',
-                'Веб, iOS и Android — один рабочий процесс',
+                'Основные возможности сервиса доступны в веб-версии и на Android. Версия для iOS — бесплатный компаньон.',
               ].map((t) => (
                 <li key={t} className="flex items-start gap-2.5">
                   <span className="mt-0.5 inline-flex h-5 w-5 items-center justify-center rounded-full bg-[#DFF5EC] text-[#45A049] flex-shrink-0">
@@ -346,7 +346,7 @@ export default function Home() {
               Работайте там, где удобно
             </h2>
             <p className="mt-2 text-neutral-600">
-              Браузер, iPhone и Android — один рабочий процесс на любом устройстве.
+              Расширенные возможности сервиса доступны в веб-версии и на Android. Версия для iOS распространяется как бесплатный компаньон с базовыми функциями записи, расписания и услуг.
             </p>
           </div>
 

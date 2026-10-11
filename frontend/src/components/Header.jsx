@@ -3,6 +3,7 @@ import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { UserCircleIcon } from '@heroicons/react/24/outline'
 import { Button, Logo } from './ui'
 import { useAuth } from '../contexts/AuthContext'
+import { normalizePathname } from '../utils/authSession'
 
 export default function Header({ compactPublicBooking = false, clientManagedBranches = [] }) {
   const [isMenuOpen, setIsMenuOpen] = useState(false)
@@ -12,6 +13,7 @@ export default function Header({ compactPublicBooking = false, clientManagedBran
   const { isAuthenticated, logout, openAuthModal, user, isIosRestrictedContext: isIosAppWebSession, commerceAllowed } = useAuth()
   const navigate = useNavigate()
   const { pathname } = useLocation()
+  const onIosFreeCompanion = normalizePathname(pathname) === '/ios-free-companion'
   const isPublicBooking = pathname.startsWith('/m/')
   const isClientUser =
     ((user?.role || localStorage.getItem('user_role') || '') + '').toLowerCase() === 'client'
@@ -136,7 +138,7 @@ export default function Header({ compactPublicBooking = false, clientManagedBran
                 </Link>
               </>
             )}
-            {commerceAllowed ? (
+            {commerceAllowed && !onIosFreeCompanion ? (
               <Link to="/pricing" className="nav-link">
                 Тарифы
               </Link>
@@ -478,7 +480,7 @@ export default function Header({ compactPublicBooking = false, clientManagedBran
                   </Link>
                 </>
               )}
-              {!isIosAppWebSession ? <Link
+              {!onIosFreeCompanion && !isIosAppWebSession ? <Link
                 to="/pricing"
                 className="nav-link px-4 py-2 rounded-lg hover:bg-neutral-100"
                 onClick={() => setIsMenuOpen(false)}

@@ -18,11 +18,11 @@ describe('iOS welcome companion copy', () => {
     expect(blob).not.toContain('показатели');
   });
 
-  it('keeps client visit discounts without subscription/paywall wording', () => {
+  it('describes client visits without loyalty or paywall wording', () => {
     const client = getWelcomeSlidesForRole('client');
     const blob = client.map((slide) => `${slide.title} ${slide.description}`).join('\n');
-    expect(blob).toMatch(/скидк|балл/i);
-    expect(blob).not.toMatch(/тариф|подписк|Premium|купить/i);
+    expect(blob).toContain('Записывайтесь и управляйте своими визитами');
+    expect(blob).not.toMatch(/скидк|балл|тариф|подписк|Premium|купить/i);
   });
 
   it('does not mount pricing UI on the iOS welcome screen', () => {

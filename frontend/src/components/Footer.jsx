@@ -1,8 +1,11 @@
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
+import { normalizePathname } from '../utils/authSession'
 
 export default function Footer({ compact = false }) {
   const { commerceAllowed } = useAuth()
+  const { pathname } = useLocation()
+  const showPricing = commerceAllowed && normalizePathname(pathname) !== '/ios-free-companion'
   return (
     <footer
       className={
@@ -58,7 +61,7 @@ export default function Footer({ compact = false }) {
           >
             Главная
           </Link>
-          {commerceAllowed ? <Link
+          {showPricing ? <Link
             to="/pricing"
             className={
               compact

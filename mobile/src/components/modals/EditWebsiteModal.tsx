@@ -298,7 +298,9 @@ export function EditWebsiteModal({
       <View style={styles.overlay}>
         <SafeAreaView style={styles.container} edges={['bottom']}>
           <View style={styles.header}>
-            <Text style={styles.headerTitle}>Управление сайтом</Text>
+            <Text style={styles.headerTitle}>
+              {Platform.OS === 'ios' ? 'Публичная страница' : 'Управление сайтом'}
+            </Text>
             <TouchableOpacity onPress={onClose} style={styles.closeButton}>
               <Ionicons name="close" size={24} color="#666" />
             </TouchableOpacity>

@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert, Modal, TextInput, ScrollView, RefreshControl } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert, Modal, TextInput, ScrollView, RefreshControl, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Clipboard from 'expo-clipboard';
@@ -31,6 +31,7 @@ import { BOTTOM_NAV_CONTENT_FALLBACK_HEIGHT } from '@src/constants/bottomNavLayo
 import { completePasswordMutationLogout } from '@src/auth/passwordMutationLogout';
 import { AccountDeletionSubscriptionWarningHost } from '@src/components/AccountDeletionSubscriptionWarningHost';
 import { checkSubscriptionBeforeAccountDeletion } from '@src/services/accountDeletionSubscriptionGuard';
+import { IosFreeCompanionNotice } from '@src/components/ios/IosFreeCompanionNotice';
 
 export default function MasterSettingsScreen() {
   const pathname = usePathname();
@@ -411,7 +412,7 @@ export default function MasterSettingsScreen() {
         {/* Блок 3: Управление сайтом (только если can_work_independently) */}
         {settings.master.can_work_independently && (
           <SettingsBlock
-            title="Управление сайтом"
+            title={Platform.OS === 'ios' ? 'Публичная страница' : 'Управление сайтом'}
             onEdit={() => setEditWebsiteVisible(true)}
           >
             <View style={styles.infoBlock}>
@@ -469,6 +470,8 @@ export default function MasterSettingsScreen() {
         )}
 
         {/* Ограничения клиентов вынесены в меню (пункт с тарифным ограничением) */}
+
+        {Platform.OS === 'ios' ? <IosFreeCompanionNotice variant="master" /> : null}
 
         {/* Кнопка изменения пароля */}
         <View style={styles.passwordSection}>

@@ -75,8 +75,10 @@ describe('Privacy Policy legal architecture', () => {
     expect(agreementSource).not.toContain('только для пользователей, достигших 18 лет')
     expect(agreementSource).not.toContain('Restore Purchases')
     expect(agreementSource).not.toContain('Apple In-App Purchase')
-    expect(agreementSource).toContain('фиксированный набор функций мастера')
-    expect(agreementSource).toContain('наличие платного статуса не открывает дополнительные функции')
+    expect(agreementSource).toContain('бесплатным приложением-компаньоном')
+    expect(agreementSource).toContain('не открывает в приложении для iOS дополнительные экраны')
+    expect(agreementSource).toContain('ценами реальных услуг специалистов')
+    expect(agreementSource).not.toContain('не содержит цен')
     expect(agreementSource).toContain('Standard Apple EULA')
     expect(deletionSource).not.toContain('Apple auto-renewal')
     expect(policySource).not.toContain('Apple (подписки App Store)')
@@ -96,6 +98,6 @@ describe('Privacy Policy legal architecture', () => {
 
   it('uses the approved revision date in changed legal documents', () => {
     expect(policySource).toContain('Дата вступления в силу: 23 сентября 2026 г.')
-    expect(agreementSource).toContain('Дата последнего обновления: 23 сентября 2026 г.')
+    expect(agreementSource).toContain('Дата последнего обновления: 12 октября 2026 г.')
   })
 })

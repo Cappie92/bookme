@@ -7,6 +7,7 @@ export const INDEXABLE_LEGAL_ROUTES = [
   'user-agreement',
   'personal-data-consent',
   'account-deletion',
+  'ios-free-companion',
 ]
 
 const BOT_NAMES = ['robots', 'googlebot', 'bingbot', 'yandex']

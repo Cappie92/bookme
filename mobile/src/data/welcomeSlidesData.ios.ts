@@ -89,12 +89,12 @@ const CLIENT_SLIDES: Omit<WelcomeSlide, 'role'>[] = [
     type: 'feature',
   },
   {
-    id: 'client-loyalty',
-    title: 'Скидки и баллы после регистрации',
-    description: 'Накапливайте бонусы у мастеров и получайте персональные скидки от повторных визитов.',
-    badge: 'Выгода',
-    icon: 'ribbon-outline',
-    illustration: 'client-loyalty',
+    id: 'client-visits',
+    title: 'Записывайтесь и управляйте своими визитами',
+    description: 'Выбирайте услугу, дату и время и следите за своими записями в приложении.',
+    badge: 'Запись',
+    icon: 'calendar-outline',
+    illustration: 'client-dashboard',
     type: 'feature',
   },
   {

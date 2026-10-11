@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { AUTH_STATUS as S, authPermissions, createAuthSession, IOS_CONTEXT_TTL, readIosContext } from './authSession'
+import { AUTH_STATUS as S, authPermissions, createAuthSession, IOS_CONTEXT_TTL, isSafePublicPath, readIosContext } from './authSession'
 
 const memory = () => {
   const values = new Map()
@@ -232,7 +232,17 @@ describe('auth session identity and fail-closed commerce', () => {
     expect(x.permissions().commerceAllowed).toBe(false) // failed flow remains isolated
   })
 
-  it.each(['/privacy-policy', '/user-agreement', '/personal-data-consent', '/account-deletion'])('public legal context %s is UX-only, not an authenticated session', async (path) => {
+  it.each(['/ios-free-companion', '/ios-free-companion/'])('ios companion %s is the same commerce-safe public context', async (path) => {
+    const x = setup({ token: false, path, search: '?context=ios_app' })
+    await x.session.check()
+    expect(isSafePublicPath(path)).toBe(true)
+    expect(x.state().status).toBe(S.ANONYMOUS)
+    expect(x.state().marker?.kind).toBe('ios_app')
+    expect(x.permissions().isIosRestrictedContext).toBe(true)
+    expect(x.permissions().commerceAllowed).toBe(false)
+  })
+
+  it.each(['/privacy-policy', '/user-agreement', '/personal-data-consent', '/account-deletion', '/ios-free-companion'])('public legal context %s is UX-only, not an authenticated session', async (path) => {
     const x = setup({ token: false, path, search: '?context=ios_app' })
     await x.session.check()
     expect(x.state().status).toBe(S.ANONYMOUS)

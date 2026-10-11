@@ -85,10 +85,8 @@ describe('fixed-feature iOS master contract', () => {
   it('does not advertise subscriptions in iOS client settings copy', () => {
     const clientSettings = source('app/(client)/settings/index.tsx');
     expect(clientSettings).toContain("Platform.OS === 'ios'");
-    expect(clientSettings).toContain('DeDato Mobile - управление бронированиями');
+    expect(clientSettings).toContain("? 'DeDato для iOS — бесплатный компаньон'");
     expect(clientSettings).toContain('DeDato Mobile - управление бронированиями и подписками');
-    expect(clientSettings).toMatch(
-      /Platform\.OS === 'ios'\s*\?[\s\S]*управление бронированиями'/
-    );
+    expect(clientSettings).toContain('variant="client"');
   });
 });

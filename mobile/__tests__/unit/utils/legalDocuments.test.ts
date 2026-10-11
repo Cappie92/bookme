@@ -2,6 +2,7 @@ jest.mock('react-native', () => ({ Platform: { OS: 'android' } }));
 import { Platform } from 'react-native';
 import {
   buildLegalDocumentUrl,
+  IOS_FREE_COMPANION_PATH,
   openLegalDocument,
   PERSONAL_DATA_CONSENT_PATH,
   PRIVACY_POLICY_PATH,
@@ -11,7 +12,13 @@ import {
 describe('legalDocuments', () => {
   afterEach(() => { (Platform as { OS: string }).OS = 'android'; });
 
-  it.each([USER_AGREEMENT_PATH, PERSONAL_DATA_CONSENT_PATH, PRIVACY_POLICY_PATH, '/account-deletion'])(
+  it.each([
+    USER_AGREEMENT_PATH,
+    PERSONAL_DATA_CONSENT_PATH,
+    PRIVACY_POLICY_PATH,
+    IOS_FREE_COMPANION_PATH,
+    '/account-deletion',
+  ])(
     'iOS legal %s carries only a non-sensitive UX context flag', (path) => {
       (Platform as { OS: string }).OS = 'ios';
       const url = new URL(buildLegalDocumentUrl(path, 'https://dedato.ru'));

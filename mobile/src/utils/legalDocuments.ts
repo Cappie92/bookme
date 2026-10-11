@@ -4,6 +4,7 @@ import { Platform } from 'react-native';
 export const USER_AGREEMENT_PATH = '/user-agreement';
 export const PERSONAL_DATA_CONSENT_PATH = '/personal-data-consent';
 export const PRIVACY_POLICY_PATH = '/privacy-policy';
+export const IOS_FREE_COMPANION_PATH = '/ios-free-companion';
 
 const DEFAULT_LEGAL_ORIGIN = 'https://dedato.ru';
 

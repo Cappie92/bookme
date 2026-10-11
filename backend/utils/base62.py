@@ -14,7 +14,7 @@ BASE62_ALPHABET = string.digits + string.ascii_lowercase + string.ascii_uppercas
 RESERVED_MASTER_DOMAINS = {
     "admin", "api", "auth", "master", "client", "salon", "pricing", "payment",
     "blog", "about", "register", "account-deletion", "privacy-policy",
-    "user-agreement", "personal-data-consent",
+    "user-agreement", "personal-data-consent", "ios-free-companion",
 }
 
 

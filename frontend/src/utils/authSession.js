@@ -8,8 +8,18 @@ export const AUTH_STATUS = Object.freeze({
 
 const CONTEXT_KEY = 'dedato_ios_context'
 export const IOS_CONTEXT_TTL = 30 * 60 * 1000
-const LEGAL_PATHS = new Set(['/privacy-policy', '/user-agreement', '/personal-data-consent', '/account-deletion', '/marketing-consent'])
-export const isSafePublicPath = (path) => LEGAL_PATHS.has(path) || ['/', '/about'].includes(path)
+const LEGAL_PATHS = new Set(['/privacy-policy', '/user-agreement', '/personal-data-consent', '/account-deletion', '/marketing-consent', '/ios-free-companion'])
+
+/** `/ios-free-companion` and `/ios-free-companion/` are the same public route. */
+export function normalizePathname(path) {
+  if (typeof path !== 'string' || path === '/' || path === '') return path
+  return path.replace(/\/+$/, '') || '/'
+}
+
+export const isSafePublicPath = (path) => {
+  const normalized = normalizePathname(path)
+  return LEGAL_PATHS.has(normalized) || ['/', '/about'].includes(normalized)
+}
 
 /** UX restriction only. Never an authorization claim and never contains credentials. */
 export function readIosContext(storage, now = Date.now()) {
@@ -28,7 +38,7 @@ export function createAuthSession({ storage, tabStorage, fetcher, path = '/', se
     tabStorage.setItem(CONTEXT_KEY, JSON.stringify(marker))
   }
   if (path === '/auth/mobile-handoff') mark('ios_app_pending')
-  if (LEGAL_PATHS.has(path) && new URLSearchParams(search).get('context') === 'ios_app') mark('ios_app')
+  if (LEGAL_PATHS.has(normalizePathname(path)) && new URLSearchParams(search).get('context') === 'ios_app') mark('ios_app')
   let generation = 0
   // OAuth is an auth-resolution screen. Never bootstrap the old token into a
   // cabinet while its replacement is pending or the exchange has failed.
