@@ -47,6 +47,11 @@ from schemas import (
 from services.scheduling import check_booking_conflicts, get_available_slots, parse_yyyy_mm_dd
 from utils.booking_occupancy import booking_slot_conflict
 from utils.loyalty_discounts import evaluate_and_prepare_applied_discount, build_applied_discount_info
+from utils.ios_free_companion import (
+    ios_booking_blocked_detail,
+    ios_booking_detail_json,
+    is_ios_free_surface,
+)
 from utils.master_canon import (
     LEGACY_INDIE_MODE,
     MASTER_CANON_DEBUG,
@@ -123,17 +128,18 @@ def _booking_payment_amount(booking: Booking) -> float:
     return 0.0
 
 
-def _booking_list_price_fields(booking: Booking) -> dict:
+def _booking_list_price_fields(booking: Booking, *, hide_loyalty_points: bool = False) -> dict:
     """
     Поля цены для списков ЛК клиента.
     price / amount_to_pay — денежная часть; payment_amount — до баллов; loyalty_points_used — резерв.
+    На iOS free companion баллы не отдаются. Денежная сумма уже созданной записи не пересчитывается.
     """
     payment_amount = _booking_payment_amount(booking)
     loyalty_pts = int(getattr(booking, "loyalty_points_used", None) or 0)
     amount_to_pay = max(0.0, payment_amount - float(loyalty_pts))
     return {
         "payment_amount": payment_amount,
-        "loyalty_points_used": loyalty_pts,
+        "loyalty_points_used": 0 if hide_loyalty_points else loyalty_pts,
         "amount_to_pay": amount_to_pay,
         "price": amount_to_pay,
     }
@@ -149,6 +155,7 @@ def get_future_bookings(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
     client_id: int = None,
+    client_surface: Optional[str] = Query(None),
     full: bool = Query(
         False,
         description="Если true — полный список будущих записей (модалка «Все»). Иначе — краткий превью (до 5).",
@@ -226,7 +233,10 @@ def get_future_bookings(
             # быть выставлен — но клиент его не должен видеть).
             salon_name = None
             service_name = b.service.name if b.service else "-"
-            price_fields = _booking_list_price_fields(b)
+            price_fields = _booking_list_price_fields(
+                b,
+                hide_loyalty_points=is_ios_free_surface(client_surface, current_user),
+            )
             duration = int(b.service.duration) if b.service and b.service.duration is not None else 0
             date = b.start_time
             branch_name = None
@@ -312,6 +322,7 @@ def get_past_bookings(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
     client_id: int = None,
+    client_surface: Optional[str] = Query(None),
     full: bool = Query(
         False,
         description="Если true — полный список прошедших записей (модалка «Все»). Иначе — краткий превью (до 5).",
@@ -390,7 +401,10 @@ def get_past_bookings(
             # их в этом виде больше не получает.
             salon_name = None
             service_name = b.service.name if b.service else "-"
-            price_fields = _booking_list_price_fields(b)
+            price_fields = _booking_list_price_fields(
+                b,
+                hide_loyalty_points=is_ios_free_surface(client_surface, current_user),
+            )
             duration = int(b.service.duration) if b.service and b.service.duration is not None else 0
             date = b.start_time
             branch_name = None
@@ -848,6 +862,7 @@ async def send_calendar_email(
 @router.post("/", response_model=BookingSchema)
 def create_booking(
     booking_in: BookingCreate,
+    client_surface: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ) -> Any:
@@ -880,6 +895,8 @@ def create_booking(
         
         # Если клиент заблокирован - возвращаем ошибку
         if restriction_check['is_blocked']:
+            if is_ios_free_surface(client_surface):
+                raise HTTPException(status_code=403, detail=ios_booking_blocked_detail())
             raise HTTPException(
                 status_code=403,
                 detail=restriction_check.get('reason', 'Запись к этому мастеру невозможна')
@@ -920,9 +937,11 @@ def create_booking(
     ):
         raise booking_slot_conflict()
 
+    ios_free = is_ios_free_surface(client_surface, current_user)
+
     # Обработка баллов лояльности
     loyalty_points_used = 0
-    if booking_in.use_loyalty_points and booking_in.master_id:
+    if (not ios_free) and booking_in.use_loyalty_points and booking_in.master_id:
         # Резервирование баллов происходит только для мастеров
         from utils.loyalty import (
             get_loyalty_settings, get_available_points,
@@ -1009,7 +1028,7 @@ def create_booking(
         raise HTTPException(status_code=400, detail=str(e)) from e
 
     from utils.booking_limit_guard import enforce_booking_creation_limit
-    enforce_booking_creation_limit(db, booking_data)
+    enforce_booking_creation_limit(db, booking_data, client_surface=client_surface)
     booking = Booking(**booking_data)
     db.add(booking)
     db.flush()
@@ -1029,8 +1048,10 @@ def create_booking(
 
     db.commit()
     db.refresh(booking)
-    if applied_discount_data:
+    if applied_discount_data and not ios_free:
         booking.applied_discount = build_applied_discount_info(applied_discount)
+    if ios_free:
+        return ios_booking_detail_json(BookingSchema.model_validate(booking))
     return booking
 
 
@@ -1038,6 +1059,7 @@ def create_booking(
 def update_booking(
     booking_id: int,
     booking_in: BookingUpdate,
+    client_surface: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ) -> Any:
@@ -1131,7 +1153,9 @@ def update_booking(
         .filter(AppliedDiscount.booking_id == booking_id)
         .first()
     )
-    
+
+    if is_ios_free_surface(client_surface):
+        return ios_booking_detail_json(BookingSchema.model_validate(booking))
     booking.applied_discount = build_applied_discount_info(applied_discount) if applied_discount else None
     
     return booking
@@ -1174,6 +1198,7 @@ def cancel_booking(
 @router.post("/temporary", response_model=TemporaryBookingOut)
 def create_temporary_booking(
     booking_in: TemporaryBookingCreate,
+    client_surface: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ) -> Any:
@@ -1198,6 +1223,8 @@ def create_temporary_booking(
     )
     
     if restriction_check['is_blocked']:
+        if is_ios_free_surface(client_surface):
+            raise HTTPException(status_code=403, detail=ios_booking_blocked_detail())
         raise HTTPException(
             status_code=403,
             detail=restriction_check.get('reason', 'Запись к этому мастеру невозможна')
@@ -1295,6 +1322,7 @@ def create_temporary_booking(
 @router.post("/temporary/{temporary_booking_id}/confirm-payment", response_model=BookingSchema)
 def confirm_temporary_booking_payment(
     temporary_booking_id: int,
+    client_surface: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ) -> Any:
@@ -1360,7 +1388,7 @@ def confirm_temporary_booking_payment(
     ):
         raise booking_slot_conflict()
     from utils.booking_limit_guard import enforce_booking_creation_limit
-    enforce_booking_creation_limit(db, booking_data)
+    enforce_booking_creation_limit(db, booking_data, client_surface=client_surface)
     booking = Booking(**booking_data)
     db.add(booking)
     db.flush()
@@ -1383,9 +1411,10 @@ def confirm_temporary_booking_payment(
 
     db.commit()
     db.refresh(booking)
-    if applied_discount_orm:
+    if applied_discount_orm and not is_ios_free_surface(client_surface):
         booking.applied_discount = build_applied_discount_info(applied_discount_orm)
-
+    if is_ios_free_surface(client_surface):
+        return ios_booking_detail_json(BookingSchema.model_validate(booking))
     return booking
 
 

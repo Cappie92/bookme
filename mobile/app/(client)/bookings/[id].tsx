@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, RefreshControl, Alert } from 'react-native';
+import { Platform, View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, RefreshControl, Alert  } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, Stack, router } from 'expo-router';
 import { fetchBookingById, Booking, getStatusLabel, getStatusColor, cancelBooking, BookingStatus } from '@src/services/api/bookings';
@@ -7,6 +7,7 @@ import { BookingTimeEditModal } from '@src/components/BookingTimeEditModal';
 import { PrimaryButton } from '@src/components/PrimaryButton';
 import { SecondaryButton } from '@src/components/SecondaryButton';
 import { MasterLoyaltyInfo } from '@src/components/loyalty/MasterLoyaltyInfo';
+import { isIosFreeCompanion } from '@src/config/iosProductModel';
 import { safeBack } from '@src/utils/safeBack';
 
 const CLIENT_BOOKINGS_FALLBACK = '/client/dashboard';
@@ -309,7 +310,9 @@ export default function BookingDetailScreen() {
         {/* Информация о программе лояльности мастера (только для клиентов) */}
         {booking.master_id && (
           <View style={styles.section}>
-            <MasterLoyaltyInfo masterId={booking.master_id} />
+            {!isIosFreeCompanion(Platform.OS) && booking.master_id != null && (
+              <MasterLoyaltyInfo masterId={booking.master_id} />
+            )}
           </View>
         )}
 

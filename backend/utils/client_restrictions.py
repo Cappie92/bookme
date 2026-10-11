@@ -178,9 +178,12 @@ def check_client_restrictions(
         manual_restriction = q.first()
     
     if manual_restriction:
+        restriction_type = getattr(
+            manual_restriction.restriction_type, "value", manual_restriction.restriction_type
+        )
         return {
-            'is_blocked': manual_restriction.restriction_type.value == 'blacklist',
-            'requires_advance_payment': manual_restriction.restriction_type.value == 'advance_payment_only',
+            'is_blocked': restriction_type == 'blacklist',
+            'requires_advance_payment': restriction_type == 'advance_payment_only',
             'reason': manual_restriction.reason or 'Ручное ограничение',
             'applied_rule_id': None
         }

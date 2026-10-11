@@ -16,6 +16,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ScheduleWeek, Booking, ScheduleSlot, MasterSettings } from '@src/services/api/master';
 import { DayDrawer } from './DayDrawer';
 import { apiClient } from '@src/services/api/client';
+import { isIosFreeCompanion } from '@src/config/iosProductModel';
 
 interface WeekViewProps {
   schedule: ScheduleWeek;
@@ -138,7 +139,7 @@ function buildWeeklyOpenSlotsPayload(slots: ScheduleSlot[]) {
         minute,
         is_working: true,
         has_conflict: slot.has_conflict || false,
-        is_frozen: slot.is_frozen || false,
+        is_frozen: isIosFreeCompanion(Platform.OS) ? false : Boolean(slot.is_frozen),
       };
     })
     .filter((slot): slot is NonNullable<typeof slot> => slot !== null);
@@ -695,7 +696,7 @@ export function WeekView({
             minute: minute,
             is_working: true,
             has_conflict: slot.has_conflict || false,
-            is_frozen: slot.is_frozen || false,
+            is_frozen: isIosFreeCompanion(Platform.OS) ? false : Boolean(slot.is_frozen),
           };
         })
         .filter(slot => slot !== null); // Убираем null значения

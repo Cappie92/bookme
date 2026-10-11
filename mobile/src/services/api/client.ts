@@ -1,5 +1,6 @@
 import axios, { AxiosInstance, InternalAxiosRequestConfig, AxiosResponse, AxiosError } from 'axios';
 import { Platform } from 'react-native';
+import { applyIosFreeSurface } from '@src/services/api/iosFreeSurface';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { env } from '@src/config/env';
 import { logger } from '@src/utils/logger';
@@ -180,6 +181,7 @@ apiClient.interceptors.request.use(
       }
     }
 
+    applyIosFreeSurface(config, Platform.OS);
     const url = config.url || '';
     if (__DEV__ && isMasterExclusiveApiPath(url)) {
       try {

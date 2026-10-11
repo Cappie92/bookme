@@ -20,6 +20,7 @@ import {
   sendCalendarEmail,
 } from '@src/services/api/bookings'
 import { getClientLoyaltyPoints, getClientDashboardStats, ClientLoyaltyMaster } from '@src/services/api/clientDashboard'
+import { isIosFreeCompanion } from '@src/config/iosProductModel'
 import { getBookingTypeAndId, getFavoriteKeyFromBooking, getFavoriteKeyFromFavorite } from '@src/utils/clientDashboard'
 import { writeIcsToCacheAndGetUri, getShareErrorAlert } from '@src/utils/calendarIcsPath'
 
@@ -71,7 +72,9 @@ export default function ClientDashboardScreen() {
       const [futureData, pastData, loyaltyResponse, statsResponse] = await Promise.all([
         getFutureBookings('client'),
         getPastBookings('client'),
-        getClientLoyaltyPoints(),
+        isIosFreeCompanion(Platform.OS)
+          ? Promise.resolve({ masters: [], total_balance: 0 })
+          : getClientLoyaltyPoints(),
         getClientDashboardStats().catch(() => ({ salons_enabled: false }))
       ])
 
@@ -407,7 +410,7 @@ export default function ClientDashboardScreen() {
             )}
           </SectionCard>
           
-          {/* 4. Мои баллы */}
+          {!isIosFreeCompanion(Platform.OS) && (
           <SectionCard
             title="Мои баллы"
             secondaryButton={{ label: 'История', onPress: handleViewLoyaltyHistory }}
@@ -434,6 +437,7 @@ export default function ClientDashboardScreen() {
               </View>
             )}
           </SectionCard>
+          )}
         </View>
       </ScrollView>
     </ScreenContainer>

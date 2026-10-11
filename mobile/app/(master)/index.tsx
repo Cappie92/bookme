@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
-import { View, Text, StyleSheet, ActivityIndicator, ScrollView, TouchableOpacity, Alert, RefreshControl } from 'react-native';
+import { Platform, View, Text, StyleSheet, ActivityIndicator, ScrollView, TouchableOpacity, Alert, RefreshControl  } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTabBarHeight } from '@src/contexts/TabBarHeightContext';
@@ -19,6 +19,7 @@ import { formatMoney } from '@src/utils/money';
 import { canPreVisitConfirmBooking, canConfirmPostVisit, canCancelBooking, debugConfirmUI } from '@src/utils/bookingOutcome';
 import { CancelReasonSheet } from '@src/components/bookings/CancelReasonSheet';
 import { NoteSheet } from '@src/components/bookings/NoteSheet';
+import { isIosFreeCompanion } from '@src/config/iosProductModel';
 import { BookingCardCompact } from '@src/components/bookings/BookingCardCompact';
 import { stripIndiePrefix } from '@src/utils/stripIndiePrefix';
 import { logger } from '@src/utils/logger';
@@ -672,12 +673,13 @@ export default function HomeScreen() {
         />
       )}
 
-      {/* Sheet заметки клиента */}
+      {!isIosFreeCompanion(Platform.OS) && (
       <NoteSheet
         visible={noteSheetBooking !== null}
         onClose={() => setNoteSheetBooking(null)}
         content={noteSheetBooking?.client_note}
       />
+      )}
 
       {/* Sheet выбора причины отмены */}
       <CancelReasonSheet

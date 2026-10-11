@@ -14,6 +14,7 @@ from database import get_db
 from models import User, LoyaltyTransaction, Booking, Master
 from schemas import ClientLoyaltyPointsOut, ClientLoyaltyPointsSummaryOut, LoyaltyTransactionOut
 from utils.loyalty import calculate_client_balance
+from utils.ios_free_companion import is_ios_free_surface
 from utils.public_booking_loyalty import (
     effective_available_points,
     sum_active_loyalty_reserved_points,
@@ -63,13 +64,16 @@ def _loyalty_transaction_to_out(t: LoyaltyTransaction) -> LoyaltyTransactionOut:
 @router.get("/points", response_model=ClientLoyaltyPointsSummaryOut)
 def get_client_points(
     current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    client_surface: Optional[str] = Query(None),
 ):
     """
     Получить все баллы клиента по всем мастерам.
     Возвращает объект с общим балансом и списком баллов по каждому мастеру.
     Включает мастеров с нулевым доступным балансом, если есть история транзакций (например spent).
     """
+    if is_ios_free_surface(client_surface, current_user):
+        return ClientLoyaltyPointsSummaryOut(masters=[], total_balance=0, total_reserved=0)
     from sqlalchemy.exc import OperationalError, ProgrammingError
 
     try:
@@ -242,8 +246,11 @@ def get_client_loyalty_history_for_master(
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
     limit: int = Query(100, ge=1, le=200),
+    client_surface: Optional[str] = Query(None),
 ):
     """История earned + spent у конкретного мастера (для mobile/web)."""
+    if is_ios_free_surface(client_surface, current_user):
+        return []
     client_id = current_user.id
     now = datetime.utcnow()
 
@@ -282,12 +289,15 @@ def get_client_loyalty_history_for_master(
 @router.get("/points/summary", response_model=List[ClientLoyaltyPointsSummaryOut])
 def get_client_points_summary(
     current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    client_surface: Optional[str] = Query(None),
 ):
     """
     Получить краткую информацию о баллах клиента по мастерам.
     Используется для отображения в списке избранных мастеров.
     """
+    if is_ios_free_surface(client_surface, current_user):
+        return []
     client_id = current_user.id
 
     master_ids = db.query(LoyaltyTransaction.master_id).filter(
@@ -320,12 +330,21 @@ def get_client_points_summary(
 def get_available_points_for_master(
     master_id: int,
     current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    client_surface: Optional[str] = Query(None),
 ):
     """
     Получить доступные баллы клиента у конкретного мастера.
     Используется при создании бронирования.
     """
+    if is_ios_free_surface(client_surface, current_user):
+        from schemas import AvailableLoyaltyPointsOut
+        return AvailableLoyaltyPointsOut(
+            master_id=master_id,
+            available_points=0,
+            max_payment_percent=None,
+            is_loyalty_enabled=False,
+        )
     client_id = current_user.id
 
     from utils.loyalty import get_loyalty_settings, get_available_points
@@ -355,12 +374,21 @@ def get_available_points_for_master(
 def get_master_loyalty_settings_public(
     master_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    client_surface: Optional[str] = Query(None),
 ):
     """
     Получить публичные настройки программы лояльности мастера (read-only для клиентов).
     Используется для отображения информации о лояльности в клиентском UI.
     """
+    if is_ios_free_surface(client_surface, current_user):
+        return {
+            "master_id": master_id,
+            "is_enabled": False,
+            "accrual_percent": None,
+            "max_payment_percent": None,
+            "points_lifetime_days": None,
+        }
     from utils.loyalty import get_loyalty_settings
 
     loyalty_settings = get_loyalty_settings(db, master_id)

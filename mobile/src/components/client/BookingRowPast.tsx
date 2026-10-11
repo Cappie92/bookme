@@ -7,12 +7,13 @@
  */
 
 import React, { useState, useEffect } from 'react'
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native'
+import { Platform, View, Text, TouchableOpacity, StyleSheet } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
 import { Booking } from '@src/services/api/bookings'
 import { formatDateShort, getBookingPrice, formatPriceDisplay, formatPrice } from '@src/utils/clientDashboard'
 import { useFavoritesStore, logFav } from '@src/stores/favoritesStore'
 import { FavoriteButtonControlled } from './FavoriteButtonControlled'
+import { isIosFreeCompanion } from '@src/config/iosProductModel'
 
 const HEART_SIZE = 16
 const HEART_CONTAINER = 24
@@ -49,7 +50,7 @@ export function BookingRowPast({
   }, [booking.id, booking.master_id, favKey, isFavorite])
 
   const dateShort = formatDateShort(booking.start_time)
-  const pts = Number(booking.loyalty_points_used ?? 0)
+  const pts = isIosFreeCompanion(Platform.OS) ? 0 : Number(booking.loyalty_points_used ?? 0)
   const payAmt =
     booking.payment_amount != null && !Number.isNaN(Number(booking.payment_amount))
       ? Number(booking.payment_amount)

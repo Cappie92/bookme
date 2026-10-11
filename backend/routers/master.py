@@ -15,6 +15,12 @@ import models
 from database import get_db
 from utils.booking_status import get_effective_booking_status, apply_effective_status_to_bookings
 from utils.client_display_name import get_client_display_name, get_meta_for_client, strip_indie_service_prefix
+from utils.ios_free_companion import (
+    is_ios_free_surface,
+    omit_schedule_freeze,
+    project_ios_booking,
+    project_ios_settings,
+)
 
 logger = logging.getLogger(__name__)
 from models import Booking, Master, MasterSchedule, MasterScheduleSettings, User, BookingStatus, Service, ServiceCategory, MasterServiceCategory, MasterService, SalonMasterInvitation, SalonMasterInvitationStatus, ClientRestriction, Salon, SalonBranch, Income, Subscription, SubscriptionType, SubscriptionStatus, SubscriptionFreeze, ClientRestrictionRule, MasterPaymentSettings, IndieMaster, AppliedDiscount, MasterClientMetadata
@@ -114,7 +120,9 @@ def get_salons(
 
 @router.get("/bookings", response_model=List[BookingSchema])
 def get_bookings(
-    db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)
+    client_surface: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ) -> Any:
     """
     Получение списка всех бронирований мастера (включая прошедшие для отображения в расписании).
@@ -150,15 +158,28 @@ def get_bookings(
         )
         applied_map = {a.booking_id: a for a in applied_list}
 
+    ios_free = is_ios_free_surface(client_surface, current_user)
+    payload = []
     for booking in bookings:
         applied = applied_map.get(booking.id)
-        booking.applied_discount = build_applied_discount_info(applied) if applied else None
+        if not ios_free:
+            booking.applied_discount = build_applied_discount_info(applied) if applied else None
+        if ios_free:
+            item = BookingSchema.model_validate(booking).model_dump(mode="json")
+            item.pop("applied_discount", None)
+            item.pop("loyalty_points_used", None)
+            payload.append(item)
+    if ios_free:
+        from fastapi.responses import JSONResponse
 
+        return JSONResponse(content=payload)
     return bookings
 
 @router.get("/bookings/detailed")
 def get_detailed_bookings(
-    db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)
+    client_surface: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ) -> Any:
     """
     Полное дерево записей для недельного календаря (web/mobile).
@@ -257,6 +278,8 @@ def get_detailed_bookings(
             "applied_discount": applied_info
         })
     
+    if is_ios_free_surface(client_surface, current_user):
+        detailed_bookings = [project_ios_booking(row) for row in detailed_bookings]
     return detailed_bookings
 
 
@@ -264,6 +287,7 @@ def get_detailed_bookings(
 def get_future_bookings_paginated(
     page: int = Query(1, ge=1, description="Номер страницы"),
     limit: int = Query(15, ge=1, le=100, description="Количество записей на странице"),
+    client_surface: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ) -> Any:
@@ -400,6 +424,8 @@ def get_future_bookings_paginated(
             "client_note": meta.note if meta and meta.note else None,
         })
 
+    if is_ios_free_surface(client_surface, current_user):
+        result = [project_ios_booking(row) for row in result]
     return {
         "bookings": result,
         "total": total,
@@ -534,6 +560,7 @@ def get_past_appointments(
     status: Optional[str] = Query(None, description="Фильтр по статусу: completed, cancelled, confirmed"),
     page: int = Query(1, ge=1, description="Номер страницы"),
     limit: int = Query(20, ge=1, le=100, description="Количество записей на странице"),
+    client_surface: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -669,6 +696,8 @@ def get_past_appointments(
             "end_time": booking.end_time.isoformat()
         })
 
+    if is_ios_free_surface(client_surface, current_user):
+        appointments = [project_ios_booking(row) for row in appointments]
     return {
         "appointments": appointments,
         "total": total,
@@ -751,9 +780,10 @@ def get_master_settings(
     from utils.pre_visit_effective import effective_pre_visit_confirmations_allowed
 
     pre_visit_effective = effective_pre_visit_confirmations_allowed(db, current_user.id, master)
-    if client_surface == "ios_fixed" or getattr(current_user, "web_session_origin", None) == "ios_app":
+    ios_free = is_ios_free_surface(client_surface, current_user)
+    if ios_free:
         pre_visit_effective = not bool(master.auto_confirm_bookings)
-    return {
+    payload = {
         "user": {
             "id": current_user.id,
             "email": current_user.email,
@@ -785,6 +815,9 @@ def get_master_settings(
             "site_description": master.site_description,
         }
     }
+    if ios_free:
+        return project_ios_settings(payload)
+    return payload
 
 
 @router.put("/ios-web/domain")
@@ -943,6 +976,7 @@ def get_master_service_functions(
 
 @router.get("/bookings/limit")
 def get_master_bookings_limit(
+    client_surface: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ) -> Any:
@@ -966,6 +1000,19 @@ def get_master_bookings_limit(
         .filter(active_future_bookings_sql_filter(master, _now_lim))
         .scalar() or 0
     )
+
+    if is_ios_free_surface(client_surface, current_user):
+        from utils.booking_limit_guard import future_bookings_limit_for_surface
+
+        ios_limit = future_bookings_limit_for_surface(
+            db, current_user, _now_lim, client_surface
+        )
+        return {
+            "current_active_bookings": active_bookings_count,
+            "max_future_bookings": ios_limit,
+            "is_limit_exceeded": ios_limit is not None and active_bookings_count >= ios_limit,
+            "has_limit": ios_limit is not None,
+        }
     
     # Получаем план подписки
     subscription = db.query(Subscription).filter(
@@ -1054,6 +1101,7 @@ async def update_master_profile(
     missed_sessions_advance_payment_threshold: Optional[int] = Form(None),
     missed_sessions_blacklist_threshold: Optional[int] = Form(None),
     cancellation_grace_period_hours: Optional[int] = Form(None),
+    client_surface: Optional[str] = Query(None),
     db: Session = Depends(get_db), 
     current_user: User = Depends(get_current_active_user)
 ) -> Any:
@@ -1109,7 +1157,9 @@ async def update_master_profile(
             master.domain = generate_unique_domain(master.id, db)
         # Если domain указан явно в запросе, проверяем доступ к функции изменения домена
         elif domain is not None and domain != master.domain:
-            if getattr(current_user, "web_session_origin", None) == "ios_app":
+            from utils.ios_free_companion import is_ios_originated_web_session
+
+            if is_ios_originated_web_session(current_user) or is_ios_free_surface(client_surface):
                 raise HTTPException(status_code=403, detail="Изменение адреса недоступно в этой сессии")
             from utils.subscription_features import can_customize_domain
             from fastapi import status
@@ -1331,6 +1381,7 @@ async def update_master_profile(
 def get_master_weekly_schedule(
     week_offset: int = Query(0, description="Смещение недели (0 = текущая, 1 = следующая, -1 = предыдущая)"),
     weeks_ahead: int = Query(3, description="Количество недель вперед для загрузки"),
+    client_surface: Optional[str] = Query(None),
     db: Session = Depends(get_db), 
     current_user: User = Depends(get_current_active_user)
 ) -> Any:
@@ -1375,31 +1426,30 @@ def get_master_weekly_schedule(
         day_key = f"{slot['schedule_date']}_{slot['hour']}_{slot['minute']}"
         schedule_dict[day_key] = slot
 
-    # Получаем информацию о замороженных днях
+    ios_free = is_ios_free_surface(client_surface, current_user)
     frozen_dates = set()
-    subscription = db.query(Subscription).filter(
-        Subscription.user_id == current_user.id,
-        Subscription.subscription_type == SubscriptionType.MASTER,
-        Subscription.status == SubscriptionStatus.ACTIVE,
-        Subscription.is_active == True
-    ).first()
-    
-    if subscription:
-        # Получаем активные заморозки
-        now = datetime.utcnow()
-        active_freezes = db.query(SubscriptionFreeze).filter(
-            SubscriptionFreeze.subscription_id == subscription.id,
-            SubscriptionFreeze.is_cancelled == False,
-            SubscriptionFreeze.end_date >= now  # Только будущие или текущие заморозки
-        ).all()
+    if not ios_free:
+        subscription = db.query(Subscription).filter(
+            Subscription.user_id == current_user.id,
+            Subscription.subscription_type == SubscriptionType.MASTER,
+            Subscription.status == SubscriptionStatus.ACTIVE,
+            Subscription.is_active == True
+        ).first()
         
-        # Создаем множество замороженных дат
-        for freeze in active_freezes:
-            current_freeze_date = freeze.start_date.date()
-            end_freeze_date = freeze.end_date.date()
-            while current_freeze_date <= end_freeze_date:
-                frozen_dates.add(current_freeze_date)
-                current_freeze_date += timedelta(days=1)
+        if subscription:
+            now = datetime.utcnow()
+            active_freezes = db.query(SubscriptionFreeze).filter(
+                SubscriptionFreeze.subscription_id == subscription.id,
+                SubscriptionFreeze.is_cancelled == False,
+                SubscriptionFreeze.end_date >= now
+            ).all()
+
+            for freeze in active_freezes:
+                current_freeze_date = freeze.start_date.date()
+                end_freeze_date = freeze.end_date.date()
+                while current_freeze_date <= end_freeze_date:
+                    frozen_dates.add(current_freeze_date)
+                    current_freeze_date += timedelta(days=1)
     
     # Генерируем все слоты для текущей недели и следующих недель
     slots = []
@@ -1428,13 +1478,17 @@ def get_master_weekly_schedule(
                         is_frozen=is_frozen
                     ))
 
-    return MasterScheduleResponse(slots=slots)
+    response = MasterScheduleResponse(slots=slots)
+    if ios_free:
+        return omit_schedule_freeze(response)
+    return response
 
 
 @router.get("/schedule/monthly", response_model=MasterScheduleResponse)
 def get_master_monthly_schedule(
     year: int = Query(..., description="Год"),
     month: int = Query(..., description="Месяц (1-12)"),
+    client_surface: Optional[str] = Query(None),
     db: Session = Depends(get_db), 
     current_user: User = Depends(get_current_active_user)
 ) -> Any:
@@ -1465,31 +1519,30 @@ def get_master_monthly_schedule(
         day_key = f"{slot['schedule_date']}_{slot['hour']}_{slot['minute']}"
         schedule_dict[day_key] = slot
 
-    # Получаем информацию о замороженных днях
+    ios_free = is_ios_free_surface(client_surface, current_user)
     frozen_dates = set()
-    subscription = db.query(Subscription).filter(
-        Subscription.user_id == current_user.id,
-        Subscription.subscription_type == SubscriptionType.MASTER,
-        Subscription.status == SubscriptionStatus.ACTIVE,
-        Subscription.is_active == True
-    ).first()
-    
-    if subscription:
-        # Получаем активные заморозки
-        now = datetime.utcnow()
-        active_freezes = db.query(SubscriptionFreeze).filter(
-            SubscriptionFreeze.subscription_id == subscription.id,
-            SubscriptionFreeze.is_cancelled == False,
-            SubscriptionFreeze.end_date >= now  # Только будущие или текущие заморозки
-        ).all()
+    if not ios_free:
+        subscription = db.query(Subscription).filter(
+            Subscription.user_id == current_user.id,
+            Subscription.subscription_type == SubscriptionType.MASTER,
+            Subscription.status == SubscriptionStatus.ACTIVE,
+            Subscription.is_active == True
+        ).first()
         
-        # Создаем множество замороженных дат
-        for freeze in active_freezes:
-            current_freeze_date = freeze.start_date.date()
-            end_freeze_date = freeze.end_date.date()
-            while current_freeze_date <= end_freeze_date:
-                frozen_dates.add(current_freeze_date)
-                current_freeze_date += timedelta(days=1)
+        if subscription:
+            now = datetime.utcnow()
+            active_freezes = db.query(SubscriptionFreeze).filter(
+                SubscriptionFreeze.subscription_id == subscription.id,
+                SubscriptionFreeze.is_cancelled == False,
+                SubscriptionFreeze.end_date >= now
+            ).all()
+
+            for freeze in active_freezes:
+                current_freeze_date = freeze.start_date.date()
+                end_freeze_date = freeze.end_date.date()
+                while current_freeze_date <= end_freeze_date:
+                    frozen_dates.add(current_freeze_date)
+                    current_freeze_date += timedelta(days=1)
     
     # Генерируем все слоты для месяца
     slots = []
@@ -1519,7 +1572,10 @@ def get_master_monthly_schedule(
         
         current_date += timedelta(days=1)
 
-    return MasterScheduleResponse(slots=slots)
+    response = MasterScheduleResponse(slots=slots)
+    if ios_free:
+        return omit_schedule_freeze(response)
+    return response
 
 
 def generate_time_slots(date: date, start_time_str: str, end_time_str: str, valid_until_date: date) -> List[Dict]:
@@ -2060,6 +2116,7 @@ def create_schedule_rules(
 @router.put("/schedule/weekly", response_model=MasterScheduleResponse)
 def update_master_weekly_schedule(
     schedule_update: MasterScheduleUpdate,
+    client_surface: Optional[str] = Query(None),
     db: Session = Depends(get_db), 
     current_user: User = Depends(get_current_active_user)
 ) -> Any:
@@ -2176,10 +2233,15 @@ def update_master_weekly_schedule(
                     ))
             current_date += timedelta(days=1)
         
-        return MasterScheduleResponse(slots=slots)
+        response = MasterScheduleResponse(slots=slots)
+        if is_ios_free_surface(client_surface, current_user):
+            return omit_schedule_freeze(response)
+        return response
     else:
-        # Если слотов нет, возвращаем пустой список
-        return MasterScheduleResponse(slots=[])
+        response = MasterScheduleResponse(slots=[])
+        if is_ios_free_surface(client_surface, current_user):
+            return omit_schedule_freeze(response)
+        return response
 
 
 _SLOT_GUARD_CANCELLED_STATUSES = frozenset(
@@ -3555,13 +3617,14 @@ def get_master_dashboard_stats(
             logger.error("dashboard/stats: master not found user_id=%s", current_user.id)
             raise HTTPException(status_code=404, detail="Master profile not found")
         logger.debug("dashboard/stats: master_id=%s", master.id)
+        ios_free = is_ios_free_surface(client_surface, current_user)
 
         is_indie_master = master.can_work_independently
         logger.debug("dashboard/stats: is_indie_master=%s", is_indie_master)
         
         # Получаем информацию о подписке (если мастер индивидуал)
         subscription_info = None
-        if is_indie_master and client_surface != "ios_fixed":
+        if is_indie_master and not ios_free:
             # Получаем реальную информацию о подписке
             from models import SubscriptionType
             subscription = db.query(Subscription).filter(
@@ -3748,6 +3811,11 @@ def get_master_dashboard_stats(
             client_phone = client.phone if client else None
             meta = get_meta_for_client(meta_map_dash, client_phone)
             client_name = get_client_display_name(meta, client, "Неизвестный клиент")
+            account_name = (
+                str(client.full_name).strip()
+                if client and getattr(client, "full_name", None)
+                else ""
+            ) or None
 
             # Форматируем продолжительность: 30 минут, 1 час, 1,5 часа
             duration_text = ""
@@ -3790,7 +3858,12 @@ def get_master_dashboard_stats(
                 "client_phone": client_phone,
                 "has_client_note": bool(meta and meta.note),
                 "client_note": meta.note if meta and meta.note else None,
+                "client_account_name": account_name,
             })
+            if ios_free:
+                next_bookings_list[-1] = project_ios_booking(next_bookings_list[-1])
+            else:
+                next_bookings_list[-1].pop("client_account_name", None)
         
         # Для обратной совместимости оставляем next_working_info (только первая запись)
         next_working_info = None
@@ -3819,6 +3892,11 @@ def get_master_dashboard_stats(
             _client_phone = _client.phone if _client else None
             _meta = get_meta_for_client(meta_map_dash, _client_phone)
             _client_name = get_client_display_name(_meta, _client, "Неизвестный клиент")
+            _account_name = (
+                str(_client.full_name).strip()
+                if _client and getattr(_client, "full_name", None)
+                else ""
+            ) or None
             _svc_name = strip_indie_service_prefix(next_booking.service.name if next_booking.service else None) or "Неизвестная услуга"
             next_working_info = {
                 "next_booking_date": booking_date.isoformat() if booking_date else None,
@@ -3827,8 +3905,13 @@ def get_master_dashboard_stats(
                 "client_name": _client_name,
                 "client_display_name": _client_name,
                 "client_phone": _client_phone,
+                "client_account_name": _account_name,
                 "service_name": _svc_name
             }
+            if ios_free:
+                next_working_info = project_ios_booking(next_working_info)
+            else:
+                next_working_info.pop("client_account_name", None)
         
         logger.debug("dashboard/stats: periods data")
         # Статусы для stacked charts (единый источник правды для web/mobile)
@@ -4183,7 +4266,7 @@ def get_master_dashboard_stats(
                 "top_period_label": str(top_period_label) if top_period_label else "",
                 "top_period_range": str(top_period_range) if top_period_range else ""
             }
-            if client_surface != "ios_fixed":
+            if not ios_free:
                 response_data["subscription_info"] = subscription_info
             if day_window_meta:
                 response_data.update(day_window_meta)

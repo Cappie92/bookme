@@ -4,6 +4,7 @@
  * Wizard: Услуга → Дата → Время
  */
 import React, { useState, useEffect, useCallback } from 'react';
+import { isIosFreeCompanion } from '@src/config/iosProductModel';
 import {
   View,
   Text,
@@ -519,12 +520,13 @@ export default function MasterPublicBookingScreen() {
       happyHoursChipLabel(
         slot.start_time,
         profile?.master_timezone || 'Europe/Moscow',
-        profile?.loyalty_visual?.happy_hours ?? []
+        isIosFreeCompanion(Platform.OS) ? [] : (profile?.loyalty_visual?.happy_hours ?? [])
       ),
     [profile?.master_timezone, profile?.loyalty_visual?.happy_hours]
   );
 
   const discountPreface = React.useMemo(() => {
+    if (isIosFreeCompanion(Platform.OS)) return null;
     if (!isAuthenticated || !profile || !selectedService || !selectedDate) return null;
     const hint = eligibility?.loyalty_hint;
     if (!hint?.active) return null;
@@ -542,11 +544,13 @@ export default function MasterPublicBookingScreen() {
   ]);
 
   const discountAppliedExplain = React.useMemo(() => {
+    if (isIosFreeCompanion(Platform.OS)) return null;
     if (!selectedSlot) return null;
     return buildAppliedDiscountExplain(pricePreview);
   }, [selectedSlot, pricePreview]);
 
   const loyaltyPaySlot = React.useMemo(() => {
+    if (isIosFreeCompanion(Platform.OS)) return null;
     const hasSummary = Boolean(selectedService && selectedDate && selectedSlot);
     if (
       !hasSummary ||
@@ -719,7 +723,9 @@ export default function MasterPublicBookingScreen() {
         service_id: selectedService.id,
         start_time: selectedSlot.start_time,
         end_time: selectedSlot.end_time,
-        use_loyalty_points: Boolean(
+        use_loyalty_points: isIosFreeCompanion(Platform.OS)
+          ? false
+          : Boolean(
           useLoyaltyPoints &&
             eligibility &&
             eligibility.points != null &&

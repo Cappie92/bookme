@@ -129,13 +129,43 @@ def _limit_for_user(db: Session, user: User, now_utc: datetime) -> int | None:
     return int(raw_limit) if isinstance(raw_limit, (int, float)) and raw_limit > 0 else None
 
 
+def future_bookings_limit_for_surface(
+    db: Session,
+    user: User,
+    now_utc: datetime,
+    client_surface: str | None = None,
+) -> int | None:
+    """Web/Android keep the plan limit. Native iOS may only keep or tighten it.
+
+    `is_always_free` is an internal admin grant (price-0 AlwaysFree, all paid
+    feature flags). It is not an App Store purchase. This pass does not add an
+    exemption: a missing numeric limit, including that grant, stays at the free cap.
+    """
+    from utils.ios_free_companion import (
+        IOS_FREE_FUTURE_BOOKINGS_LIMIT,
+        is_ios_free_surface,
+    )
+
+    existing = _limit_for_user(db, user, now_utc)
+    if not is_ios_free_surface(client_surface):
+        return existing
+    if existing is None:
+        return IOS_FREE_FUTURE_BOOKINGS_LIMIT
+    return min(int(existing), IOS_FREE_FUTURE_BOOKINGS_LIMIT)
+
+
 def enforce_booking_creation_limit(
     db: Session,
     booking_data: Mapping[str, Any],
     *,
     now_utc: datetime | None = None,
+    client_surface: str | None = None,
 ) -> None:
-    """Reject a new booking if it would exceed the resolved owner's active limit."""
+    """Reject a new booking if it would exceed the resolved owner's active limit.
+
+    `client_surface=ios_fixed` uses min(existing limit, free cap). Callers that
+    omit the surface keep the web/Android plan limit, including unlimited paid plans.
+    """
     if not db.info.get("booking_creation_transaction"):
         raise RuntimeError("begin_booking_creation_transaction must be called first")
     now = now_utc or datetime.utcnow()
@@ -145,7 +175,7 @@ def enforce_booking_creation_limit(
     user = db.query(User).filter(User.id == master.user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="Master user not found")
-    limit = _limit_for_user(db, user, now)
+    limit = future_bookings_limit_for_surface(db, user, now, client_surface)
     if limit is None:
         return
     count = (

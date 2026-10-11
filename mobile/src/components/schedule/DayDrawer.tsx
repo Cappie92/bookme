@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
+  Platform,
   View,
   Text,
   StyleSheet,
@@ -26,6 +27,7 @@ import { canCancelBooking, canPreVisitConfirmBooking, canConfirmPostVisit, debug
 import { getPastBookingStatusLabel, getPastBookingStatusColor } from '@src/utils/bookingStatusDisplay';
 import { CancelReasonSheet } from '@src/components/bookings/CancelReasonSheet';
 import { NoteSheet } from '@src/components/bookings/NoteSheet';
+import { isIosFreeCompanion } from '@src/config/iosProductModel';
 import { BookingCardCompact } from '@src/components/bookings/BookingCardCompact';
 import {
   SLOT_MINUTE_STEPS,
@@ -541,7 +543,9 @@ export function DayDrawer({
       </View>}
       </Modal>
 
-      <NoteSheet visible={noteSheetBooking !== null} onClose={() => setNoteSheetBooking(null)} content={noteSheetBooking?.client_note} />
+      {!isIosFreeCompanion(Platform.OS) && (
+        <NoteSheet visible={noteSheetBooking !== null} onClose={() => setNoteSheetBooking(null)} content={noteSheetBooking?.client_note} />
+      )}
       <CancelReasonSheet
         visible={cancelSheetBookingId !== null}
         onClose={() => setCancelSheetBookingId(null)}

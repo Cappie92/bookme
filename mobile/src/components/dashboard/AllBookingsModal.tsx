@@ -36,6 +36,7 @@ import {
 } from '@src/utils/bookingOutcome';
 import { CancelReasonSheet } from '@src/components/bookings/CancelReasonSheet';
 import { NoteSheet } from '@src/components/bookings/NoteSheet';
+import { isIosFreeCompanion } from '@src/config/iosProductModel';
 import { BookingCardCompact } from '@src/components/bookings/BookingCardCompact';
 import { Booking } from '@src/services/api/bookings';
 import {
@@ -501,11 +502,13 @@ export function AllBookingsModal({
         </View>
       </View>
 
+      {!isIosFreeCompanion(Platform.OS) && (
       <NoteSheet
         visible={noteSheetBooking !== null}
         onClose={() => setNoteSheetBooking(null)}
         content={noteSheetBooking?.client_note}
       />
+      )}
       <NoteSheet
         visible={cancellationReasonSheet !== null}
         onClose={() => setCancellationReasonSheet(null)}

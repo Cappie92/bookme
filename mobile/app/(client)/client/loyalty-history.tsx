@@ -3,14 +3,16 @@
  */
 
 import React, { useEffect, useState } from 'react'
-import { View, ScrollView, Text, StyleSheet, RefreshControl, ActivityIndicator } from 'react-native'
-import { useLocalSearchParams } from 'expo-router'
+import { Platform, View, ScrollView, Text, StyleSheet, RefreshControl, ActivityIndicator } from 'react-native'
+import { useLocalSearchParams, useRouter } from 'expo-router'
 import { getLoyaltyHistory, LoyaltyTransaction } from '@src/services/api/clientDashboard'
+import { isIosFreeCompanion } from '@src/config/iosProductModel'
 import { formatDateTimeShort } from '@src/utils/clientDashboard'
 
 import { ScreenContainer } from '@src/components/ScreenContainer'
 
 export default function LoyaltyHistoryScreen() {
+  const router = useRouter()
   const params = useLocalSearchParams<{ masterId?: string; masterName?: string }>()
 
   const [transactions, setTransactions] = useState<LoyaltyTransaction[]>([])
@@ -29,6 +31,7 @@ export default function LoyaltyHistoryScreen() {
       : ''
 
   const loadData = async () => {
+    if (isIosFreeCompanion(Platform.OS)) return
     try {
       setIsLoading(true)
       const data = await getLoyaltyHistory(masterIdOk)
@@ -48,8 +51,14 @@ export default function LoyaltyHistoryScreen() {
   }
 
   useEffect(() => {
+    if (isIosFreeCompanion(Platform.OS)) {
+      router.replace('/client/dashboard')
+      return
+    }
     loadData()
   }, [masterIdOk])
+
+  if (isIosFreeCompanion(Platform.OS)) return null
 
   return (
     <ScreenContainer>

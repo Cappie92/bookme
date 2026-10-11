@@ -1,9 +1,10 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { Platform, View, Text, StyleSheet, TouchableOpacity  } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBadge } from '../StatusBadge';
 import { formatDateDDMM, formatTimeHHMM } from '@src/utils/format';
 import { canCancelBooking } from '@src/utils/bookingOutcome';
+import { isIosFreeCompanion } from '@src/config/iosProductModel';
 
 const BRAND_GREEN = '#4CAF50';
 
@@ -54,8 +55,9 @@ export function BookingCardCompact({
   showCancellationReasonIcon = false,
   isBusy = false,
 }: BookingCardCompactProps) {
+  const iosFree = isIosFreeCompanion(Platform.OS);
   const clientDisplay = (() => {
-    const alias = (booking.client_master_alias ?? '').trim();
+    const alias = iosFree ? '' : (booking.client_master_alias ?? '').trim();
     if (alias) return { text: alias, isAlias: true, account: '', phone: '' };
     let account = (booking.client_account_name ?? booking.client_name ?? '').trim();
     const phone = (booking.client_phone ?? '').trim();
@@ -102,7 +104,7 @@ export function BookingCardCompact({
                 >
                   {clientCompactLine}
                 </Text>
-                {booking.has_client_note && onNotePress && (
+                {!iosFree && booking.has_client_note && onNotePress && (
                   <TouchableOpacity
                     hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                     onPress={() => onNotePress(booking)}

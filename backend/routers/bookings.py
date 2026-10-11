@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
@@ -151,6 +151,7 @@ async def list_bookings(
 @router.post("/", response_model=BookingSchema)
 async def create_booking(
     booking: BookingCreate,
+    client_surface: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -271,9 +272,12 @@ async def create_booking(
     ):
         raise booking_slot_conflict()
 
+    from utils.ios_free_companion import is_ios_free_surface
+    ios_free = is_ios_free_surface(client_surface, current_user)
+
     # Обработка баллов лояльности (только для авторизованных клиентов)
     loyalty_points_used = 0
-    if booking.use_loyalty_points and booking.master_id and current_user:
+    if (not ios_free) and booking.use_loyalty_points and booking.master_id and current_user:
         # Резервирование баллов происходит только для мастеров
         from utils.loyalty import (
             get_loyalty_settings, get_available_points,
@@ -366,7 +370,7 @@ async def create_booking(
         raise HTTPException(status_code=400, detail=str(e)) from e
 
     from utils.booking_limit_guard import enforce_booking_creation_limit
-    enforce_booking_creation_limit(db, booking_data)
+    enforce_booking_creation_limit(db, booking_data, client_surface=client_surface)
     db_booking = Booking(**booking_data)
     db.add(db_booking)
     db.flush()
@@ -386,8 +390,12 @@ async def create_booking(
 
     db.commit()
     db.refresh(db_booking)
-    if applied_discount_data:
+    if applied_discount_data and not ios_free:
         db_booking.applied_discount = build_applied_discount_info(applied_discount)
+    if ios_free:
+        from utils.ios_free_companion import ios_booking_detail_json
+
+        return ios_booking_detail_json(BookingSchema.model_validate(db_booking))
     return db_booking
 
 
@@ -395,16 +403,19 @@ async def create_booking(
 async def create_booking_public(
     booking: BookingCreate,
     client_phone: str,
+    client_surface: Optional[str] = Query(None),
     db: Session = Depends(get_db),
 ):
     """Validate a public booking and persist only opaque, expiring server-side state."""
+    from utils.ios_free_companion import remember_restrictive_surface
+
     phone = _validate_public_booking_phone(client_phone, db)
     _validate_specific_public_booking(booking, db, conflict_status=400)
-    ticket = _store_public_booking_ticket({
+    ticket = _store_public_booking_ticket(remember_restrictive_surface({
         "flow": "specific",
         "phone": phone,
         "booking": booking.model_dump(mode="json"),
-    })
+    }, client_surface))
     return _public_booking_pending_response(ticket, phone)
 
 
@@ -518,7 +529,7 @@ def _resolve_or_create_verified_public_client(
 
 
 def _create_specific_public_booking_after_proof(
-    pending: dict, db: Session
+    pending: dict, db: Session, client_surface: Optional[str] = None
 ) -> tuple[Booking, User, bool, Optional[dict]]:
     from utils.booking_factory import BookingOwnerError, normalize_booking_fields
 
@@ -569,7 +580,7 @@ def _create_specific_public_booking_after_proof(
     except BookingOwnerError as exc:
         raise HTTPException(400, str(exc)) from exc
     from utils.booking_limit_guard import enforce_booking_creation_limit
-    enforce_booking_creation_limit(db, data)
+    enforce_booking_creation_limit(db, data, client_surface=client_surface)
     created = Booking(**data)
     db.add(created)
     db.flush()
@@ -629,6 +640,7 @@ async def request_public_booking_phone_verification(
 async def confirm_public_booking_phone_verification(
     request: ConfirmSignupPhoneVerificationRequest,
     creds: HTTPAuthorizationCredentials = Depends(public_booking_verification_bearer),
+    client_surface: Optional[str] = Query(None),
     db: Session = Depends(get_db),
 ):
     from utils.booking_limit_guard import begin_booking_creation_transaction
@@ -663,21 +675,24 @@ async def confirm_public_booking_phone_verification(
             call_id=request.call_id,
             phone_digits=request.phone_digits,
         )
+        from utils.ios_free_companion import effective_booking_surface, is_ios_free_surface
+
+        surface = effective_booking_surface(client_surface, claimed_pending)
         if claimed_pending.get("flow") == "specific":
             booking, client, is_new_client, applied = _create_specific_public_booking_after_proof(
-                claimed_pending, db
+                claimed_pending, db, client_surface=surface
             )
             master_name = None
         elif claimed_pending.get("flow") == "any_master":
             booking, client, is_new_client, master_name = _create_any_master_public_booking_after_proof(
-                claimed_pending, db
+                claimed_pending, db, client_surface=surface
             )
             applied = None
         else:
             raise HTTPException(400, "Unknown public booking flow")
         db.commit()
         db.refresh(booking)
-        if applied:
+        if applied and not is_ios_free_surface(surface):
             booking.applied_discount = build_applied_discount_info(applied)
     except HTTPException:
         db.rollback()
@@ -1053,6 +1068,7 @@ async def get_available_slots_any_master(
 @router.get("/{booking_id}", response_model=BookingSchema)
 async def get_booking(
     booking_id: int,
+    client_surface: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -1100,7 +1116,11 @@ async def get_booking(
         .filter(AppliedDiscount.booking_id == booking_id)
         .first()
     )
-    
+
+    from utils.ios_free_companion import ios_booking_detail_json, is_ios_free_surface
+
+    if is_ios_free_surface(client_surface):
+        return ios_booking_detail_json(BookingSchema.model_validate(db_booking))
     db_booking.applied_discount = build_applied_discount_info(applied_discount) if applied_discount else None
     
     return db_booking
@@ -1125,6 +1145,7 @@ async def create_booking_with_any_master(
     branch_id: Optional[int] = None,
     notes: Optional[str] = None,
     client_phone: Optional[str] = None,
+    client_surface: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: Optional[User] = Depends(get_current_user_optional),
 ):
@@ -1165,7 +1186,9 @@ async def create_booking_with_any_master(
         db, start_time, end_time, OwnerType.MASTER, best_master["id"]
     ):
         raise booking_slot_conflict(status.HTTP_400_BAD_REQUEST)
-    pending = {
+    from utils.ios_free_companion import remember_restrictive_surface
+
+    pending = remember_restrictive_surface({
         "flow": "any_master",
         "phone": phone,
         "salon_id": salon_id,
@@ -1174,11 +1197,11 @@ async def create_booking_with_any_master(
         "end_time": end_time.isoformat(),
         "branch_id": branch_id,
         "notes": notes,
-    }
+    }, client_surface)
     if current_user:
         try:
             booking, _, _, master_name = _create_any_master_public_booking_after_proof(
-                pending, db
+                pending, db, client_surface=client_surface
             )
             db.commit()
             db.refresh(booking)
@@ -1200,7 +1223,7 @@ async def create_booking_with_any_master(
 
 
 def _create_any_master_public_booking_after_proof(
-    pending: dict, db: Session
+    pending: dict, db: Session, client_surface: Optional[str] = None
 ) -> tuple[Booking, User, bool, str]:
     from utils.booking_factory import BookingOwnerError, normalize_booking_fields
 
@@ -1254,7 +1277,7 @@ def _create_any_master_public_booking_after_proof(
     except BookingOwnerError as exc:
         raise HTTPException(400, str(exc)) from exc
     from utils.booking_limit_guard import enforce_booking_creation_limit
-    enforce_booking_creation_limit(db, data)
+    enforce_booking_creation_limit(db, data, client_surface=client_surface)
     created = Booking(**data, created_at=datetime.utcnow())
     db.add(created)
     db.flush()

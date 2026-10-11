@@ -3,9 +3,10 @@
  */
 
 import React, { useEffect, useState } from 'react'
-import { View, ScrollView, Text, StyleSheet, RefreshControl, Alert, TouchableOpacity } from 'react-native'
+import { Platform, View, ScrollView, Text, StyleSheet, RefreshControl, Alert, TouchableOpacity } from 'react-native'
 import { useRouter } from 'expo-router'
 import { getClientLoyaltyPoints, ClientLoyaltyMaster } from '@src/services/api/clientDashboard'
+import { isIosFreeCompanion } from '@src/config/iosProductModel'
 
 // Components
 import { ScreenContainer } from '@src/components/ScreenContainer'
@@ -19,6 +20,7 @@ export default function LoyaltyPointsScreen() {
   const [refreshing, setRefreshing] = useState(false)
   
   const loadData = async () => {
+    if (isIosFreeCompanion(Platform.OS)) return
     try {
       setIsLoading(true)
       const data = await getClientLoyaltyPoints()
@@ -39,6 +41,10 @@ export default function LoyaltyPointsScreen() {
   }
   
   useEffect(() => {
+    if (isIosFreeCompanion(Platform.OS)) {
+      router.replace('/client/dashboard')
+      return
+    }
     loadData()
   }, [])
   
@@ -58,6 +64,8 @@ export default function LoyaltyPointsScreen() {
     }
   }
   
+  if (isIosFreeCompanion(Platform.OS)) return null
+
   return (
     <ScreenContainer>
       <ScrollView

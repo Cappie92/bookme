@@ -8,6 +8,12 @@ from zoneinfo import ZoneInfo
 from typing import Any, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query
+from utils.ios_free_companion import (
+    is_ios_free_surface,
+    ios_eligibility_json,
+    ios_price_preview_json,
+    ios_public_profile_json,
+)
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -271,7 +277,11 @@ def _ensure_master_timezone(master: Master) -> None:
     summary="Публичный профиль мастера",
     responses={404: {"description": "Мастер не найден"}},
 )
-def get_public_master_profile(slug: str, db: Session = Depends(get_db)) -> Any:
+def get_public_master_profile(
+    slug: str,
+    client_surface: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+) -> Any:
     """Публичный профиль мастера по slug (masters.domain). Без авторизации."""
     master = _get_master_by_slug(db, slug)
     if not master:
@@ -305,15 +315,19 @@ def get_public_master_profile(slug: str, db: Session = Depends(get_db)) -> Any:
     if payment_settings and getattr(payment_settings, "requires_advance_payment", False):
         requires_advance = True
 
-    raw_hints = build_public_loyalty_visual_hints(db, master)
-    loyalty_visual = PublicLoyaltyVisualOut(
-        happy_hours=[PublicHappyHoursVisualOut(**h) for h in raw_hints.get("happy_hours") or []],
-        service_discounts=[
-            PublicServiceDiscountVisualOut(**x) for x in raw_hints.get("service_discounts") or []
-        ],
-    )
+    ios_free = is_ios_free_surface(client_surface)
+    if ios_free:
+        loyalty_visual = PublicLoyaltyVisualOut()
+    else:
+        raw_hints = build_public_loyalty_visual_hints(db, master)
+        loyalty_visual = PublicLoyaltyVisualOut(
+            happy_hours=[PublicHappyHoursVisualOut(**h) for h in raw_hints.get("happy_hours") or []],
+            service_discounts=[
+                PublicServiceDiscountVisualOut(**x) for x in raw_hints.get("service_discounts") or []
+            ],
+        )
 
-    return PublicMasterProfileOut(
+    profile = PublicMasterProfileOut(
         master_id=master.id,
         master_name=user.full_name or "Мастер",
         master_slug=master.domain or slug,
@@ -330,6 +344,9 @@ def get_public_master_profile(slug: str, db: Session = Depends(get_db)) -> Any:
         booking_blocked=False,
         loyalty_visual=loyalty_visual,
     )
+    if ios_free:
+        return ios_public_profile_json(profile)
+    return profile
 
 
 @router.get(
@@ -427,6 +444,7 @@ def get_public_availability(
 def create_public_booking(
     slug: str,
     body: PublicBookingCreate,
+    client_surface: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ) -> Any:
@@ -445,6 +463,10 @@ def create_public_booking(
         db, master.id, current_user.id, current_user.phone or ""
     )
     if restriction.get("is_blocked"):
+        if is_ios_free_surface(client_surface):
+            from utils.ios_free_companion import ios_booking_blocked_detail
+
+            raise HTTPException(status_code=403, detail=ios_booking_blocked_detail())
         raise HTTPException(
             status_code=403,
             detail=restriction.get("reason", "Запись к этому мастеру невозможна"),
@@ -475,6 +497,8 @@ def create_public_booking(
     if check_booking_conflicts(db, body.start_time, body.end_time, OwnerType.MASTER, master.id):
         raise booking_slot_conflict()
 
+    base_price = float(service.price or 0)
+    ios_free = is_ios_free_surface(client_surface, current_user)
     discounted_amount, applied_discount_data = evaluate_and_prepare_applied_discount(
         master_id=master.id,
         client_id=current_user.id,
@@ -483,15 +507,17 @@ def create_public_booking(
         service_id=service.id,
         db=db,
     )
-    base_price = float(service.price or 0)
     payment_amount = discounted_amount if discounted_amount is not None else base_price
-    loyalty_points_used = compute_public_create_loyalty_points_used(
-        db,
-        master_id=master.id,
-        client_id=current_user.id,
-        discounted_price=float(payment_amount),
-        use_loyalty_points=bool(body.use_loyalty_points),
-    )
+    if ios_free:
+        loyalty_points_used = 0
+    else:
+        loyalty_points_used = compute_public_create_loyalty_points_used(
+            db,
+            master_id=master.id,
+            client_id=current_user.id,
+            discounted_price=float(payment_amount),
+            use_loyalty_points=bool(body.use_loyalty_points),
+        )
 
     booking_data = {
         "service_id": service.id,
@@ -511,7 +537,7 @@ def create_public_booking(
         raise HTTPException(status_code=400, detail=str(e)) from e
 
     from utils.booking_limit_guard import enforce_booking_creation_limit
-    enforce_booking_creation_limit(db, booking_data)
+    enforce_booking_creation_limit(db, booking_data, client_surface=client_surface)
     booking = Booking(**booking_data)
     db.add(booking)
     db.flush()
@@ -531,7 +557,7 @@ def create_public_booking(
     disc_amt = float(applied_discount_data.get("discount_amount") or 0) if applied_discount_data else 0.0
     disc_pct = applied_discount_data.get("discount_percent") if applied_discount_data else None
     money_to_pay = max(0.0, float(payment_amount) - float(loyalty_points_used))
-    return PublicBookingCreateOut(
+    created = PublicBookingCreateOut(
         id=booking.id,
         status=status_val,
         public_reference=booking.public_reference or "",
@@ -549,6 +575,11 @@ def create_public_booking(
         ),
         condition_type=applied_discount_data.get("condition_type") if applied_discount_data else None,
     )
+    if ios_free:
+        from utils.ios_free_companion import ios_price_preview_json
+
+        return ios_price_preview_json(created)
+    return created
 
 
 @router.get(
@@ -586,6 +617,7 @@ def get_public_client_note(
 )
 def get_public_eligibility(
     slug: str,
+    client_surface: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: Optional[User] = Depends(get_current_user_optional),
 ) -> Any:
@@ -608,16 +640,20 @@ def get_public_eligibility(
         result.booking_blocked = restriction.get("is_blocked", False)
         if restriction.get("requires_advance_payment"):
             result.requires_advance_payment = True
-        try:
-            eff = effective_available_points(db, master_id=master.id, client_id=current_user.id)
-            result.points = eff
-            result.points_payment_available = eff > 0
-        except Exception:
-            result.points = 0
-            result.points_payment_available = False
-        ls = get_loyalty_settings(db, master.id)
-        result.loyalty_program_enabled = bool(ls and ls.is_enabled)
-        result.loyalty_hint = _loyalty_hint_for_eligibility(db, master.id, current_user)
+        ios_free = is_ios_free_surface(client_surface, current_user)
+        if not ios_free:
+            try:
+                eff = effective_available_points(db, master_id=master.id, client_id=current_user.id)
+                result.points = eff
+                result.points_payment_available = eff > 0
+            except Exception:
+                result.points = 0
+                result.points_payment_available = False
+            ls = get_loyalty_settings(db, master.id)
+            result.loyalty_program_enabled = bool(ls and ls.is_enabled)
+            result.loyalty_hint = _loyalty_hint_for_eligibility(db, master.id, current_user)
+    if is_ios_free_surface(client_surface, current_user):
+        return ios_eligibility_json(result)
     return result
 
 
@@ -632,6 +668,7 @@ def get_booking_price_preview(
     service_id: int = Query(..., description="ID MasterService из профиля"),
     start_time: datetime = Query(..., description="Начало выбранного слота (ISO)"),
     use_loyalty_points: bool = Query(False, description="Учитывать списание баллов (только для авторизованного клиента)"),
+    client_surface: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: Optional[User] = Depends(get_current_user_optional),
 ) -> Any:
@@ -653,6 +690,7 @@ def get_booking_price_preview(
 
     service = _resolve_canonical_service_for_master_service(db, master, master_svc)
     base_price = float(service.price or 0)
+    ios_free = is_ios_free_surface(client_surface, current_user)
 
     client_id: Optional[int] = None
     client_phone: Optional[str] = None
@@ -700,10 +738,10 @@ def get_booking_price_preview(
         master_id=master.id,
         client_id=client_id,
         discounted_price=discounted_price,
-        use_loyalty_points=use_loyalty_points,
+        use_loyalty_points=False if ios_free else use_loyalty_points,
     )
     money = float(loyalty["amount_to_pay"])
-    return BookingPricePreviewOut(
+    preview = BookingPricePreviewOut(
         base_price=base_price,
         discount_percent=float(disc_pct) if disc_pct is not None else None,
         discount_amount=disc_amt,
@@ -719,3 +757,6 @@ def get_booking_price_preview(
         loyalty_points_to_use=int(loyalty.get("loyalty_points_to_use") or 0),
         loyalty_program_enabled=bool(loyalty.get("loyalty_program_enabled")),
     )
+    if ios_free:
+        return ios_price_preview_json(preview)
+    return preview
