@@ -18,7 +18,6 @@ import { PasswordInput } from '@src/components/ui/PasswordInput';
 import { completePasswordMutationLogout } from '@src/auth/passwordMutationLogout';
 import { AccountDeletionSubscriptionWarningHost } from '@src/components/AccountDeletionSubscriptionWarningHost';
 import { checkSubscriptionBeforeAccountDeletion } from '@src/services/accountDeletionSubscriptionGuard';
-import { IosFreeCompanionNotice } from '@src/components/ios/IosFreeCompanionNotice';
 
 export default function SettingsScreen() {
   const pathname = usePathname();
@@ -402,8 +401,6 @@ export default function SettingsScreen() {
           onPress={() => Alert.alert('О приложении', 'DeDato Mobile\nВерсия: ' + getAppVersion())}
         />
       </SettingsSection>
-
-      {Platform.OS === 'ios' ? <IosFreeCompanionNotice variant="client" /> : null}
 
       {/* Секция "Опасная зона" */}
       <SettingsSection title="Опасная зона">

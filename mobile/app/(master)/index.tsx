@@ -433,7 +433,7 @@ export default function HomeScreen() {
   if (loading) {
     return (
       <SafeAreaView style={styles.safeAreaContainer} edges={['top', 'left', 'right']}>
-        <StatusBar style="auto" />
+        {Platform.OS === 'android' ? <StatusBar style="auto" /> : null}
         <View style={styles.centerContainer}>
           <ActivityIndicator size="large" color="#4CAF50" />
           <Text style={styles.loadingText}>Загрузка...</Text>
@@ -447,7 +447,7 @@ export default function HomeScreen() {
 
   return (
     <SafeAreaView style={styles.safeAreaContainer} edges={['top', 'left', 'right']}>
-      <StatusBar style="auto" />
+      {Platform.OS === 'android' ? <StatusBar style="auto" /> : null}
       {inlineSuccess ? (
         <View style={[styles.inlineToast, { bottom: scrollViewPaddingBottom + 8 }]} pointerEvents="none">
           <Text style={styles.inlineToastText}>{inlineSuccess}</Text>

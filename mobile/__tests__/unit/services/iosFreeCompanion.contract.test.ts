@@ -87,6 +87,6 @@ describe('fixed-feature iOS master contract', () => {
     expect(clientSettings).toContain("Platform.OS === 'ios'");
     expect(clientSettings).toContain("? 'DeDato для iOS — бесплатный компаньон'");
     expect(clientSettings).toContain('DeDato Mobile - управление бронированиями и подписками');
-    expect(clientSettings).toContain('variant="client"');
+    expect(clientSettings).not.toContain('IosFreeCompanionNotice');
   });
 });

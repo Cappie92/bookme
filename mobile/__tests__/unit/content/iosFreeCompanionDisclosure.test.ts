@@ -17,15 +17,16 @@ function source(relativePath: string): string {
 }
 
 describe('iOS free companion disclosure', () => {
-  it('states the free companion on the iOS welcome screen', () => {
+  it('marks the iOS welcome as a free companion without the long explanation', () => {
     const welcome = source('src/screens/WelcomeScreen.ios.tsx');
-    expect(welcome).toContain('IosFreeCompanionNotice');
-    expect(welcome).toContain('variant="welcome"');
-    expect(IOS_FREE_COMPANION_TITLE).toBe('DeDato для iOS — бесплатный компаньон');
-    expect(IOS_FREE_COMPANION_WELCOME).toBe(
-      'Базовые функции записи, расписания и услуг доступны бесплатно.'
-    );
-    expect(IOS_FREE_COMPANION_PRICES).toContain('реальным услугам специалистов');
+    const topBar = source('src/components/welcome/WelcomeIosTopBar.tsx');
+    expect(welcome).toContain('WelcomeIosTopBar');
+    expect(welcome).not.toContain('IosFreeCompanionNotice');
+    expect(topBar).toContain('Бесплатный компаньон');
+    expect(welcome).not.toContain(IOS_FREE_COMPANION_WELCOME);
+    expect(welcome).not.toContain(IOS_FREE_COMPANION_PRICES);
+    expect(topBar).not.toContain(IOS_FREE_COMPANION_WELCOME);
+    expect(topBar).not.toContain(IOS_FREE_COMPANION_PRICES);
   });
 
   it('does not keep the retired loyalty claim in active iOS welcome copy', () => {
@@ -53,10 +54,18 @@ describe('iOS free companion disclosure', () => {
     expect(source('src/components/ios/IosFreeCompanionNotice.tsx')).not.toContain('checkout');
   });
 
-  it('gives the signed-in client the same required entries', () => {
+  it('does not mount a separate free companion block in client settings', () => {
     const settings = source('app/(client)/settings/index.tsx');
-    expect(settings).toContain('variant="client"');
-    expect(settings).toContain("Platform.OS === 'ios' ? <IosFreeCompanionNotice");
+    const master = source('app/(master)/master/settings.tsx');
+    const notice = source('src/components/ios/IosFreeCompanionNotice.tsx');
+    expect(settings).not.toContain('IosFreeCompanionNotice');
+    expect(settings).not.toContain('variant="client"');
+    expect(settings).toContain('О приложении');
+    expect(master).toContain('variant="master"');
+    expect(notice).toContain('useState(false)');
+    expect(notice).toContain('ios-free-companion-master-toggle');
+    expect(source('src/components/welcome/WelcomeIosTopBar.tsx')).toContain('Бесплатный компаньон');
+    expect(source('src/screens/WelcomeScreen.android.tsx')).not.toContain('IosFreeCompanionNotice');
     expect(IOS_CLIENT_FREE_FEATURES).toEqual([
       'Запись на реальные услуги',
       'Просмотр и управление своими записями',

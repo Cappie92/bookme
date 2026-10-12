@@ -26,8 +26,9 @@ describe('iOS welcome companion copy', () => {
   });
 
   it('does not mount pricing UI on the iOS welcome screen', () => {
-    expect(iosWelcomeScreen).toContain('showPricing={false}');
+    expect(iosWelcomeScreen).not.toContain('WelcomeTopNav');
     expect(iosWelcomeScreen).not.toContain('WelcomePricingModal');
+    expect(iosWelcomeScreen).not.toContain('showPricing');
     expect(iosWelcome).not.toMatch(/type: 'pricing'/);
   });
 

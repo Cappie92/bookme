@@ -6,6 +6,7 @@ import * as Linking from 'expo-linking';
 import { useAuth } from '@src/auth/AuthContext';
 import { getVerificationRequiredRoute } from '@src/auth/authFlowRouting';
 import { router, useLocalSearchParams } from 'expo-router';
+import { safeBack } from '@src/utils/safeBack';
 import { logger } from '@src/utils/logger';
 import { normalizeRussianPhoneForApi } from '@src/utils/normalizeRussianPhoneForApi';
 import { getPublicBookingDraft, isDraftValidForPostLoginRedirect } from '@src/stores/publicBookingDraftStore';
@@ -450,7 +451,7 @@ export default function LoginScreen() {
               <View style={styles.container}>
         <TouchableOpacity
           style={styles.backToWelcome}
-          onPress={() => router.push('/welcome')}
+          onPress={() => safeBack('/welcome')}
           accessibilityRole="button"
           accessibilityLabel="На главную"
         >

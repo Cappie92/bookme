@@ -77,6 +77,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         usesNonExemptEncryption: false,
       },
       infoPlist: {
+        UIViewControllerBasedStatusBarAppearance: true,
         NSAppTransportSecurity: {
           NSAllowsLocalNetworking: true,
         },
