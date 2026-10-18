@@ -1,5 +1,5 @@
 import { formatLocalDate, parseLocalDate } from '@src/utils/date';
-import React, { useState, useMemo, useEffect, type ReactElement } from 'react';
+import React, { useState, useMemo, useEffect, useRef, type ReactElement } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Pressable, Modal } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { Ionicons } from '@expo/vector-icons';
@@ -20,7 +20,10 @@ interface DayViewProps {
 }
 
 const TIME_SLOT_HEIGHT = 60; // Высота слота 30 минут
-const INITIAL_SCROLL_HOUR = 7; // Начальная позиция скролла - 7:00
+const MINUTES_PER_SLOT = 30;
+const PIXELS_PER_MINUTE = TIME_SLOT_HEIGHT / MINUTES_PER_SLOT;
+const INITIAL_SCROLL_HOUR = 9;
+const INITIAL_DAY_SCROLL_Y = INITIAL_SCROLL_HOUR * 2 * TIME_SLOT_HEIGHT;
 
 function formatServicePrice(price: number | null | undefined): string | null {
   if (price == null || Number.isNaN(Number(price))) return null;
@@ -41,6 +44,20 @@ export function DayView({
   const [dayDrawerVisible, setDayDrawerVisible] = useState(false);
   const [calendarVisible, setCalendarVisible] = useState(false);
   const [calendarDate, setCalendarDate] = useState(new Date());
+  const timelineRef = useRef<ScrollView>(null);
+  const viewportReadyRef = useRef(false);
+  const contentReadyRef = useRef(false);
+  const didInitialScrollRef = useRef(false);
+  const userHasInteractedRef = useRef(false);
+
+  const positionTimelineAtOpeningHour = () => {
+    if (didInitialScrollRef.current || userHasInteractedRef.current) return;
+    if (!viewportReadyRef.current || !contentReadyRef.current) return;
+    const timeline = timelineRef.current;
+    if (!timeline) return;
+    timeline.scrollTo({ y: INITIAL_DAY_SCROLL_Y, animated: false });
+    didInitialScrollRef.current = true;
+  };
 
   // Вычисляем даты текущей недели
   const weekDates = useMemo(() => {
@@ -141,7 +158,6 @@ export function DayView({
     const slots: Array<{ hour: number; minute: number; label: string }> = [];
     for (let hour = 0; hour <= 23; hour++) {
       for (let minute of [0, 30]) {
-        if (hour === 23 && minute === 30) break;
         const hourStr = hour.toString().padStart(2, '0');
         const minuteStr = minute.toString().padStart(2, '0');
         slots.push({
@@ -161,17 +177,30 @@ export function DayView({
     );
   };
 
-  // Находим booking для слота
-  const getBookingForSlot = (hour: number, minute: number): Booking | undefined => {
-    const slotStart = new Date(currentDateObj);
-    slotStart.setHours(hour, minute, 0, 0);
-    const slotEnd = new Date(slotStart);
-    slotEnd.setMinutes(slotEnd.getMinutes() + 30);
+  // One card per API booking, independent of the background's 30-minute grid.
+  // Keep the existing API/status filtering and day summary unchanged.
+  const bookingLayouts = useMemo(() => dayBookings.flatMap((booking) => {
+    const start = new Date(booking.start_time);
+    const duration = (new Date(booking.end_time).getTime() - start.getTime()) / 60000;
+    const startMinute = start.getHours() * 60 + start.getMinutes() + start.getSeconds() / 60;
+    const endMinute = Math.min(24 * 60, startMinute + duration);
+    if (!Number.isFinite(startMinute) || !Number.isFinite(duration) || duration <= 0) return [];
+    return [{ booking, startMinute, endMinute }];
+  }), [dayBookings]);
 
-    return dayBookings.find((booking) => {
-      const bookingStart = new Date(booking.start_time);
-      const bookingEnd = new Date(booking.end_time);
-      return bookingStart < slotEnd && bookingEnd > slotStart;
+  // Only subtract painted booking ranges; do not change schedule availability.
+  // Splitting at exact endpoints also preserves free time after e.g. 13:15.
+  const freeRangesForSlot = (startMinute: number) => {
+    const endMinute = startMinute + MINUTES_PER_SLOT;
+    const boundaries = [...new Set([
+      startMinute, endMinute,
+      ...bookingLayouts.flatMap(layout => [layout.startMinute, layout.endMinute])
+        .filter(minute => minute > startMinute && minute < endMinute),
+    ])].sort((a, b) => a - b);
+    return boundaries.slice(0, -1).flatMap((start, index) => {
+      const end = boundaries[index + 1];
+      return bookingLayouts.some(layout => layout.startMinute < end && layout.endMinute > start)
+        ? [] : [{ start, end }];
     });
   };
 
@@ -240,12 +269,6 @@ export function DayView({
     return `${dayName.charAt(0).toUpperCase() + dayName.slice(1)}, ${dayNumber}`;
   };
 
-  // Вычисляем начальную позицию скролла (7:00)
-  const initialScrollY = useMemo(() => {
-    const initialIndex = timeSlots.findIndex(slot => slot.hour === INITIAL_SCROLL_HOUR && slot.minute === 0);
-    return initialIndex >= 0 ? initialIndex * TIME_SLOT_HEIGHT : 0;
-  }, [timeSlots]);
-
   return (
     <View style={styles.container}>
       {/* Верхняя панель с навигацией */}
@@ -297,62 +320,98 @@ export function DayView({
 
       {/* Таймлайн дня */}
       <ScrollView
+        ref={timelineRef}
         style={styles.timeline}
         contentContainerStyle={styles.timelineContent}
-        contentOffset={{ x: 0, y: initialScrollY }}
+        onLayout={() => {
+          viewportReadyRef.current = true;
+          positionTimelineAtOpeningHour();
+        }}
+        onContentSizeChange={() => {
+          contentReadyRef.current = true;
+          positionTimelineAtOpeningHour();
+        }}
+        onScrollBeginDrag={() => {
+          userHasInteractedRef.current = true;
+        }}
         showsVerticalScrollIndicator={true}
+        scrollsToTop={false}
         refreshControl={refreshControl}
       >
-        {timeSlots.map((timeSlot, index) => {
-          const isAvailable = isSlotAvailable(timeSlot.hour, timeSlot.minute);
-          const booking = getBookingForSlot(timeSlot.hour, timeSlot.minute);
-          const isFirstInHour = timeSlot.minute === 0;
+        <View style={styles.timelineGrid}>
+          {timeSlots.map((timeSlot, index) => {
+            const isAvailable = isSlotAvailable(timeSlot.hour, timeSlot.minute);
+            const slotStartMinute = timeSlot.hour * 60 + timeSlot.minute;
+            const isFirstInHour = timeSlot.minute === 0;
 
-          return (
-            <View key={index} style={styles.timeSlot}>
-              <View style={styles.timeLabel}>
-                {isFirstInHour && (
-                  <Text style={styles.timeText}>{timeSlot.label}</Text>
-                )}
-              </View>
-              <TouchableOpacity
-                activeOpacity={0.75}
-                style={[styles.slotContent, isAvailable && styles.slotAvailable, booking && styles.slotBooked]}
-                onPress={() => setDayDrawerVisible(true)}
-                accessibilityRole="button"
-                accessibilityLabel="Открыть день"
-              >
-                {booking ? (
-                  <View style={styles.bookingBlock}>
-                    <Text style={styles.bookingTime} numberOfLines={1}>
-                      {new Date(booking.start_time).toLocaleTimeString('ru-RU', { 
-                        hour: '2-digit', 
-                        minute: '2-digit' 
-                      })}
-                    </Text>
-                    <Text style={styles.bookingService} numberOfLines={1}>
-                      {booking.service_name}
-                    </Text>
-                    <View style={styles.bookingClientRow}>
-                      <Text style={styles.bookingClient} numberOfLines={1}>
-                        {booking.client_name}
-                      </Text>
-                      {formatServicePrice(booking.service_price) ? (
-                        <Text style={styles.bookingPriceInline} numberOfLines={1}>
-                          {formatServicePrice(booking.service_price)}
-                        </Text>
-                      ) : null}
+            return (
+              <View key={index} style={styles.timeSlot}>
+                <View style={styles.timeLabel}>
+                  {isFirstInHour && (
+                    <Text style={styles.timeText}>{timeSlot.label}</Text>
+                  )}
+                </View>
+                <TouchableOpacity
+                  activeOpacity={0.75}
+                  style={styles.slotContent}
+                  onPress={() => setDayDrawerVisible(true)}
+                  accessibilityRole="button"
+                  accessibilityLabel="Открыть день"
+                >
+                  {isAvailable && freeRangesForSlot(slotStartMinute).map(range => (
+                    <View
+                      key={range.start}
+                      testID={`day-free-${range.start}-${range.end}`}
+                      style={[styles.freeSlot, styles.slotAvailable, {
+                        top: (range.start - slotStartMinute) * PIXELS_PER_MINUTE,
+                        height: (range.end - range.start) * PIXELS_PER_MINUTE,
+                      }]}
+                    >
+                      <Text style={styles.freeSlotText}>Свободно</Text>
                     </View>
-                  </View>
-                ) : isAvailable ? (
-                  <View style={styles.freeSlot}>
-                    <Text style={styles.freeSlotText}>Свободно</Text>
-                  </View>
-                ) : null}
-              </TouchableOpacity>
-            </View>
-          );
-        })}
+                  ))}
+                </TouchableOpacity>
+              </View>
+            );
+          })}
+          {bookingLayouts.map(({ booking, startMinute, endMinute }) => (
+            <TouchableOpacity
+              key={booking.id}
+              testID={`day-booking-${booking.id}`}
+              activeOpacity={0.75}
+              style={[styles.bookingOverlay, styles.slotBooked, {
+                top: startMinute * PIXELS_PER_MINUTE,
+                height: (endMinute - startMinute) * PIXELS_PER_MINUTE,
+              }]}
+              onPress={() => setDayDrawerVisible(true)}
+              accessibilityRole="button"
+              accessibilityLabel="Открыть день"
+            >
+              <View style={styles.bookingBlock}>
+                <Text style={styles.bookingTime} numberOfLines={1}>
+                  {new Date(booking.start_time).toLocaleTimeString('ru-RU', {
+                    hour: '2-digit', minute: '2-digit',
+                  })}–{new Date(booking.end_time).toLocaleTimeString('ru-RU', {
+                    hour: '2-digit', minute: '2-digit',
+                  })}
+                </Text>
+                <Text style={styles.bookingService} numberOfLines={1}>
+                  {booking.service_name}
+                </Text>
+                <View style={styles.bookingClientRow}>
+                  <Text style={styles.bookingClient} numberOfLines={1}>
+                    {booking.client_name}
+                  </Text>
+                  {formatServicePrice(booking.service_price) ? (
+                    <Text style={styles.bookingPriceInline} numberOfLines={1}>
+                      {formatServicePrice(booking.service_price)}
+                    </Text>
+                  ) : null}
+                </View>
+              </View>
+            </TouchableOpacity>
+          ))}
+        </View>
       </ScrollView>
 
       <Modal visible={calendarVisible} transparent animationType="fade" onRequestClose={() => setCalendarVisible(false)}>
@@ -475,9 +534,12 @@ const styles = StyleSheet.create({
   timelineContent: {
     paddingBottom: 20,
   },
+  timelineGrid: {
+    position: 'relative',
+  },
   timeSlot: {
     flexDirection: 'row',
-    minHeight: TIME_SLOT_HEIGHT,
+    height: TIME_SLOT_HEIGHT,
     borderBottomWidth: 1,
     borderBottomColor: '#f0f0f0',
   },
@@ -494,10 +556,15 @@ const styles = StyleSheet.create({
   },
   slotContent: {
     flex: 1,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    justifyContent: 'center',
     backgroundColor: '#fff',
+  },
+  bookingOverlay: {
+    position: 'absolute',
+    left: 70,
+    right: 0,
+    paddingVertical: 2,
+    paddingHorizontal: 12,
+    overflow: 'hidden',
   },
   slotAvailable: {
     backgroundColor: '#E8F5E9',
@@ -541,8 +608,14 @@ const styles = StyleSheet.create({
     flexShrink: 0,
   },
   freeSlot: {
-    flex: 1,
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    paddingHorizontal: 12,
+    overflow: 'hidden',
     justifyContent: 'center',
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
   },
   freeSlotText: {
     fontSize: 13,

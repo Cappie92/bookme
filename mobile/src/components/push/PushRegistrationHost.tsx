@@ -15,7 +15,7 @@ import {
 import { getPushPermissionKind, requestPushPermission } from '@src/services/push/pushPermissions';
 import {
   ensurePushRegistrationForAuthenticatedUser,
-  refreshPushRegistrationIfNeeded,
+  registerObservedPushToken,
 } from '@src/services/push/pushRegistration';
 import { configurePushNotificationRuntime } from '@src/services/push/pushRuntime';
 import { getPushSessionGeneration, isPushSessionCurrent } from '@src/services/push/pushSessionGuard';
@@ -85,9 +85,9 @@ export function PushRegistrationHost() {
 
   useEffect(() => {
     if (typeof Notifications.addPushTokenListener !== 'function') return;
-    const sub = Notifications.addPushTokenListener(() => {
+    const sub = Notifications.addPushTokenListener((payload) => {
       if (!settled || !canRegisterPushForUser(user)) return;
-      void refreshPushRegistrationIfNeeded({
+      void registerObservedPushToken(payload, {
         user,
         accessToken: token,
         isAuthenticated,

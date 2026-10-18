@@ -16,6 +16,10 @@ const mockExpoNotifications = {
     type: 'expo',
     data: 'ExponentPushToken[testtoken]',
   })),
+  getDevicePushTokenAsync: jest.fn(async () => ({
+    type: 'ios',
+    data: 'native-device-token-should-not-be-used',
+  })),
   setNotificationChannelAsync: jest.fn(async () => null),
   addPushTokenListener: jest.fn(() => ({ remove: jest.fn() })),
   AndroidImportance: {

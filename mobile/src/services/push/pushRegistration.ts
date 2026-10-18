@@ -1,9 +1,15 @@
 import { Platform } from 'react-native';
 import Constants from 'expo-constants';
+import * as Device from 'expo-device';
 import { readToken } from '@src/auth/tokenStorage';
 import { deactivatePushDevice, registerPushDevice } from '@src/services/api/push';
 import { logger } from '@src/utils/logger';
-import { acquireExpoPushToken } from './expoPushToken';
+import {
+  acquireExpoPushToken,
+  convertNativeDeviceToExpoPushToken,
+  readNativeDevicePushToken,
+  type NativeDevicePushToken,
+} from './expoPushToken';
 import { getOrCreateInstallationId, peekInstallationId } from './installationIdentity';
 import { canRegisterPushForUser, type PushAuthUser } from './pushEligibility';
 import { getPushPermissionKind } from './pushPermissions';
@@ -18,6 +24,21 @@ const DEACTIVATE_TIMEOUT_MS = 2500;
 
 let lastRegistrationKey: string | null = null;
 let registrationChain: Promise<unknown> = Promise.resolve();
+let tokenAcquisitionDepth = 0;
+let nextOperationId = 0;
+let latestCommittedOperationId = 0;
+
+type RegistrationWork = {
+  id: number;
+  generation: number;
+  accessToken: string | null;
+  input: EnsurePushRegistrationInput;
+  nativeToken: NativeDevicePushToken | null;
+};
+
+export function isPushTokenAcquisitionInFlight(): boolean {
+  return tokenAcquisitionDepth > 0;
+}
 
 export type EnsurePushRegistrationResult =
   | 'skipped'
@@ -86,10 +107,39 @@ async function resolveAccessToken(explicit?: string | null): Promise<string | nu
   }
 }
 
+/**
+ * Native listener payload is APNs/FCM. Conversion uses that token and does not
+ * consult the native-acquisition slot, so a hung initial acquire cannot block it.
+ * The raw native string is never sent to the backend.
+ */
+export async function registerObservedPushToken(
+  payload: unknown,
+  input: EnsurePushRegistrationInput
+): Promise<EnsurePushRegistrationResult> {
+  if (Platform.OS === 'ios' && !Device.isDevice) return 'skipped';
+  const nativeToken = readNativeDevicePushToken(payload);
+  if (!nativeToken) return 'skipped';
+  return enqueuePushRegistration(input, nativeToken);
+}
+
 export async function ensurePushRegistrationForAuthenticatedUser(
   input: EnsurePushRegistrationInput
 ): Promise<EnsurePushRegistrationResult> {
-  const run = () => ensurePushRegistrationUnlocked(input);
+  return enqueuePushRegistration(input, null);
+}
+
+function enqueuePushRegistration(
+  input: EnsurePushRegistrationInput,
+  nativeToken: NativeDevicePushToken | null
+): Promise<EnsurePushRegistrationResult> {
+  const work: RegistrationWork = {
+    id: ++nextOperationId,
+    generation: getPushSessionGeneration(),
+    accessToken: input.accessToken ?? null,
+    input,
+    nativeToken,
+  };
+  const run = () => ensurePushRegistrationUnlocked(work);
   const pending = registrationChain.then(run, run);
   registrationChain = pending.then(
     () => undefined,
@@ -99,15 +149,17 @@ export async function ensurePushRegistrationForAuthenticatedUser(
 }
 
 async function ensurePushRegistrationUnlocked(
-  input: EnsurePushRegistrationInput
+  work: RegistrationWork
 ): Promise<EnsurePushRegistrationResult> {
-  const generation = getPushSessionGeneration();
+  const generation = work.generation;
+  if (!isPushSessionCurrent(generation)) return 'skipped';
+  const input = work.input;
   const platform = nativePlatform();
   if (!platform) return 'skipped';
   if (!input.isAuthenticated || !canRegisterPushForUser(input.user)) return 'skipped';
 
   const expectedUserId = input.user!.id;
-  const accessToken = await resolveAccessToken(input.accessToken);
+  const accessToken = work.accessToken || (await resolveAccessToken(null));
   if (!accessToken || !isPushSessionCurrent(generation)) return 'skipped';
 
   try {
@@ -123,14 +175,26 @@ async function ensurePushRegistrationUnlocked(
     const installationId = await getOrCreateInstallationId();
     if (!isPushSessionCurrent(generation)) return 'skipped';
 
-    const tokenResult = await acquireExpoPushToken();
+    let tokenResult: Awaited<ReturnType<typeof acquireExpoPushToken>>;
+    if (work.nativeToken) {
+      tokenResult = await convertNativeDeviceToExpoPushToken(work.nativeToken);
+    } else {
+      tokenAcquisitionDepth += 1;
+      try {
+        tokenResult = await acquireExpoPushToken();
+      } finally {
+        tokenAcquisitionDepth -= 1;
+      }
+    }
     if (!isPushSessionCurrent(generation) || expectedUserId !== input.user?.id) {
       return 'skipped';
     }
     if (!tokenResult.ok) {
+      if (tokenResult.reason === 'simulator') return 'skipped';
       pushDiag(`token_unavailable:${tokenResult.reason}`);
       return 'failed';
     }
+    if (work.id < latestCommittedOperationId) return 'skipped';
 
     const registrationKey = `${generation}:${expectedUserId}:${installationId}:${tokenResult.token}`;
     if (lastRegistrationKey === registrationKey) {
@@ -154,6 +218,8 @@ async function ensurePushRegistrationUnlocked(
       }
     );
     if (!isPushSessionCurrent(generation)) return 'skipped';
+    if (work.id < latestCommittedOperationId) return 'skipped';
+    latestCommittedOperationId = work.id;
     lastRegistrationKey = registrationKey;
     return 'registered';
   } catch {
@@ -172,6 +238,9 @@ export async function refreshPushRegistrationIfNeeded(
 export function __resetPushRegistrationCacheForTests(): void {
   lastRegistrationKey = null;
   registrationChain = Promise.resolve();
+  tokenAcquisitionDepth = 0;
+  nextOperationId = 0;
+  latestCommittedOperationId = 0;
 }
 
 /**

@@ -100,6 +100,11 @@ jest.mock('expo-constants', () => ({
 
 jest.mock('expo-notifications', () => require('./mocks/expo-notifications.mock'));
 
+jest.mock('expo-device', () => ({
+  __esModule: true,
+  isDevice: true,
+}));
+
 jest.mock('@appmetrica/react-native-analytics', () => ({
   __esModule: true,
   default: {

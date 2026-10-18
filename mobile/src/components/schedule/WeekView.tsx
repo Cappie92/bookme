@@ -5,6 +5,7 @@ import {
   Text,
   StyleSheet,
   FlatList,
+  ScrollView,
   TouchableOpacity,
   Pressable,
   Dimensions,
@@ -32,57 +33,43 @@ interface WeekViewProps {
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const DAY_COLUMN_WIDTH = (SCREEN_WIDTH - 60) / 7; // 60px для колонки времени
 const TIME_SLOT_HEIGHT = 40; // Высота слота 30 минут
+const PIXELS_PER_MINUTE = TIME_SLOT_HEIGHT / 30;
 const START_HOUR = 0; // Начинаем с 0:00 (все 24 часа доступны)
 const END_HOUR = 23; // Заканчиваем в 23:00
-const INITIAL_SCROLL_HOUR = 7; // Начальная позиция скролла - 7:00
+const INITIAL_SCROLL_HOUR = 9; // Начальная позиция скролла — 09:00
 
 type WeekSlotCellProps = {
   isAvailable: boolean;
-  hasBooking: boolean;
-  bookingTimeLabel: string;
-  bookingServiceName: string;
   isSelected: boolean;
   onPress: () => void;
   onLongPress: () => void;
   onPressIn?: () => void;
   onPressOut?: () => void;
+  testID: string;
 };
 
 const WeekSlotCell = memo(function WeekSlotCell({
   isAvailable,
-  hasBooking,
-  bookingTimeLabel,
-  bookingServiceName,
   isSelected,
   onPress,
   onLongPress,
   onPressIn,
   onPressOut,
+  testID,
 }: WeekSlotCellProps) {
   return (
     <Pressable
+      testID={testID}
       style={[
         styles.slot,
         isAvailable && styles.slotAvailable,
-        hasBooking && styles.slotBooked,
         isSelected && styles.slotSelected,
       ]}
       onPress={onPress}
       onLongPress={onLongPress}
       onPressIn={onPressIn}
       onPressOut={onPressOut}
-    >
-      {hasBooking ? (
-        <View style={styles.bookingBlock}>
-          <Text style={styles.bookingTime} numberOfLines={1}>
-            {bookingTimeLabel}
-          </Text>
-          <Text style={styles.bookingService} numberOfLines={1}>
-            {bookingServiceName}
-          </Text>
-        </View>
-      ) : null}
-    </Pressable>
+    />
   );
 });
 
@@ -94,9 +81,6 @@ type TimeSlotRow = { hour: number; minute: number; label: string };
 
 type SlotGridMeta = {
   availability: Map<string, boolean>;
-  bookingBySlot: Map<string, Booking | null>;
-  bookingTimeBySlot: Map<string, string>;
-  bookingServiceBySlot: Map<string, string>;
 };
 
 type SlotHandlers = {
@@ -190,15 +174,11 @@ const WeekGridRow = memo(function WeekGridRow({
       <View style={styles.gridRow}>
       {weekDateStrings.map((dateStr) => {
         const key = slotKeyFromParts(dateStr, timeSlot.hour, timeSlot.minute);
-        const booking = slotGridMeta.bookingBySlot.get(key);
-        const hasBooking = !!booking;
         return (
           <View key={key} style={styles.dayColumn}>
             <WeekSlotCell
+              testID={`week-slot-${dateStr}-${timeSlot.hour}-${timeSlot.minute}`}
               isAvailable={slotGridMeta.availability.get(key) ?? false}
-              hasBooking={hasBooking}
-              bookingTimeLabel={slotGridMeta.bookingTimeBySlot.get(key) || ''}
-              bookingServiceName={slotGridMeta.bookingServiceBySlot.get(key) || ''}
               isSelected={selectedSlots.has(key)}
               onPress={slotInteractionHandlers.onPress.get(key)!}
               onLongPress={slotInteractionHandlers.onLongPress.get(key)!}
@@ -214,6 +194,69 @@ const WeekGridRow = memo(function WeekGridRow({
     </View>
   );
 }, weekGridRowPropsEqual);
+
+type WeekBookingLayout = {
+  booking: Booking;
+  date: string;
+  dayIndex: number;
+  startMinute: number;
+  endMinute: number;
+};
+
+type WeekGridScrollProps = React.ComponentProps<typeof ScrollView> & {
+  bookingLayouts: WeekBookingLayout[];
+  isEditMode: boolean;
+  onBookingPress: (date: string) => void;
+  gridHeight: number;
+};
+
+/**
+ * VirtualizedList replaces children of the element returned by renderScrollComponent.
+ * This wrapper reads those replaced cells and paints the booking overlay beside them
+ * inside one ScrollView, forwarding the list ref onto that ScrollView.
+ */
+const WeekGridScroll = React.forwardRef<ScrollView, WeekGridScrollProps>(function WeekGridScroll(
+  { children, bookingLayouts, isEditMode, onBookingPress, gridHeight, ...scrollProps },
+  ref,
+) {
+  return (
+    <ScrollView ref={ref} {...scrollProps}>
+      {children}
+      <View
+        testID="week-booking-layer"
+        pointerEvents="box-none"
+        style={[styles.bookingLayer, { height: gridHeight }]}
+      >
+        {bookingLayouts.map(({ booking, date, dayIndex, startMinute, endMinute }) => (
+          <Pressable
+            key={booking.id}
+            testID={`week-booking-${booking.id}`}
+            pointerEvents={isEditMode ? 'none' : 'auto'}
+            onPress={() => onBookingPress(date)}
+            style={[
+              styles.slotBooked,
+              styles.bookingBlock,
+              {
+                position: 'absolute',
+                top: startMinute * PIXELS_PER_MINUTE,
+                height: (endMinute - startMinute) * PIXELS_PER_MINUTE,
+                left: 60 + dayIndex * DAY_COLUMN_WIDTH,
+                width: DAY_COLUMN_WIDTH - 1,
+                zIndex: 2,
+                elevation: 2,
+              },
+            ]}
+          >
+            <Text style={styles.bookingTime} numberOfLines={1}>
+              {new Date(booking.start_time).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
+            </Text>
+            <Text style={styles.bookingService} numberOfLines={1}>{booking.service_name || ''}</Text>
+          </Pressable>
+        ))}
+      </View>
+    </ScrollView>
+  );
+});
 
 export function WeekView({
   schedule,
@@ -299,7 +342,6 @@ export function WeekView({
     const slots: Array<{ hour: number; minute: number; label: string }> = [];
     for (let hour = START_HOUR; hour <= END_HOUR; hour++) {
       for (let minute of [0, 30]) {
-        if (hour === END_HOUR && minute === 30) break;
         const hourStr = hour.toString().padStart(2, '0');
         const minuteStr = minute.toString().padStart(2, '0');
         slots.push({
@@ -312,12 +354,9 @@ export function WeekView({
     return slots;
   }, []);
 
-  /** Предрасчёт доступности и записей по ячейкам — без O(bookings) на каждый render. */
+  /** Фоновая доступность не зависит от геометрии карточек записей. */
   const slotGridMeta = useMemo(() => {
     const availability = new Map<string, boolean>();
-    const bookingBySlot = new Map<string, Booking | null>();
-    const bookingTimeBySlot = new Map<string, string>();
-    const bookingServiceBySlot = new Map<string, string>();
 
     for (const dateStr of weekDateStrings) {
       const daySlots = slotsByDay[dateStr] || [];
@@ -327,37 +366,20 @@ export function WeekView({
           !!(s.is_available ?? s.is_working)
         );
       }
-      const dayBookings = bookingsByDay[dateStr] || [];
-      for (const ts of timeSlots) {
-        const key = slotKeyFromParts(dateStr, ts.hour, ts.minute);
-        const slotStart = new Date(
-          `${dateStr}T${String(ts.hour).padStart(2, '0')}:${String(ts.minute).padStart(2, '0')}:00`
-        );
-        const slotEnd = new Date(slotStart.getTime() + 30 * 60 * 1000);
-        let hit: Booking | null = null;
-        for (const booking of dayBookings) {
-          const bookingStart = new Date(booking.start_time);
-          const bookingEnd = new Date(booking.end_time);
-          if (bookingStart < slotEnd && bookingEnd > slotStart) {
-            hit = booking;
-            break;
-          }
-        }
-        bookingBySlot.set(key, hit);
-        if (hit) {
-          bookingTimeBySlot.set(
-            key,
-            new Date(hit.start_time).toLocaleTimeString('ru-RU', {
-              hour: '2-digit',
-              minute: '2-digit',
-            })
-          );
-          bookingServiceBySlot.set(key, hit.service_name || '');
-        }
-      }
     }
-    return { availability, bookingBySlot, bookingTimeBySlot, bookingServiceBySlot };
-  }, [weekDateStrings, slotsByDay, bookingsByDay, timeSlots]);
+    return { availability };
+  }, [weekDateStrings, slotsByDay]);
+
+  const bookingLayouts = useMemo(() => weekDateStrings.flatMap((date, dayIndex) =>
+    (bookingsByDay[date] || []).flatMap((booking) => {
+      const start = new Date(booking.start_time);
+      const duration = (new Date(booking.end_time).getTime() - start.getTime()) / 60000;
+      const startMinute = start.getHours() * 60 + start.getMinutes() + start.getSeconds() / 60;
+      const endMinute = Math.min(1440, startMinute + duration);
+      if (!Number.isFinite(startMinute) || !Number.isFinite(duration) || duration <= 0) return [];
+      return [{ booking, date, dayIndex, startMinute, endMinute }];
+    })
+  ), [weekDateStrings, bookingsByDay]);
 
   const initialScrollIndex = useMemo(() => {
     const idx = timeSlots.findIndex((slot) => slot.hour === INITIAL_SCROLL_HOUR && slot.minute === 0);
@@ -396,6 +418,19 @@ export function WeekView({
     setSelectedDate(null);
   }, []);
 
+  // VirtualizedList делает cloneElement(renderScrollComponent(props), { ref }, cells)
+  // и выбрасывает children, которые были у возвращённого элемента. Overlay должен
+  // рисоваться компонентом уже из подставленных cells, в том же ScrollView.
+  const renderGridScroll = useCallback((props: React.ComponentProps<typeof ScrollView>) => (
+    <WeekGridScroll
+      {...props}
+      bookingLayouts={bookingLayouts}
+      isEditMode={isEditMode}
+      onBookingPress={handleDayPress}
+      gridHeight={timeSlots.length * TIME_SLOT_HEIGHT}
+    />
+  ), [bookingLayouts, handleDayPress, isEditMode, timeSlots.length]);
+
   // Сохраняем состояние для UNDO
   const saveStateForUndo = () => {
     setUndoStack([...undoStack, JSON.parse(JSON.stringify(localSchedule))]);
@@ -418,14 +453,6 @@ export function WeekView({
   useEffect(() => {
     setLocalSchedule(schedule);
   }, [schedule]);
-
-  useEffect(() => {
-    if (initialScrollY <= 0) return;
-    const t = setTimeout(() => {
-      gridScrollRef.current?.scrollToOffset({ offset: initialScrollY, animated: false });
-    }, 80);
-    return () => clearTimeout(t);
-  }, [initialScrollY, weekOffset]);
 
   // Обработка long press для начала выделения
   const handleSlotLongPress = (date: string, hour: number, minute: number) => {
@@ -800,18 +827,20 @@ export function WeekView({
           extraData={gridListRevision}
           keyExtractor={weekGridKeyExtractor}
           renderItem={renderWeekGridRow}
+          renderScrollComponent={renderGridScroll}
           getItemLayout={getWeekRowLayout}
           initialScrollIndex={initialScrollIndex}
-          onScrollToIndexFailed={(info) => {
+          onScrollToIndexFailed={() => {
             gridScrollRef.current?.scrollToOffset({
-              offset: Math.max(0, info.averageItemLength * info.index),
+              offset: initialScrollY,
               animated: false,
             });
           }}
           showsVerticalScrollIndicator
+          scrollsToTop={false}
           style={styles.gridScroll}
           contentContainerStyle={showEditFooter ? styles.daysScrollContentWithFooter : styles.daysScrollContent}
-          removeClippedSubviews={Platform.OS === 'android'}
+          removeClippedSubviews={false}
           refreshControl={refreshControl}
           initialNumToRender={12}
           maxToRenderPerBatch={8}
@@ -1040,9 +1069,17 @@ const styles = StyleSheet.create({
     borderLeftColor: '#FF9800',
   },
   bookingBlock: {
-    flex: 1,
     padding: 2,
     justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  bookingLayer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 2,
+    elevation: 2,
   },
   bookingTime: {
     fontSize: 9,
