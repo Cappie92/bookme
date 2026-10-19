@@ -135,23 +135,13 @@ def future_bookings_limit_for_surface(
     now_utc: datetime,
     client_surface: str | None = None,
 ) -> int | None:
-    """Web/Android keep the plan limit. Native iOS may only keep or tighten it.
+    """Booking-count capacity is the ordinary account contract on every surface.
 
-    `is_always_free` is an internal admin grant (price-0 AlwaysFree, all paid
-    feature flags). It is not an App Store purchase. This pass does not add an
-    exemption: a missing numeric limit, including that grant, stays at the free cap.
+    `client_surface`, including `ios_fixed`, does not change this number.
+    Other iOS Free Companion rules stay in their own projections.
     """
-    from utils.ios_free_companion import (
-        IOS_FREE_FUTURE_BOOKINGS_LIMIT,
-        is_ios_free_surface,
-    )
-
-    existing = _limit_for_user(db, user, now_utc)
-    if not is_ios_free_surface(client_surface):
-        return existing
-    if existing is None:
-        return IOS_FREE_FUTURE_BOOKINGS_LIMIT
-    return min(int(existing), IOS_FREE_FUTURE_BOOKINGS_LIMIT)
+    del client_surface
+    return _limit_for_user(db, user, now_utc)
 
 
 def enforce_booking_creation_limit(
@@ -161,10 +151,10 @@ def enforce_booking_creation_limit(
     now_utc: datetime | None = None,
     client_surface: str | None = None,
 ) -> None:
-    """Reject a new booking if it would exceed the resolved owner's active limit.
+    """Reject a new booking if it would exceed the owner's ordinary active limit.
 
-    `client_surface=ios_fixed` uses min(existing limit, free cap). Callers that
-    omit the surface keep the web/Android plan limit, including unlimited paid plans.
+    The surface is accepted so callers can keep passing it. It does not select
+    a different booking-count capacity.
     """
     if not db.info.get("booking_creation_transaction"):
         raise RuntimeError("begin_booking_creation_transaction must be called first")

@@ -37,7 +37,6 @@ from utils.booking_limit_guard import (
     begin_booking_creation_transaction,
     enforce_booking_creation_limit,
 )
-from utils.ios_free_companion import IOS_FREE_FUTURE_BOOKINGS_LIMIT
 
 
 def _login(client, phone: str) -> dict:
@@ -299,7 +298,7 @@ def test_ios_settings_allowlist_has_no_paid_fields(client, db):
     assert "phone" in body["user"]
 
 
-def test_ios_capacity_is_20_for_paid_master_and_web_stays_unlimited(client, db):
+def test_ios_capacity_matches_paid_unlimited(client, db):
     master_user = _user(
         db, role=UserRole.MASTER, phone="+79001000051", email="cap@test.local", name="Мастер"
     )
@@ -335,12 +334,7 @@ def test_ios_capacity_is_20_for_paid_master_and_web_stays_unlimited(client, db):
     }
     begin_booking_creation_transaction(db)
     enforce_booking_creation_limit(db, candidate, now_utc=now)
-    with pytest.raises(HTTPException) as exc:
-        enforce_booking_creation_limit(
-            db, candidate, now_utc=now, client_surface="ios_fixed"
-        )
-    assert exc.value.status_code == 409
-    assert exc.value.detail["limit"] == IOS_FREE_FUTURE_BOOKINGS_LIMIT
+    enforce_booking_creation_limit(db, candidate, now_utc=now, client_surface="ios_fixed")
 
     headers = _login(client, master_user.phone)
 
@@ -353,9 +347,9 @@ def test_ios_capacity_is_20_for_paid_master_and_web_stays_unlimited(client, db):
     ios = client.get("/api/master/bookings/limit?client_surface=ios_fixed", headers=headers)
     assert ios.status_code == 200, ios.text
     ios_body = ios.json()
-    assert ios_body["max_future_bookings"] == 20
-    assert ios_body["has_limit"] is True
-    assert ios_body["is_limit_exceeded"] is True
+    assert ios_body["max_future_bookings"] is None
+    assert ios_body["has_limit"] is False
+    assert ios_body["is_limit_exceeded"] is False
     assert "plan_name" not in ios_body
 
 
@@ -813,7 +807,7 @@ def test_ios_settings_contract_ignores_paid_customization(client, db):
     assert "subscription" not in free_ios.text
 
 
-def test_ios_capacity_does_not_loosen_a_stricter_limit(client, db):
+def test_ios_capacity_matches_a_finite_plan_limit(client, db):
     master_user = _user(
         db, role=UserRole.MASTER, phone="+79001000161", email="cap10@test.local", name="Мастер"
     )
@@ -828,6 +822,7 @@ def test_ios_capacity_does_not_loosen_a_stricter_limit(client, db):
     assert web.status_code == ios.status_code == 200
     assert web.json()["max_future_bookings"] == 10
     assert ios.json()["max_future_bookings"] == 10
+    assert ios.json()["max_future_bookings"] != 20
     assert "plan_name" not in ios.json()
 
 
@@ -951,3 +946,152 @@ def test_ios_dashboard_free_and_paid_stats_match(client, db):
     assert free_fp["top_bookings"][0]["booking_count"] == 1
     assert bodies[0]["top_services_by_bookings"][0]["booking_count"] == 1
     assert "bookings_count" not in bodies[0]["top_services_by_bookings"][0]
+
+
+def _public_capacity_master(db, *, domain, phone, email):
+    master_user = _user(
+        db, role=UserRole.MASTER, phone=phone, email=email, name="Мастер"
+    )
+    master = _master(db, master_user, domain=domain)
+    canon = Service(name="Стрижка", duration=30, price=1000.0, salon_id=None, indie_master_id=None)
+    db.add(canon)
+    db.flush()
+    master_service = MasterService(
+        master_id=master.id, category_id=None, name="Стрижка", duration=30, price=1000.0
+    )
+    work_date = date(2031, 4, 2)
+    db.add(master_service)
+    db.add(
+        MasterSchedule(
+            master_id=master.id,
+            salon_id=None,
+            date=work_date,
+            start_time=time(8, 0),
+            end_time=time(20, 0),
+            is_available=True,
+        )
+    )
+    db.commit()
+    db.refresh(master_service)
+    return master_user, master, master_service, work_date
+
+
+def _fill_future_bookings(db, master, count):
+    service = Service(name="Уже занято", price=100, duration=60, salon_id=None)
+    db.add(service)
+    db.flush()
+    origin = datetime.utcnow() + timedelta(days=40)
+    for index in range(count):
+        start = origin + timedelta(hours=index + 1)
+        db.add(
+            Booking(
+                client_id=master.user_id,
+                service_id=service.id,
+                master_id=master.id,
+                start_time=start,
+                end_time=start + timedelta(hours=1),
+                status=BookingStatus.CREATED,
+                payment_amount=100,
+                loyalty_points_used=0,
+            )
+        )
+    db.commit()
+
+
+def _ios_public_booking(client, db, *, domain, service_id, work_date, buyer_phone):
+    headers = _login(client, buyer_phone)
+    start, end = _public_slot(work_date, 10)
+    return client.post(
+        f"/api/public/masters/{domain}/bookings?client_surface=ios_fixed",
+        json={
+            "service_id": service_id,
+            "start_time": start.isoformat(),
+            "end_time": end.isoformat(),
+        },
+        headers=headers,
+    )
+
+
+def _buyer(db, phone, email):
+    return _user(db, role=UserRole.CLIENT, phone=phone, email=email, name="Клиент")
+
+
+def test_ios_public_booking_hits_ordinary_free_limit(client, db):
+    master_user, master, master_service, work_date = _public_capacity_master(
+        db, domain="free-cap", phone="+79001000301", email="free-cap@test.local"
+    )
+    buyer = _buyer(db, "+79001000302", "free-cap-c@test.local")
+    _fill_future_bookings(db, master, 20)
+    response = _ios_public_booking(
+        client,
+        db,
+        domain=master.domain,
+        service_id=master_service.id,
+        work_date=work_date,
+        buyer_phone=buyer.phone,
+    )
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"]["limit"] == 20
+    assert response.json()["detail"]["code"] == "free_active_booking_limit_reached"
+
+
+def test_ios_public_booking_allows_paid_plan_above_20(client, db):
+    master_user, master, master_service, work_date = _public_capacity_master(
+        db, domain="paid-100", phone="+79001000311", email="paid-100@test.local"
+    )
+    subscription = _paid_plan(db, master_user)
+    plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.id == subscription.plan_id).first()
+    plan.limits = {"max_future_bookings": 100}
+    db.commit()
+    buyer = _buyer(db, "+79001000312", "paid-100-c@test.local")
+    _fill_future_bookings(db, master, 30)
+    response = _ios_public_booking(
+        client,
+        db,
+        domain=master.domain,
+        service_id=master_service.id,
+        work_date=work_date,
+        buyer_phone=buyer.phone,
+    )
+    assert response.status_code == 200, response.text
+
+
+def test_ios_public_booking_allows_paid_unlimited_above_20(client, db):
+    master_user, master, master_service, work_date = _public_capacity_master(
+        db, domain="paid-inf", phone="+79001000321", email="paid-inf@test.local"
+    )
+    _paid_plan(db, master_user)
+    buyer = _buyer(db, "+79001000322", "paid-inf-c@test.local")
+    _fill_future_bookings(db, master, 30)
+    response = _ios_public_booking(
+        client,
+        db,
+        domain=master.domain,
+        service_id=master_service.id,
+        work_date=work_date,
+        buyer_phone=buyer.phone,
+    )
+    assert response.status_code == 200, response.text
+
+
+def test_ios_public_booking_blocks_at_finite_plan_limit(client, db):
+    master_user, master, master_service, work_date = _public_capacity_master(
+        db, domain="paid-10", phone="+79001000331", email="paid-10@test.local"
+    )
+    subscription = _paid_plan(db, master_user)
+    plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.id == subscription.plan_id).first()
+    plan.limits = {"max_future_bookings": 10}
+    db.commit()
+    buyer = _buyer(db, "+79001000332", "paid-10-c@test.local")
+    _fill_future_bookings(db, master, 10)
+    response = _ios_public_booking(
+        client,
+        db,
+        domain=master.domain,
+        service_id=master_service.id,
+        work_date=work_date,
+        buyer_phone=buyer.phone,
+    )
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"]["limit"] == 10
+    assert response.json()["detail"]["limit"] != 20

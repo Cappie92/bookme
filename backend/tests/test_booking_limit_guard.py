@@ -25,6 +25,7 @@ from utils.booking_limit_guard import (
     FREE_ACTIVE_FUTURE_BOOKINGS_LIMIT,
     begin_booking_creation_transaction,
     enforce_booking_creation_limit,
+    future_bookings_limit_for_surface,
 )
 
 
@@ -152,6 +153,72 @@ def test_paid_unlimited_and_always_free_bypass(db):
     begin_booking_creation_transaction(db)
     enforce_booking_creation_limit(db, _data(paid_master, paid_service, now, offset=40), now_utc=now)
     enforce_booking_creation_limit(db, _data(free_master, free_service, now, offset=40), now_utc=now)
+    enforce_booking_creation_limit(
+        db, _data(paid_master, paid_service, now, offset=41), now_utc=now, client_surface="ios_fixed"
+    )
+    enforce_booking_creation_limit(
+        db, _data(free_master, free_service, now, offset=41), now_utc=now, client_surface="ios_fixed"
+    )
+
+
+def _activate_plan(db, user, limits, now):
+    plan = SubscriptionPlan(
+        name=f"Capacity {user.id}",
+        display_name="Paid",
+        subscription_type=SubscriptionType.MASTER,
+        price_1month=1,
+        price_3months=1,
+        price_6months=1,
+        price_12months=1,
+        features={},
+        limits=limits,
+        is_active=True,
+    )
+    db.add(plan)
+    db.flush()
+    db.add(Subscription(
+        user_id=user.id,
+        subscription_type=SubscriptionType.MASTER,
+        status=SubscriptionStatus.ACTIVE,
+        start_date=now - timedelta(days=1),
+        end_date=now + timedelta(days=30),
+        price=1,
+        daily_rate=0,
+        is_active=True,
+        plan_id=plan.id,
+    ))
+    db.commit()
+    return plan
+
+
+def test_ios_surface_uses_the_ordinary_account_capacity(db):
+    now = datetime.utcnow()
+    free_user, _, _ = _owner(db, "surface-free")
+    finite_user, _, _ = _owner(db, "surface-finite")
+    unlimited_user, _, _ = _owner(db, "surface-unlimited")
+    always_user, _, _ = _owner(db, "surface-always", always_free=True)
+    _activate_plan(db, finite_user, {"max_future_bookings": 100}, now)
+    _activate_plan(db, unlimited_user, {"max_future_bookings": None}, now)
+    surfaces = (None, "web", "android", "ios_fixed")
+    expected = {
+        free_user.id: FREE_ACTIVE_FUTURE_BOOKINGS_LIMIT,
+        finite_user.id: 100,
+        unlimited_user.id: None,
+        always_user.id: None,
+    }
+    for user in (free_user, finite_user, unlimited_user, always_user):
+        limits = [
+            future_bookings_limit_for_surface(db, user, now, surface)
+            for surface in surfaces
+        ]
+        assert limits == [expected[user.id]] * len(surfaces)
+
+    _activate_plan(db, free_user, {"max_future_bookings": 40}, now)
+    upgraded = [
+        future_bookings_limit_for_surface(db, free_user, now, surface)
+        for surface in surfaces
+    ]
+    assert upgraded == [40, 40, 40, 40]
 
 
 def test_all_business_booking_insert_paths_use_the_guard():

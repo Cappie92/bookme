@@ -3,7 +3,8 @@
 Native iOS is `client_surface=ios_fixed` only. An `ios_app` web session stays on
 the ordinary web contract; commerce isolation keeps its own origin check.
 
-Spoofing `ios_fixed` only tightens the contract. It does not grant paid features.
+Spoofing `ios_fixed` only tightens feature projections. It does not grant paid
+features and does not change the ordinary booking-count capacity.
 """
 
 from __future__ import annotations
@@ -14,7 +15,6 @@ from fastapi.responses import JSONResponse
 
 IOS_FREE_SURFACE = "ios_fixed"
 IOS_APP_ORIGIN = "ios_app"
-IOS_FREE_FUTURE_BOOKINGS_LIMIT = 20
 
 _BLOCKED_BOOKING_KEYS = frozenset(
     {
