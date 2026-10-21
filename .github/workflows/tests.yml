@@ -70,7 +70,20 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
       - name: Run pytest
-        run: python -m pytest
+        run: >
+          python -m pytest
+          --durations=50
+          --durations-min=0.5
+          --junitxml=pytest-results.xml
+          --override-ini=junit_duration_report=total
+      - name: Upload pytest timing report
+        if: ${{ success() || failure() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: backend-pytest-results
+          path: backend/pytest-results.xml
+          retention-days: 7
+          if-no-files-found: warn
 
   frontend:
     needs: select
