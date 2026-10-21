@@ -376,17 +376,19 @@ export default function Home() {
               />
             </a>
 
-            <span className="relative inline-flex items-center opacity-55 select-none" aria-disabled="true">
+            <a
+              href="https://apps.apple.com/ru/app/dedato-%D0%BA%D0%BE%D0%BC%D0%BF%D0%B0%D0%BD%D1%8C%D0%BE%D0%BD/id6794012674"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center hover:opacity-90 active:scale-[0.99] transition"
+            >
               <img
                 src="/badges/app-store.png"
                 alt="Загрузите в App Store"
-                className="h-11 w-auto pointer-events-none"
+                className="h-11 w-auto"
                 draggable={false}
               />
-              <span className="absolute -top-2 -right-2 rounded-full border border-[#E7E2DF] bg-[#F4F1EF]/80 px-2 py-0.5 text-[10px] font-semibold text-neutral-500 backdrop-blur-[2px]">
-                Скоро
-              </span>
-            </span>
+            </a>
 
             <span className="relative inline-flex items-center opacity-55 select-none" aria-disabled="true">
               <img
