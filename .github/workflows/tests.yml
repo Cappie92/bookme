@@ -40,6 +40,9 @@ jobs:
       playwright: ${{ steps.scope.outputs.playwright }}
       playwright_mode: ${{ steps.scope.outputs.playwright_mode }}
       full: ${{ steps.scope.outputs.full }}
+      docs_only: ${{ steps.scope.outputs.docs_only }}
+      backend_scope: ${{ steps.scope.outputs.backend_scope }}
+      backend_paths: ${{ steps.scope.outputs.backend_paths }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -51,10 +54,20 @@ jobs:
         id: scope
         run: python3 -B scripts/ci/select_tests.py
 
-  backend:
+  # Full backend pytest is two module shards. Selected test files stay on
+  # the aggregator below so an empty shard cannot report success.
+  # Both jobs use the same condition: a failed selector still runs every module,
+  # and a selected module list skips both jobs.
+  backend-shard:
+    name: backend shard ${{ matrix.shard }}
     needs: select
-    if: ${{ !cancelled() && (needs.select.result != 'success' || needs.select.outputs.backend != 'false') }}
+    if: ${{ !cancelled() && (needs.select.result != 'success' || needs.select.outputs.backend != 'false') && (needs.select.result != 'success' || needs.select.outputs.backend_scope != 'selected') }}
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
     defaults:
       run:
         working-directory: backend
@@ -69,15 +82,154 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-      - name: Run pytest
-        run: >
-          python -m pytest
-          --durations=50
-          --durations-min=0.5
-          --junitxml=pytest-results.xml
-          --override-ini=junit_duration_report=total
-      - name: Upload pytest timing report
+      - name: Run pytest shard
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp)"
+          trap 'rm -f "$tmp"' EXIT
+          if ! python3 -B ../scripts/ci/backend_shards.py --shard ${{ matrix.shard }} --shards 2 > "$tmp"; then
+            echo "Shard generation failed" >&2
+            exit 1
+          fi
+          modules=()
+          while IFS= read -r module || [[ -n "$module" ]]; do
+            [[ -n "$module" ]] && modules+=("$module")
+          done < "$tmp"
+          if [[ ${#modules[@]} -eq 0 ]]; then
+            echo "ERROR: backend shard ${{ matrix.shard }} has no modules" >&2
+            exit 1
+          fi
+          for module in "${modules[@]}"; do
+            base="$(basename "$module")"
+            if [[ "$module" != tests/*.py || "$module" == *..* || "$module" == *" "* || "$base" != test_*.py || ! -f "$module" ]]; then
+              echo "ERROR: refusing backend module ${module}" >&2
+              exit 1
+            fi
+          done
+          python -m pytest --collect-only -q --disable-warnings "${modules[@]}" > shard-nodeids.txt
+          grep -q '::' shard-nodeids.txt
+          python -m pytest "${modules[@]}" \
+            --durations=50 \
+            --durations-min=0.5 \
+            --junitxml=pytest-results.xml \
+            --override-ini=junit_duration_report=total
+      - name: Upload pytest shard report
         if: ${{ success() || failure() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: backend-pytest-shard-${{ matrix.shard }}
+          path: |
+            backend/pytest-results.xml
+            backend/shard-nodeids.txt
+          retention-days: 7
+          if-no-files-found: warn
+
+  backend-collect:
+    name: backend collection
+    needs: select
+    if: ${{ !cancelled() && (needs.select.result != 'success' || needs.select.outputs.backend != 'false') && (needs.select.result != 'success' || needs.select.outputs.backend_scope != 'selected') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.9'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Collect backend node ids
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pytest --collect-only -q --disable-warnings > all-nodeids.txt
+          test -s all-nodeids.txt
+      - name: Upload backend collection
+        if: ${{ success() || failure() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: backend-pytest-collection
+          path: backend/all-nodeids.txt
+          retention-days: 7
+          if-no-files-found: warn
+
+  backend:
+    name: backend
+    needs: [select, backend-shard, backend-collect]
+    if: ${{ !cancelled() && (needs.select.result != 'success' || needs.select.outputs.backend != 'false') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - name: Require both shards when the full backend suite is selected
+        env:
+          BACKEND_SCOPE: ${{ needs.select.outputs.backend_scope }}
+          SHARD_RESULT: ${{ needs.backend-shard.result }}
+          COLLECT_RESULT: ${{ needs.backend-collect.result }}
+        run: python3 -B scripts/ci/backend_shards.py --aggregate-decision
+      - uses: actions/download-artifact@v7
+        if: needs.select.outputs.backend_scope != 'selected'
+        with:
+          name: backend-pytest-shard-1
+          path: shard-artifacts/1
+      - uses: actions/download-artifact@v7
+        if: needs.select.outputs.backend_scope != 'selected'
+        with:
+          name: backend-pytest-shard-2
+          path: shard-artifacts/2
+      - uses: actions/download-artifact@v7
+        if: needs.select.outputs.backend_scope != 'selected'
+        with:
+          name: backend-pytest-collection
+          path: collection-artifact
+      - name: Check shard node ids against the full collection
+        if: needs.select.outputs.backend_scope != 'selected'
+        run: python3 -B scripts/ci/backend_shards.py --check-nodeids collection-artifact/all-nodeids.txt shard-artifacts/1/shard-nodeids.txt shard-artifacts/2/shard-nodeids.txt
+      - uses: actions/setup-python@v6
+        if: needs.select.outputs.backend_scope == 'selected'
+        with:
+          python-version: '3.9'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install dependencies
+        if: needs.select.outputs.backend_scope == 'selected'
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Run selected backend modules
+        if: needs.select.outputs.backend_scope == 'selected'
+        working-directory: backend
+        shell: bash
+        env:
+          BACKEND_PATHS: ${{ needs.select.outputs.backend_paths }}
+        run: |
+          set -euo pipefail
+          IFS=',' read -r -a modules <<< "${BACKEND_PATHS}"
+          if [[ ${#modules[@]} -eq 0 ]]; then
+            echo "ERROR: selected backend scope has no modules" >&2
+            exit 1
+          fi
+          for module in "${modules[@]}"; do
+            if [[ "$module" != tests/test_*.py || "$module" == *"/"*"/"* || ! -f "$module" ]]; then
+              echo "ERROR: refusing backend module ${module}" >&2
+              exit 1
+            fi
+          done
+          python -m pytest "${modules[@]}" \
+            --durations=50 \
+            --durations-min=0.5 \
+            --junitxml=pytest-results.xml \
+            --override-ini=junit_duration_report=total
+      - name: Upload pytest timing report
+        if: ${{ needs.select.outputs.backend_scope == 'selected' && (success() || failure()) }}
         uses: actions/upload-artifact@v7
         with:
           name: backend-pytest-results

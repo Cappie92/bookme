@@ -9,8 +9,8 @@ import unittest
 from unittest.mock import patch
 
 from select_tests import (
-    LANDING, SMOKE_SPECS, SUITES, classify, full, knowledge_docs, select,
-    smoke_specs_or_error, verify,
+    LANDING, SMOKE_SPECS, SUITES, classify, full, knowledge_docs,
+    resolve_backend_modules, select, smoke_specs_or_error, verify,
 )
 
 
@@ -35,8 +35,150 @@ class SelectionMatrix(unittest.TestCase):
     def test_b_booking_limit_is_extended(self):
         self.assert_suites(classify(["backend/utils/booking_limit_guard.py"]), SUITES, True)
 
-    def test_backend_tests_keep_backend_and_integration(self):
-        self.assert_suites(classify(["backend/tests/test_bookings.py"]), ["backend", "playwright"])
+    def test_backend_test_module_runs_only_that_module(self):
+        result = classify(["backend/tests/test_bookings.py", "backend/tests/test_auth.py"])
+        self.assert_suites(result, ["backend"])
+        self.assertEqual(result["backend_scope"], "selected")
+        self.assertEqual(result["backend_paths"], "tests/test_auth.py,tests/test_bookings.py")
+        self.assertEqual(result["reason"], "backend-test-modules")
+
+    def test_backend_conftest_runs_full_backend_suite_only(self):
+        for paths in (
+            ["backend/tests/conftest.py"],
+            ["backend/tests/conftest.py", "backend/tests/test_bookings.py"],
+            ["Knowledge/ci-cd.md", "backend/tests/conftest.py"],
+        ):
+            with self.subTest(paths=paths):
+                result = classify(paths)
+                self.assert_suites(result, ["backend"])
+                self.assertEqual(result["backend_scope"], "all")
+                self.assertEqual(result["backend_paths"], "")
+                self.assertEqual(result["reason"], "backend-test-configuration")
+
+    def test_backend_test_support_file_is_full_regression(self):
+        self.assert_suites(
+            classify(["backend/tests/SUBSCRIPTION_TESTS_REPORT.md"]), SUITES, True)
+        self.assert_suites(classify(["backend/tests/helpers.py"]), SUITES, True)
+
+    def test_backend_test_module_plus_other_suite_keeps_module_list(self):
+        result = classify([
+            "backend/tests/test_bookings.py", "mobile/src/components/Button.tsx",
+        ])
+        self.assert_suites(result, ["backend", "mobile"])
+        self.assertEqual(result["backend_scope"], "selected")
+        self.assertEqual(result["backend_paths"], "tests/test_bookings.py")
+
+    def test_missing_backend_module_upgrades_to_full_backend_suite(self):
+        classified = classify(["backend/tests/test_removed.py"])
+        result = resolve_backend_modules(Path("/does-not-exist"), classified)
+        self.assertEqual(result["backend_scope"], "all")
+        self.assertEqual(result["backend_paths"], "")
+        self.assertEqual(result["reason"], "backend-test-module-missing")
+        self.assertFalse(result["playwright"])
+        self.assertFalse(result["full"])
+
+    def test_unsafe_backend_plan_is_not_passed_to_pytest(self):
+        result = resolve_backend_modules(Path("."), {
+            "backend_scope": "selected",
+            "backend_paths": "tests/test_ok.py;echo",
+            "backend": True, "frontend": False, "mobile": False, "playwright": False,
+            "full": False, "docs_only": False, "playwright_mode": "full",
+        })
+        self.assertEqual(result["backend_scope"], "all")
+        self.assertEqual(result["backend_paths"], "")
+        self.assertEqual(result["reason"], "backend-test-plan-invalid")
+
+    def test_audit_selector_matrix(self):
+        repo = Path(__file__).resolve().parents[2]
+        imported = resolve_backend_modules(
+            repo, classify(["backend/tests/test_confirm_booking_created.py"]))
+        self.assertEqual(imported["reason"], "backend-test-module-imported")
+        self.assertEqual(imported["backend_scope"], "all")
+        self.assertEqual(imported["backend_paths"], "")
+        self.assertTrue(imported["backend"])
+        self.assertFalse(imported["frontend"])
+        self.assertFalse(imported["mobile"])
+        self.assertFalse(imported["playwright"])
+        self.assertFalse(imported["full"])
+        independent = resolve_backend_modules(
+            repo, classify(["backend/tests/test_bookings.py"]))
+        self.assertEqual(independent["backend_scope"], "selected")
+        self.assertEqual(independent["backend_paths"], "tests/test_bookings.py")
+        self.assertFalse(independent["playwright"])
+        self.assertFalse(independent["full"])
+        conftest = resolve_backend_modules(repo, classify(["backend/tests/conftest.py"]))
+        self.assertEqual(conftest["backend_scope"], "all")
+        self.assertEqual(conftest["reason"], "backend-test-configuration")
+        self.assertFalse(conftest["playwright"])
+        self.assertFalse(conftest["full"])
+        runtime = classify(["backend/utils/booking_limit_guard.py"])
+        self.assert_suites(runtime, SUITES, True)
+        unknown = classify(["new-package/src/file.ts"])
+        self.assert_suites(unknown, SUITES, True)
+
+    def _resolve_fixture(self, files, changed):
+        with tempfile.TemporaryDirectory(prefix="dedato-import-graph-") as temp:
+            root = Path(temp)
+            for name, content in files.items():
+                path = root / "backend" / "tests" / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(content)
+            return resolve_backend_modules(root, classify([f"backend/tests/{changed}"]))
+
+    def test_import_aliases_packages_and_chains_run_all_backend_tests(self):
+        files = {
+            "test_a.py": "def helper():\n    return 1\n",
+            "test_b.py": "import test_a as helpers\nfrom tests.test_a import helper as renamed\n",
+            "test_c.py": "from backend.tests.test_b import helpers\nfrom .test_b import helpers as again\n",
+            "test_free.py": "def test_ok():\n    assert True\n",
+        }
+        imported = self._resolve_fixture(files, "test_a.py")
+        self.assertEqual(imported["backend_scope"], "all")
+        self.assertEqual(imported["reason"], "backend-test-module-imported")
+        self.assertFalse(imported["playwright"])
+        self.assertFalse(imported["full"])
+        middle = self._resolve_fixture(files, "test_b.py")
+        self.assertEqual(middle["backend_scope"], "all")
+        leaf = self._resolve_fixture(files, "test_c.py")
+        self.assertEqual(leaf["backend_scope"], "selected")
+        self.assertEqual(leaf["backend_paths"], "tests/test_c.py")
+        free = self._resolve_fixture(files, "test_free.py")
+        self.assertEqual(free["backend_scope"], "selected")
+        self.assertEqual(free["backend_paths"], "tests/test_free.py")
+
+    def test_unresolved_import_falls_back_to_the_whole_backend_suite(self):
+        dynamic = self._resolve_fixture({
+            "test_free.py": "def test_ok():\n    assert True\n",
+            "test_dyn.py": "import importlib\nname = 'test_free'\nimportlib.import_module(name)\n",
+        }, "test_free.py")
+        self.assertEqual(dynamic["backend_scope"], "all")
+        self.assertEqual(dynamic["reason"], "backend-test-import-unresolved")
+        self.assertFalse(dynamic["frontend"])
+        self.assertFalse(dynamic["playwright"])
+        self.assertFalse(dynamic["full"])
+        literal = self._resolve_fixture({
+            "test_free.py": "def test_ok():\n    assert True\n",
+            "test_dyn.py": "import importlib\nimportlib.import_module('json')\n",
+        }, "test_free.py")
+        self.assertEqual(literal["backend_scope"], "selected")
+        migration = self._resolve_fixture({
+            "test_free.py": "def test_ok():\n    assert True\n",
+            "test_mig.py": (
+                "import importlib.util\nfrom pathlib import Path\n"
+                "path = Path('alembic') / 'versions' / 'x.py'\n"
+                "importlib.util.spec_from_file_location('migration', path)\n"
+            ),
+        }, "test_free.py")
+        self.assertEqual(migration["backend_scope"], "selected")
+        loaded = self._resolve_fixture({
+            "test_a.py": "VALUE = 1\n",
+            "test_loader.py": (
+                "import importlib.util\n"
+                "importlib.util.spec_from_file_location('loaded', 'tests/test_a.py')\n"
+            ),
+        }, "test_a.py")
+        self.assertEqual(loaded["backend_scope"], "all")
+        self.assertEqual(loaded["reason"], "backend-test-module-imported")
 
     def test_c_mobile_only(self):
         self.assert_suites(classify(["mobile/src/components/Button.tsx"]), ["mobile"])
@@ -53,8 +195,9 @@ class SelectionMatrix(unittest.TestCase):
 
     def test_f_all_configuration(self):
         for path in (".github/workflows/tests.yml", ".github/actions/setup/action.yml",
-                     "scripts/ci/select_tests.py", "backend/pyproject.toml",
-                     "backend/tests/conftest.py", "frontend/vite.config.js",
+                     "scripts/ci/select_tests.py", "scripts/ci/backend_shards.py",
+                     "scripts/ci/backend_module_durations.json", "backend/pyproject.toml",
+                     "frontend/vite.config.js",
                      "frontend/playwright.config.ts", "frontend/package-lock.json",
                      "frontend/e2e/globalSetup.ts", "mobile/jest.unit.config.js",
                      "mobile/test-utils/setup.ts", "mobile/app.config.ts"):
@@ -87,8 +230,10 @@ class SelectionMatrix(unittest.TestCase):
                 self.assert_suites(classify(paths), SUITES, True)
 
     def test_knowledge_markdown_is_docs_only(self):
-        self.assert_suites(classify(["Knowledge/ci-cd.md", "Knowledge/README.md"]),
-                           [], mode="none", docs_only=True)
+        result = classify(["Knowledge/ci-cd.md", "Knowledge/README.md"])
+        self.assert_suites(result, [], mode="none", docs_only=True)
+        self.assertEqual(result["backend_scope"], "off")
+        self.assertEqual(result["backend_paths"], "")
 
     def test_knowledge_plus_home_stays_landing_smoke(self):
         self.assert_suites(
@@ -171,6 +316,37 @@ class GitEventTests(unittest.TestCase):
         self.save("frontend/src/pages/Home.jsx", "badge\n")
         self.assertEqual(self.push()["playwright_mode"], "smoke")
         self.assertFalse(self.push()["backend"])
+
+    def test_push_of_backend_test_module_selects_that_file(self):
+        self.save("backend/tests/test_bookings.py", "def test_ok():\n    assert True\n")
+        result = self.push()
+        self.assertEqual(result["backend_scope"], "selected")
+        self.assertEqual(result["backend_paths"], "tests/test_bookings.py")
+        self.assertTrue(result["backend"])
+        self.assertFalse(result["playwright"])
+        self.assertFalse(result["full"])
+
+    def test_push_of_backend_conftest_is_backend_suite_only(self):
+        self.save("backend/tests/conftest.py", "def fixture():\n    pass\n")
+        result = self.push()
+        self.assertEqual(result["backend_scope"], "all")
+        self.assertEqual(result["backend_paths"], "")
+        self.assertTrue(result["backend"])
+        self.assertFalse(result["frontend"])
+        self.assertFalse(result["mobile"])
+        self.assertFalse(result["playwright"])
+        self.assertFalse(result["full"])
+
+    def test_deleted_backend_test_module_runs_full_backend_suite(self):
+        before = self.save("backend/tests/test_removed.py", "def test_ok():\n    assert True\n")
+        self.git("rm", "backend/tests/test_removed.py")
+        self.git("commit", "-qm", "disposable delete")
+        result = self.push(before=before)
+        self.assertEqual(result["reason"], "backend-test-module-missing")
+        self.assertEqual(result["backend_scope"], "all")
+        self.assertTrue(result["backend"])
+        self.assertFalse(result["playwright"])
+        self.assertFalse(result["full"])
 
     def test_initial_missing_forced_and_tag_push_are_full(self):
         self.save("frontend/src/pages/Home.jsx", "badge\n")
@@ -266,6 +442,21 @@ class ResultGateTests(unittest.TestCase):
 
     def test_full_gate_requires_all_four_real_successes(self):
         self.assertTrue(verify(self.needs(full("release")), require_full=True))
+
+    def test_selected_backend_and_full_regression_use_different_gates(self):
+        repo = Path(__file__).resolve().parents[2]
+        selected = resolve_backend_modules(
+            repo, classify(["backend/tests/test_bookings.py"]))
+        self.assertEqual(selected["backend_scope"], "selected")
+        self.assertTrue(verify(self.needs(selected)))
+        self.assertFalse(verify(self.needs(selected), require_full=True))
+        imported = resolve_backend_modules(
+            repo, classify(["backend/tests/test_confirm_booking_created.py"]))
+        self.assertEqual(imported["backend_scope"], "all")
+        self.assertFalse(imported["full"])
+        self.assertTrue(verify(self.needs(imported)))
+        self.assertFalse(verify(self.needs(imported), require_full=True))
+        self.assertTrue(verify(self.needs(full("explicit-full-event")), require_full=True))
 
     def test_docs_only_allows_skipped_suites_but_not_a_blank_zero_set(self):
         needs = self.needs(knowledge_docs())

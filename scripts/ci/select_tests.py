@@ -6,6 +6,7 @@ still run the checkout action's merge commit, not an unmerged branch snapshot.
 """
 
 import argparse
+import ast
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -22,11 +23,16 @@ SMOKE_SPECS = (
     "e2e/home.spec.ts", "e2e/public.spec.ts", "e2e/master.spec.ts",
     "e2e/client.spec.ts", "e2e/public-booking.spec.ts",
 )
+# Pytest modules only. Helpers and notes under backend/tests/ stay ambiguous.
+BACKEND_TEST_MODULE = re.compile(r"backend/tests/test_[A-Za-z0-9_]+\.py\Z")
+BACKEND_PYTEST_PATH = re.compile(r"tests/test_[A-Za-z0-9_]+\.py\Z")
+BACKEND_CONFTEST = "backend/tests/conftest.py"
 
 
 def full(reason):
     return {**{suite: True for suite in SUITES}, "full": True, "docs_only": False,
-            "playwright_mode": "full", "reason": reason}
+            "playwright_mode": "full", "backend_scope": "all", "backend_paths": "",
+            "reason": reason}
 
 
 def knowledge_docs(reason="knowledge-docs"):
@@ -36,7 +42,8 @@ def knowledge_docs(reason="knowledge-docs"):
     Knowledge/. A zero-suite result is allowed only for this explicit class.
     """
     return {**{suite: False for suite in SUITES}, "full": False, "docs_only": True,
-            "playwright_mode": "none", "reason": reason}
+            "playwright_mode": "none", "backend_scope": "off", "backend_paths": "",
+            "reason": reason}
 
 
 def is_knowledge_markdown(path):
@@ -53,7 +60,9 @@ def classify(paths):
     if not app_paths:
         return knowledge_docs()
     chosen = {suite: False for suite in SUITES}
-    for path in app_paths:
+    backend_modules = []
+    saw_conftest = False
+    for path in sorted(app_paths):
         parts = PurePosixPath(path).parts
         if not parts or path.startswith("/") or ".." in parts or "\\" in path:
             return full("unrecognized-path")
@@ -64,9 +73,16 @@ def classify(paths):
         if path.startswith(("shared/", ".github/", "scripts/")):
             return full("shared-or-ci-tooling")
         if path.startswith("backend/tests/"):
-            if path.endswith("conftest.py"):
-                return full("test-configuration")
-            chosen["backend"] = chosen["playwright"] = True
+            if BACKEND_TEST_MODULE.fullmatch(path):
+                chosen["backend"] = True
+                backend_modules.append("tests/" + PurePosixPath(path).name)
+            elif path == BACKEND_CONFTEST:
+                # Shared by every backend test, and by nothing in frontend,
+                # mobile or Playwright. Run the whole backend suite only.
+                chosen["backend"] = True
+                saw_conftest = True
+            else:
+                return full("backend-test-support-ambiguous")
         elif path.startswith("backend/"):
             # Includes migrations, models, auth, payments, booking guards and API
             # contracts. Cross-client effects cannot safely be inferred by name.
@@ -88,9 +104,247 @@ def classify(paths):
         else:
             return full("unknown-or-configuration-path")
     landing = app_paths <= LANDING
+    if chosen["backend"] and (saw_conftest or not backend_modules):
+        scope, module_list = "all", ""
+    elif chosen["backend"]:
+        scope = "selected"
+        module_list = ",".join(sorted(set(backend_modules)))
+    else:
+        scope, module_list = "off", ""
+    only_backend = chosen["backend"] and not any(
+        chosen[suite] for suite in SUITES if suite != "backend")
+    if only_backend and saw_conftest:
+        reason = "backend-test-configuration"
+    elif only_backend and scope == "selected":
+        reason = "backend-test-modules"
+    elif landing:
+        reason = "landing-only"
+    else:
+        reason = "known-package-scope"
     return {**chosen, "full": False, "docs_only": False,
             "playwright_mode": "smoke" if landing else "full",
-            "reason": "landing-only" if landing else "known-package-scope"}
+            "backend_scope": scope, "backend_paths": module_list, "reason": reason}
+
+
+class _UnresolvedTestImport(Exception):
+    """A test module import could not be resolved from the AST alone."""
+
+
+def _test_module_paths(backend):
+    tests = Path(backend) / "tests"
+    if not tests.is_dir():
+        return []
+    found = []
+    for path in sorted(tests.rglob("test_*.py")):
+        if not path.is_file():
+            continue
+        relative = path.relative_to(backend).as_posix()
+        if relative.startswith("tests/") and ".." not in relative.split("/"):
+            found.append(relative)
+    return found
+
+
+def _is_test_module_name(name):
+    return re.fullmatch(r"test_[A-Za-z0-9_]+", name) is not None
+
+
+def _candidate_test_paths(dotted):
+    parts = [part for part in dotted.split(".") if part]
+    if not parts:
+        return []
+    candidates = []
+    if len(parts) == 1 and _is_test_module_name(parts[0]):
+        candidates.append("tests/" + parts[0] + ".py")
+    if parts[0] == "tests" and len(parts) > 1:
+        candidates.append("tests/" + "/".join(parts[1:]) + ".py")
+    if len(parts) >= 3 and parts[0] == "backend" and parts[1] == "tests":
+        candidates.append("tests/" + "/".join(parts[2:]) + ".py")
+    return candidates
+
+
+def _resolve_dotted_test_module(dotted, known):
+    candidates = _candidate_test_paths(dotted)
+    if not candidates:
+        if any(_is_test_module_name(part) for part in dotted.split(".")):
+            raise _UnresolvedTestImport(dotted)
+        return None
+    found = [candidate for candidate in candidates if candidate in known]
+    if len(found) == 1:
+        return found[0]
+    if found:
+        raise _UnresolvedTestImport(dotted)
+    if any(_is_test_module_name(PurePosixPath(candidate).stem) for candidate in candidates):
+        raise _UnresolvedTestImport(dotted)
+    return None
+
+
+def _relative_directory(source, level):
+    directory = list(PurePosixPath(source).parts[:-1])
+    if level < 1 or level > len(directory):
+        raise _UnresolvedTestImport(source)
+    return directory[: len(directory) - (level - 1)]
+
+
+def _call_dotted_name(node):
+    if isinstance(node, ast.Name):
+        return node.id
+    parts = []
+    while isinstance(node, ast.Attribute):
+        parts.append(node.attr)
+        node = node.value
+    if isinstance(node, ast.Name):
+        parts.append(node.id)
+        return ".".join(reversed(parts))
+    return None
+
+
+def _string_constant(node):
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    return None
+
+
+def _imports_from_tree(tree, source, known):
+    """Test modules this file imports. Raises when an import is not static."""
+    dependencies = set()
+
+    def add_dotted(dotted):
+        resolved = _resolve_dotted_test_module(dotted, known)
+        if resolved and resolved != source:
+            dependencies.add(resolved)
+
+    def add_relative(level, module, names):
+        directory = _relative_directory(source, level)
+        if module:
+            relative = "/".join(directory + module.split(".")) + ".py"
+            if relative in known:
+                if relative != source:
+                    dependencies.add(relative)
+                return
+            leaf = module.split(".")[-1]
+            if _is_test_module_name(leaf):
+                raise _UnresolvedTestImport(module)
+            return
+        for alias in names:
+            if alias.name == "*":
+                raise _UnresolvedTestImport(source)
+            if not _is_test_module_name(alias.name):
+                continue
+            relative = "/".join(directory + [alias.name]) + ".py"
+            if relative not in known:
+                raise _UnresolvedTestImport(alias.name)
+            if relative != source:
+                dependencies.add(relative)
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                add_dotted(alias.name)
+        elif isinstance(node, ast.ImportFrom):
+            if node.level:
+                add_relative(node.level, node.module, node.names)
+                continue
+            module = node.module or ""
+            if module in {"tests", "backend.tests"} and any(alias.name == "*" for alias in node.names):
+                raise _UnresolvedTestImport(module)
+            try:
+                resolved = _resolve_dotted_test_module(module, known) if module else None
+            except _UnresolvedTestImport:
+                raise
+            if resolved:
+                if resolved != source:
+                    dependencies.add(resolved)
+                continue
+            for alias in node.names:
+                if alias.name == "*":
+                    continue
+                if _is_test_module_name(alias.name) or module == "tests" or module.startswith("tests."):
+                    add_dotted(module + "." + alias.name if module else alias.name)
+        elif isinstance(node, ast.Call):
+            called = _call_dotted_name(node.func)
+            if called in {"importlib.import_module", "import_module", "__import__"}:
+                if not node.args:
+                    raise _UnresolvedTestImport(called)
+                literal = _string_constant(node.args[0])
+                if literal is None:
+                    raise _UnresolvedTestImport(called)
+                add_dotted(literal)
+            elif called and called.endswith("spec_from_file_location"):
+                for arg in list(node.args) + [keyword.value for keyword in node.keywords]:
+                    literal = _string_constant(arg)
+                    if literal is None:
+                        continue
+                    normalized = literal.replace("\\", "/")
+                    matches = [item for item in known if normalized.endswith(item)]
+                    if len(matches) > 1:
+                        raise _UnresolvedTestImport(literal)
+                    if len(matches) == 1 and matches[0] != source:
+                        dependencies.add(matches[0])
+                    elif PurePosixPath(normalized).name.startswith("test_") and normalized.endswith(".py"):
+                        raise _UnresolvedTestImport(literal)
+    return dependencies
+
+
+def backend_test_importers(repo, selected):
+    """Other test modules that import one of ``selected``, including chains.
+
+    Raises ``_UnresolvedTestImport`` when the AST is not enough to trust a
+    narrowed module list.
+    """
+    backend = Path(repo) / "backend"
+    modules = _test_module_paths(backend)
+    known = set(modules)
+    graph = {}
+    for relative in modules:
+        path = backend / relative
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=relative)
+        except (OSError, SyntaxError, UnicodeError) as exc:
+            raise _UnresolvedTestImport(relative) from exc
+        graph[relative] = _imports_from_tree(tree, relative, known)
+    reverse = {}
+    for importer, dependencies in graph.items():
+        for dependency in dependencies:
+            reverse.setdefault(dependency, set()).add(importer)
+    importers = set()
+    stack = list(selected)
+    while stack:
+        current = stack.pop()
+        for importer in reverse.get(current, ()):
+            if importer in selected or importer in importers:
+                continue
+            importers.add(importer)
+            stack.append(importer)
+    return importers
+
+
+def resolve_backend_modules(repo, result):
+    """Do not pass a deleted test path to pytest.
+
+    Rename detection is off, so the diff still contains the old path. A missing
+    module upgrades to the whole backend suite and still leaves the other
+    application suites out. A changed module that another test imports does too:
+    running only the edited file would skip those dependents.
+    """
+    if result.get("backend_scope") != "selected":
+        return result
+    raw = [part for part in str(result.get("backend_paths") or "").split(",") if part]
+    if not raw or any(BACKEND_PYTEST_PATH.fullmatch(part) is None for part in raw):
+        return {**result, "backend_scope": "all", "backend_paths": "",
+                "reason": "backend-test-plan-invalid"}
+    root = Path(repo) / "backend"
+    if any(not (root / part).is_file() for part in raw):
+        return {**result, "backend_scope": "all", "backend_paths": "",
+                "reason": "backend-test-module-missing"}
+    try:
+        importers = backend_test_importers(repo, raw)
+    except _UnresolvedTestImport:
+        return {**result, "backend_scope": "all", "backend_paths": "",
+                "reason": "backend-test-import-unresolved"}
+    if importers:
+        return {**result, "backend_scope": "all", "backend_paths": "",
+                "reason": "backend-test-module-imported"}
+    return result
 
 
 def git(repo, *args):
@@ -166,7 +420,7 @@ def select(repo, event_name, event, tested_sha):
                      | changed(repo, base, tested))
         else:
             return full("unknown-event")
-        result = classify(paths)
+        result = resolve_backend_modules(repo, classify(paths))
         result["changed_count"] = len(paths)
         return result
     except (OSError, ValueError, KeyError, TypeError, AttributeError, subprocess.SubprocessError):
