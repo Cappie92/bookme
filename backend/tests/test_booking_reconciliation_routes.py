@@ -11,7 +11,6 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import NullPool
 
-from auth import get_password_hash
 from database import Base, get_db
 from main import app
 from models import (
@@ -50,10 +49,10 @@ def ReconciliationSession(reconciliation_engine):
     )
 
 
-def _add_user(db, *, email: str, phone: str, role: UserRole) -> User:
+def _add_user(db, *, email: str, phone: str, role: UserRole, password_hash: str) -> User:
     user = User(
         email=email,
-        hashed_password=get_password_hash("testpassword"),
+        hashed_password=password_hash,
         phone=phone,
         full_name=email.split("@", 1)[0],
         role=role,
@@ -93,32 +92,37 @@ def _add_master(db, *, user: User, domain: str) -> Master:
 
 
 @pytest.fixture
-def reconciliation_world(ReconciliationSession):
+def reconciliation_world(ReconciliationSession, fixture_password_hash):
     db = ReconciliationSession()
     try:
+        password_hash = fixture_password_hash("testpassword")
         owner_one = _add_user(
             db,
             email="reconciliation-master-1@test.local",
             phone="+79006100001",
             role=UserRole.MASTER,
+            password_hash=password_hash,
         )
         owner_two = _add_user(
             db,
             email="reconciliation-master-2@test.local",
             phone="+79006100002",
             role=UserRole.MASTER,
+            password_hash=password_hash,
         )
         client_one = _add_user(
             db,
             email="reconciliation-client-1@test.local",
             phone="+79006100003",
             role=UserRole.CLIENT,
+            password_hash=password_hash,
         )
         client_two = _add_user(
             db,
             email="reconciliation-client-2@test.local",
             phone="+79006100004",
             role=UserRole.CLIENT,
+            password_hash=password_hash,
         )
         master_one = _add_master(db, user=owner_one, domain="reconciliation-one")
         master_two = _add_master(db, user=owner_two, domain="reconciliation-two")

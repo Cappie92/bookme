@@ -7,6 +7,20 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+# Disposable DBs must be selected before importing the application. The process
+# env is otherwise empty locally and Settings would default to backend/bookme.db.
+_TEST_DB_DIR = tempfile.mkdtemp(prefix="dedato-pytest-")
+atexit.register(shutil.rmtree, _TEST_DB_DIR, ignore_errors=True)
+_existing_database_url = (os.environ.get("DATABASE_URL") or "").strip().lower()
+if (
+    _existing_database_url.startswith(("postgres://", "postgresql://", "mysql://"))
+    or "dedato.ru" in _existing_database_url
+):
+    raise RuntimeError(
+        "backend pytest refuses DATABASE_URL that is not a disposable SQLite test database"
+    )
+os.environ["DATABASE_URL"] = f"sqlite:///{Path(_TEST_DB_DIR) / 'import.db'}"
+
 import httpx
 import pytest
 from fastapi.testclient import TestClient
@@ -21,14 +35,29 @@ from models import User, UserRole
 
 # Per-process tempfile SQLite: isolates parallel pytest invocations from each
 # other without StaticPool, which livelocks threaded tests (Robokassa InvId).
-_TEST_DB_DIR = tempfile.mkdtemp(prefix="dedato-pytest-")
-atexit.register(shutil.rmtree, _TEST_DB_DIR, ignore_errors=True)
 SQLALCHEMY_DATABASE_URL = f"sqlite:///{Path(_TEST_DB_DIR) / 'test.db'}"
 engine = create_engine(
     SQLALCHEMY_DATABASE_URL,
     connect_args={"check_same_thread": False},
 )
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+
+@pytest.fixture(scope="session")
+def fixture_password_hash():
+    """Reuse real bcrypt hashes only for immutable users made by test fixtures.
+
+    This helper is never installed on ``auth``. Registration, reset and password
+    change routes therefore keep calling the production hashing function.
+    """
+    hashes = {}
+
+    def for_password(password: str) -> str:
+        if password not in hashes:
+            hashes[password] = get_password_hash(password)
+        return hashes[password]
+
+    return for_password
 
 
 @pytest.fixture(scope="function", autouse=True)
@@ -91,10 +120,10 @@ def client(db):
 
 
 @pytest.fixture(scope="function")
-def test_user(db):
+def test_user(db, fixture_password_hash):
     user = User(
         email="test@example.com",
-        hashed_password=get_password_hash("testpassword"),
+        hashed_password=fixture_password_hash("testpassword"),
         phone="+79001234567",
         full_name="Test User",
         role=UserRole.CLIENT,
@@ -109,10 +138,10 @@ def test_user(db):
 
 
 @pytest.fixture(scope="function")
-def test_admin(db):
+def test_admin(db, fixture_password_hash):
     admin = User(
         email="admin@example.com",
-        hashed_password=get_password_hash("testpassword"),
+        hashed_password=fixture_password_hash("testpassword"),
         phone="+79001234568",
         full_name="Admin User",
         role=UserRole.ADMIN,
@@ -127,10 +156,10 @@ def test_admin(db):
 
 
 @pytest.fixture(scope="function")
-def test_master(db):
+def test_master(db, fixture_password_hash):
     master = User(
         email="master@example.com",
-        hashed_password=get_password_hash("testpassword"),
+        hashed_password=fixture_password_hash("testpassword"),
         phone="+79001234569",
         full_name="Master User",
         role=UserRole.MASTER,
@@ -145,10 +174,10 @@ def test_master(db):
 
 
 @pytest.fixture(scope="function")
-def test_salon(db):
+def test_salon(db, fixture_password_hash):
     salon = User(
         email="salon@example.com",
-        hashed_password=get_password_hash("testpassword"),
+        hashed_password=fixture_password_hash("testpassword"),
         phone="+79001234570",
         full_name="Salon User",
         role=UserRole.SALON,

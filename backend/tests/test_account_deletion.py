@@ -47,11 +47,11 @@ def _auth(client, phone: str, password: str = "testpassword"):
 
 
 @pytest.fixture
-def deletion_world(db):
+def deletion_world(db, fixture_password_hash):
     """Мастер A + клиент C + другой мастер B + клиент с записями у обоих."""
     master_user = User(
         email="del_master@test.com",
-        hashed_password=get_password_hash("testpassword"),
+        hashed_password=fixture_password_hash("testpassword"),
         phone="+79990001001",
         full_name="Delete Me Master",
         role=UserRole.MASTER,
@@ -61,7 +61,7 @@ def deletion_world(db):
     )
     other_master_user = User(
         email="keep_master@test.com",
-        hashed_password=get_password_hash("testpassword"),
+        hashed_password=fixture_password_hash("testpassword"),
         phone="+79990001002",
         full_name="Keep Master",
         role=UserRole.MASTER,
@@ -70,7 +70,7 @@ def deletion_world(db):
     )
     client_user = User(
         email="del_client_hist@test.com",
-        hashed_password=get_password_hash("testpassword"),
+        hashed_password=fixture_password_hash("testpassword"),
         phone="+79990001003",
         full_name="History Client",
         role=UserRole.CLIENT,
@@ -79,7 +79,7 @@ def deletion_world(db):
     )
     other_client = User(
         email="other_client@test.com",
-        hashed_password=get_password_hash("testpassword"),
+        hashed_password=fixture_password_hash("testpassword"),
         phone="+79990001004",
         full_name="Other Client",
         role=UserRole.CLIENT,
@@ -547,10 +547,10 @@ def test_client_history_gets_deleted_master_flag(db, deletion_world):
     assert is_master_deleted(master) is True
 
 
-def test_client_self_delete_anonymizes_not_hard_delete(client, db):
+def test_client_self_delete_anonymizes_not_hard_delete(client, db, fixture_password_hash):
     u = User(
         email="client_del@test.com",
-        hashed_password=get_password_hash("testpassword"),
+        hashed_password=fixture_password_hash("testpassword"),
         phone="+79990003001",
         full_name="Client Del",
         role=UserRole.CLIENT,

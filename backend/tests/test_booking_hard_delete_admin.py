@@ -5,7 +5,6 @@ from unittest.mock import patch
 import pytest
 from sqlalchemy.orm import Session
 
-from auth import get_password_hash
 from models import (
     AppliedDiscount,
     Booking,
@@ -35,10 +34,10 @@ def _login_headers(client, phone: str) -> dict:
 
 
 @pytest.fixture
-def world(db: Session):
+def world(db: Session, fixture_password_hash):
     client = User(
         email="hd.client@example.com",
-        hashed_password=get_password_hash("testpassword"),
+        hashed_password=fixture_password_hash("testpassword"),
         phone="+79001110001",
         full_name="HD Client",
         role=UserRole.CLIENT,
@@ -47,7 +46,7 @@ def world(db: Session):
     )
     master_user = User(
         email="hd.master@example.com",
-        hashed_password=get_password_hash("testpassword"),
+        hashed_password=fixture_password_hash("testpassword"),
         phone="+79001110002",
         full_name="HD Master",
         role=UserRole.MASTER,
@@ -56,7 +55,7 @@ def world(db: Session):
     )
     salon_user = User(
         email="hd.salon@example.com",
-        hashed_password=get_password_hash("testpassword"),
+        hashed_password=fixture_password_hash("testpassword"),
         phone="+79001110003",
         full_name="HD Salon",
         role=UserRole.SALON,
@@ -65,7 +64,7 @@ def world(db: Session):
     )
     indie_user = User(
         email="hd.indie@example.com",
-        hashed_password=get_password_hash("testpassword"),
+        hashed_password=fixture_password_hash("testpassword"),
         phone="+79001110004",
         full_name="HD Indie",
         role=UserRole.INDIE,
@@ -74,7 +73,7 @@ def world(db: Session):
     )
     moderator = User(
         email="hd.mod@example.com",
-        hashed_password=get_password_hash("testpassword"),
+        hashed_password=fixture_password_hash("testpassword"),
         phone="+79001110005",
         full_name="HD Moderator",
         role=UserRole.MODERATOR,
@@ -83,7 +82,7 @@ def world(db: Session):
     )
     admin = User(
         email="hd.admin@example.com",
-        hashed_password=get_password_hash("testpassword"),
+        hashed_password=fixture_password_hash("testpassword"),
         phone="+79001110006",
         full_name="HD Admin",
         role=UserRole.ADMIN,
@@ -222,10 +221,10 @@ def test_moderator_with_can_delete_bookings_still_403(client, db, world):
     assert db.query(Booking).filter(Booking.id == bid).first() is not None
 
 
-def test_client_cannot_delete_foreign_booking(client, db, world):
+def test_client_cannot_delete_foreign_booking(client, db, world, fixture_password_hash):
     other = User(
         email="hd.other@example.com",
-        hashed_password=get_password_hash("testpassword"),
+        hashed_password=fixture_password_hash("testpassword"),
         phone="+79001110099",
         full_name="Other",
         role=UserRole.CLIENT,
