@@ -223,7 +223,7 @@ echo "Frontend ready"
 
 echo "Running npm run test:e2e"
 cd "$ROOT/frontend"
-if ! CI=true npm run test:e2e; then
+if ! CI=true npm run test:e2e -- "$@"; then
   EXIT_CODE=1
   echo "Playwright failed" >&2
   if [ -f "$BACKEND_LOG" ]; then

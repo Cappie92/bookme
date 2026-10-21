@@ -2,14 +2,58 @@ name: Application tests
 
 on:
   pull_request:
+  merge_group:
   push:
     branches: [main]
+    tags: ['v*']
+  schedule:
+    - cron: '17 1 * * *' # 04:17 Europe/Moscow; scheduled runs may be delayed by GitHub.
+  workflow_dispatch:
+    inputs:
+      purpose:
+        description: >
+          Always runs every application suite on github.sha of the selected
+          ref (branch or tag tip). release does not retarget another commit;
+          choose it only when that SHA is the exact revision you will ship.
+          Full regression gate then requires backend, frontend, mobile and
+          Playwright success on this checkout. Push of tags v* is the same
+          full gate on the tagged SHA.
+        type: choice
+        default: full-regression
+        options: [full-regression, release]
 
 permissions:
   contents: read
 
+concurrency:
+  group: application-tests-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
+  select:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      backend: ${{ steps.scope.outputs.backend }}
+      frontend: ${{ steps.scope.outputs.frontend }}
+      mobile: ${{ steps.scope.outputs.mobile }}
+      playwright: ${{ steps.scope.outputs.playwright }}
+      playwright_mode: ${{ steps.scope.outputs.playwright_mode }}
+      full: ${{ steps.scope.outputs.full }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Test suite-selection policy
+        run: python3 -B -m unittest discover -s scripts/ci -p 'test_*.py' -v
+      - name: Select suites (unknown or invalid diff means full CI)
+        id: scope
+        run: python3 -B scripts/ci/select_tests.py
+
   backend:
+    needs: select
+    if: ${{ !cancelled() && (needs.select.result != 'success' || needs.select.outputs.backend != 'false') }}
     runs-on: ubuntu-24.04
     defaults:
       run:
@@ -29,6 +73,8 @@ jobs:
         run: python -m pytest
 
   frontend:
+    needs: select
+    if: ${{ !cancelled() && (needs.select.result != 'success' || needs.select.outputs.frontend != 'false') }}
     runs-on: ubuntu-24.04
     defaults:
       run:
@@ -46,6 +92,8 @@ jobs:
         run: npm test
 
   mobile:
+    needs: select
+    if: ${{ !cancelled() && (needs.select.result != 'success' || needs.select.outputs.mobile != 'false') }}
     runs-on: ubuntu-24.04
     defaults:
       run:
@@ -72,6 +120,8 @@ jobs:
         run: npm run test:integration
 
   playwright:
+    needs: select
+    if: ${{ !cancelled() && (needs.select.result != 'success' || needs.select.outputs.playwright != 'false') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -96,11 +146,37 @@ jobs:
         run: npm ci
       - name: Install Playwright Chromium
         working-directory: frontend
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install --with-deps --only-shell chromium
       - name: Run Playwright E2E
         env:
           CI: true
-        run: ./scripts/run-playwright-e2e.sh
+          E2E_MODE: ${{ needs.select.outputs.playwright_mode }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${E2E_MODE:-}" == "smoke" ]]; then
+            specs_file="$(mktemp)"
+            if python3 -B scripts/ci/select_tests.py --smoke-specs >"$specs_file"; then
+              specs=()
+              while IFS= read -r spec || [[ -n "$spec" ]]; do
+                [[ -n "$spec" ]] && specs+=("$spec")
+              done < "$specs_file"
+              rm -f "$specs_file"
+              if [[ ${#specs[@]} -eq 0 ]]; then
+                echo "ERROR: SMOKE_SPECS produced an empty list" >&2
+                exit 1
+              fi
+              echo "Playwright smoke specs: ${specs[*]}"
+              ./scripts/run-playwright-e2e.sh "${specs[@]}"
+            else
+              status=$?
+              rm -f "$specs_file"
+              echo "ERROR: SMOKE_SPECS selection failed (exit ${status}); running full Playwright E2E" >&2
+              ./scripts/run-playwright-e2e.sh
+            fi
+          else
+            ./scripts/run-playwright-e2e.sh
+          fi
       - name: Upload Playwright artifacts
         if: failure()
         uses: actions/upload-artifact@v7
@@ -113,3 +189,29 @@ jobs:
             /tmp/dedato-e2e-vite.log
           if-no-files-found: ignore
           retention-days: 7
+
+  ci-result:
+    name: Application CI result
+    needs: [select, backend, frontend, mobile, playwright]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: Require every selected suite to succeed
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: python3 -B scripts/ci/select_tests.py --verify
+
+  full-regression:
+    name: Full regression gate
+    needs: [select, backend, frontend, mobile, playwright]
+    if: ${{ !cancelled() && (needs.select.result != 'success' || needs.select.outputs.full != 'false') }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: Require full regression on this exact SHA
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          echo "Full regression required for ${GITHUB_SHA}"
+          python3 -B scripts/ci/select_tests.py --verify --require-full
