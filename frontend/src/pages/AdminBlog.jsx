@@ -21,8 +21,16 @@ import SEOAnalyzer from '../components/SEOAnalyzer';
 import JSONLDEditor from '../components/JSONLDEditor';
 import BlogPreview from '../components/BlogPreview';
 import { useModal } from '../hooks/useModal';
+import { useAdminAccess } from '../contexts/AdminAccessContext';
+
+const PUBLISH_FIELDS = ['status', 'published_at', 'scheduled_at'];
 
 const AdminBlog = () => {
+  const { can, refresh: refreshAccess } = useAdminAccess();
+  const canCreate = can('blog.create');
+  const canEdit = can('blog.edit');
+  const canDelete = can('blog.delete');
+  const canPublish = can('blog.publish');
   const [posts, setPosts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
@@ -103,6 +111,7 @@ const AdminBlog = () => {
         setApiError('');
       } else {
         console.error('Ошибка загрузки статей:', response.status, response.statusText);
+        if (response.status === 403) refreshAccess();
         setPosts([]);
         setApiError(`Ошибка загрузки статей: ${response.status} ${response.statusText}`);
       }
@@ -192,6 +201,16 @@ const AdminBlog = () => {
           postData[field] = null;
         }
       });
+
+      // Без can_publish_blog статус и даты публикации не меняются: при
+      // редактировании не отправляем их, новая статья всегда черновик.
+      if (!canPublish) {
+        if (editingPost) {
+          PUBLISH_FIELDS.forEach((field) => { delete postData[field]; });
+        } else {
+          Object.assign(postData, { status: 'draft', published_at: null, scheduled_at: null });
+        }
+      }
       
       console.log('Отправляем данные:', postData);
       
@@ -233,6 +252,7 @@ const AdminBlog = () => {
         } else {
           errorMessage = `Ошибка ${response.status}: ${response.statusText}`;
         }
+        if (response.status === 403) refreshAccess();
         
         setSubmitError(errorMessage);
       }
@@ -288,6 +308,9 @@ const AdminBlog = () => {
       
       if (response.ok) {
         fetchPosts();
+      } else {
+        if (response.status === 403) refreshAccess();
+        setApiError(`Не удалось удалить статью: ${response.status}`);
       }
     } catch (error) {
       console.error('Error deleting post:', error);
@@ -305,6 +328,9 @@ const AdminBlog = () => {
       
       if (response.ok) {
         fetchPosts();
+      } else {
+        if (response.status === 403) refreshAccess();
+        setApiError(`Не удалось опубликовать статью: ${response.status}`);
       }
     } catch (error) {
       console.error('Error publishing post:', error);
@@ -576,16 +602,20 @@ const AdminBlog = () => {
             className="hidden"
             onChange={handleBlogImportFile}
           />
+          {canCreate && (
+          <>
           <button
             type="button"
             disabled={importLoading}
             onClick={() => fileImportRef.current?.click()}
+            data-testid="admin-blog-import"
             className="bg-white border border-gray-300 text-gray-800 px-4 py-2 rounded-lg hover:bg-gray-50 flex items-center gap-2 disabled:opacity-50"
           >
             <ArrowUpTrayIcon className="h-5 w-5" />
             {importLoading ? 'Импорт…' : 'Импорт из файла'}
           </button>
           <button
+            data-testid="admin-blog-create"
             onClick={() => {
               setEditingPost(null);
               resetForm();
@@ -599,6 +629,8 @@ const AdminBlog = () => {
             <PlusIcon className="h-5 w-5" />
             Новая статья
           </button>
+          </>
+          )}
         </div>
       </div>
 
@@ -745,6 +777,7 @@ const AdminBlog = () => {
                       >
                         <EyeIcon className="h-4 w-4" />
                       </button>
+                      {canEdit && (
                       <button
                         onClick={() => handleEdit(post)}
                         className="text-[#4CAF50] hover:text-[#388e3c]"
@@ -752,7 +785,8 @@ const AdminBlog = () => {
                       >
                         <PencilIcon className="h-4 w-4" />
                       </button>
-                      {post.status === 'draft' && (
+                      )}
+                      {canPublish && post.status === 'draft' && (
                         <button
                           onClick={() => handlePublish(post.id)}
                           className="text-green-600 hover:text-green-900"
@@ -761,6 +795,7 @@ const AdminBlog = () => {
                           <EyeSlashIcon className="h-4 w-4" />
                         </button>
                       )}
+                      {canDelete && (
                       <button
                         onClick={() => handleDelete(post.id)}
                         className="text-red-600 hover:text-red-900"
@@ -768,6 +803,7 @@ const AdminBlog = () => {
                       >
                         <TrashIcon className="h-4 w-4" />
                       </button>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -939,14 +975,19 @@ const AdminBlog = () => {
                           Статус
                         </label>
                         <select
-                          value={formData.status}
+                          value={canPublish || editingPost ? formData.status : 'draft'}
                           onChange={(e) => setFormData({...formData, status: e.target.value})}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#4CAF50]"
+                          disabled={!canPublish}
+                          data-testid="admin-blog-status"
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#4CAF50] disabled:bg-gray-100 disabled:text-gray-500"
                         >
                           <option value="draft">Черновик</option>
                           <option value="scheduled">Запланирован</option>
                           <option value="published">Опубликован</option>
                         </select>
+                        {!canPublish && (
+                          <p className="text-xs text-gray-500 mt-1">Публикацию и планирование выполняет сотрудник с правом публикации.</p>
+                        )}
                       </div>
                     </div>
 

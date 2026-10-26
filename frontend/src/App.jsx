@@ -1,5 +1,5 @@
 import AuthSafetyBoundary, { IsolatedSessionError } from './components/AuthSafetyBoundary'
-import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom"
+import { BrowserRouter, Routes, Route, Navigate, Outlet, useLocation } from "react-router-dom"
 import { HelmetProvider } from 'react-helmet-async'
 import { lazy, Suspense, useEffect, useRef } from 'react'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
@@ -9,6 +9,10 @@ import { ToastProvider } from './contexts/ToastContext'
 import MainLayout from "./layouts/MainLayout"
 import AdminLayout from "./layouts/AdminLayout"
 import ClientLayout from "./layouts/ClientLayout"
+import { AdminAccessProvider } from './contexts/AdminAccessContext'
+import AdminSectionGate from './components/AdminSectionGate'
+import MasterWorkspaceRoute from './components/MasterWorkspaceRoute'
+import { isStaffRole, normalizeRole } from './utils/adminAccess'
 
 // Критичные компоненты для первого рендера (загружаются сразу)
 import Home from "./pages/Home"
@@ -121,15 +125,18 @@ function getPostAdminDenyPath(role) {
   return '/'
 }
 
-function AdminRoute({ children }) {
+/** One admin shell for ADMIN and MODERATOR; sections are gated by the server access snapshot. */
+function AdminRoute() {
   const { loading, user, isAuthenticated, openAuthModal } = useAuth()
-  const role = (user?.role || '').toString().toLowerCase()
+  const location = useLocation()
+  const role = normalizeRole(user?.role)
+  const returnToPath = `${location.pathname}${location.search}`
 
   useEffect(() => {
     if (!loading && (!isAuthenticated || !user)) {
-      openAuthModal('client', 'login', { redirectMode: 'default' })
+      openAuthModal('client', 'login', { redirectMode: 'returnTo', returnToPath })
     }
-  }, [loading, isAuthenticated, user, openAuthModal])
+  }, [loading, isAuthenticated, user, openAuthModal, returnToPath])
 
   if (loading) {
     return <PageLoader />
@@ -139,11 +146,15 @@ function AdminRoute({ children }) {
     return <Navigate to="/" replace />
   }
 
-  if (role !== 'admin') {
+  if (!isStaffRole(role)) {
     return <Navigate to={getPostAdminDenyPath(role)} replace />
   }
 
-  return <AdminLayout>{children}</AdminLayout>
+  return (
+    <AdminAccessProvider>
+      <AdminLayout><Outlet /></AdminLayout>
+    </AdminAccessProvider>
+  )
 }
 
 function IosCommerceRouteGuard({ children }) {
@@ -194,15 +205,18 @@ function App() {
           <Route path="/dashboard/places" element={<MainLayout><PlacesDashboard/></MainLayout>} />
           <Route path="/profile/:slug" element={<MainLayout><PublicProfile/></MainLayout>} />
           <Route path="/clients" element={<MainLayout><Clients/></MainLayout>} />
-          <Route path="/admin" element={<AdminRoute><AdminDashboard/></AdminRoute>} />
-          <Route path="/admin/users" element={<AdminRoute><AdminUsers/></AdminRoute>} />
-          <Route path="/admin/moderators" element={<AdminRoute><AdminModerators/></AdminRoute>} />
-          <Route path="/admin/blog" element={<AdminRoute><AdminBlog/></AdminRoute>} />
-          <Route path="/admin/stats" element={<AdminRoute><AdminStats/></AdminRoute>} />
-          <Route path="/admin/functions" element={<AdminRoute><AdminFunctions/></AdminRoute>} />
-          <Route path="/admin/promo-engine" element={<AdminRoute><AdminPromoEngine/></AdminRoute>} />
-          <Route path="/admin/always-free-logs" element={<AdminRoute><AdminAlwaysFreeLogs/></AdminRoute>} />
-          <Route path="/admin/settings" element={<AdminRoute><AdminSettings/></AdminRoute>} />
+          <Route path="/admin" element={<AdminRoute />}>
+            <Route index element={<AdminSectionGate section="dashboard"><AdminDashboard/></AdminSectionGate>} />
+            <Route path="users" element={<AdminSectionGate section="users"><AdminUsers/></AdminSectionGate>} />
+            <Route path="moderators" element={<AdminSectionGate section="moderators"><AdminModerators/></AdminSectionGate>} />
+            <Route path="blog" element={<AdminSectionGate section="blog"><AdminBlog/></AdminSectionGate>} />
+            <Route path="stats" element={<AdminSectionGate section="stats"><AdminStats/></AdminSectionGate>} />
+            <Route path="functions" element={<AdminSectionGate section="functions"><AdminFunctions/></AdminSectionGate>} />
+            <Route path="promo-engine" element={<AdminSectionGate section="promo-engine"><AdminPromoEngine/></AdminSectionGate>} />
+            <Route path="always-free-logs" element={<AdminSectionGate section="always-free-logs"><AdminAlwaysFreeLogs/></AdminSectionGate>} />
+            <Route path="settings" element={<AdminSectionGate section="settings"><AdminSettings/></AdminSectionGate>} />
+            <Route path="*" element={<Navigate to="/404" replace />} />
+          </Route>
           <Route path="/user-agreement" element={<UserAgreement/>} />
           <Route path="/personal-data-consent" element={<PersonalDataConsentPage />} />
           <Route path="/privacy-policy" element={<PrivacyPolicyPage />} />
@@ -217,7 +231,7 @@ function App() {
           <Route path="/client/profile" element={<ClientLayout><ClientProfile/></ClientLayout>} />
           <Route path="/client/favorite" element={<ClientLayout><ClientFavorite/></ClientLayout>} />
           <Route path="/client/master-notes" element={<ClientLayout><ClientMasterNotes/></ClientLayout>} />
-          <Route path="/master" element={<MasterDashboard/>} />
+          <Route path="/master" element={<MasterWorkspaceRoute fallback={<PageLoader />}><MasterDashboard/></MasterWorkspaceRoute>} />
           <Route path="/demo/master" element={<MainLayout><DemoMasterEntry/></MainLayout>} />
           <Route path="/master/tariff" element={<IosCommerceRouteGuard><Navigate to="/master?tab=tariff" replace /></IosCommerceRouteGuard>} />
           <Route path="/master/subscription/plans" element={<IosCommerceRouteGuard><MasterSubscriptionPlans/></IosCommerceRouteGuard>} />

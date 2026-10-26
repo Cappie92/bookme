@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react"
+import { Link } from "react-router-dom"
 import { 
   UsersIcon, 
   DocumentTextIcon, 
@@ -6,8 +7,17 @@ import {
   ChartBarIcon 
 } from "@heroicons/react/24/outline"
 import { API_BASE_URL } from '../utils/config';
+import { useAdminAccess } from '../contexts/AdminAccessContext'
+
+const QUICK_ACTIONS = [
+  { action: 'users.view', to: '/admin/users', label: 'Управление пользователями', icon: UsersIcon },
+  { action: 'blog.create', requires: ['blog.view'], to: '/admin/blog', label: 'Создать пост', icon: DocumentTextIcon },
+  { action: 'stats.view', to: '/admin/stats', label: 'Просмотр статистики', icon: ChartBarIcon },
+]
 
 export default function AdminDashboard() {
+  const { can, refresh: refreshAccess } = useAdminAccess()
+  const [loadError, setLoadError] = useState(null)
   const [stats, setStats] = useState({
     total_users: 0,
     total_salons: 0,
@@ -36,40 +46,31 @@ export default function AdminDashboard() {
           const statsData = await statsResponse.json()
           setStats(statsData)
         } else {
-          // Fallback к реальным данным из базы
-          setStats({
-            total_users: 39,
-            new_users_today: 0,
-            total_salons: 2,
-            bookings_today: 3,
-            bookings_this_week: 3,
-            total_blog_posts: 0,
-            average_booking_duration: 2.2,
-            conversion_rate: 0.0
-          })
+          setLoadError(statsResponse.status === 403
+            ? 'Нет доступа к статистике.'
+            : `Не удалось загрузить статистику (${statsResponse.status}).`)
+          if (statsResponse.status === 403) refreshAccess()
         }
-        
-        // Баланс и подписка не нужны для админа
-        
       } catch (error) {
         console.error('Ошибка при загрузке данных:', error)
+        setLoadError('Не удалось загрузить статистику.')
       } finally {
         setLoading(false)
       }
     }
 
     fetchData()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Вычисляем DAU (Daily Active Users) - пользователи, которые были активны сегодня
-  const dau = stats.new_users_today + Math.floor(stats.total_users * 0.1) // Примерная формула
+  const quickActions = QUICK_ACTIONS.filter((item) => [item.action, ...(item.requires || [])].every(can))
 
   if (loading) {
     return (
       <div className="space-y-6">
         <div className="border-b border-gray-200 pb-4">
           <h1 className="text-3xl font-bold text-gray-900">Панель администратора</h1>
-          <p className="text-gray-600 mt-2">Добро пожаловать в панель управления Appointo</p>
+          <p className="text-gray-600 mt-2">Добро пожаловать в панель управления DeDato</p>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           {[...Array(4)].map((_, i) => (
@@ -93,9 +94,15 @@ export default function AdminDashboard() {
       {/* Заголовок */}
       <div className="border-b border-gray-200 pb-4">
         <h1 className="text-3xl font-bold text-gray-900">Панель администратора</h1>
-        <p className="text-gray-600 mt-2">Добро пожаловать в панель управления Appointo</p>
+        <p className="text-gray-600 mt-2">Добро пожаловать в панель управления DeDato</p>
       </div>
 
+      {loadError ? (
+        <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200" role="alert" data-testid="admin-dashboard-error">
+          <p className="text-sm text-gray-700">{loadError}</p>
+        </div>
+      ) : (
+      <>
 
       {/* Статистика */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -129,8 +136,8 @@ export default function AdminDashboard() {
               <ChartBarIcon className="w-6 h-6 text-purple-600" />
             </div>
             <div className="ml-4">
-              <p className="text-sm font-medium text-gray-600">DAU</p>
-              <p className="text-2xl font-bold text-gray-900">{dau}</p>
+              <p className="text-sm font-medium text-gray-600">Записей за неделю</p>
+              <p className="text-2xl font-bold text-gray-900" data-testid="admin-stat-bookings-week">{stats.bookings_this_week ?? 0}</p>
             </div>
           </div>
         </div>
@@ -181,53 +188,32 @@ export default function AdminDashboard() {
           <p className="text-sm text-gray-600 mt-2">Всего записей в системе</p>
         </div>
       </div>
+      </>
+      )}
 
       {/* Быстрые действия */}
-      <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
+      {quickActions.length > 0 && (
+      <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200" data-testid="admin-quick-actions">
         <h2 className="text-lg font-semibold text-gray-900 mb-4">Быстрые действия</h2>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <button className="flex items-center justify-center px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">
-            <UsersIcon className="w-5 h-5 mr-2 text-gray-600" />
-            <span className="text-gray-700">Управление пользователями</span>
-          </button>
-          <button className="flex items-center justify-center px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">
-            <DocumentTextIcon className="w-5 h-5 mr-2 text-gray-600" />
-            <span className="text-gray-700">Создать пост</span>
-          </button>
-          <button className="flex items-center justify-center px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">
-            <ChartBarIcon className="w-5 h-5 mr-2 text-gray-600" />
-            <span className="text-gray-700">Просмотр статистики</span>
-          </button>
+          {quickActions.map((item) => {
+            const Icon = item.icon
+            return (
+              <Link
+                key={item.action}
+                to={item.to}
+                data-testid={`admin-quick-${item.action}`}
+                className="flex items-center justify-center px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+              >
+                <Icon className="w-5 h-5 mr-2 text-gray-600" />
+                <span className="text-gray-700">{item.label}</span>
+              </Link>
+            )
+          })}
         </div>
       </div>
+      )}
 
-      {/* Последние действия */}
-      <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
-        <h2 className="text-lg font-semibold text-gray-900 mb-4">Последние действия</h2>
-        <div className="space-y-3">
-          <div className="flex items-center justify-between py-2 border-b border-gray-100">
-            <div>
-              <p className="text-sm font-medium text-gray-900">Новый пользователь зарегистрирован</p>
-              <p className="text-xs text-gray-500">2 минуты назад</p>
-            </div>
-            <span className="text-xs bg-green-100 text-green-800 px-2 py-1 rounded-full">Новый</span>
-          </div>
-          <div className="flex items-center justify-between py-2 border-b border-gray-100">
-            <div>
-              <p className="text-sm font-medium text-gray-900">Создан новый пост в блоге</p>
-              <p className="text-xs text-gray-500">15 минут назад</p>
-            </div>
-            <span className="text-xs bg-green-100 text-green-800 px-2 py-1 rounded-full">Блог</span>
-          </div>
-          <div className="flex items-center justify-between py-2">
-            <div>
-              <p className="text-sm font-medium text-gray-900">Обновлены настройки системы</p>
-              <p className="text-xs text-gray-500">1 час назад</p>
-            </div>
-            <span className="text-xs bg-orange-100 text-orange-800 px-2 py-1 rounded-full">Система</span>
-          </div>
-        </div>
-      </div>
     </div>
   )
 } 

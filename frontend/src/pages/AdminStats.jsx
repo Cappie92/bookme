@@ -9,93 +9,36 @@ import {
   ArrowPathIcon
 } from "@heroicons/react/24/outline"
 import { API_BASE_URL } from '../utils/config'
+import { useAdminAccess } from '../contexts/AdminAccessContext'
 
 export default function AdminStats() {
+  const { refresh: refreshAccess } = useAdminAccess()
   const [stats, setStats] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [lastUpdated, setLastUpdated] = useState(null)
 
-  const fetchStats = async (forceRefresh = false) => {
+  const fetchStats = async () => {
+    setLoading(true)
     try {
-      // Проверяем кэш
-      const cached = localStorage.getItem('admin_stats_cache')
-      const cacheTime = localStorage.getItem('admin_stats_cache_time')
-      
-      if (!forceRefresh && cached && cacheTime) {
-        const cacheAge = Date.now() - parseInt(cacheTime)
-        const twoHours = 2 * 60 * 60 * 1000 // 2 часа в миллисекундах
-        
-        if (cacheAge < twoHours) {
-          setStats(JSON.parse(cached))
-          setLastUpdated(new Date(parseInt(cacheTime)))
-          setLoading(false)
-          return
+      const token = localStorage.getItem('access_token')
+      const response = await fetch(`${API_BASE_URL}/api/admin/stats`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
         }
+      })
+      if (!response.ok) {
+        if (response.status === 403) refreshAccess()
+        throw new Error(response.status === 403 ? 'нет доступа' : `HTTP ${response.status}`)
       }
-
-      setLoading(true)
-      
-      // Загружаем реальную статистику из API
-      try {
-        const token = localStorage.getItem('access_token')
-        const response = await fetch(`${API_BASE_URL}/api/admin/stats`, {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          }
-        })
-        
-        if (response.ok) {
-          const data = await response.json()
-          setStats(data)
-          setLastUpdated(new Date(data.last_updated))
-          setError(null)
-          return
-        }
-      } catch (error) {
-        console.error('Ошибка загрузки статистики:', error)
-      }
-      
-      // Fallback к реальным данным из базы
-      const data = {
-        total_users: 39,
-        new_users_today: 0,
-        total_salons: 2,
-        bookings_today: 3,
-        bookings_this_week: 3,
-        total_blog_posts: 0,
-        average_booking_duration: 2.2,
-        conversion_rate: 0.0,
-        users_by_role: {
-          'client': 21,
-          'master': 15,
-          'admin': 3
-        },
-        weekly_activity: [
-          { day: 'Понедельник', users: 0, bookings: 0 },
-          { day: 'Вторник', users: 0, bookings: 0 },
-          { day: 'Среда', users: 0, bookings: 0 },
-          { day: 'Четверг', users: 0, bookings: 0 },
-          { day: 'Пятница', users: 0, bookings: 0 },
-          { day: 'Суббота', users: 0, bookings: 0 },
-          { day: 'Воскресенье', users: 1, bookings: 0 }
-        ],
-        top_salons: [
-          { name: 'Салон красоты №2', bookings: 115, masters: 115, rating: 4.5 },
-          { name: 'Салон красоты №1', bookings: 90, masters: 90, rating: 4.5 }
-        ],
-        last_updated: new Date().toISOString()
-      }
-      
-      // Сохраняем в кэш
-      localStorage.setItem('admin_stats_cache', JSON.stringify(data))
-      localStorage.setItem('admin_stats_cache_time', Date.now().toString())
-      
+      const data = await response.json()
       setStats(data)
       setLastUpdated(new Date(data.last_updated))
       setError(null)
     } catch (err) {
+      console.error('Ошибка загрузки статистики:', err)
+      setStats(null)
       setError(err.message)
     } finally {
       setLoading(false)
@@ -103,11 +46,15 @@ export default function AdminStats() {
   }
 
   useEffect(() => {
+    // Legacy shared cache only ever held placeholder numbers, never API data.
+    localStorage.removeItem('admin_stats_cache')
+    localStorage.removeItem('admin_stats_cache_time')
     fetchStats()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const handleRefresh = () => {
-    fetchStats(true)
+    fetchStats()
   }
 
   if (loading) {

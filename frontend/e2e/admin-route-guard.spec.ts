@@ -20,6 +20,13 @@ async function mockApi(page, role: string | null) {
       })
     }
 
+    if (path === '/api/admin/access') {
+      if (role !== 'admin') {
+        return route.fulfill({ status: 403, json: { detail: 'Forbidden' } })
+      }
+      return route.fulfill({ json: { role: 'admin', permissions: {} } })
+    }
+
     if (path === '/api/admin/promo-engine/stats') {
       return route.fulfill({
         json: {
@@ -58,7 +65,7 @@ test.describe('admin route guard', () => {
     await navigateSpa(page, '/admin/promo-engine')
 
     await expect(page).toHaveURL(/\/$/)
-    await expect(page.getByText('Панель администратора')).toHaveCount(0)
+    await expect(page.getByTestId('admin-sidebar')).toHaveCount(0)
     await expect(page.getByRole('heading', { name: 'Промокоды' })).toHaveCount(0)
   })
 
@@ -71,7 +78,7 @@ test.describe('admin route guard', () => {
     await navigateSpa(page, '/admin/functions')
 
     await expect(page).toHaveURL(/\/master/)
-    await expect(page.getByText('Панель администратора')).toHaveCount(0)
+    await expect(page.getByTestId('admin-sidebar')).toHaveCount(0)
   })
 
   test('admin can render admin promo route', async ({ page }) => {
@@ -82,7 +89,7 @@ test.describe('admin route guard', () => {
 
     await navigateSpa(page, '/admin/promo-engine')
 
-    await expect(page.getByText('Панель администратора')).toBeVisible()
+    await expect(page.getByTestId('admin-sidebar')).toBeVisible()
     await expect(page.getByRole('heading', { name: 'Промокоды' })).toBeVisible()
   })
 })

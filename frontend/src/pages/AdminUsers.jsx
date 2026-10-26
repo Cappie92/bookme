@@ -11,10 +11,28 @@ import {
 } from "@heroicons/react/24/outline"
 import { API_BASE_URL } from '../utils/config'
 import { useModal } from '../hooks/useModal'
+import { useAuth } from '../contexts/AuthContext'
+import { useAdminAccess } from '../contexts/AdminAccessContext'
+import { canManageUserTarget } from '../utils/adminAccess'
 
 const PAGE_SIZE = 30
 
+async function readErrorDetail(response) {
+  try {
+    const body = await response.json()
+    if (typeof body?.detail === 'string') return body.detail
+  } catch { /* ignore */ }
+  return `Ошибка ${response.status}`
+}
+
 export default function AdminUsers() {
+  const { user: currentUser } = useAuth()
+  const { access, can, refresh: refreshAccess } = useAdminAccess()
+  const canEditAuthority = can('users.editAuthority')
+  const canEditTarget = (target) => canManageUserTarget(access, 'users.edit', target)
+  const canDeleteTarget = (target) =>
+    canManageUserTarget(access, 'users.delete', target) && target?.id !== currentUser?.id
+  const [actionError, setActionError] = useState('')
   const [users, setUsers] = useState([])
   const [totalCount, setTotalCount] = useState(0)
   const [page, setPage] = useState(1)
@@ -94,6 +112,7 @@ export default function AdminUsers() {
           if (errBody?.detail) detail = typeof errBody.detail === 'string' ? errBody.detail : JSON.stringify(errBody.detail)
         } catch { /* ignore */ }
         console.error('Ошибка загрузки пользователей:', response.status, detail)
+        if (response.status === 403) refreshAccess()
         setUsers([])
         setTotalCount(0)
       }
@@ -122,11 +141,12 @@ export default function AdminUsers() {
 
   const handleEditUser = async (user) => {
     setSelectedUser(user)
+    setActionError('')
     setIsAlwaysFreeChecked(user.is_always_free || false)
     setCurrentPlanId(null) // Сбрасываем текущий план
     setShowEditModal(true)
-    // Загружаем планы подписки при открытии модального окна
-    await fetchSubscriptionPlans()
+    // Планы нужны только для admin-only поля «Всегда бесплатно»
+    if (canEditAuthority) await fetchSubscriptionPlans()
   }
   
   const fetchSubscriptionPlans = async () => {
@@ -154,6 +174,7 @@ export default function AdminUsers() {
 
   const handleDeleteUser = (user) => {
     setSelectedUser(user)
+    setActionError('')
     setShowDeleteModal(true)
   }
 
@@ -182,9 +203,12 @@ export default function AdminUsers() {
         setSelectedUser(null)
       } else {
         console.error('Ошибка при удалении пользователя')
+        if (response.status === 403) refreshAccess()
+        setActionError(await readErrorDetail(response))
       }
     } catch (error) {
       console.error('Ошибка при удалении пользователя:', error)
+      setActionError('Не удалось удалить пользователя')
     }
   }
 
@@ -210,9 +234,12 @@ export default function AdminUsers() {
         setSelectedUser(null)
       } else {
         console.error('Ошибка при обновлении пользователя')
+        if (response.status === 403) refreshAccess()
+        setActionError(await readErrorDetail(response))
       }
     } catch (error) {
       console.error('Ошибка при обновлении пользователя:', error)
+      setActionError('Не удалось сохранить изменения')
     }
   }
 
@@ -584,6 +611,7 @@ export default function AdminUsers() {
                         >
                           <EyeIcon className="w-4 h-4" />
                         </button>
+                        {canEditTarget(user) && (
                         <button 
                           onClick={() => handleEditUser(user)}
                           className="text-green-600 hover:text-green-900" 
@@ -591,6 +619,8 @@ export default function AdminUsers() {
                         >
                           <PencilIcon className="w-4 h-4" />
                         </button>
+                        )}
+                        {canDeleteTarget(user) && (
                         <button 
                           onClick={() => handleDeleteUser(user)}
                           className="text-red-600 hover:text-red-900" 
@@ -598,6 +628,7 @@ export default function AdminUsers() {
                         >
                           <TrashIcon className="w-4 h-4" />
                         </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -724,11 +755,15 @@ export default function AdminUsers() {
                 full_name: formData.get('full_name'),
                 email: formData.get('email'),
                 phone: formData.get('phone'),
-                role: formData.get('role'),
-                is_active: formData.get('is_active') === 'on',
-                is_verified: formData.get('is_verified') === 'on',
-                is_always_free: formData.get('is_always_free') === 'on',
-                always_free_plan_id: formData.get('always_free_plan_id') ? parseInt(formData.get('always_free_plan_id')) : null
+              }
+              if (canEditAuthority) {
+                Object.assign(data, {
+                  role: formData.get('role'),
+                  is_active: formData.get('is_active') === 'on',
+                  is_verified: formData.get('is_verified') === 'on',
+                  is_always_free: formData.get('is_always_free') === 'on',
+                  always_free_plan_id: formData.get('always_free_plan_id') ? parseInt(formData.get('always_free_plan_id')) : null
+                })
               }
               handleSaveUser(data)
             }}>
@@ -766,6 +801,7 @@ export default function AdminUsers() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700">Роль</label>
+                  {canEditAuthority ? (
                   <select
                     name="role"
                     defaultValue={selectedUser.role}
@@ -778,12 +814,17 @@ export default function AdminUsers() {
                     <option value="moderator">Модератор</option>
                     <option value="indie">Независимый мастер</option>
                   </select>
+                  ) : (
+                    <p className="text-sm text-gray-900" data-testid="admin-user-role-readonly">{getRoleLabel(selectedUser.role)}</p>
+                  )}
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700">Текущий план подписки</label>
                   <p className="text-sm text-gray-700">{formatSubscriptionPlanLabel(selectedUser)}</p>
                   <p className="text-xs text-gray-500">После сохранения подпись в таблице обновится из ответа сервера</p>
                 </div>
+                {canEditAuthority ? (
+                <>
                 <div>
                   <label className="flex items-center">
                     <input
@@ -847,7 +888,17 @@ export default function AdminUsers() {
                     </p>
                   </div>
                 )}
+                </>
+                ) : (
+                  <p className="text-xs text-gray-500" data-testid="admin-user-authority-note">
+                    Роль, статус, подтверждения и «Всегда бесплатно» меняет только администратор.
+                  </p>
+                )}
               </div>
+
+              {actionError && (
+                <p className="mt-4 text-sm text-red-600" role="alert">{actionError}</p>
+              )}
               
               <div className="mt-6 flex justify-end space-x-3">
                 <button
@@ -894,6 +945,9 @@ export default function AdminUsers() {
               <p className="text-sm text-gray-500 mt-2">
                 Это действие нельзя отменить. Все данные пользователя будут удалены безвозвратно.
               </p>
+              {actionError && (
+                <p className="mt-3 text-sm text-red-600" role="alert">{actionError}</p>
+              )}
             </div>
 
             <div className="flex justify-end space-x-3">

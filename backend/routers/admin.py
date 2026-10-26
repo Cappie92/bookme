@@ -3,7 +3,7 @@ import os
 import uuid
 from typing import Any, Dict, List, Optional, Tuple
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Response, UploadFile, status
 from sqlalchemy.orm import Session, noload
 from sqlalchemy import func, or_, and_, select
 from sqlalchemy.exc import IntegrityError
@@ -65,6 +65,36 @@ router = APIRouter(
     tags=["admin"],
     dependencies=[Depends(require_admin_or_moderator())],
 )
+
+MODERATOR_PERMISSION_NAMES = tuple(
+    column.name
+    for column in ModeratorPermissions.__table__.columns
+    if column.name.startswith("can_")
+)
+
+
+@router.get("/access")
+def get_admin_access(
+    response: Response,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> Any:
+    """Own staff access snapshot for the admin UI. Mirrors ensure_moderator_permission.
+
+    UX only: every admin endpoint still enforces its own guard on each request.
+    """
+    response.headers["Cache-Control"] = "no-store"
+    if current_user.role == UserRole.ADMIN:
+        granted = {name: True for name in MODERATOR_PERMISSION_NAMES}
+    else:
+        row = db.query(ModeratorPermissions).filter(
+            ModeratorPermissions.user_id == current_user.id
+        ).first()
+        granted = {
+            name: bool(row is not None and getattr(row, name, False))
+            for name in MODERATOR_PERMISSION_NAMES
+        }
+    return {"role": current_user.role.value, "permissions": granted}
 
 
 @router.post("/payments/{payment_id}/retry-subscription-apply")
