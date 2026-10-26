@@ -311,7 +311,9 @@ jobs:
         run: npm ci
       - name: Install Playwright Chromium
         working-directory: frontend
-        run: npx playwright install --with-deps --only-shell chromium
+        timeout-minutes: 18
+        shell: bash
+        run: bash ../scripts/ci/install-playwright-chromium.sh
       - name: Run Playwright E2E
         env:
           CI: true
@@ -354,6 +356,28 @@ jobs:
             /tmp/dedato-e2e-vite.log
           if-no-files-found: ignore
           retention-days: 7
+
+  # Report only: not a dependency of the result or regression gates, and every
+  # failure inside it is tolerated so timing data can never change the outcome.
+  ci-timing:
+    name: CI timing summary
+    needs: [select, backend-shard, backend-collect, backend, frontend, mobile, playwright]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    continue-on-error: true
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Write timing summary
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 -B scripts/ci/ci_timing_summary.py
 
   ci-result:
     name: Application CI result
