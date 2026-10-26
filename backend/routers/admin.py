@@ -8,7 +8,14 @@ from sqlalchemy.orm import Session, noload
 from sqlalchemy import func, or_, and_, select
 from sqlalchemy.exc import IntegrityError
 
-from auth import get_current_active_user, require_admin, require_admin_or_moderator, require_moderator_permission
+from auth import (
+    ensure_moderator_permission,
+    get_current_active_user,
+    require_admin,
+    require_admin_or_moderator,
+    require_any_moderator_permission,
+    require_moderator_permission,
+)
 from utils.blog_import import parse_blog_import_markdown
 from database import get_db
 from models import (
@@ -56,7 +63,7 @@ from schemas import UserStats, AdminStats
 router = APIRouter(
     prefix="/admin",
     tags=["admin"],
-    dependencies=[Depends(require_admin_or_moderator)],
+    dependencies=[Depends(require_admin_or_moderator())],
 )
 
 
@@ -64,6 +71,7 @@ router = APIRouter(
 def retry_subscription_apply(
     payment_id: int,
     db: Session = Depends(get_db),
+    _current_user: User = Depends(require_admin),
 ) -> Any:
     """
     Служебный ретрай apply для subscription payment.
@@ -75,6 +83,11 @@ def retry_subscription_apply(
     """
     now = datetime.utcnow()
     try:
+        # Authentication resolves the user through this request-scoped Session,
+        # which starts a read-only transaction. Close it before opening the
+        # explicit financial transaction below.
+        if db.in_transaction():
+            db.rollback()
         with db.begin():
             payment = db.query(Payment).filter(Payment.id == payment_id).with_for_update().first()
             if not payment:
@@ -521,26 +534,72 @@ def update_user(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Пользователь не найден"
         )
-    
-    # Нельзя изменить роль другого администратора (только суперадмин может)
-    if user.role == UserRole.ADMIN and current_user.role != UserRole.ADMIN:
+
+    requested_role = None
+    if "role" in user_data:
+        try:
+            requested_role = UserRole(user_data["role"])
+        except (TypeError, ValueError):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Недопустимая роль пользователя",
+            )
+
+    # Любое управление staff-аккаунтом и переходы ролей — только ADMIN.
+    # Проверяем до assignments/commit, чтобы mixed payload отклонялся атомарно.
+    if (
+        current_user.role != UserRole.ADMIN
+        and user.role in (UserRole.ADMIN, UserRole.MODERATOR)
+    ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Недостаточно прав для изменения администратора"
+            detail="Недостаточно прав для изменения staff-пользователя",
         )
-    
+
+    privileged_fields = {
+        "role",
+        "is_active",
+        "is_verified",
+        "is_phone_verified",
+        "is_always_free",
+        "always_free_plan_id",
+    }
+    if current_user.role != UserRole.ADMIN:
+        role_changes = (
+            requested_role is not None
+            and requested_role != user.role
+        )
+        authority_changes = any(
+            field in user_data and user_data[field] != getattr(user, field)
+            for field in privileged_fields - {"role", "always_free_plan_id"}
+        )
+        if (
+            role_changes
+            or authority_changes
+            or user_data.get("always_free_plan_id") is not None
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Изменение роли и административных полномочий доступно только администратору",
+            )
+
     try:
         # Обновляем разрешенные поля (только скаляры User; без relationship).
-        allowed_fields = [
+        profile_fields = [
             "full_name",
             "email",
             "phone",
+        ]
+        admin_fields = [
             "role",
             "is_active",
             "is_verified",
             "is_phone_verified",
             "is_always_free",
         ]
+        allowed_fields = profile_fields + (
+            admin_fields if current_user.role == UserRole.ADMIN else []
+        )
 
         # Логируем изменение статуса "всегда бесплатно"
         old_always_free = user.is_always_free
@@ -574,8 +633,8 @@ def update_user(
 
         for field, value in user_data.items():
             if field in allowed_fields:
-                if field == "role" and value:
-                    setattr(user, field, UserRole(value))
+                if field == "role":
+                    setattr(user, field, requested_role)
                 else:
                     setattr(user, field, value)
 
@@ -598,8 +657,16 @@ def update_user(
                 detail="Пользователь не найден",
             )
 
-        # Обрабатываем подписку для "всегда бесплатно"
-        if new_always_free:
+        # Подписку "всегда бесплатно" изменяет только ADMIN и только когда
+        # соответствующие authority-поля явно присутствуют в запросе.
+        update_always_free_subscription = (
+            current_user.role == UserRole.ADMIN
+            and (
+                "is_always_free" in user_data
+                or user_data.get("always_free_plan_id") is not None
+            )
+        )
+        if update_always_free_subscription and new_always_free:
             # Определяем тип подписки на основе роли пользователя
             subscription_type = None
             if user.role in [UserRole.MASTER, UserRole.INDIE]:
@@ -655,7 +722,7 @@ def update_user(
                         )
                         db.add(new_subscription)
                     db.commit()
-        else:
+        elif update_always_free_subscription:
             # Если is_always_free = False, деактивируем подписку (или оставляем как есть)
             # Можно оставить подписку активной, если она была оплачена
             pass
@@ -737,10 +804,13 @@ def delete_user(
             detail="Нельзя удалить самого себя",
         )
 
-    if target_role == UserRole.ADMIN and current_user.role != UserRole.ADMIN:
+    if (
+        target_role in (UserRole.ADMIN, UserRole.MODERATOR)
+        and current_user.role != UserRole.ADMIN
+    ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Недостаточно прав для удаления администратора",
+            detail="Недостаточно прав для удаления staff-пользователя",
         )
 
     if target_role in (UserRole.CLIENT, UserRole.MASTER, UserRole.INDIE):
@@ -1155,7 +1225,7 @@ def get_blog_posts(
 def get_blog_post(
     post_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(require_moderator_permission("can_view_blog")),
 ) -> Any:
     """
     Получение конкретного поста блога.
@@ -1207,11 +1277,18 @@ def get_blog_post(
 def create_blog_post(
     post_in: BlogPostCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(require_moderator_permission("can_create_blog")),
 ) -> Any:
     """
     Создание нового поста блога.
     """
+    if (
+        post_in.status != BlogPostStatus.DRAFT
+        or post_in.published_at is not None
+        or post_in.scheduled_at is not None
+    ):
+        ensure_moderator_permission(current_user, db, "can_publish_blog")
+
     # Генерируем slug если не указан
     if not post_in.slug:
         post_in.slug = generate_slug(post_in.title)
@@ -1310,7 +1387,9 @@ BLOG_COVER_UPLOAD_DIR = "uploads/blog-covers"
 @router.post("/blog/import/preview", response_model=BlogPostImportPreviewResponse)
 async def blog_import_preview(
     file: UploadFile = File(...),
-    _current_user: User = Depends(get_current_active_user),
+    _current_user: User = Depends(
+        require_any_moderator_permission("can_create_blog", "can_edit_blog")
+    ),
 ) -> Any:
     """
     Разбор одного .md файла (YAML frontmatter + Markdown тело) без записи в БД.
@@ -1340,7 +1419,9 @@ async def blog_import_preview(
 async def upload_blog_cover(
     request: Request,
     file: UploadFile = File(...),
-    _current_user: User = Depends(get_current_active_user),
+    _current_user: User = Depends(
+        require_any_moderator_permission("can_create_blog", "can_edit_blog")
+    ),
 ) -> Any:
     """
     Загрузка обложки статьи. Возвращает публичный URL, который можно вставить в cover_image.
@@ -1376,7 +1457,7 @@ def update_blog_post(
     post_id: int,
     post_in: BlogPostUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(require_moderator_permission("can_edit_blog")),
 ) -> Any:
     """
     Обновление поста блога.
@@ -1386,7 +1467,14 @@ def update_blog_post(
         raise HTTPException(status_code=404, detail="Post not found")
 
     # Обновляем поля
-    update_data = post_in.dict(exclude_unset=True)
+    update_data = post_in.model_dump(exclude_unset=True)
+
+    publish_fields_changed = any(
+        field in update_data and update_data[field] != getattr(post, field)
+        for field in ("status", "published_at", "scheduled_at")
+    )
+    if publish_fields_changed:
+        ensure_moderator_permission(current_user, db, "can_publish_blog")
     
     # Если изменился заголовок и не указан slug, генерируем новый
     if "title" in update_data and not update_data.get("slug"):
@@ -1459,7 +1547,7 @@ def update_blog_post(
 def delete_blog_post(
     post_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(require_moderator_permission("can_delete_blog")),
 ) -> Any:
     """
     Удаление поста блога.
@@ -1477,7 +1565,7 @@ def delete_blog_post(
 def publish_blog_post(
     post_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(require_moderator_permission("can_publish_blog")),
 ) -> Any:
     """
     Публикация поста блога.
@@ -1509,7 +1597,7 @@ def schedule_blog_post(
     post_id: int,
     scheduled_at: datetime,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(require_moderator_permission("can_publish_blog")),
 ) -> Any:
     """
     Планирование публикации поста блога.
@@ -1530,7 +1618,7 @@ def schedule_blog_post(
 def preview_blog_post(
     post_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(require_moderator_permission("can_view_blog")),
 ) -> Any:
     """
     Предварительный просмотр поста блога.
@@ -1554,7 +1642,7 @@ def preview_blog_post(
 @router.get("/blog/tags")
 def get_blog_tags(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(require_moderator_permission("can_view_blog")),
 ) -> Any:
     """
     Получение всех тегов блога.

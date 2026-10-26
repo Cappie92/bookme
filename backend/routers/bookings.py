@@ -6,7 +6,12 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
-from auth import get_current_user, get_current_user_optional, require_admin
+from auth import (
+    ensure_moderator_permission,
+    get_current_user,
+    get_current_user_optional,
+    require_admin,
+)
 from database import get_db
 from models import (
     Booking,
@@ -15,7 +20,9 @@ from models import (
     EditRequestStatus,
     OwnerType,
     User,
+    UserRole,
     Master,
+    IndieMaster,
     AppliedDiscount,
     Service,
     Salon,
@@ -121,7 +128,7 @@ def _public_booking_pending_response(ticket: str, phone: str) -> dict:
 async def list_bookings(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
-    status: BookingStatus = None,
+    booking_status: BookingStatus = Query(None, alias="status"),
     start_date: datetime = None,
     end_date: datetime = None,
 ):
@@ -130,20 +137,56 @@ async def list_bookings(
     """
     query = db.query(Booking)
 
-    if status:
-        query = query.filter(Booking.status == status)
+    if booking_status:
+        query = query.filter(Booking.status == booking_status)
     if start_date:
         query = query.filter(Booking.start_time >= start_date)
     if end_date:
         query = query.filter(Booking.end_time <= end_date)
 
-    # Фильтруем по роли пользователя
-    if current_user.role == "client":
+    # Явная read-scope матрица. Неизвестная/новая роль никогда не получает
+    # глобальный fall-through.
+    if current_user.role == UserRole.ADMIN:
+        pass
+    elif current_user.role == UserRole.MODERATOR:
+        ensure_moderator_permission(current_user, db, "can_view_bookings")
+    elif current_user.role == UserRole.CLIENT:
         query = query.filter(Booking.client_id == current_user.id)
-    elif current_user.role == "master":
-        query = query.filter(Booking.master_id == current_user.id)
-    elif current_user.role == "salon":
-        query = query.filter(Booking.salon_id == current_user.id)
+    elif current_user.role == UserRole.MASTER:
+        master = db.query(Master).filter(Master.user_id == current_user.id).first()
+        if not master:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Профиль мастера не найден",
+            )
+        query = query.filter(Booking.master_id == master.id)
+    elif current_user.role == UserRole.INDIE:
+        indie = db.query(IndieMaster).filter(
+            IndieMaster.user_id == current_user.id
+        ).first()
+        if not indie:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Профиль независимого мастера не найден",
+            )
+        query = query.filter(Booking.indie_master_id == indie.id)
+    elif current_user.role == UserRole.SALON:
+        salon = db.query(Salon).filter(Salon.user_id == current_user.id).first()
+        if salon:
+            query = query.filter(Booking.salon_id == salon.id)
+        else:
+            branch_ids = [
+                row.id
+                for row in db.query(SalonBranch).filter(
+                    SalonBranch.manager_id == current_user.id
+                ).all()
+            ]
+            query = query.filter(Booking.branch_id.in_(branch_ids or [-1]))
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Доступ запрещён",
+        )
 
     return query.all()
 
@@ -1075,6 +1118,9 @@ async def get_booking(
     """
     Получить информацию о конкретном бронировании
     """
+    if current_user.role == UserRole.MODERATOR:
+        ensure_moderator_permission(current_user, db, "can_view_bookings")
+
     db_booking = db.query(Booking).filter(Booking.id == booking_id).first()
     if not db_booking:
         raise HTTPException(
@@ -1082,16 +1128,29 @@ async def get_booking(
         )
     
     # Проверка доступа по роли
-    if current_user.role == "client":
+    if current_user.role in (UserRole.ADMIN, UserRole.MODERATOR):
+        pass
+    elif current_user.role == UserRole.CLIENT:
         if db_booking.client_id != current_user.id:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Доступ запрещён")
-    elif current_user.role == "master":
+    elif current_user.role == UserRole.MASTER:
         master = db.query(Master).filter(Master.user_id == current_user.id).first()
         if not master:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Профиль мастера не найден")
         if db_booking.master_id != master.id:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Доступ запрещён")
-    elif current_user.role == "salon":
+    elif current_user.role == UserRole.INDIE:
+        indie = db.query(IndieMaster).filter(
+            IndieMaster.user_id == current_user.id
+        ).first()
+        if not indie:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Профиль независимого мастера не найден",
+            )
+        if db_booking.indie_master_id != indie.id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Доступ запрещён")
+    elif current_user.role == UserRole.SALON:
         # Проверяем, является ли пользователь владельцем салона
         salon = db.query(Salon).filter(Salon.user_id == current_user.id).first()
         if salon:
@@ -1099,12 +1158,17 @@ async def get_booking(
                 raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Доступ запрещён")
         else:
             # Проверяем, является ли пользователь менеджером филиала
-            branch = db.query(SalonBranch).filter(
-                SalonBranch.manager_id == current_user.id,
-                SalonBranch.salon_id == db_booking.salon_id
-            ).first()
-            if not branch or (db_booking.branch_id and db_booking.branch_id != branch.id):
+            branch_ids = [
+                row.id
+                for row in db.query(SalonBranch.id).filter(
+                    SalonBranch.manager_id == current_user.id,
+                    SalonBranch.salon_id == db_booking.salon_id,
+                ).all()
+            ]
+            if db_booking.branch_id not in branch_ids:
                 raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Доступ запрещён")
+    else:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Доступ запрещён")
     
     # Загружаем AppliedDiscount с связанными правилами
     applied_discount = (

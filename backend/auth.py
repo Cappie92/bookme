@@ -415,33 +415,70 @@ def require_admin_or_moderator():
     return role_checker
 
 
+def ensure_moderator_permission(
+    current_user: User,
+    db: Session,
+    permission_name: str,
+) -> User:
+    """Apply one existing moderator capability, with the ADMIN bypass."""
+    if current_user.role == UserRole.ADMIN:
+        return current_user
+    if current_user.role != UserRole.MODERATOR:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Operation requires moderator role",
+        )
+
+    from models import ModeratorPermissions
+
+    permissions = db.query(ModeratorPermissions).filter(
+        ModeratorPermissions.user_id == current_user.id
+    ).first()
+    if not permissions or not getattr(permissions, permission_name, False):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Moderator does not have permission: {permission_name}",
+        )
+    return current_user
+
+
 def require_moderator_permission(permission_name: str):
     async def permission_checker(
         current_user: User = Depends(get_current_active_user),
         db: Session = Depends(get_db)
     ):
-        # Администраторы имеют все права
+        return ensure_moderator_permission(current_user, db, permission_name)
+    return permission_checker
+
+
+def require_any_moderator_permission(*permission_names: str):
+    async def permission_checker(
+        current_user: User = Depends(get_current_active_user),
+        db: Session = Depends(get_db),
+    ):
         if current_user.role == UserRole.ADMIN:
             return current_user
-        
-        # Проверяем только модераторов
         if current_user.role != UserRole.MODERATOR:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Operation requires moderator role",
             )
-        
-        # Проверяем права модератора
+
         from models import ModeratorPermissions
+
         permissions = db.query(ModeratorPermissions).filter(
             ModeratorPermissions.user_id == current_user.id
         ).first()
-        
-        if not permissions or not getattr(permissions, permission_name, False):
+        if not permissions or not any(
+            getattr(permissions, permission_name, False)
+            for permission_name in permission_names
+        ):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Moderator does not have permission: {permission_name}",
+                detail=(
+                    "Moderator requires one of permissions: "
+                    + ", ".join(permission_names)
+                ),
             )
-        
         return current_user
     return permission_checker

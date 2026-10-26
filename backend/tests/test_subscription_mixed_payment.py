@@ -228,7 +228,7 @@ def test_mixed_expire_releases_hold(client, db, monkeypatch):
     assert get_user_available_balance(db, user.id, do_commit=False) == pytest.approx(300.0)
 
 
-def test_admin_retry_apply_v2_finalizes_hold(client, db, monkeypatch):
+def test_admin_retry_apply_v2_finalizes_hold(client, db, monkeypatch, test_admin):
     """paid + apply failed → admin retry must accept card_portion and finalize hold."""
     monkeypatch.setenv("ROBOKASSA_MODE", "stub")
     monkeypatch.setenv("ROBOKASSA_PASSWORD_1", "p1")
@@ -238,6 +238,7 @@ def test_admin_retry_apply_v2_finalizes_hold(client, db, monkeypatch):
 
     reload_settings()
 
+    admin_phone = test_admin.phone
     user = _master(db, phone="+79005550107", balance=300)
     plan = _plan(db, 1000.0)
     headers = _headers(client, user)
@@ -282,13 +283,9 @@ def test_admin_retry_apply_v2_finalizes_hold(client, db, monkeypatch):
     )
     db.commit()
 
-    # Admin auth: reuse require_admin — mark user admin for retry endpoint
-    from models import UserRole
-
-    user.role = UserRole.ADMIN
-    db.commit()
-
-    admin_headers = _headers(client, user)
+    admin_headers = {
+        "Authorization": f"Bearer {_login(client, admin_phone)['access_token']}"
+    }
     retry = client.post(
         f"/api/admin/payments/{payment_id}/retry-subscription-apply",
         headers=admin_headers,
