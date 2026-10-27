@@ -45,6 +45,16 @@ from schemas import (
     TemporaryBookingCreate, TemporaryBookingOut
 )
 from services.scheduling import check_booking_conflicts, get_available_slots, parse_yyyy_mm_dd
+from services.booking_admission import (
+    admit_booking_request,
+    admit_booking_update,
+    admit_hold_promotion,
+    expire_pending_holds,
+    mark_booking_mutated,
+    online_booking_metadata,
+    reserve_booking_writer,
+    unified_admission_enabled,
+)
 from utils.booking_occupancy import booking_slot_conflict
 from utils.loyalty_discounts import evaluate_and_prepare_applied_discount, build_applied_discount_info
 from utils.ios_free_companion import (
@@ -928,7 +938,16 @@ def create_booking(
         conflict_owner_type, conflict_owner_id = OwnerType.SALON, booking_in.salon_id
     else:
         raise HTTPException(status_code=400, detail="master_id or indie_master_id required")
-    if check_booking_conflicts(
+    admission = None
+    if unified_admission_enabled():
+        admission = admit_booking_request(
+            db,
+            start=booking_in.start_time,
+            end=booking_in.end_time,
+            master_id=booking_in.master_id,
+            indie_master_id=None if booking_in.master_id else booking_in.indie_master_id,
+        )
+    elif check_booking_conflicts(
         db,
         booking_in.start_time,
         booking_in.end_time,
@@ -1029,6 +1048,8 @@ def create_booking(
 
     from utils.booking_limit_guard import enforce_booking_creation_limit
     enforce_booking_creation_limit(db, booking_data, client_surface=client_surface)
+    if admission is not None:
+        booking_data.update(online_booking_metadata(admission, current_user.id))
     booking = Booking(**booking_data)
     db.add(booking)
     db.flush()
@@ -1066,6 +1087,9 @@ def update_booking(
     """
     Обновление существующего бронирования.
     """
+    unified = unified_admission_enabled()
+    if unified:
+        reserve_booking_writer(db)
     booking = (
         db.query(Booking)
         .filter(Booking.id == booking_id, Booking.client_id == current_user.id)
@@ -1104,6 +1128,9 @@ def update_booking(
         if "end_time" not in updates:
             updates["end_time"] = new_end
 
+    if unified:
+        admission = admit_booking_update(db, booking, updates)
+    elif booking_in.start_time:
         master_id = updates.get("master_id", booking.master_id)
         indie_id = updates.get("indie_master_id", booking.indie_master_id)
         salon_id = updates.get("salon_id", booking.salon_id)
@@ -1130,6 +1157,8 @@ def update_booking(
     old_status = booking.status
     for field, value in updates.items():
         setattr(booking, field, value)
+    if unified:
+        mark_booking_mutated(booking, admission)
 
     from services.notification_events import record_booking_mutation_side_effects
     record_booking_mutation_side_effects(
@@ -1206,6 +1235,9 @@ def create_temporary_booking(
     Создание временной брони на период оплаты (20 минут).
     Используется когда требуется предоплата.
     """
+    unified = unified_admission_enabled()
+    if unified:
+        reserve_booking_writer(db)
     from utils.client_restrictions import check_client_restrictions
     
     master = db.query(Master).filter(Master.id == booking_in.master_id).first()
@@ -1247,25 +1279,34 @@ def create_temporary_booking(
             detail="Мастер не принимает онлайн оплату"
         )
     
-    # Проверяем конфликты временных броней
-    existing_temporary = db.query(TemporaryBooking).filter(
-        TemporaryBooking.master_id == booking_in.master_id,
-        TemporaryBooking.start_time == booking_in.start_time,
-        TemporaryBooking.status == 'pending'
-    ).first()
-    
-    if existing_temporary:
-        raise HTTPException(status_code=400, detail="Это время уже забронировано")
-    
-    # Проверяем конфликты обычных броней
-    existing_booking = db.query(Booking).filter(
-        Booking.master_id == booking_in.master_id,
-        Booking.start_time == booking_in.start_time,
-        Booking.status != BookingStatus.CANCELLED
-    ).first()
-    
-    if existing_booking:
-        raise HTTPException(status_code=400, detail="Это время уже забронировано")
+    hold_time_columns = {}
+    if unified:
+        hold_time_columns = admit_booking_request(
+            db,
+            start=booking_in.start_time,
+            end=booking_in.end_time,
+            master_id=booking_in.master_id,
+        ).time_columns()
+    else:
+        # Проверяем конфликты временных броней
+        existing_temporary = db.query(TemporaryBooking).filter(
+            TemporaryBooking.master_id == booking_in.master_id,
+            TemporaryBooking.start_time == booking_in.start_time,
+            TemporaryBooking.status == 'pending'
+        ).first()
+
+        if existing_temporary:
+            raise HTTPException(status_code=400, detail="Это время уже забронировано")
+
+        # Проверяем конфликты обычных броней
+        existing_booking = db.query(Booking).filter(
+            Booking.master_id == booking_in.master_id,
+            Booking.start_time == booking_in.start_time,
+            Booking.status != BookingStatus.CANCELLED
+        ).first()
+
+        if existing_booking:
+            raise HTTPException(status_code=400, detail="Это время уже забронировано")
     
     # Вычисляем время истечения (20 минут от создания)
     expires_at = datetime.utcnow() + timedelta(minutes=20)
@@ -1311,6 +1352,8 @@ def create_temporary_booking(
         fixed_discount_percent=fixed_percent,
         fixed_discount_amount=fixed_amount,
     )
+    for key, value in hold_time_columns.items():
+        setattr(temporary_booking, key, value)
     
     db.add(temporary_booking)
     db.commit()
@@ -1379,7 +1422,10 @@ def confirm_temporary_booking_payment(
         )
     except BookingOwnerError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-    if check_booking_conflicts(
+    admission = None
+    if unified_admission_enabled():
+        admission = admit_hold_promotion(db, temporary_booking)
+    elif check_booking_conflicts(
         db,
         booking_data["start_time"],
         booking_data["end_time"],
@@ -1389,6 +1435,8 @@ def confirm_temporary_booking_payment(
         raise booking_slot_conflict()
     from utils.booking_limit_guard import enforce_booking_creation_limit
     enforce_booking_creation_limit(db, booking_data, client_surface=client_surface)
+    if admission is not None:
+        booking_data.update(online_booking_metadata(admission, current_user.id))
     booking = Booking(**booking_data)
     db.add(booking)
     db.flush()
@@ -1438,8 +1486,13 @@ def get_temporary_booking_status(
     
     # Проверяем, не истекло ли время
     if temporary_booking.status == 'pending' and datetime.utcnow() > temporary_booking.expires_at:
-        temporary_booking.status = 'expired'
-        db.commit()
+        if unified_admission_enabled():
+            expire_pending_holds(db, [temporary_booking.id])
+            db.commit()
+            db.refresh(temporary_booking)
+        else:
+            temporary_booking.status = 'expired'
+            db.commit()
     
     return temporary_booking
 

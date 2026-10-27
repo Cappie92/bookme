@@ -494,7 +494,18 @@ def create_public_booking(
     ):
         raise HTTPException(status_code=400, detail="Мастер не работает в указанное время")
 
-    if check_booking_conflicts(db, body.start_time, body.end_time, OwnerType.MASTER, master.id):
+    from services.booking_admission import (
+        admit_booking_request,
+        online_booking_metadata,
+        unified_admission_enabled,
+    )
+
+    admission = None
+    if unified_admission_enabled():
+        admission = admit_booking_request(
+            db, start=body.start_time, end=body.end_time, master_id=master.id
+        )
+    elif check_booking_conflicts(db, body.start_time, body.end_time, OwnerType.MASTER, master.id):
         raise booking_slot_conflict()
 
     base_price = float(service.price or 0)
@@ -538,6 +549,8 @@ def create_public_booking(
 
     from utils.booking_limit_guard import enforce_booking_creation_limit
     enforce_booking_creation_limit(db, booking_data, client_surface=client_surface)
+    if admission is not None:
+        booking_data.update(online_booking_metadata(admission, current_user.id))
     booking = Booking(**booking_data)
     db.add(booking)
     db.flush()

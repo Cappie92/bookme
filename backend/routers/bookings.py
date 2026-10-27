@@ -46,6 +46,15 @@ from schemas import (
     PhoneVerificationResponse,
 )
 from services.scheduling import check_booking_conflicts, get_available_slots, get_available_slots_any_master_logic, get_best_master_for_slot
+from services.booking_admission import (
+    AdmissionDecision,
+    admit_booking_request,
+    admit_booking_update,
+    mark_booking_mutated,
+    online_booking_metadata,
+    reserve_booking_writer,
+    unified_admission_enabled,
+)
 from services.pending_ticket_service import (
     claim_pending_ticket,
     delete_pending_ticket,
@@ -306,7 +315,16 @@ async def create_booking(
         )
     
     # Проверяем конфликты
-    if check_booking_conflicts(
+    admission = None
+    if unified_admission_enabled():
+        admission = admit_booking_request(
+            db,
+            start=booking.start_time,
+            end=booking.end_time,
+            master_id=booking.master_id,
+            indie_master_id=None if booking.master_id else booking.indie_master_id,
+        )
+    elif check_booking_conflicts(
         db,
         booking.start_time,
         booking.end_time,
@@ -414,6 +432,8 @@ async def create_booking(
 
     from utils.booking_limit_guard import enforce_booking_creation_limit
     enforce_booking_creation_limit(db, booking_data, client_surface=client_surface)
+    if admission is not None:
+        booking_data.update(online_booking_metadata(admission, current_user.id))
     db_booking = Booking(**booking_data)
     db.add(db_booking)
     db.flush()
@@ -481,7 +501,7 @@ def _validate_public_booking_phone(client_phone: str, db: Session) -> str:
 
 def _validate_specific_public_booking(
     booking: BookingCreate, db: Session, *, conflict_status: int
-) -> tuple[Optional[int], Optional[int]]:
+) -> tuple[Optional[int], Optional[int], Optional[AdmissionDecision]]:
     from models import IndieMaster
     from services.scheduling import check_master_working_hours
     from utils.master_canon import LEGACY_INDIE_MODE
@@ -535,11 +555,22 @@ def _validate_specific_public_booking(
     else:
         raise HTTPException(400, "Не указан мастер, индивидуальный мастер или салон")
 
-    if check_booking_conflicts(
+    admission = None
+    if unified_admission_enabled():
+        # Before phone proof nothing is written, so no writer reservation is taken.
+        admission = admit_booking_request(
+            db,
+            start=booking.start_time,
+            end=booking.end_time,
+            master_id=effective_master_id,
+            indie_master_id=None if effective_master_id else effective_indie_id,
+            require_reservation=conflict_status == status.HTTP_409_CONFLICT,
+        )
+    elif check_booking_conflicts(
         db, booking.start_time, booking.end_time, owner_type, owner_id
     ):
         raise booking_slot_conflict(conflict_status)
-    return effective_master_id, effective_indie_id
+    return effective_master_id, effective_indie_id, admission
 
 
 def _resolve_or_create_verified_public_client(
@@ -577,7 +608,7 @@ def _create_specific_public_booking_after_proof(
     from utils.booking_factory import BookingOwnerError, normalize_booking_fields
 
     booking = BookingCreate(**pending["booking"])
-    effective_master_id, effective_indie_id = _validate_specific_public_booking(
+    effective_master_id, effective_indie_id, admission = _validate_specific_public_booking(
         booking, db, conflict_status=409
     )
     client, is_new_client = _resolve_or_create_verified_public_client(
@@ -624,6 +655,8 @@ def _create_specific_public_booking_after_proof(
         raise HTTPException(400, str(exc)) from exc
     from utils.booking_limit_guard import enforce_booking_creation_limit
     enforce_booking_creation_limit(db, data, client_surface=client_surface)
+    if admission is not None:
+        data.update(online_booking_metadata(admission, client.id))
     created = Booking(**data)
     db.add(created)
     db.flush()
@@ -794,6 +827,9 @@ async def update_booking(
     """
     Обновить существующее бронирование
     """
+    unified = unified_admission_enabled()
+    if unified:
+        reserve_booking_writer(db)
     db_booking = db.query(Booking).filter(Booking.id == booking_id).first()
     if not db_booking:
         raise HTTPException(
@@ -806,7 +842,10 @@ async def update_booking(
     old_status = db_booking.status
 
     # Проверяем конфликты
-    if booking.start_time and booking.end_time:
+    admission = None
+    if unified:
+        admission = admit_booking_update(db, db_booking, changes)
+    elif booking.start_time and booking.end_time:
         if check_booking_conflicts(
             db,
             booking.start_time,
@@ -822,6 +861,8 @@ async def update_booking(
 
     for key, value in booking.dict(exclude_unset=True).items():
         setattr(db_booking, key, value)
+    if unified:
+        mark_booking_mutated(db_booking, admission)
 
     from services.notification_events import record_booking_mutation_side_effects
     record_booking_mutation_side_effects(
@@ -911,8 +952,23 @@ async def create_edit_request(
     if edit_request.booking_id != booking_id:
         raise HTTPException(400, "Несогласованный идентификатор бронирования")
 
+    proposed_start = edit_request.proposed_start
+    proposed_end = edit_request.proposed_end
     # Проверяем конфликты для нового времени
-    if check_booking_conflicts(
+    if unified_admission_enabled():
+        # Only a request is stored; the move itself is admitted on acceptance.
+        decision = admit_booking_request(
+            db,
+            start=proposed_start,
+            end=proposed_end,
+            master_id=db_booking.master_id,
+            indie_master_id=None if db_booking.master_id else db_booking.indie_master_id,
+            exclude_booking_id=booking_id,
+            require_reservation=False,
+        )
+        wall = decision.time_columns()
+        proposed_start, proposed_end = wall["start_time"], wall["end_time"]
+    elif check_booking_conflicts(
         db,
         edit_request.proposed_start,
         edit_request.proposed_end,
@@ -926,8 +982,8 @@ async def create_edit_request(
 
     db_edit_request = BookingEditRequest(
         booking_id=booking_id,
-        proposed_start=edit_request.proposed_start,
-        proposed_end=edit_request.proposed_end,
+        proposed_start=proposed_start,
+        proposed_end=proposed_end,
     )
     db.add(db_edit_request)
     db.commit()
@@ -945,6 +1001,9 @@ async def update_edit_request(
     """
     Обновить статус запроса на изменение бронирования
     """
+    unified = unified_admission_enabled()
+    if unified:
+        reserve_booking_writer(db)
     db_request = (
         db.query(BookingEditRequest).filter(BookingEditRequest.id == request_id).first()
     )
@@ -956,7 +1015,26 @@ async def update_edit_request(
 
     db_booking = db_request.booking
     require_booking_actor(db, current_user, db_booking)
-    if update.status == EditRequestStatus.ACCEPTED:
+    if update.status == EditRequestStatus.ACCEPTED and unified:
+        # Stored proposals are master-wall naive by the scheduling contract.
+        admission = admit_booking_update(
+            db,
+            db_booking,
+            {"start_time": db_request.proposed_start, "end_time": db_request.proposed_end},
+        )
+        old_start = db_booking.start_time
+        db_booking.start_time = db_request.proposed_start
+        db_booking.end_time = db_request.proposed_end
+        mark_booking_mutated(db_booking, admission)
+        from services.notification_events import record_booking_rescheduled_notification
+        record_booking_rescheduled_notification(
+            db,
+            db_booking,
+            actor_user_id=current_user.id,
+            old_start=old_start,
+            new_start=db_booking.start_time,
+        )
+    elif update.status == EditRequestStatus.ACCEPTED:
         if check_booking_conflicts(
             db, db_request.proposed_start, db_request.proposed_end,
             OwnerType.MASTER if db_booking.master_id else OwnerType.SALON,
@@ -1246,7 +1324,15 @@ async def create_booking_with_any_master(
     )
     if not best_master:
         raise HTTPException(400, "Нет доступных мастеров для выбранного времени")
-    if check_booking_conflicts(
+    if unified_admission_enabled():
+        admit_booking_request(
+            db,
+            start=start_time,
+            end=end_time,
+            master_id=best_master["id"],
+            require_reservation=False,
+        )
+    elif check_booking_conflicts(
         db, start_time, end_time, OwnerType.MASTER, best_master["id"]
     ):
         raise booking_slot_conflict(status.HTTP_400_BAD_REQUEST)
@@ -1306,21 +1392,29 @@ def _create_any_master_public_booking_after_proof(
         end_time,
         pending.get("branch_id"),
     )
-    if not best_master or check_booking_conflicts(
-        db, start_time, end_time, OwnerType.MASTER,
-        best_master["id"] if best_master else 0,
-    ):
-        raise booking_slot_conflict()
-    locked_master = (
-        db.query(Master)
-        .filter(Master.id == best_master["id"])
-        .with_for_update()
-        .first()
-    )
-    if not locked_master or check_booking_conflicts(
-        db, start_time, end_time, OwnerType.MASTER, best_master["id"]
-    ):
-        raise booking_slot_conflict()
+    admission = None
+    if unified_admission_enabled():
+        if not best_master:
+            raise booking_slot_conflict()
+        admission = admit_booking_request(
+            db, start=start_time, end=end_time, master_id=best_master["id"]
+        )
+    else:
+        if not best_master or check_booking_conflicts(
+            db, start_time, end_time, OwnerType.MASTER,
+            best_master["id"] if best_master else 0,
+        ):
+            raise booking_slot_conflict()
+        locked_master = (
+            db.query(Master)
+            .filter(Master.id == best_master["id"])
+            .with_for_update()
+            .first()
+        )
+        if not locked_master or check_booking_conflicts(
+            db, start_time, end_time, OwnerType.MASTER, best_master["id"]
+        ):
+            raise booking_slot_conflict()
     client, is_new_client = _resolve_or_create_verified_public_client(
         pending["phone"], None, db
     )
@@ -1342,6 +1436,8 @@ def _create_any_master_public_booking_after_proof(
         raise HTTPException(400, str(exc)) from exc
     from utils.booking_limit_guard import enforce_booking_creation_limit
     enforce_booking_creation_limit(db, data, client_surface=client_surface)
+    if admission is not None:
+        data.update(online_booking_metadata(admission, client.id))
     created = Booking(**data, created_at=datetime.utcnow())
     db.add(created)
     db.flush()

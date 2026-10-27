@@ -500,6 +500,16 @@ def update_master_booking_time(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ) -> Any:
+    from services.booking_admission import (
+        admit_booking_update,
+        mark_booking_mutated,
+        reserve_booking_writer,
+        unified_admission_enabled,
+    )
+
+    unified = unified_admission_enabled()
+    if unified:
+        reserve_booking_writer(db)
     master, booking = _owned_master_booking(db, current_user, booking_id)
     if booking.status in {
         BookingStatus.CANCELLED.value,
@@ -527,7 +537,12 @@ def update_master_booking_time(
         salon_id=booking.salon_id,
     ):
         raise HTTPException(status_code=400, detail="Мастер не работает в указанное время")
-    if check_booking_conflicts(
+    admission = None
+    if unified:
+        admission = admit_booking_update(
+            db, booking, {"start_time": body.start_time, "end_time": body.end_time}
+        )
+    elif check_booking_conflicts(
         db,
         body.start_time,
         body.end_time,
@@ -540,6 +555,8 @@ def update_master_booking_time(
     old_start = booking.start_time
     booking.start_time = body.start_time
     booking.end_time = body.end_time
+    if unified:
+        mark_booking_mutated(booking, admission)
     from services.notification_events import record_booking_rescheduled_notification
     record_booking_rescheduled_notification(
         db,

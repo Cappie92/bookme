@@ -59,6 +59,16 @@ def _is_future_pre_visit_to_confirmed(new_status: str, booking: Booking) -> bool
 
 logger = logging.getLogger(__name__)
 
+_STATUS_BY_ACTION = {
+    "created": BookingStatus.CREATED,
+    "confirmed": BookingStatus.CONFIRMED,
+    "awaiting_confirmation": BookingStatus.AWAITING_CONFIRMATION,
+    "completed": BookingStatus.COMPLETED,
+    "cancelled": BookingStatus.CANCELLED,
+    "client_requested_early": BookingStatus.CANCELLED_BY_CLIENT_EARLY,
+    "client_requested_late": BookingStatus.CANCELLED_BY_CLIENT_LATE,
+}
+
 
 @router.post("/update-booking-status/{booking_id}")
 async def update_booking_status(
@@ -75,6 +85,16 @@ async def update_booking_status(
     - Если переводим из completed в другой: удаляем BookingConfirmation и связанные доходы
     - Для cancelled: просто меняем статус
     """
+    from services.booking_admission import (
+        admit_booking_update,
+        mark_booking_mutated,
+        reserve_booking_writer,
+        unified_admission_enabled,
+    )
+
+    unified = unified_admission_enabled()
+    if unified:
+        reserve_booking_writer(db)
     try:
         # IMPORTANT:
         # - Booking.master_id / indie_master_id — проверка владения (салон / инди)
@@ -131,6 +151,11 @@ async def update_booking_status(
             )
 
         old_status = booking.status
+        admission = None
+        if unified:
+            admission = admit_booking_update(
+                db, booking, {"status": _STATUS_BY_ACTION[new_status].value}
+            )
 
         # Очистка подтверждений/доходов, если уходим из completed
         if booking.status == BookingStatus.COMPLETED and new_status != "completed":
@@ -178,6 +203,9 @@ async def update_booking_status(
                 )
             except ValueError as ve:
                 raise HTTPException(status_code=400, detail=str(ve)) from ve
+
+        if unified:
+            mark_booking_mutated(booking, admission)
 
         from services.notification_events import is_cancel_status, record_booking_cancelled_notification
         if is_cancel_status(booking.status) and not is_cancel_status(old_status):

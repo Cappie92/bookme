@@ -31,6 +31,17 @@ BOOKING_LIMIT_ERROR_CODE = "free_active_booking_limit_reached"
 BOOKING_LIMIT_ERROR_MESSAGE = "Достигнут лимит 20 активных будущих записей."
 BOOKING_SLOT_BUSY_CODE = "BOOKING_SLOT_BUSY"
 BOOKING_SLOT_BUSY_MESSAGE = "Сервис временно недоступен, повторите попытку"
+_WRITER_TRANSACTION_KEY = "booking_writer_transaction"
+
+
+def holds_booking_writer_reservation(db: Session) -> bool:
+    """True only inside the very transaction that executed BEGIN IMMEDIATE."""
+    transaction = db.info.get(_WRITER_TRANSACTION_KEY)
+    return (
+        transaction is not None
+        and transaction is db.get_transaction()
+        and transaction.is_active
+    )
 
 
 def begin_booking_creation_transaction(db: Session) -> None:
@@ -40,9 +51,15 @@ def begin_booking_creation_transaction(db: Session) -> None:
     beginning of a creation endpoint it is safe to close that transaction and start
     BEGIN IMMEDIATE. PostgreSQL uses an owner-row lock in the policy check instead.
     """
-    if db.info.get("booking_creation_transaction"):
-        return
+    from services.booking_admission import unified_admission_enabled
+
     bind = db.get_bind()
+    if db.info.get("booking_creation_transaction") and (
+        bind.dialect.name != "sqlite"
+        or not unified_admission_enabled()
+        or holds_booking_writer_reservation(db)
+    ):
+        return
     if bind.dialect.name == "sqlite":
         if db.in_transaction():
             if db.new or db.dirty or db.deleted:
@@ -63,6 +80,7 @@ def begin_booking_creation_transaction(db: Session) -> None:
                     },
                 ) from exc
             raise
+        db.info[_WRITER_TRANSACTION_KEY] = db.get_transaction()
     db.info["booking_creation_transaction"] = True
 
 
