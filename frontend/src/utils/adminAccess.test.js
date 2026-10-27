@@ -15,7 +15,7 @@ import {
   normalizeAccess,
   resolveAdminSection,
 } from './adminAccess'
-import { masterWorkspaceDecision } from '../components/MasterWorkspaceRoute'
+import { masterWorkspaceDecision, sharedMasterProfileProbe } from '../components/MasterWorkspaceRoute'
 
 const moderator = (grants = {}) => normalizeAccess({ role: 'moderator', permissions: grants })
 const admin = normalizeAccess({ role: 'admin', permissions: {} })
@@ -288,6 +288,39 @@ describe('createAdminAccessStore', () => {
     expect(store.getSnapshot()).toMatchObject({ status: ADMIN_ACCESS_STATUS.READY, identity: '3:new' })
   })
 
+  it('a remount joins the request in flight instead of aborting and resending it', async () => {
+    const { fetcher, pending } = deferredFetcher()
+    const store = createAdminAccessStore({ fetcher, getToken: () => 't' })
+    store.load('5:t')
+    store.load('5:t')
+    expect(fetcher).toHaveBeenCalledTimes(1)
+    expect(pending[0].init.signal.aborted).toBe(false)
+    pending[0].resolve(jsonResponse(200, { role: 'moderator', permissions: { can_view_blog: true } }))
+    await tick()
+    expect(store.getSnapshot()).toMatchObject({ status: ADMIN_ACCESS_STATUS.READY, identity: '5:t' })
+  })
+
+  it('force and a new identity still replace the request in flight', async () => {
+    const { fetcher, pending } = deferredFetcher()
+    const store = createAdminAccessStore({ fetcher, getToken: () => 't' })
+    store.load('5:t')
+    store.load('5:t', { force: true })
+    expect(fetcher).toHaveBeenCalledTimes(2)
+    expect(pending[0].init.signal.aborted).toBe(true)
+    store.load('6:t')
+    expect(fetcher).toHaveBeenCalledTimes(3)
+    expect(pending[1].init.signal.aborted).toBe(true)
+  })
+
+  it('after reset the same identity loads again', async () => {
+    const { fetcher } = deferredFetcher()
+    const store = createAdminAccessStore({ fetcher, getToken: () => 't' })
+    store.load('5:t')
+    store.reset()
+    store.load('5:t')
+    expect(fetcher).toHaveBeenCalledTimes(2)
+  })
+
   it('a transient failure of a background refresh keeps the open page', async () => {
     const { fetcher, pending } = deferredFetcher()
     const store = createAdminAccessStore({ fetcher, getToken: () => 't' })
@@ -352,6 +385,30 @@ describe('masterWorkspaceDecision', () => {
   it('staff with an own master profile or an unknown probe keeps the master cabinet', () => {
     expect(masterWorkspaceDecision({ user: staff('moderator'), isIosAppWebSession: false, probe: 'has-profile' })).toBe('master')
     expect(masterWorkspaceDecision({ user: staff('moderator'), isIosAppWebSession: false, probe: 'unknown' })).toBe('master')
+  })
+
+  it('concurrent probes for one session share a single request; a settled probe is not cached', async () => {
+    let release
+    const probe = vi.fn(() => new Promise((resolve) => { release = resolve }))
+    const first = sharedMasterProfileProbe(7, 'tok', probe)
+    const second = sharedMasterProfileProbe(7, 'tok', probe)
+    expect(probe).toHaveBeenCalledTimes(1)
+    expect(probe).toHaveBeenCalledWith('tok')
+    release('no-profile')
+    expect(await first).toBe('no-profile')
+    expect(await second).toBe('no-profile')
+
+    sharedMasterProfileProbe(7, 'tok', probe)
+    expect(probe).toHaveBeenCalledTimes(2)
+    release('has-profile')
+  })
+
+  it('a different user or token never reuses another session probe', () => {
+    const probe = vi.fn(() => new Promise(() => {}))
+    sharedMasterProfileProbe(8, 'a', probe)
+    sharedMasterProfileProbe(9, 'a', probe)
+    sharedMasterProfileProbe(8, 'b', probe)
+    expect(probe).toHaveBeenCalledTimes(3)
   })
 
   it('iOS app, demo and anonymous sessions are untouched', () => {

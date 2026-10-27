@@ -159,6 +159,7 @@ export function createAdminAccessStore({ fetcher, getToken }) {
   let state = { status: ADMIN_ACCESS_STATUS.LOADING, access: null, identity: null }
   let generation = 0
   let controller = null
+  let inflightIdentity = null
   const listeners = new Set()
   const publish = (next) => {
     state = next
@@ -166,10 +167,12 @@ export function createAdminAccessStore({ fetcher, getToken }) {
   }
 
   const load = async (identity, { force = false } = {}) => {
-    if (!force && identity === state.identity && state.status !== ADMIN_ACCESS_STATUS.LOADING) return
+    if (!force && identity === state.identity
+      && (state.status !== ADMIN_ACCESS_STATUS.LOADING || inflightIdentity === identity)) return
     const current = ++generation
     controller?.abort()
     controller = typeof AbortController === 'undefined' ? null : new AbortController()
+    inflightIdentity = identity
     const background = identity === state.identity && state.status === ADMIN_ACCESS_STATUS.READY
     if (!background) {
       publish({ status: ADMIN_ACCESS_STATUS.LOADING, access: null, identity })
@@ -178,6 +181,7 @@ export function createAdminAccessStore({ fetcher, getToken }) {
     try {
       const result = await fetchAdminAccess(fetcher, token, controller?.signal)
       if (current !== generation) return
+      inflightIdentity = null
       if (token !== getToken()) {
         // The session changed under this request: drop grants and let the
         // next load for the new identity start from scratch.
@@ -200,8 +204,8 @@ export function createAdminAccessStore({ fetcher, getToken }) {
     reset: () => {
       generation += 1
       controller?.abort()
+      inflightIdentity = null
       publish({ status: ADMIN_ACCESS_STATUS.LOADING, access: null, identity: null })
     },
-    dispose: () => { generation += 1; controller?.abort() },
   }
 }

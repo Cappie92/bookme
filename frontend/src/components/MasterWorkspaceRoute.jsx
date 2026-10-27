@@ -17,19 +17,28 @@ export function masterWorkspaceDecision({ user, isIosAppWebSession, probe }) {
   return probe === 'no-profile' ? 'admin' : 'master'
 }
 
-async function probeOwnMasterProfile(signal) {
-  const token = window.localStorage.getItem('access_token')
+async function probeOwnMasterProfile(token) {
   try {
     const response = await fetch('/api/master/settings', {
       headers: { 'Content-Type': 'application/json', ...(token && { Authorization: `Bearer ${token}` }) },
-      signal,
     })
     if (response.status === 404) return 'no-profile'
     return response.ok ? 'has-profile' : 'unknown'
-  } catch (error) {
-    if (error?.name === 'AbortError') throw error
+  } catch {
     return 'unknown'
   }
+}
+
+// A remount (StrictMode replay, quick re-navigation) joins the request in
+// flight for the same session instead of aborting it and sending another.
+const pendingProbes = new Map()
+
+export function sharedMasterProfileProbe(userId, token, probe = probeOwnMasterProfile) {
+  const key = `${userId}:${token || ''}`
+  if (!pendingProbes.has(key)) {
+    pendingProbes.set(key, probe(token).finally(() => pendingProbes.delete(key)))
+  }
+  return pendingProbes.get(key)
 }
 
 export default function MasterWorkspaceRoute({ children, fallback = null }) {
@@ -39,12 +48,11 @@ export default function MasterWorkspaceRoute({ children, fallback = null }) {
 
   useEffect(() => {
     if (!needsProbe) return undefined
-    const controller = new AbortController()
+    let active = true
     const userId = user.id
-    probeOwnMasterProfile(controller.signal)
-      .then((result) => setProbe({ userId, result }))
-      .catch(() => {})
-    return () => controller.abort()
+    sharedMasterProfileProbe(userId, window.localStorage.getItem('access_token'))
+      .then((result) => { if (active) setProbe({ userId, result }) })
+    return () => { active = false }
   }, [needsProbe, user?.id])
 
   // The role is unknown while the session resolves; the cabinet must not mount before it is.

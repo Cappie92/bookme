@@ -35,8 +35,6 @@ export function AdminAccessProvider({ children }) {
     return () => window.removeEventListener('focus', onFocus)
   }, [identity, store])
 
-  useEffect(() => () => store.dispose(), [store])
-
   // The server no longer treats this account as staff: re-resolve the session
   // so the role guard leaves the admin shell instead of showing stale actions.
   useEffect(() => {
