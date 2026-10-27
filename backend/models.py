@@ -2,7 +2,9 @@ import enum
 from datetime import datetime, timezone, date, time
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
+    CheckConstraint,
     Column,
     DateTime,
     Date,
@@ -348,11 +350,25 @@ class Booking(Base):
 
     # Публичный код для клиента (не sequential id); уникален, задаётся при INSERT
     public_reference = Column(String(20), unique=True, index=True, nullable=False)
-    
+
+    # Calendar metadata. Legacy rows keep NULL: their source, creator and the
+    # offset of start_time/end_time are unknown and must not be guessed.
+    master_client_metadata_id = Column(
+        Integer, ForeignKey("master_client_metadata.id"), nullable=True, index=True
+    )
+    source = Column(String(32), nullable=True)
+    created_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    start_utc_us = Column(BigInteger, nullable=True)
+    end_utc_us = Column(BigInteger, nullable=True)
+    time_zone = Column(String(64), nullable=True)
+    version = Column(Integer, nullable=False, default=1, server_default="1")
+
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     client = relationship("User", back_populates="bookings", foreign_keys=[client_id])
+    local_contact = relationship("MasterClientMetadata", foreign_keys=[master_client_metadata_id])
+    created_by = relationship("User", foreign_keys=[created_by_user_id])
     service = relationship("Service", back_populates="bookings")
     master = relationship("Master", back_populates="bookings")
     indie_master = relationship("IndieMaster", back_populates="bookings")
@@ -1489,6 +1505,10 @@ class TemporaryBooking(Base):
     fixed_discount_rule_id = Column(Integer, nullable=True)
     fixed_discount_percent = Column(Float, nullable=True)
     fixed_discount_amount = Column(Float, nullable=True)
+    # Calendar metadata; NULL on legacy holds (offset of start/end unknown).
+    start_utc_us = Column(BigInteger, nullable=True)
+    end_utc_us = Column(BigInteger, nullable=True)
+    time_zone = Column(String(64), nullable=True)
     
     # Связи
     master = relationship("Master")
@@ -1501,6 +1521,73 @@ class TemporaryBooking(Base):
         Index("idx_temporary_bookings_client", "client_id"),
         Index("idx_temporary_bookings_expires", "expires_at"),
         Index("idx_temporary_bookings_status", "status"),
+    )
+
+
+CALENDAR_BLOCK_CATEGORIES = ("personal", "break", "busy")
+
+
+class CalendarBlock(Base):
+    """Private owner interval that subtracts availability. Not a Booking.
+
+    No client, service, payment or loyalty links. Times are canonical UTC
+    microseconds plus the IANA zone they were entered in.
+    """
+
+    __tablename__ = "calendar_blocks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    master_id = Column(Integer, ForeignKey("masters.id"), nullable=False)
+    created_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    category = Column(String(16), nullable=False, default="personal")
+    title = Column(String(120), nullable=True)
+    description = Column(String(1000), nullable=True)
+    start_utc_us = Column(BigInteger, nullable=False)
+    end_utc_us = Column(BigInteger, nullable=False)
+    time_zone = Column(String(64), nullable=False)
+    version = Column(Integer, nullable=False, default=1, server_default="1")
+    deleted_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    master = relationship("Master")
+    created_by = relationship("User")
+
+    __table_args__ = (
+        CheckConstraint("end_utc_us > start_utc_us", name="ck_calendar_blocks_interval"),
+        CheckConstraint(
+            "category IN ('personal', 'break', 'busy')",
+            name="ck_calendar_blocks_category",
+        ),
+        CheckConstraint("version >= 1", name="ck_calendar_blocks_version"),
+        Index("idx_calendar_blocks_master_range", "master_id", "start_utc_us", "end_utc_us"),
+    )
+
+
+class IdempotencyReceipt(Base):
+    """Persisted result of an idempotent write, scoped to actor and operation.
+
+    Stores only SHA-256 digests of the client key and of the request intent,
+    never the raw key or payload.
+    """
+
+    __tablename__ = "idempotency_receipts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    actor_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    scope = Column(String(64), nullable=False)
+    key_hash = Column(String(64), nullable=False)
+    request_hash = Column(String(64), nullable=False)
+    resource_type = Column(String(32), nullable=False)
+    resource_id = Column(Integer, nullable=False)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "actor_user_id", "scope", "key_hash", name="uq_idempotency_receipts_actor_scope_key"
+        ),
+        CheckConstraint("length(key_hash) = 64", name="ck_idempotency_receipts_key_hash"),
+        CheckConstraint("length(request_hash) = 64", name="ck_idempotency_receipts_request_hash"),
     )
 
 

@@ -101,6 +101,10 @@ def ensure_candidate_available(
         )
 
 
+def in_admission_transaction(session: Session) -> bool:
+    return session.info.get(_TRANSACTION_MARKER) is not None
+
+
 def _is_sqlite_busy(exc: OperationalError) -> bool:
     error_code = getattr(exc.orig, "sqlite_errorcode", None)
     if isinstance(error_code, int) and error_code & 0xFF in (
