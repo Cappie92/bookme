@@ -711,6 +711,13 @@ class AvailableSlotOut(BaseModel):
     end_time: datetime
 
 
+class TimedAvailableSlotOut(AvailableSlotOut):
+    """Слот с naive start/end (время мастера) и offset-aware start_at/end_at."""
+    start_at: Optional[str] = None
+    end_at: Optional[str] = None
+    time_zone: Optional[str] = None
+
+
 class DomainSubdomainInfoOut(BaseModel):
     """Информация о владельце поддомена (салон / indie мастер / мастер). Все поля кроме owner_type и owner_id опциональны."""
     owner_type: str

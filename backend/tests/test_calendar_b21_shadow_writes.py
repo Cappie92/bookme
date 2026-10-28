@@ -560,10 +560,11 @@ def _payload(world, start, kind="offset"):
 
 
 def _stored_digits(kind, start):
-    return start.astimezone(timezone.utc).replace(tzinfo=None) if kind == "utc_z" else start.replace(tzinfo=None)
+    # B2.2: any explicit instant is persisted as the master's wall time.
+    return start.replace(tzinfo=None)
 
 
-EXPECTED_ZONE = {"offset": "Europe/Moscow", "utc_z": "UTC", "naive": None}
+EXPECTED_ZONE = {"offset": "Europe/Moscow", "utc_z": "Europe/Moscow", "naive": None}
 
 
 @pytest.mark.parametrize("path", ["/api/client/bookings/", "/api/bookings/"])
@@ -631,7 +632,7 @@ def test_off_phone_verified_ticket_preserves_the_offset(client, db, world, monke
     db.expire_all()
     row = db.get(Booking, booking_id)
     assert row.start_time == _stored_digits("utc_z", start)
-    assert _canonical(row) == (_us(start), _us(start + timedelta(hours=1)), "UTC")
+    assert _canonical(row) == (_us(start), _us(start + timedelta(hours=1)), "Europe/Moscow")
     assert row.source == "online"
 
 
@@ -660,7 +661,7 @@ def test_off_any_master_ticket_preserves_the_offset(client, db, world, monkeypat
     db.expire_all()
     row = db.get(Booking, booking_id)
     assert row.start_time == _stored_digits("utc_z", start)
-    assert _canonical(row) == (_us(start), _us(start + timedelta(hours=1)), "UTC")
+    assert _canonical(row) == (_us(start), _us(start + timedelta(hours=1)), "Europe/Moscow")
 
 
 def _create_offset_booking(api, world, headers, start):
@@ -717,8 +718,8 @@ def test_off_edit_request_acceptance_without_evidence_leaves_no_stale_instant(cl
     booking_id = _create_offset_booking(client, world, client_headers, start)
     target = start + timedelta(hours=3)
     created = client.post(f"/api/bookings/{booking_id}/edit-requests", headers=client_headers, json={
-        "booking_id": booking_id, "proposed_start": target.isoformat(),
-        "proposed_end": (target + timedelta(hours=1)).isoformat(),
+        "booking_id": booking_id, "proposed_start": target.replace(tzinfo=None).isoformat(),
+        "proposed_end": (target + timedelta(hours=1)).replace(tzinfo=None).isoformat(),
     })
     assert created.status_code == 200, created.text
     master_headers = _login(client, world["master_phone"])

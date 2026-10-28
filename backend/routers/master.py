@@ -467,6 +467,8 @@ def get_master_booking_available_slots(
     except ValueError as error:
         raise HTTPException(status_code=400, detail="Неверный формат даты. Используйте YYYY-MM-DD") from error
 
+    from services.booking_time_shadow import owner_time_zone, slot_instant_fields
+
     slots = get_available_slots(
         db=db,
         owner_type=models.OwnerType.MASTER,
@@ -476,17 +478,26 @@ def get_master_booking_available_slots(
         branch_id=booking.branch_id,
         exclude_booking_id=booking.id,
     )
+    zone_name = owner_time_zone(db, master_id=master.id)
+
+    def serialize(slot: dict) -> dict:
+        # Only the mobile app reads this endpoint and every released build echoes
+        # start_time/end_time verbatim, so they carry the offset when it is unique.
+        instant = slot_instant_fields(slot["start_time"], slot["end_time"], zone_name)
+        return {
+            "start_time": instant["start_at"] or slot["start_time"].isoformat(),
+            "end_time": instant["end_at"] or slot["end_time"].isoformat(),
+            "formatted_time": slot["start_time"].strftime("%H:%M"),
+            **instant,
+        }
+
     return {
         "booking_id": booking.id,
         "service_name": service.name,
         "service_duration": service.duration,
         "current_start_time": booking.start_time.isoformat(),
         "available_slots": [
-            {
-                "start_time": slot["start_time"].isoformat(),
-                "end_time": slot["end_time"].isoformat(),
-                "formatted_time": slot["start_time"].strftime("%H:%M"),
-            }
+            serialize(slot)
             for slot in slots
             if abs((slot["start_time"] - booking.start_time).total_seconds()) > 300
         ],
@@ -506,6 +517,7 @@ def update_master_booking_time(
         reserve_booking_writer,
         unified_admission_enabled,
     )
+    from services.booking_time_shadow import legacy_request_times
 
     unified = unified_admission_enabled()
     if unified:
@@ -538,23 +550,30 @@ def update_master_booking_time(
     ):
         raise HTTPException(status_code=400, detail="Мастер не работает в указанное время")
     admission = None
+    new_start, new_end, time_columns = body.start_time, body.end_time, {}
     if unified:
         admission = admit_booking_update(
             db, booking, {"start_time": body.start_time, "end_time": body.end_time}
         )
-    elif check_booking_conflicts(
-        db,
-        body.start_time,
-        body.end_time,
-        models.OwnerType.MASTER,
-        master.id,
-        exclude_booking_id=booking.id,
-    ):
-        raise HTTPException(status_code=400, detail="Выбранное время уже занято")
+    else:
+        new_start, new_end, time_columns = legacy_request_times(
+            db, body.start_time, body.end_time, master_id=master.id
+        )
+        if check_booking_conflicts(
+            db,
+            new_start,
+            new_end,
+            models.OwnerType.MASTER,
+            master.id,
+            exclude_booking_id=booking.id,
+        ):
+            raise HTTPException(status_code=400, detail="Выбранное время уже занято")
 
     old_start = booking.start_time
-    booking.start_time = body.start_time
-    booking.end_time = body.end_time
+    booking.start_time = new_start
+    booking.end_time = new_end
+    for key, value in time_columns.items():
+        setattr(booking, key, value)
     if unified:
         mark_booking_mutated(booking, admission)
     from services.notification_events import record_booking_rescheduled_notification

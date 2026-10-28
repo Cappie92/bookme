@@ -168,6 +168,10 @@ export interface AvailableSlot {
   start_time: string;
   end_time: string;
   formatted_time: string;
+  /** Offset-aware instant in the master's zone; null when the wall time is not unique. */
+  start_at?: string | null;
+  end_at?: string | null;
+  time_zone?: string | null;
 }
 
 /**

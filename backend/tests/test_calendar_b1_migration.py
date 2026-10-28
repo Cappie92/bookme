@@ -31,6 +31,14 @@ NEW_COLUMNS = {
     ],
     "temporary_bookings": ["start_utc_us", "end_utc_us", "time_zone"],
 }
+# Added by revisions after B1; absent from the pre-B1 production shape.
+LATER_COLUMNS = {
+    "booking_edit_requests": [
+        "proposed_start_utc_us",
+        "proposed_end_utc_us",
+        "proposed_time_zone",
+    ],
+}
 BOOKING_COLUMNS = (
     "id, client_id, master_id, start_time, end_time, status, public_reference"
 )
@@ -104,7 +112,7 @@ def _legacy_metadata() -> MetaData:
     for table in Base.metadata.sorted_tables:
         if table.name in NEW_TABLES:
             continue
-        dropped = set(NEW_COLUMNS.get(table.name, ()))
+        dropped = set(NEW_COLUMNS.get(table.name, ())) | set(LATER_COLUMNS.get(table.name, ()))
         if not dropped:
             table.to_metadata(legacy)
             continue
@@ -204,7 +212,7 @@ def test_upgrade_preserves_legacy_rows_and_leaves_metadata_unknown(legacy_db):
     url = f"sqlite:///{legacy_db}"
     before = _snapshot(legacy_db)
 
-    _alembic(url, "upgrade", "head")
+    _alembic(url, "upgrade", HEAD)
 
     after = _snapshot(legacy_db)
     assert {key: after[key] for key in ("bookings", "holds", "users")} == {
@@ -229,7 +237,7 @@ def test_upgrade_preserves_legacy_rows_and_leaves_metadata_unknown(legacy_db):
         assert _rows(conn, "SELECT version_num FROM alembic_version") == [(PREVIOUS,)]
         assert not NEW_TABLES & _tables(conn)
 
-    _alembic(url, "upgrade", "head")
+    _alembic(url, "upgrade", HEAD)
     with sqlite3.connect(legacy_db) as conn:
         assert _select(conn, BOOKING_COLUMNS, "bookings") == before["bookings"]
         assert _rows(conn, "SELECT DISTINCT version FROM bookings") == [(1,)]

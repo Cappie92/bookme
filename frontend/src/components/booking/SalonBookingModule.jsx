@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { CalendarIcon, ClockIcon, UserIcon, TagIcon } from '@heroicons/react/24/outline'
 import { dateToISOString, formatTime, getMinDate, getSelectedCity } from '../../utils/dateUtils'
+import { bookingSlotChoice, formatLocalDate } from '../../utils/scheduleDates'
 import { metrikaGoal } from '../../analytics/metrika'
 import { M } from '../../analytics/metrikaEvents'
 import {
@@ -35,6 +36,7 @@ export default function SalonBookingModule({
   const [services, setServices] = useState([])
   const [branches, setBranches] = useState([])
   const [availableSlots, setAvailableSlots] = useState([])
+  const [selectedSlot, setSelectedSlot] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
@@ -231,10 +233,7 @@ export default function SalonBookingModule({
       if (response.ok) {
         const data = await response.json()
         
-        const timeSlots = data.map(slot => {
-          const startTime = new Date(slot.start_time)
-          return startTime.toTimeString().slice(0, 5)
-        })
+        const timeSlots = data.map(bookingSlotChoice).filter(Boolean)
         
         setAvailableSlots(timeSlots)
       } else {
@@ -256,7 +255,7 @@ export default function SalonBookingModule({
       for (let i = 0; i < 30; i++) {
         const date = new Date(today)
         date.setDate(today.getDate() + i)
-        const dateStr = date.toISOString().split('T')[0]
+        const dateStr = formatLocalDate(date)
         
         let response
         
@@ -325,6 +324,7 @@ export default function SalonBookingModule({
     }))
     
     setAvailableSlots([])
+    setSelectedSlot(null)
     setFormData(prev => ({
       ...prev,
       time: ''
@@ -341,6 +341,7 @@ export default function SalonBookingModule({
     }))
     
     setAvailableSlots([])
+    setSelectedSlot(null)
     setFormData(prev => ({
       ...prev,
       time: ''
@@ -357,6 +358,7 @@ export default function SalonBookingModule({
     }))
     
     setAvailableSlots([])
+    setSelectedSlot(null)
     setFormData(prev => ({
       ...prev,
       time: ''
@@ -372,6 +374,7 @@ export default function SalonBookingModule({
     }))
     
     setAvailableSlots([])
+    setSelectedSlot(null)
     setFormData(prev => ({
       ...prev,
       time: ''
@@ -379,9 +382,10 @@ export default function SalonBookingModule({
   }
   
   const handleTimeSlotSelect = (slot) => {
+    setSelectedSlot(slot)
     setFormData(prev => ({
       ...prev,
-      time: slot
+      time: slot.label
     }))
   }
   
@@ -430,13 +434,10 @@ export default function SalonBookingModule({
   }
   
   const createBooking = async (clientPhone = null) => {
-    const [hours, minutes] = formData.time.split(':')
-    const startTimeStr = `${formData.date}T${hours.padStart(2, '0')}:${minutes.padStart(2, '0')}:00`
-    const startTime = new Date(startTimeStr)
-    
-    const endTime = new Date(startTime)
-    endTime.setMinutes(endTime.getMinutes() + selectedService.duration)
-    
+    if (!selectedSlot) {
+      throw new Error('Некорректное время записи')
+    }
+
     let response
     
     if (selectedMaster) {
@@ -446,8 +447,8 @@ export default function SalonBookingModule({
         master_id: parseInt(formData.master_id),
         salon_id: null,
         branch_id: formData.branch_id ? parseInt(formData.branch_id) : null,
-        start_time: startTime.toISOString(),
-        end_time: endTime.toISOString(),
+        start_time: selectedSlot.start_time,
+        end_time: selectedSlot.end_time,
         notes: formData.notes,
         client_name: currentUser?.full_name || currentUser?.phone || 'Клиент',
         service_name: selectedService?.name || '',
@@ -479,8 +480,8 @@ export default function SalonBookingModule({
       const params = new URLSearchParams({
         salon_id: salonId,
         service_id: formData.service_id,
-        start_time: startTime.toISOString(),
-        end_time: endTime.toISOString(),
+        start_time: selectedSlot.start_time,
+        end_time: selectedSlot.end_time,
         notes: formData.notes || ''
       })
       
@@ -632,6 +633,7 @@ export default function SalonBookingModule({
     setSelectedService(null)
     setSelectedMaster(null)
     setAvailableSlots([])
+    setSelectedSlot(null)
     setShowPhoneModal(false)
   }
   
@@ -803,12 +805,12 @@ export default function SalonBookingModule({
                     type="button"
                     onClick={() => handleTimeSlotSelect(slot)}
                     className={`p-3 text-sm border rounded-lg transition-colors ${
-                      formData.time === slot
+                      formData.time === slot.label
                         ? 'bg-[#4CAF50] text-white border-[#4CAF50]'
                         : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
                     }`}
                   >
-                    {formatTime(slot)}
+                    {formatTime(slot.label)}
                   </button>
                 ))}
               </div>

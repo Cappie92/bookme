@@ -11,13 +11,17 @@ never assumed to belong to any zone.
 The mapper guard keeps every ORM write consistent: canonical columns are
 derived from aware values, kept only while they still describe the stored
 wall, and cleared otherwise, so no row carries partial or stale metadata.
+
+Route writers apply the request contract (``legacy_request_times``): an aware
+request value is an absolute instant and is persisted as the master's wall
+time plus canonical UTC, exactly like an admitted unified write.
 """
 
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta
-from typing import Iterable, List, Optional
+from datetime import datetime, timedelta, timezone
+from typing import Iterable, List, Optional, Tuple
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import event, inspect, select
@@ -164,6 +168,80 @@ def hold_time_columns(hold) -> dict:
     if not _row_consistent(hold):
         return {}
     return {key: getattr(hold, key) for key in CANONICAL_KEYS}
+
+
+def owner_time_zone(
+    db, *, master_id: Optional[int] = None, indie_master_id: Optional[int] = None
+) -> Optional[str]:
+    """The owning master's valid IANA zone; indie rows resolve through their master."""
+
+    from models import IndieMaster, Master
+
+    if master_id is None and indie_master_id is not None:
+        master_id = db.query(IndieMaster.master_id).filter(IndieMaster.id == indie_master_id).scalar()
+    if master_id is None:
+        return None
+    name = (db.query(Master.timezone).filter(Master.id == master_id).scalar() or "").strip()
+    return name if _zone(name) is not None else None
+
+
+def legacy_request_times(
+    db,
+    start: Optional[datetime],
+    end: Optional[datetime],
+    *,
+    master_id: Optional[int] = None,
+    indie_master_id: Optional[int] = None,
+) -> Tuple[Optional[datetime], Optional[datetime], dict]:
+    """Request bounds for a legacy-mode write and the columns to persist.
+
+    Both bounds aware: the instant is explicit, so the master's wall time is
+    returned together with ``start_time``/``end_time`` and canonical columns.
+    Otherwise the bounds are returned unchanged with no columns: a naive value
+    keeps its legacy meaning and is never assigned a zone.
+    """
+
+    from services.calendar_adapters import canonical_time_columns
+
+    if not (_is_aware(start) and _is_aware(end)):
+        return start, end, {}
+    zone_name = owner_time_zone(db, master_id=master_id, indie_master_id=indie_master_id)
+    if zone_name is None:
+        return start, end, {}
+    try:
+        columns = canonical_time_columns(canonical_interval(start, end), zone_name)
+    except TimeNormalizationError:
+        return start, end, {}
+    return columns["start_time"], columns["end_time"], columns
+
+
+def stored_instants(start_utc_us, end_utc_us) -> Optional[Tuple[datetime, datetime]]:
+    """Aware UTC bounds for persisted canonical microseconds."""
+
+    if start_utc_us is None or end_utc_us is None:
+        return None
+    return tuple(
+        CanonicalInstant(value).to_datetime().astimezone(timezone.utc)
+        for value in (start_utc_us, end_utc_us)
+    )
+
+
+def slot_instant_fields(start: datetime, end: datetime, zone_name: Optional[str]) -> dict:
+    """Offset-aware bounds for a slot the scheduler built as wall time in ``zone_name``.
+
+    ``None`` bounds mean the wall has no single instant (DST gap or fold, or
+    no valid zone); clients then fall back to the legacy naive value.
+    """
+
+    columns = wall_time_columns(start, end, zone_name) if zone_name else {}
+    if not columns:
+        return {"start_at": None, "end_at": None, "time_zone": zone_name or None}
+    zone = ZoneInfo(zone_name)
+    start_at, end_at = (
+        CanonicalInstant(columns[key]).to_datetime().astimezone(zone).isoformat()
+        for key in ("start_utc_us", "end_utc_us")
+    )
+    return {"start_at": start_at, "end_at": end_at, "time_zone": zone_name}
 
 
 def online_origin_metadata(actor_user_id: Optional[int]) -> dict:

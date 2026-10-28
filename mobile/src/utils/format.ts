@@ -1,12 +1,17 @@
 /**
  * Утилиты форматирования дат и времени для отображения записей.
- * Даты парсятся из ISO-строк (start_time/end_time), отображаются в локальном времени устройства.
+ * ISO-строки API (start_time/end_time) — время мастера: naive или со смещением мастера.
+ * Дата и время берутся из самой строки, без перевода в часовой пояс устройства.
  */
+
+const ISO_WALL = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2}))?/;
 
 /**
  * Формат даты DD.MM (например, 28.02)
  */
 export function formatDateDDMM(dateString: string): string {
+  const wall = ISO_WALL.exec(dateString ?? '');
+  if (wall) return `${wall[3]}.${wall[2]}`;
   const date = parseBookingDate(dateString);
   const day = date.getDate().toString().padStart(2, '0');
   const month = (date.getMonth() + 1).toString().padStart(2, '0');
@@ -17,6 +22,8 @@ export function formatDateDDMM(dateString: string): string {
  * Формат времени HH:MM (например, 10:00)
  */
 export function formatTimeHHMM(dateString: string): string {
+  const wall = ISO_WALL.exec(dateString ?? '');
+  if (wall && wall[4] !== undefined) return `${wall[4]}:${wall[5]}`;
   const date = parseBookingDate(dateString);
   const hours = date.getHours().toString().padStart(2, '0');
   const minutes = date.getMinutes().toString().padStart(2, '0');
@@ -51,7 +58,11 @@ const WEEKDAYS_RU = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
  * Дата для выбора: "сегодня", "завтра" или "28.02, Пн"
  */
 export function formatDateForPicker(dateStr: string): string {
-  const d = new Date(dateStr);
+  const calendarDay = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr ?? '');
+  // new Date('YYYY-MM-DD') is UTC midnight: the previous day west of UTC.
+  const d = calendarDay
+    ? new Date(Number(calendarDay[1]), Number(calendarDay[2]) - 1, Number(calendarDay[3]))
+    : new Date(dateStr);
   if (isNaN(d.getTime())) return dateStr;
   const today = new Date();
   today.setHours(0, 0, 0, 0);

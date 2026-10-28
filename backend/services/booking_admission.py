@@ -95,6 +95,19 @@ def booking_time_unresolved() -> HTTPException:
     )
 
 
+EDIT_REQUEST_TIME_UNRESOLVED_CODE = "EDIT_REQUEST_TIME_UNRESOLVED"
+
+
+def edit_request_time_unresolved() -> HTTPException:
+    """A proposal stored without its instant cannot be applied as a unified move."""
+
+    return _http_error(
+        status.HTTP_409_CONFLICT,
+        EDIT_REQUEST_TIME_UNRESOLVED_CODE,
+        "Предложенное время сохранено без часового пояса. Создайте новый запрос на перенос.",
+    )
+
+
 def _busy() -> HTTPException:
     from utils.booking_limit_guard import BOOKING_SLOT_BUSY_CODE, BOOKING_SLOT_BUSY_MESSAGE
 

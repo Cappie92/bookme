@@ -16,7 +16,14 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
-from models import Booking, IndieMaster, Master, TemporaryBooking
+from models import (
+    Booking,
+    BookingEditRequest,
+    EditRequestStatus,
+    IndieMaster,
+    Master,
+    TemporaryBooking,
+)
 from services.calendar_adapters import booking_interval, stored_interval
 from services.calendar_time import (
     AmbiguousWallTimeError,
@@ -183,6 +190,8 @@ class ReadinessReport:
     blocked_master_ids: List[int] = field(default_factory=list)
     candidate: CandidateResolution = field(default_factory=CandidateResolution)
     provenance: WriteProvenance = field(default_factory=WriteProvenance)
+    # Informational: unified acceptance of these proposals is refused (409).
+    pending_edit_requests_without_instant: int = 0
 
     @property
     def activation_ready(self) -> bool:
@@ -204,7 +213,26 @@ class ReadinessReport:
                 "dst_fold": self.candidate.dst_fold,
             },
             "write_provenance": self.provenance.as_dict(),
+            "pending_edit_requests_without_instant": self.pending_edit_requests_without_instant,
         }
+
+
+def pending_edit_requests_without_instant(db: Session) -> int:
+    from services.booking_time_shadow import is_consistent
+
+    pending = db.query(BookingEditRequest).filter(
+        BookingEditRequest.status == EditRequestStatus.PENDING
+    )
+    return sum(
+        not is_consistent(
+            start_time=row.proposed_start,
+            end_time=row.proposed_end,
+            start_utc_us=row.proposed_start_utc_us,
+            end_utc_us=row.proposed_end_utc_us,
+            time_zone=row.proposed_time_zone,
+        )
+        for row in pending.yield_per(500)
+    )
 
 
 def readiness_report(
@@ -237,4 +265,5 @@ def readiness_report(
         .count()
     )
     report.provenance = write_provenance(db, now, shadow_since)
+    report.pending_edit_requests_without_instant = pending_edit_requests_without_instant(db)
     return report

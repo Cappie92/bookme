@@ -523,6 +523,10 @@ class BookingEditRequest(Base):
     booking_id = Column(Integer, ForeignKey("bookings.id"))
     proposed_start = Column(DateTime)
     proposed_end = Column(DateTime)
+    # Proposed instant; NULL for proposals created without an explicit offset.
+    proposed_start_utc_us = Column(BigInteger, nullable=True)
+    proposed_end_utc_us = Column(BigInteger, nullable=True)
+    proposed_time_zone = Column(String(64), nullable=True)
     status = Column(Enum(EditRequestStatus), default=EditRequestStatus.PENDING)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

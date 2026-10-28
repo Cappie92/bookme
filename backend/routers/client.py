@@ -55,7 +55,13 @@ from services.booking_admission import (
     reserve_booking_writer,
     unified_admission_enabled,
 )
-from services.booking_time_shadow import hold_time_columns, online_origin_metadata
+from services.booking_time_shadow import (
+    hold_time_columns,
+    legacy_request_times,
+    online_origin_metadata,
+    owner_time_zone,
+    slot_instant_fields,
+)
 from utils.booking_occupancy import booking_slot_conflict
 from utils.loyalty_discounts import evaluate_and_prepare_applied_discount, build_applied_discount_info
 from utils.ios_free_companion import (
@@ -555,6 +561,11 @@ def get_available_slots_for_booking(
             exclude_booking_id=booking.id,
         )
         
+        zone_name = owner_time_zone(
+            db,
+            master_id=booking.master_id,
+            indie_master_id=None if booking.master_id else booking.indie_master_id,
+        )
         # Фильтруем слоты, исключая текущее время записи
         filtered_slots = []
         for slot in available_slots:
@@ -563,10 +574,13 @@ def get_available_slots_for_booking(
             if isinstance(slot_start, datetime):
                 # Исключаем слот, который совпадает с текущим временем записи
                 if abs((slot_start - booking.start_time).total_seconds()) > 300:  # 5 минут разницы
+                    # start_time stays naive master wall: deployed web builds read it
+                    # through the browser zone. New clients send start_at/end_at.
                     filtered_slots.append({
                         'start_time': slot_start.isoformat(),
                         'end_time': slot['end_time'].isoformat(),
-                        'formatted_time': slot_start.strftime('%H:%M')
+                        'formatted_time': slot_start.strftime('%H:%M'),
+                        **slot_instant_fields(slot_start, slot['end_time'], zone_name),
                     })
             else:
                 # Если slot_start уже строка, конвертируем её в datetime для сравнения
@@ -940,6 +954,7 @@ def create_booking(
     else:
         raise HTTPException(status_code=400, detail="master_id or indie_master_id required")
     admission = None
+    time_columns = {}
     if unified_admission_enabled():
         admission = admit_booking_request(
             db,
@@ -948,14 +963,16 @@ def create_booking(
             master_id=booking_in.master_id,
             indie_master_id=None if booking_in.master_id else booking_in.indie_master_id,
         )
-    elif check_booking_conflicts(
-        db,
-        booking_in.start_time,
-        booking_in.end_time,
-        conflict_owner_type,
-        conflict_owner_id,
-    ):
-        raise booking_slot_conflict()
+    else:
+        start, end, time_columns = legacy_request_times(
+            db,
+            booking_in.start_time,
+            booking_in.end_time,
+            master_id=booking_in.master_id,
+            indie_master_id=None if booking_in.master_id else booking_in.indie_master_id,
+        )
+        if check_booking_conflicts(db, start, end, conflict_owner_type, conflict_owner_id):
+            raise booking_slot_conflict()
 
     ios_free = is_ios_free_surface(client_surface, current_user)
 
@@ -1053,6 +1070,7 @@ def create_booking(
         booking_data.update(online_booking_metadata(admission, current_user.id))
     else:
         booking_data.update(online_origin_metadata(current_user.id))
+        booking_data.update(time_columns)
     booking = Booking(**booking_data)
     db.add(booking)
     db.flush()
@@ -1137,6 +1155,14 @@ def update_booking(
         master_id = updates.get("master_id", booking.master_id)
         indie_id = updates.get("indie_master_id", booking.indie_master_id)
         salon_id = updates.get("salon_id", booking.salon_id)
+        new_start, new_end, time_columns = legacy_request_times(
+            db,
+            new_start,
+            new_end,
+            master_id=master_id,
+            indie_master_id=None if master_id else indie_id,
+        )
+        updates.update(time_columns)
         if master_id is not None:
             owner_type, owner_id = OwnerType.MASTER, master_id
         elif indie_id is not None:
@@ -1291,10 +1317,13 @@ def create_temporary_booking(
             master_id=booking_in.master_id,
         ).time_columns()
     else:
+        hold_start, _, hold_time_columns = legacy_request_times(
+            db, booking_in.start_time, booking_in.end_time, master_id=booking_in.master_id
+        )
         # Проверяем конфликты временных броней
         existing_temporary = db.query(TemporaryBooking).filter(
             TemporaryBooking.master_id == booking_in.master_id,
-            TemporaryBooking.start_time == booking_in.start_time,
+            TemporaryBooking.start_time == hold_start,
             TemporaryBooking.status == 'pending'
         ).first()
 
@@ -1304,7 +1333,7 @@ def create_temporary_booking(
         # Проверяем конфликты обычных броней
         existing_booking = db.query(Booking).filter(
             Booking.master_id == booking_in.master_id,
-            Booking.start_time == booking_in.start_time,
+            Booking.start_time == hold_start,
             Booking.status != BookingStatus.CANCELLED
         ).first()
 
