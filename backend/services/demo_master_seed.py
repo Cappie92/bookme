@@ -28,6 +28,7 @@ from models import (
     UserRole,
     master_services,
 )
+from services.booking_time_shadow import wall_time_columns
 from settings import get_settings
 
 
@@ -203,6 +204,8 @@ def _make_booking(
         salon_id=None,
         start_time=start,
         end_time=end,
+        # Demo walls are placed inside the demo master's schedule, in its own zone.
+        **wall_time_columns(start, end, master.timezone),
         status=status,
         notes=notes or None,
         payment_method="on_visit",

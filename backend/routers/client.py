@@ -55,6 +55,7 @@ from services.booking_admission import (
     reserve_booking_writer,
     unified_admission_enabled,
 )
+from services.booking_time_shadow import hold_time_columns, online_origin_metadata
 from utils.booking_occupancy import booking_slot_conflict
 from utils.loyalty_discounts import evaluate_and_prepare_applied_discount, build_applied_discount_info
 from utils.ios_free_companion import (
@@ -1050,6 +1051,8 @@ def create_booking(
     enforce_booking_creation_limit(db, booking_data, client_surface=client_surface)
     if admission is not None:
         booking_data.update(online_booking_metadata(admission, current_user.id))
+    else:
+        booking_data.update(online_origin_metadata(current_user.id))
     booking = Booking(**booking_data)
     db.add(booking)
     db.flush()
@@ -1437,6 +1440,9 @@ def confirm_temporary_booking_payment(
     enforce_booking_creation_limit(db, booking_data, client_surface=client_surface)
     if admission is not None:
         booking_data.update(online_booking_metadata(admission, current_user.id))
+    else:
+        booking_data.update(online_origin_metadata(current_user.id))
+        booking_data.update(hold_time_columns(temporary_booking))
     booking = Booking(**booking_data)
     db.add(booking)
     db.flush()

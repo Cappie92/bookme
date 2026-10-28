@@ -114,6 +114,65 @@ def owner_readiness(db: Session, master: Master, now_utc: Optional[datetime] = N
 
 
 @dataclass
+class WriteProvenance:
+    """Every booking row by the origin of its time metadata.
+
+    A row without canonical columns is a new write when it carries the
+    provenance stamped by current writers (``source``) or was created at or
+    after ``shadow_since``; otherwise it is history from before shadow writes.
+    """
+
+    legacy_history: int = 0
+    canonical: int = 0
+    canonical_wall_in_master_zone: int = 0
+    canonical_wall_in_other_zone: int = 0
+    unresolved_new_writes: int = 0
+    unresolved_new_writes_still_relevant: int = 0
+    conflicting_canonical: int = 0
+    conflicting_canonical_still_relevant: int = 0
+
+    def as_dict(self) -> dict:
+        return dict(self.__dict__)
+
+
+_CANONICAL_COLUMNS = ("start_utc_us", "end_utc_us", "time_zone")
+
+
+def write_provenance(
+    db: Session, now_utc: Optional[datetime] = None, shadow_since: Optional[datetime] = None
+) -> WriteProvenance:
+    now = (now_utc or datetime.utcnow()).replace(tzinfo=None)
+    since = shadow_since.replace(tzinfo=None) if shadow_since is not None else None
+    master_zones = dict(db.query(Master.id, Master.timezone).all())
+    indie_masters = dict(db.query(IndieMaster.id, IndieMaster.master_id).all())
+    report = WriteProvenance()
+    for booking in db.query(Booking).yield_per(500):
+        relevant = booking.end_time is None or booking.end_time > now - _LEGACY_LATEST_SHIFT
+        present = [getattr(booking, key) is not None for key in _CANONICAL_COLUMNS]
+        if any(present):
+            if not booking_interval(booking).is_resolved:
+                report.conflicting_canonical += 1
+                report.conflicting_canonical_still_relevant += relevant
+                continue
+            report.canonical += 1
+            master_id = booking.master_id or indie_masters.get(booking.indie_master_id)
+            if booking.time_zone == master_zones.get(master_id):
+                report.canonical_wall_in_master_zone += 1
+            else:
+                report.canonical_wall_in_other_zone += 1
+            continue
+        is_new = booking.source is not None or (
+            since is not None and booking.created_at is not None and booking.created_at >= since
+        )
+        if is_new:
+            report.unresolved_new_writes += 1
+            report.unresolved_new_writes_still_relevant += relevant
+        else:
+            report.legacy_history += 1
+    return report
+
+
+@dataclass
 class ReadinessReport:
     masters_total: int = 0
     masters_ready: int = 0
@@ -123,6 +182,7 @@ class ReadinessReport:
     ownerless_bookings: int = 0
     blocked_master_ids: List[int] = field(default_factory=list)
     candidate: CandidateResolution = field(default_factory=CandidateResolution)
+    provenance: WriteProvenance = field(default_factory=WriteProvenance)
 
     @property
     def activation_ready(self) -> bool:
@@ -143,10 +203,13 @@ class ReadinessReport:
                 "dst_gap": self.candidate.dst_gap,
                 "dst_fold": self.candidate.dst_fold,
             },
+            "write_provenance": self.provenance.as_dict(),
         }
 
 
-def readiness_report(db: Session, now_utc: Optional[datetime] = None) -> ReadinessReport:
+def readiness_report(
+    db: Session, now_utc: Optional[datetime] = None, shadow_since: Optional[datetime] = None
+) -> ReadinessReport:
     report = ReadinessReport()
     masters = db.query(Master).filter(Master.is_deleted.is_(False)).order_by(Master.id)
     for master in masters.all():
@@ -173,4 +236,5 @@ def readiness_report(db: Session, now_utc: Optional[datetime] = None) -> Readine
         )
         .count()
     )
+    report.provenance = write_provenance(db, now, shadow_since)
     return report

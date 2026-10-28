@@ -499,6 +499,7 @@ def create_public_booking(
         online_booking_metadata,
         unified_admission_enabled,
     )
+    from services.booking_time_shadow import online_origin_metadata
 
     admission = None
     if unified_admission_enabled():
@@ -551,6 +552,8 @@ def create_public_booking(
     enforce_booking_creation_limit(db, booking_data, client_surface=client_surface)
     if admission is not None:
         booking_data.update(online_booking_metadata(admission, current_user.id))
+    else:
+        booking_data.update(online_origin_metadata(current_user.id))
     booking = Booking(**booking_data)
     db.add(booking)
     db.flush()

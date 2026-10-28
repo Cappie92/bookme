@@ -2547,3 +2547,8 @@ def _payment_public_id_immutable(mapper, connection, target):
     hist = state.attrs.public_id.history
     if hist.has_changes() and hist.deleted:
         target.public_id = hist.deleted[0]
+
+
+from services.booking_time_shadow import install_time_metadata_guards  # noqa: E402
+
+install_time_metadata_guards(Booking, TemporaryBooking)

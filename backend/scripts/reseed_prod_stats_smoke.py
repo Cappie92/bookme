@@ -64,6 +64,7 @@ from models import (
 )
 from sqlalchemy import case, func, or_
 from sqlalchemy.orm import Session
+from services.booking_time_shadow import wall_time_columns
 from utils.balance_utils import (
     deposit_balance,
     get_or_create_user_balance,
@@ -830,6 +831,8 @@ def _add_booking(
         salon_id=None,
         start_time=start,
         end_time=end,
+        # SlotAllocator returns naive UTC (_msk_naive_utc).
+        **wall_time_columns(start, end, "UTC"),
         status=status,
         payment_amount=bundle.price,
         is_paid=is_paid,

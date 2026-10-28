@@ -55,6 +55,7 @@ from services.booking_admission import (
     reserve_booking_writer,
     unified_admission_enabled,
 )
+from services.booking_time_shadow import online_origin_metadata
 from services.pending_ticket_service import (
     claim_pending_ticket,
     delete_pending_ticket,
@@ -434,6 +435,8 @@ async def create_booking(
     enforce_booking_creation_limit(db, booking_data, client_surface=client_surface)
     if admission is not None:
         booking_data.update(online_booking_metadata(admission, current_user.id))
+    else:
+        booking_data.update(online_origin_metadata(current_user.id))
     db_booking = Booking(**booking_data)
     db.add(db_booking)
     db.flush()
@@ -657,6 +660,8 @@ def _create_specific_public_booking_after_proof(
     enforce_booking_creation_limit(db, data, client_surface=client_surface)
     if admission is not None:
         data.update(online_booking_metadata(admission, client.id))
+    else:
+        data.update(online_origin_metadata(client.id))
     created = Booking(**data)
     db.add(created)
     db.flush()
@@ -1438,6 +1443,8 @@ def _create_any_master_public_booking_after_proof(
     enforce_booking_creation_limit(db, data, client_surface=client_surface)
     if admission is not None:
         data.update(online_booking_metadata(admission, client.id))
+    else:
+        data.update(online_origin_metadata(client.id))
     created = Booking(**data, created_at=datetime.utcnow())
     db.add(created)
     db.flush()
