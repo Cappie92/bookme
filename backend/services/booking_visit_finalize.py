@@ -11,6 +11,7 @@ from typing import Any, Dict
 
 from sqlalchemy.orm import Session
 
+from utils.master_future_bookings_query import booking_starts_after
 from models import (
     Booking,
     BookingConfirmation,
@@ -60,7 +61,7 @@ def finalize_post_visit_booking(
     Создаёт BookingConfirmation + Income, списывает баллы (если были зарезервированы), начисляет earned.
     Идемпотентно по наличию BookingConfirmation.
     """
-    if require_past_start and booking.start_time > datetime.utcnow():
+    if require_past_start and booking_starts_after(booking):
         raise ValueError("Нельзя подтвердить будущую запись.")
 
     existing_confirmation = (

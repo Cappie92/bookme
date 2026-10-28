@@ -23,6 +23,11 @@ from utils.booking_loyalty_reserve import clear_loyalty_points_reserve
 from utils.client_display_name import get_client_display_name, get_meta_for_client, strip_indie_service_prefix
 from utils.subscription_features import has_finance_access
 from utils.booking_real_money import booking_amount_to_pay, booking_money_api_fields, booking_real_money_sql
+from utils.master_future_bookings_query import (
+    booking_starts_after,
+    booking_starts_before,
+    start_before_now,
+)
 
 router = APIRouter(prefix="/api/master/accounting", tags=["accounting"])
 
@@ -51,8 +56,7 @@ def _is_future_pre_visit_to_confirmed(new_status: str, booking: Booking) -> bool
     """
     if new_status != "confirmed":
         return False
-    now_u = datetime.utcnow()
-    if booking.start_time <= now_u:
+    if not booking_starts_after(booking):
         return False
     return _booking_status_str(booking).lower() in ("created", "awaiting_confirmation")
 
@@ -118,7 +122,7 @@ async def update_booking_status(
         if new_status == "confirmed":
             now_u = datetime.utcnow()
             st = _booking_status_str(booking).lower()
-            if booking.start_time > now_u and st in ("created", "awaiting_confirmation"):
+            if booking_starts_after(booking, now_u) and st in ("created", "awaiting_confirmation"):
                 master_row = db.query(Master).filter(Master.user_id == current_user.id).first()
                 if not master_row:
                     raise HTTPException(
@@ -137,7 +141,7 @@ async def update_booking_status(
 
         # awaiting_confirmation — только для post-visit (прошлые записи).
         # Для будущих записей запрещено выставлять awaiting_confirmation.
-        if new_status == "awaiting_confirmation" and booking.start_time > datetime.utcnow():
+        if new_status == "awaiting_confirmation" and booking_starts_after(booking):
             raise HTTPException(
                 status_code=400,
                 detail="Статус 'На подтверждение' применим только к прошедшим записям. Для будущих используйте 'confirmed'.",
@@ -891,7 +895,7 @@ async def get_pending_confirmations(
                 ]
             ),
             BookingConfirmation.id == None,  # Без подтверждения
-            Booking.start_time < now_utc,  # POST-visit: только прошедшие
+            start_before_now(now_utc),  # POST-visit: только прошедшие
         ]
         # manual_confirm_enabled_at: показывать только записи, созданные после включения ручного режима
         manual_at = getattr(master, "manual_confirm_enabled_at", None) if master else None
@@ -928,7 +932,7 @@ async def get_pending_confirmations(
             })
             logger.info(
                 f"[pending-confirmations] master={current_user.id} booking_id={booking.id} "
-                f"start_time={booking.start_time} status={booking.status} is_past={booking.start_time < now_utc}"
+                f"start_time={booking.start_time} status={booking.status} is_past={booking_starts_before(booking, now_utc)}"
             )
         
         logger.info(f"Найдено {len(result)} услуг на подтверждение для мастера {current_user.id}")
@@ -983,7 +987,7 @@ async def confirm_booking(
             raise HTTPException(status_code=404, detail="Бронирование не найдено или не может быть подтверждено")
         
         # Будущие записи нельзя подтверждать
-        if booking.start_time > datetime.utcnow():
+        if booking_starts_after(booking):
             raise HTTPException(
                 status_code=400,
                 detail="Нельзя подтвердить будущую запись. Подтверждение доступно после времени начала.",
@@ -1051,7 +1055,7 @@ async def confirm_all_bookings(
             owner_cond,
             Booking.status == BookingStatus.AWAITING_CONFIRMATION,
             BookingConfirmation.id == None,
-            Booking.start_time < now_utc,
+            start_before_now(now_utc),
         ).all()
 
         from services.booking_visit_finalize import finalize_post_visit_booking

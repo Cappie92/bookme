@@ -14,6 +14,7 @@ from auth import get_current_active_user, require_master
 import models
 from database import get_db
 from utils.booking_status import get_effective_booking_status, apply_effective_status_to_bookings
+from utils.master_future_bookings_query import start_at_or_before_now, start_before_now
 from utils.client_display_name import get_client_display_name, get_meta_for_client, strip_indie_service_prefix
 from utils.ios_free_companion import (
     is_ios_free_surface,
@@ -201,7 +202,7 @@ def get_detailed_bookings(
             Booking.status != BookingStatus.CANCELLED,
             or_(
                 Booking.status != BookingStatus.COMPLETED,
-                Booking.start_time <= now_u,
+                start_at_or_before_now(now_u),
             ),
         )
         .order_by(Booking.start_time.desc())
@@ -617,7 +618,7 @@ def get_past_appointments(
     # Строим запрос к базе данных
     query = db.query(Booking).filter(
         Booking.master_id == master.id,
-        Booking.start_time < datetime.utcnow()  # Только прошедшие записи
+        start_before_now(datetime.utcnow()),
     )
 
     # Применяем фильтры

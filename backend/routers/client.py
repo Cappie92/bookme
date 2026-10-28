@@ -1,8 +1,6 @@
 from datetime import datetime, timezone, timedelta, date as date_type
 from typing import Any, List, Optional
 import logging
-import pytz
-
 from fastapi import APIRouter, Depends, HTTPException, status, Body, Query
 from fastapi.responses import Response, JSONResponse
 from sqlalchemy.orm import Session, joinedload, noload
@@ -27,6 +25,7 @@ def _parse_optional_client_birth_date(raw: Any) -> Optional[date_type]:
 
 
 from services.account_deletion import MASTER_ACCOUNT_DELETED_REASON, is_master_deleted
+from utils.master_future_bookings_query import booking_starts_after
 from auth import get_current_active_user, require_client, update_password_and_revoke_sessions
 from utils.booking_access import validate_booking_changes
 from utils.booking_loyalty_reserve import clear_loyalty_points_reserve
@@ -74,7 +73,7 @@ from utils.master_canon import (
     MASTER_CANON_DEBUG,
     resolve_master_for_booking,
 )
-from utils.calendar_ics import build_booking_ics, booking_start_end_utc, ensure_utc_aware
+from utils.calendar_ics import build_booking_ics, booking_start_end_utc
 from utils.yandex_maps_url import (
     booking_calendar_location_string,
     yandex_maps_url_for_booking,
@@ -125,14 +124,6 @@ def _google_calendar_event_strings(booking: Booking) -> tuple[str, str]:
     if yu:
         details = f"{details}\nЯндекс.Карты: {yu}"
     return details, booking_calendar_location_string(booking)
-
-
-def get_current_time_in_timezone(timezone_str: str) -> datetime:
-    """
-    Получает текущее время в указанном часовом поясе
-    """
-    tz = pytz.timezone(timezone_str)
-    return datetime.now(tz)
 
 
 def _booking_payment_amount(booking: Booking) -> float:
@@ -227,17 +218,9 @@ def get_future_bookings(
                 )
             logger.warning("booking %s: skip (master timezone empty, master_id=%s)", b.id, b.master_id)
             continue
-        current_time_in_master_tz = get_current_time_in_timezone(master_timezone)
-
-        # Приводим start_time к часовому поясу мастера для корректного сравнения
-        if b.start_time.tzinfo is None:
-            # Если start_time не имеет часового пояса, считаем что это UTC
-            start_time_in_master_tz = pytz.UTC.localize(b.start_time).astimezone(pytz.timezone(master_timezone))
-        else:
-            start_time_in_master_tz = b.start_time.astimezone(pytz.timezone(master_timezone))
-
-        # Проверяем, является ли запись будущей в часовом поясе мастера
-        if start_time_in_master_tz <= current_time_in_master_tz:
+        # Доказанный момент сравнивается по start_utc_us.
+        # Строка без canonical остаётся на прежнем сравнении цифр с UTC now.
+        if not booking_starts_after(b):
             past_count += 1
             continue  # Пропускаем записи, которые уже прошли в часовом поясе мастера
 
@@ -394,19 +377,7 @@ def get_past_bookings(
                 )
             logger.warning("booking %s: skip (master timezone empty, master_id=%s)", b.id, b.master_id)
             continue
-        current_time_in_master_tz = get_current_time_in_timezone(master_timezone)
-
-        try:
-            if b.start_time.tzinfo is None:
-                start_time_in_master_tz = pytz.UTC.localize(b.start_time).astimezone(pytz.timezone(master_timezone))
-            else:
-                start_time_in_master_tz = b.start_time.astimezone(pytz.timezone(master_timezone))
-        except Exception as e:
-            logger.warning("booking %s: skip (timezone conversion failed): %s", b.id, e)
-            continue
-
-        # Проверяем, является ли запись прошедшей в часовом поясе мастера
-        if start_time_in_master_tz > current_time_in_master_tz:
+        if booking_starts_after(b):
             future_count += 1
             continue  # Пропускаем записи, которые еще не наступили в часовом поясе мастера
 
@@ -663,6 +634,11 @@ def _calendar_attachment_basename(booking: Booking) -> str:
 
 def _check_booking_future_and_tz(booking, master_tz: str) -> None:
     """Raise 400 if booking is past or master has no timezone."""
+    if not str(master_tz or "").strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Мастер не настроил часовой пояс. Добавление в календарь недоступно.",
+        )
     # Master without timezone: check directly
     if booking.master and (not getattr(booking.master, "timezone", None) or not str(booking.master.timezone).strip()):
         raise HTTPException(
@@ -674,10 +650,7 @@ def _check_booking_future_and_tz(booking, master_tz: str) -> None:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Мастер не настроил часовой пояс. Добавление в календарь недоступно.",
         )
-    now_in_tz = get_current_time_in_timezone(master_tz)
-    start_utc = ensure_utc_aware(booking.start_time)
-    start_local = start_utc.astimezone(pytz.timezone(master_tz))
-    if start_local <= now_in_tz:
+    if not booking_starts_after(booking):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Добавить в календарь можно только будущие записи.",
@@ -2177,17 +2150,7 @@ def get_client_dashboard_stats(
                     )
                 logger.warning("booking %s: skip in stats (master timezone empty)", booking.id)
                 continue
-            current_time_in_master_tz = get_current_time_in_timezone(master_timezone)
-
-            # Приводим start_time к часовому поясу мастера для корректного сравнения
-            if booking.start_time.tzinfo is None:
-                # Если start_time не имеет часового пояса, считаем что это UTC
-                start_time_in_master_tz = pytz.UTC.localize(booking.start_time).astimezone(pytz.timezone(master_timezone))
-            else:
-                start_time_in_master_tz = booking.start_time.astimezone(pytz.timezone(master_timezone))
-
-            # Проверяем, является ли запись прошедшей в часовом поясе мастера
-            if start_time_in_master_tz <= current_time_in_master_tz:
+            if not booking_starts_after(booking):
                 past_bookings_count += 1
         
         # Будущие записи - записи, которые еще не прошли по времени
@@ -2217,17 +2180,7 @@ def get_client_dashboard_stats(
                     )
                 logger.warning("booking %s: skip in stats (master timezone empty)", booking.id)
                 continue
-            current_time_in_master_tz = get_current_time_in_timezone(master_timezone)
-
-            # Приводим start_time к часовому поясу мастера для корректного сравнения
-            if booking.start_time.tzinfo is None:
-                # Если start_time не имеет часового пояса, считаем что это UTC
-                start_time_in_master_tz = pytz.UTC.localize(booking.start_time).astimezone(pytz.timezone(master_timezone))
-            else:
-                start_time_in_master_tz = booking.start_time.astimezone(pytz.timezone(master_timezone))
-
-            # Проверяем, является ли запись будущей в часовом поясе мастера
-            if start_time_in_master_tz > current_time_in_master_tz:
+            if booking_starts_after(booking):
                 future_bookings_count += 1
 
         # Топ салонов по частоте записи

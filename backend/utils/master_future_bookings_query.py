@@ -1,20 +1,24 @@
 """
 Единая семантика «будущих» записей мастера для SQL-фильтров и лимитов.
 
-Будущая запись:
-- start_time > now (UTC)
-- отменённые с тем же условием показываются в списке «все будущие» до наступления времени
-- активные (не отменённые) исключают completed
+Будущая запись (строго start > now):
+- если есть доказанный canonical (start_utc_us, end_utc_us и непустой time_zone) —
+  сравнение момента с UTC now;
+- иначе stored start_time сравнивается с naive UTC now, как раньше.
+  Часовой пояс для такой строки не выводится.
+Отменённые с тем же условием показываются в списке «все будущие» до наступления времени.
+Активные (не отменённые) исключают completed.
 """
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import and_, or_
+from sqlalchemy import and_, func, or_
 
 from models import Booking, BookingStatus
+from services.calendar_time import canonical_instant
 
 
 def cancelled_statuses_tuple() -> tuple[BookingStatus, ...]:
@@ -36,12 +40,119 @@ def inactive_future_statuses_tuple() -> tuple[Any, ...]:
     )
 
 
+def _utc_now_pair(now_utc: datetime | None) -> tuple[datetime, int]:
+    """Naive UTC clock and the same moment in epoch microseconds."""
+    current = now_utc or datetime.utcnow()
+    if current.tzinfo is not None:
+        aware = current.astimezone(timezone.utc)
+        naive = aware.replace(tzinfo=None)
+    else:
+        naive = current
+        aware = current.replace(tzinfo=timezone.utc)
+    return naive, canonical_instant(aware).epoch_microseconds
+
+
+def _microseconds(value: Any) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value
+
+
+def has_proven_canonical(booking: Any) -> bool:
+    """Complete canonical triple. A missing piece stays on the legacy comparison."""
+    zone = getattr(booking, "time_zone", None)
+    if not isinstance(zone, str) or not zone.strip():
+        return False
+    return _microseconds(getattr(booking, "start_utc_us", None)) is not None and (
+        _microseconds(getattr(booking, "end_utc_us", None)) is not None
+    )
+
+
+def _legacy_start_digits(booking: Any) -> datetime | None:
+    start = getattr(booking, "start_time", None)
+    if not isinstance(start, datetime):
+        return None
+    if start.tzinfo is not None and start.utcoffset() is not None:
+        return start.astimezone(timezone.utc).replace(tzinfo=None)
+    return start.replace(tzinfo=None) if start.tzinfo is not None else start
+
+
+def booking_starts_after(booking: Any, now_utc: datetime | None = None) -> bool:
+    """start > now. Canonical instant when proven, otherwise stored digits vs UTC now."""
+    naive, now_us = _utc_now_pair(now_utc)
+    if has_proven_canonical(booking):
+        return _microseconds(booking.start_utc_us) > now_us
+    start = _legacy_start_digits(booking)
+    return start is not None and start > naive
+
+
+def booking_starts_before(booking: Any, now_utc: datetime | None = None) -> bool:
+    """start < now. Same split as booking_starts_after. Equality is neither."""
+    naive, now_us = _utc_now_pair(now_utc)
+    if has_proven_canonical(booking):
+        return _microseconds(booking.start_utc_us) < now_us
+    start = _legacy_start_digits(booking)
+    return start is not None and start < naive
+
+
+def booking_start_elapsed(
+    booking: Any, now_utc: datetime | None = None, *, minutes: int = 0
+) -> bool:
+    """now >= start + minutes. Used by the post-visit status transition."""
+    naive, now_us = _utc_now_pair(now_utc)
+    if has_proven_canonical(booking):
+        return now_us >= _microseconds(booking.start_utc_us) + minutes * 60 * 1_000_000
+    start = _legacy_start_digits(booking)
+    return start is not None and naive >= start + timedelta(minutes=minutes)
+
+
+def _proven_sql() -> Any:
+    zone = func.length(func.trim(func.coalesce(Booking.time_zone, "")))
+    return and_(
+        Booking.start_utc_us.isnot(None),
+        Booking.end_utc_us.isnot(None),
+        zone > 0,
+    )
+
+
+def _legacy_sql() -> Any:
+    zone = func.length(func.trim(func.coalesce(Booking.time_zone, "")))
+    return or_(
+        Booking.start_utc_us.is_(None),
+        Booking.end_utc_us.is_(None),
+        zone == 0,
+    )
+
+
+def start_after_now(now_utc: datetime | None = None) -> Any:
+    naive, now_us = _utc_now_pair(now_utc)
+    return or_(
+        and_(_proven_sql(), Booking.start_utc_us > now_us),
+        and_(_legacy_sql(), Booking.start_time > naive),
+    )
+
+
+def start_before_now(now_utc: datetime | None = None) -> Any:
+    naive, now_us = _utc_now_pair(now_utc)
+    return or_(
+        and_(_proven_sql(), Booking.start_utc_us < now_us),
+        and_(_legacy_sql(), Booking.start_time < naive),
+    )
+
+
+def start_at_or_before_now(now_utc: datetime | None = None) -> Any:
+    naive, now_us = _utc_now_pair(now_utc)
+    return or_(
+        and_(_proven_sql(), Booking.start_utc_us <= now_us),
+        and_(_legacy_sql(), Booking.start_time <= naive),
+    )
+
+
 def active_future_core(now_utc: datetime | None = None) -> Any:
     """Условие по времени и статусу для «активных» будущих (без привязки к владельцу)."""
-    now = now_utc or datetime.utcnow()
     inactive = inactive_future_statuses_tuple()
     return and_(
-        Booking.start_time > now,
+        start_after_now(now_utc),
         Booking.status.notin_(inactive),
     )
 
@@ -53,9 +164,8 @@ def hub_cancelled_future_statuses_tuple() -> tuple[BookingStatus, ...]:
 
 def cancelled_future_core(now_utc: datetime | None = None) -> Any:
     """Неактивные будущие для вкладки «✕» и для bookings[] в GET /bookings/future."""
-    now = now_utc or datetime.utcnow()
     statuses = hub_cancelled_future_statuses_tuple()
-    return and_(Booking.start_time > now, Booking.status.in_(statuses))
+    return and_(start_after_now(now_utc), Booking.status.in_(statuses))
 
 
 def future_bookings_sql_filter(master: Any, now_utc: datetime | None = None) -> Any:
