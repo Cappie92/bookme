@@ -1,11 +1,11 @@
 """Правила admin hard-delete для Booking (чистая будущая бронь)."""
 from __future__ import annotations
 
-from datetime import datetime
 from typing import List
 
 from sqlalchemy.orm import Session
 
+from utils.master_future_bookings_query import booking_starts_after
 from models import (
     AppliedDiscount,
     Booking,
@@ -51,7 +51,7 @@ def get_hard_delete_blockers(db: Session, booking: Booking) -> List[str]:
 
     if booking.start_time is None:
         blockers.append("missing_start_time")
-    elif booking.start_time <= datetime.utcnow():
+    elif not booking_starts_after(booking):
         blockers.append("past_booking")
 
     status_val = _status_value(booking)

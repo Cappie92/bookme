@@ -58,6 +58,50 @@ export function localCalendarDateStringsForMonth(year, monthIndex) {
   return dates
 }
 
+/**
+ * Выбранный слот переноса: wall — время мастера для отображения,
+ * payload — тело PUT. Instant (start_at/end_at) отправляется, если сервер его дал.
+ */
+const SLOT_WALL = /^(\d{4}-\d{2}-\d{2})[T ](\d{2}):(\d{2})/
+
+/** Слот API как есть: подпись — цифры мастера, payload — исходные границы (или start_at). */
+export function bookingSlotChoice(slot) {
+  const start = String(slot?.start_at || slot?.start_time || '')
+  const end = String(slot?.end_at || slot?.end_time || '')
+  const match = SLOT_WALL.exec(start)
+  if (!match || !SLOT_WALL.test(end)) return null
+  return { label: `${match[2]}:${match[3]}`, start_time: start, end_time: end }
+}
+
+/**
+ * Слот выбран как время мастера (дата + HH:MM), не как часы браузера.
+ * Возвращает naive ISO. Смещение браузера сюда не входит.
+ */
+export function masterWallInterval(date, time, durationMinutes) {
+  const day = DATE_ONLY_RE.exec(String(date || ''))
+  const clock = /^(\d{2}):(\d{2})$/.exec(String(time || ''))
+  const duration = Number(durationMinutes)
+  if (!day || !clock || !Number.isFinite(duration) || duration <= 0) return null
+  const startMinutes = Number(clock[1]) * 60 + Number(clock[2])
+  const endMinutes = startMinutes + duration
+  const pad = (value) => String(value).padStart(2, '0')
+  const dayOffset = Math.floor(endMinutes / (24 * 60))
+  const endClock = ((endMinutes % (24 * 60)) + 24 * 60) % (24 * 60)
+  const endDay = new Date(Number(day[1]), Number(day[2]) - 1, Number(day[3]) + dayOffset)
+  return {
+    start_time: `${day[0]}T${clock[1]}:${clock[2]}:00`,
+    end_time: `${formatLocalDate(endDay)}T${pad(Math.floor(endClock / 60))}:${pad(endClock % 60)}:00`,
+  }
+}
+
+export function rescheduleSlotSelection(slot) {
+  const wall = String(slot?.start_time || '').slice(0, 16)
+  const payload = slot?.start_at && slot?.end_at
+    ? { start_time: slot.start_at, end_time: slot.end_at }
+    : { start_time: wall }
+  return { wall, payload }
+}
+
 export function localizeScheduleError(message) {
   return String(message).replace(/\b(\d{4})-(\d{2})-(\d{2})\b/g, '$3.$2.$1')
 }

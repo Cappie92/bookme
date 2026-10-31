@@ -1,8 +1,6 @@
 from datetime import datetime, timezone, timedelta, date as date_type
 from typing import Any, List, Optional
 import logging
-import pytz
-
 from fastapi import APIRouter, Depends, HTTPException, status, Body, Query
 from fastapi.responses import Response, JSONResponse
 from sqlalchemy.orm import Session, joinedload, noload
@@ -27,6 +25,7 @@ def _parse_optional_client_birth_date(raw: Any) -> Optional[date_type]:
 
 
 from services.account_deletion import MASTER_ACCOUNT_DELETED_REASON, is_master_deleted
+from utils.master_future_bookings_query import booking_starts_after
 from auth import get_current_active_user, require_client, update_password_and_revoke_sessions
 from utils.booking_access import validate_booking_changes
 from utils.booking_loyalty_reserve import clear_loyalty_points_reserve
@@ -45,6 +44,23 @@ from schemas import (
     TemporaryBookingCreate, TemporaryBookingOut
 )
 from services.scheduling import check_booking_conflicts, get_available_slots, parse_yyyy_mm_dd
+from services.booking_admission import (
+    admit_booking_request,
+    admit_booking_update,
+    admit_hold_promotion,
+    expire_pending_holds,
+    mark_booking_mutated,
+    online_booking_metadata,
+    reserve_booking_writer,
+    unified_admission_enabled,
+)
+from services.booking_time_shadow import (
+    hold_time_columns,
+    legacy_request_times,
+    online_origin_metadata,
+    owner_time_zone,
+    slot_instant_fields,
+)
 from utils.booking_occupancy import booking_slot_conflict
 from utils.loyalty_discounts import evaluate_and_prepare_applied_discount, build_applied_discount_info
 from utils.ios_free_companion import (
@@ -57,7 +73,7 @@ from utils.master_canon import (
     MASTER_CANON_DEBUG,
     resolve_master_for_booking,
 )
-from utils.calendar_ics import build_booking_ics, booking_start_end_utc, ensure_utc_aware
+from utils.calendar_ics import build_booking_ics, booking_start_end_utc
 from utils.yandex_maps_url import (
     booking_calendar_location_string,
     yandex_maps_url_for_booking,
@@ -108,14 +124,6 @@ def _google_calendar_event_strings(booking: Booking) -> tuple[str, str]:
     if yu:
         details = f"{details}\nЯндекс.Карты: {yu}"
     return details, booking_calendar_location_string(booking)
-
-
-def get_current_time_in_timezone(timezone_str: str) -> datetime:
-    """
-    Получает текущее время в указанном часовом поясе
-    """
-    tz = pytz.timezone(timezone_str)
-    return datetime.now(tz)
 
 
 def _booking_payment_amount(booking: Booking) -> float:
@@ -210,17 +218,9 @@ def get_future_bookings(
                 )
             logger.warning("booking %s: skip (master timezone empty, master_id=%s)", b.id, b.master_id)
             continue
-        current_time_in_master_tz = get_current_time_in_timezone(master_timezone)
-
-        # Приводим start_time к часовому поясу мастера для корректного сравнения
-        if b.start_time.tzinfo is None:
-            # Если start_time не имеет часового пояса, считаем что это UTC
-            start_time_in_master_tz = pytz.UTC.localize(b.start_time).astimezone(pytz.timezone(master_timezone))
-        else:
-            start_time_in_master_tz = b.start_time.astimezone(pytz.timezone(master_timezone))
-
-        # Проверяем, является ли запись будущей в часовом поясе мастера
-        if start_time_in_master_tz <= current_time_in_master_tz:
+        # Доказанный момент сравнивается по start_utc_us.
+        # Строка без canonical остаётся на прежнем сравнении цифр с UTC now.
+        if not booking_starts_after(b):
             past_count += 1
             continue  # Пропускаем записи, которые уже прошли в часовом поясе мастера
 
@@ -377,19 +377,7 @@ def get_past_bookings(
                 )
             logger.warning("booking %s: skip (master timezone empty, master_id=%s)", b.id, b.master_id)
             continue
-        current_time_in_master_tz = get_current_time_in_timezone(master_timezone)
-
-        try:
-            if b.start_time.tzinfo is None:
-                start_time_in_master_tz = pytz.UTC.localize(b.start_time).astimezone(pytz.timezone(master_timezone))
-            else:
-                start_time_in_master_tz = b.start_time.astimezone(pytz.timezone(master_timezone))
-        except Exception as e:
-            logger.warning("booking %s: skip (timezone conversion failed): %s", b.id, e)
-            continue
-
-        # Проверяем, является ли запись прошедшей в часовом поясе мастера
-        if start_time_in_master_tz > current_time_in_master_tz:
+        if booking_starts_after(b):
             future_count += 1
             continue  # Пропускаем записи, которые еще не наступили в часовом поясе мастера
 
@@ -544,6 +532,11 @@ def get_available_slots_for_booking(
             exclude_booking_id=booking.id,
         )
         
+        zone_name = owner_time_zone(
+            db,
+            master_id=booking.master_id,
+            indie_master_id=None if booking.master_id else booking.indie_master_id,
+        )
         # Фильтруем слоты, исключая текущее время записи
         filtered_slots = []
         for slot in available_slots:
@@ -552,10 +545,13 @@ def get_available_slots_for_booking(
             if isinstance(slot_start, datetime):
                 # Исключаем слот, который совпадает с текущим временем записи
                 if abs((slot_start - booking.start_time).total_seconds()) > 300:  # 5 минут разницы
+                    # start_time stays naive master wall: deployed web builds read it
+                    # through the browser zone. New clients send start_at/end_at.
                     filtered_slots.append({
                         'start_time': slot_start.isoformat(),
                         'end_time': slot['end_time'].isoformat(),
-                        'formatted_time': slot_start.strftime('%H:%M')
+                        'formatted_time': slot_start.strftime('%H:%M'),
+                        **slot_instant_fields(slot_start, slot['end_time'], zone_name),
                     })
             else:
                 # Если slot_start уже строка, конвертируем её в datetime для сравнения
@@ -638,6 +634,11 @@ def _calendar_attachment_basename(booking: Booking) -> str:
 
 def _check_booking_future_and_tz(booking, master_tz: str) -> None:
     """Raise 400 if booking is past or master has no timezone."""
+    if not str(master_tz or "").strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Мастер не настроил часовой пояс. Добавление в календарь недоступно.",
+        )
     # Master without timezone: check directly
     if booking.master and (not getattr(booking.master, "timezone", None) or not str(booking.master.timezone).strip()):
         raise HTTPException(
@@ -649,10 +650,7 @@ def _check_booking_future_and_tz(booking, master_tz: str) -> None:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Мастер не настроил часовой пояс. Добавление в календарь недоступно.",
         )
-    now_in_tz = get_current_time_in_timezone(master_tz)
-    start_utc = ensure_utc_aware(booking.start_time)
-    start_local = start_utc.astimezone(pytz.timezone(master_tz))
-    if start_local <= now_in_tz:
+    if not booking_starts_after(booking):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Добавить в календарь можно только будущие записи.",
@@ -928,14 +926,26 @@ def create_booking(
         conflict_owner_type, conflict_owner_id = OwnerType.SALON, booking_in.salon_id
     else:
         raise HTTPException(status_code=400, detail="master_id or indie_master_id required")
-    if check_booking_conflicts(
-        db,
-        booking_in.start_time,
-        booking_in.end_time,
-        conflict_owner_type,
-        conflict_owner_id,
-    ):
-        raise booking_slot_conflict()
+    admission = None
+    time_columns = {}
+    if unified_admission_enabled():
+        admission = admit_booking_request(
+            db,
+            start=booking_in.start_time,
+            end=booking_in.end_time,
+            master_id=booking_in.master_id,
+            indie_master_id=None if booking_in.master_id else booking_in.indie_master_id,
+        )
+    else:
+        start, end, time_columns = legacy_request_times(
+            db,
+            booking_in.start_time,
+            booking_in.end_time,
+            master_id=booking_in.master_id,
+            indie_master_id=None if booking_in.master_id else booking_in.indie_master_id,
+        )
+        if check_booking_conflicts(db, start, end, conflict_owner_type, conflict_owner_id):
+            raise booking_slot_conflict()
 
     ios_free = is_ios_free_surface(client_surface, current_user)
 
@@ -1029,6 +1039,11 @@ def create_booking(
 
     from utils.booking_limit_guard import enforce_booking_creation_limit
     enforce_booking_creation_limit(db, booking_data, client_surface=client_surface)
+    if admission is not None:
+        booking_data.update(online_booking_metadata(admission, current_user.id))
+    else:
+        booking_data.update(online_origin_metadata(current_user.id))
+        booking_data.update(time_columns)
     booking = Booking(**booking_data)
     db.add(booking)
     db.flush()
@@ -1066,13 +1081,16 @@ def update_booking(
     """
     Обновление существующего бронирования.
     """
+    unified = unified_admission_enabled()
+    if unified:
+        reserve_booking_writer(db)
     booking = (
         db.query(Booking)
         .filter(Booking.id == booking_id, Booking.client_id == current_user.id)
         .first()
     )
 
-    if not booking:
+    if not booking or getattr(booking, "source", None) == "manual":
         raise HTTPException(status_code=404, detail="Booking not found")
 
     if booking.status == BookingStatus.CANCELLED:
@@ -1104,9 +1122,20 @@ def update_booking(
         if "end_time" not in updates:
             updates["end_time"] = new_end
 
+    if unified:
+        admission = admit_booking_update(db, booking, updates)
+    elif booking_in.start_time:
         master_id = updates.get("master_id", booking.master_id)
         indie_id = updates.get("indie_master_id", booking.indie_master_id)
         salon_id = updates.get("salon_id", booking.salon_id)
+        new_start, new_end, time_columns = legacy_request_times(
+            db,
+            new_start,
+            new_end,
+            master_id=master_id,
+            indie_master_id=None if master_id else indie_id,
+        )
+        updates.update(time_columns)
         if master_id is not None:
             owner_type, owner_id = OwnerType.MASTER, master_id
         elif indie_id is not None:
@@ -1130,6 +1159,8 @@ def update_booking(
     old_status = booking.status
     for field, value in updates.items():
         setattr(booking, field, value)
+    if unified:
+        mark_booking_mutated(booking, admission)
 
     from services.notification_events import record_booking_mutation_side_effects
     record_booking_mutation_side_effects(
@@ -1176,7 +1207,7 @@ def cancel_booking(
         .first()
     )
 
-    if not booking:
+    if not booking or getattr(booking, "source", None) == "manual":
         raise HTTPException(status_code=404, detail="Booking not found")
 
     if booking.status == BookingStatus.CANCELLED:
@@ -1206,6 +1237,9 @@ def create_temporary_booking(
     Создание временной брони на период оплаты (20 минут).
     Используется когда требуется предоплата.
     """
+    unified = unified_admission_enabled()
+    if unified:
+        reserve_booking_writer(db)
     from utils.client_restrictions import check_client_restrictions
     
     master = db.query(Master).filter(Master.id == booking_in.master_id).first()
@@ -1247,25 +1281,37 @@ def create_temporary_booking(
             detail="Мастер не принимает онлайн оплату"
         )
     
-    # Проверяем конфликты временных броней
-    existing_temporary = db.query(TemporaryBooking).filter(
-        TemporaryBooking.master_id == booking_in.master_id,
-        TemporaryBooking.start_time == booking_in.start_time,
-        TemporaryBooking.status == 'pending'
-    ).first()
-    
-    if existing_temporary:
-        raise HTTPException(status_code=400, detail="Это время уже забронировано")
-    
-    # Проверяем конфликты обычных броней
-    existing_booking = db.query(Booking).filter(
-        Booking.master_id == booking_in.master_id,
-        Booking.start_time == booking_in.start_time,
-        Booking.status != BookingStatus.CANCELLED
-    ).first()
-    
-    if existing_booking:
-        raise HTTPException(status_code=400, detail="Это время уже забронировано")
+    hold_time_columns = {}
+    if unified:
+        hold_time_columns = admit_booking_request(
+            db,
+            start=booking_in.start_time,
+            end=booking_in.end_time,
+            master_id=booking_in.master_id,
+        ).time_columns()
+    else:
+        hold_start, _, hold_time_columns = legacy_request_times(
+            db, booking_in.start_time, booking_in.end_time, master_id=booking_in.master_id
+        )
+        # Проверяем конфликты временных броней
+        existing_temporary = db.query(TemporaryBooking).filter(
+            TemporaryBooking.master_id == booking_in.master_id,
+            TemporaryBooking.start_time == hold_start,
+            TemporaryBooking.status == 'pending'
+        ).first()
+
+        if existing_temporary:
+            raise HTTPException(status_code=400, detail="Это время уже забронировано")
+
+        # Проверяем конфликты обычных броней
+        existing_booking = db.query(Booking).filter(
+            Booking.master_id == booking_in.master_id,
+            Booking.start_time == hold_start,
+            Booking.status != BookingStatus.CANCELLED
+        ).first()
+
+        if existing_booking:
+            raise HTTPException(status_code=400, detail="Это время уже забронировано")
     
     # Вычисляем время истечения (20 минут от создания)
     expires_at = datetime.utcnow() + timedelta(minutes=20)
@@ -1311,6 +1357,8 @@ def create_temporary_booking(
         fixed_discount_percent=fixed_percent,
         fixed_discount_amount=fixed_amount,
     )
+    for key, value in hold_time_columns.items():
+        setattr(temporary_booking, key, value)
     
     db.add(temporary_booking)
     db.commit()
@@ -1379,7 +1427,10 @@ def confirm_temporary_booking_payment(
         )
     except BookingOwnerError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-    if check_booking_conflicts(
+    admission = None
+    if unified_admission_enabled():
+        admission = admit_hold_promotion(db, temporary_booking)
+    elif check_booking_conflicts(
         db,
         booking_data["start_time"],
         booking_data["end_time"],
@@ -1389,6 +1440,11 @@ def confirm_temporary_booking_payment(
         raise booking_slot_conflict()
     from utils.booking_limit_guard import enforce_booking_creation_limit
     enforce_booking_creation_limit(db, booking_data, client_surface=client_surface)
+    if admission is not None:
+        booking_data.update(online_booking_metadata(admission, current_user.id))
+    else:
+        booking_data.update(online_origin_metadata(current_user.id))
+        booking_data.update(hold_time_columns(temporary_booking))
     booking = Booking(**booking_data)
     db.add(booking)
     db.flush()
@@ -1438,8 +1494,13 @@ def get_temporary_booking_status(
     
     # Проверяем, не истекло ли время
     if temporary_booking.status == 'pending' and datetime.utcnow() > temporary_booking.expires_at:
-        temporary_booking.status = 'expired'
-        db.commit()
+        if unified_admission_enabled():
+            expire_pending_holds(db, [temporary_booking.id])
+            db.commit()
+            db.refresh(temporary_booking)
+        else:
+            temporary_booking.status = 'expired'
+            db.commit()
     
     return temporary_booking
 
@@ -2089,17 +2150,7 @@ def get_client_dashboard_stats(
                     )
                 logger.warning("booking %s: skip in stats (master timezone empty)", booking.id)
                 continue
-            current_time_in_master_tz = get_current_time_in_timezone(master_timezone)
-
-            # Приводим start_time к часовому поясу мастера для корректного сравнения
-            if booking.start_time.tzinfo is None:
-                # Если start_time не имеет часового пояса, считаем что это UTC
-                start_time_in_master_tz = pytz.UTC.localize(booking.start_time).astimezone(pytz.timezone(master_timezone))
-            else:
-                start_time_in_master_tz = booking.start_time.astimezone(pytz.timezone(master_timezone))
-
-            # Проверяем, является ли запись прошедшей в часовом поясе мастера
-            if start_time_in_master_tz <= current_time_in_master_tz:
+            if not booking_starts_after(booking):
                 past_bookings_count += 1
         
         # Будущие записи - записи, которые еще не прошли по времени
@@ -2129,17 +2180,7 @@ def get_client_dashboard_stats(
                     )
                 logger.warning("booking %s: skip in stats (master timezone empty)", booking.id)
                 continue
-            current_time_in_master_tz = get_current_time_in_timezone(master_timezone)
-
-            # Приводим start_time к часовому поясу мастера для корректного сравнения
-            if booking.start_time.tzinfo is None:
-                # Если start_time не имеет часового пояса, считаем что это UTC
-                start_time_in_master_tz = pytz.UTC.localize(booking.start_time).astimezone(pytz.timezone(master_timezone))
-            else:
-                start_time_in_master_tz = booking.start_time.astimezone(pytz.timezone(master_timezone))
-
-            # Проверяем, является ли запись будущей в часовом поясе мастера
-            if start_time_in_master_tz > current_time_in_master_tz:
+            if booking_starts_after(booking):
                 future_bookings_count += 1
 
         # Топ салонов по частоте записи

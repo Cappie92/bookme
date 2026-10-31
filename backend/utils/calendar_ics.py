@@ -20,12 +20,37 @@ def ensure_utc_aware(dt: datetime) -> datetime:
     return dt.astimezone(pytz.UTC)
 
 
+def _proven_utc_bounds(booking) -> Optional[tuple[datetime, datetime]]:
+    """Absolute instants when the canonical triple is present. Otherwise None."""
+    zone = getattr(booking, "time_zone", None)
+    start_us = getattr(booking, "start_utc_us", None)
+    end_us = getattr(booking, "end_utc_us", None)
+    if (
+        not isinstance(zone, str)
+        or not zone.strip()
+        or isinstance(start_us, bool)
+        or not isinstance(start_us, int)
+        or isinstance(end_us, bool)
+        or not isinstance(end_us, int)
+    ):
+        return None
+    from services.calendar_time import CanonicalInstant
+
+    return (
+        CanonicalInstant(int(start_us)).to_datetime().astimezone(pytz.UTC),
+        CanonicalInstant(int(end_us)).to_datetime().astimezone(pytz.UTC),
+    )
+
+
 def booking_start_end_utc(booking, master_tz: str) -> tuple[datetime, datetime]:
     """
-    UTC-моменты начала/конца записи — та же интерпретация, что в ICS:
-    naive в БД = локальное «настенное» время мастера в master_tz.
-    Для ссылок Google Calendar (dates=…Z) нужны эти же UTC, а не ensure_utc_aware(naive→UTC).
+    UTC-моменты начала/конца записи — та же интерпретация, что в ICS.
+    Доказанный canonical берётся из start_utc_us/end_utc_us.
+    Без него naive в БД остаётся стеной мастера в master_tz, не UTC.
     """
+    proven = _proven_utc_bounds(booking)
+    if proven is not None:
+        return proven
     return (
         _booking_datetime_to_utc(booking.start_time, master_tz),
         _booking_datetime_to_utc(booking.end_time, master_tz),
@@ -64,9 +89,7 @@ def build_booking_ics(
     DTSTART/DTEND в UTC (суффикс Z).
     UID: booking-{id}@dedato
     """
-    # Naive datetime в БД — локальное время мастера в master_tz, не UTC.
-    start_utc = _booking_datetime_to_utc(booking.start_time, master_tz)
-    end_utc = _booking_datetime_to_utc(booking.end_time, master_tz)
+    start_utc, end_utc = booking_start_end_utc(booking, master_tz)
 
     service_name = getattr(booking.service, "name", None) or "-"
     master_name = "-"

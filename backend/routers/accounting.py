@@ -19,10 +19,16 @@ from models import (
     Service, BookingStatus, TaxRate, MasterClientMetadata
 )
 from auth import get_current_active_user
+from utils.booking_access import reject_legacy_manual_mutation
 from utils.booking_loyalty_reserve import clear_loyalty_points_reserve
 from utils.client_display_name import get_client_display_name, get_meta_for_client, strip_indie_service_prefix
 from utils.subscription_features import has_finance_access
 from utils.booking_real_money import booking_amount_to_pay, booking_money_api_fields, booking_real_money_sql
+from utils.master_future_bookings_query import (
+    booking_starts_after,
+    booking_starts_before,
+    start_before_now,
+)
 
 router = APIRouter(prefix="/api/master/accounting", tags=["accounting"])
 
@@ -51,13 +57,22 @@ def _is_future_pre_visit_to_confirmed(new_status: str, booking: Booking) -> bool
     """
     if new_status != "confirmed":
         return False
-    now_u = datetime.utcnow()
-    if booking.start_time <= now_u:
+    if not booking_starts_after(booking):
         return False
     return _booking_status_str(booking).lower() in ("created", "awaiting_confirmation")
 
 
 logger = logging.getLogger(__name__)
+
+_STATUS_BY_ACTION = {
+    "created": BookingStatus.CREATED,
+    "confirmed": BookingStatus.CONFIRMED,
+    "awaiting_confirmation": BookingStatus.AWAITING_CONFIRMATION,
+    "completed": BookingStatus.COMPLETED,
+    "cancelled": BookingStatus.CANCELLED,
+    "client_requested_early": BookingStatus.CANCELLED_BY_CLIENT_EARLY,
+    "client_requested_late": BookingStatus.CANCELLED_BY_CLIENT_LATE,
+}
 
 
 @router.post("/update-booking-status/{booking_id}")
@@ -75,6 +90,16 @@ async def update_booking_status(
     - Если переводим из completed в другой: удаляем BookingConfirmation и связанные доходы
     - Для cancelled: просто меняем статус
     """
+    from services.booking_admission import (
+        admit_booking_update,
+        mark_booking_mutated,
+        reserve_booking_writer,
+        unified_admission_enabled,
+    )
+
+    unified = unified_admission_enabled()
+    if unified:
+        reserve_booking_writer(db)
     try:
         # IMPORTANT:
         # - Booking.master_id / indie_master_id — проверка владения (салон / инди)
@@ -89,6 +114,8 @@ async def update_booking_status(
         ).first()
         if not booking:
             raise HTTPException(status_code=404, detail="Бронирование не найдено")
+        if getattr(booking, "source", None) == "manual" and new_status != "completed":
+            raise HTTPException(status_code=404, detail="Бронирование не найдено")
 
         # Ручное подтверждение будущей записи — часть booking workflow, не «Финансы».
         if not _is_future_pre_visit_to_confirmed(new_status, booking):
@@ -98,7 +125,7 @@ async def update_booking_status(
         if new_status == "confirmed":
             now_u = datetime.utcnow()
             st = _booking_status_str(booking).lower()
-            if booking.start_time > now_u and st in ("created", "awaiting_confirmation"):
+            if booking_starts_after(booking, now_u) and st in ("created", "awaiting_confirmation"):
                 master_row = db.query(Master).filter(Master.user_id == current_user.id).first()
                 if not master_row:
                     raise HTTPException(
@@ -117,7 +144,7 @@ async def update_booking_status(
 
         # awaiting_confirmation — только для post-visit (прошлые записи).
         # Для будущих записей запрещено выставлять awaiting_confirmation.
-        if new_status == "awaiting_confirmation" and booking.start_time > datetime.utcnow():
+        if new_status == "awaiting_confirmation" and booking_starts_after(booking):
             raise HTTPException(
                 status_code=400,
                 detail="Статус 'На подтверждение' применим только к прошедшим записям. Для будущих используйте 'confirmed'.",
@@ -131,6 +158,11 @@ async def update_booking_status(
             )
 
         old_status = booking.status
+        admission = None
+        if unified:
+            admission = admit_booking_update(
+                db, booking, {"status": _STATUS_BY_ACTION[new_status].value}
+            )
 
         # Очистка подтверждений/доходов, если уходим из completed
         if booking.status == BookingStatus.COMPLETED and new_status != "completed":
@@ -178,6 +210,9 @@ async def update_booking_status(
                 )
             except ValueError as ve:
                 raise HTTPException(status_code=400, detail=str(ve)) from ve
+
+        if unified and getattr(booking, "source", None) != "manual":
+            mark_booking_mutated(booking, admission)
 
         from services.notification_events import is_cancel_status, record_booking_cancelled_notification
         if is_cancel_status(booking.status) and not is_cancel_status(old_status):
@@ -243,6 +278,8 @@ def auto_confirm_awaiting_on_manual_switch(db: Session, user_id: int) -> int:
 
     confirmed_count = 0
     for booking in pending_bookings:
+        if getattr(booking, "source", None) == "manual":
+            continue
         confirmation = BookingConfirmation(
             booking_id=booking.id,
             master_id=master_user_id,
@@ -863,7 +900,7 @@ async def get_pending_confirmations(
                 ]
             ),
             BookingConfirmation.id == None,  # Без подтверждения
-            Booking.start_time < now_utc,  # POST-visit: только прошедшие
+            start_before_now(now_utc),  # POST-visit: только прошедшие
         ]
         # manual_confirm_enabled_at: показывать только записи, созданные после включения ручного режима
         manual_at = getattr(master, "manual_confirm_enabled_at", None) if master else None
@@ -900,7 +937,7 @@ async def get_pending_confirmations(
             })
             logger.info(
                 f"[pending-confirmations] master={current_user.id} booking_id={booking.id} "
-                f"start_time={booking.start_time} status={booking.status} is_past={booking.start_time < now_utc}"
+                f"start_time={booking.start_time} status={booking.status} is_past={booking_starts_before(booking, now_utc)}"
             )
         
         logger.info(f"Найдено {len(result)} услуг на подтверждение для мастера {current_user.id}")
@@ -955,7 +992,7 @@ async def confirm_booking(
             raise HTTPException(status_code=404, detail="Бронирование не найдено или не может быть подтверждено")
         
         # Будущие записи нельзя подтверждать
-        if booking.start_time > datetime.utcnow():
+        if booking_starts_after(booking):
             raise HTTPException(
                 status_code=400,
                 detail="Нельзя подтвердить будущую запись. Подтверждение доступно после времени начала.",
@@ -1023,7 +1060,7 @@ async def confirm_all_bookings(
             owner_cond,
             Booking.status == BookingStatus.AWAITING_CONFIRMATION,
             BookingConfirmation.id == None,
-            Booking.start_time < now_utc,
+            start_before_now(now_utc),
         ).all()
 
         from services.booking_visit_finalize import finalize_post_visit_booking
@@ -1078,6 +1115,7 @@ async def cancel_booking(
         
         if not booking:
             raise HTTPException(status_code=404, detail="Бронирование не найдено или не может быть отклонено")
+        reject_legacy_manual_mutation(booking)
         
         # Проверяем, не подтверждено ли уже
         existing_confirmation = db.query(BookingConfirmation).filter(
@@ -1138,6 +1176,8 @@ async def cancel_all_bookings(
         cancelled_count = 0
         from services.notification_events import record_booking_cancelled_notification
         for booking in pending_bookings:
+            if getattr(booking, "source", None) == "manual":
+                continue
             booking.status = BookingStatus.CANCELLED
             clear_loyalty_points_reserve(booking)
             record_booking_cancelled_notification(db, booking, actor_user_id=current_user.id)

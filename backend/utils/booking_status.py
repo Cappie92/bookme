@@ -2,11 +2,12 @@
 Утилиты для работы со статусами бронирований.
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 
 from sqlalchemy.orm import Session
 from models import Booking, BookingStatus
+from utils.master_future_bookings_query import booking_start_elapsed, booking_starts_after, booking_starts_before
 
 if TYPE_CHECKING:
     from models import Master
@@ -32,7 +33,7 @@ def get_effective_booking_status(booking: Booking, db: Session, now: Optional[da
         Effective статус (локальная переменная, объект не изменяется)
     """
     current_time = now or datetime.utcnow()
-    is_future = booking.start_time > current_time
+    is_future = booking_starts_after(booking, current_time)
 
     # Legacy: будущая запись с awaiting_confirmation в БД — трактуем как confirmed.
     # "На подтверждение" только для post-visit (прошлые записи).
@@ -44,8 +45,7 @@ def get_effective_booking_status(booking: Booking, db: Session, now: Optional[da
         return booking.status
 
     # CREATED: только для прошлых — переводим в awaiting_confirmation (needs outcome)
-    transition_time = booking.start_time + timedelta(minutes=1)
-    if current_time >= transition_time:
+    if booking_start_elapsed(booking, current_time, minutes=1):
         return BookingStatus.AWAITING_CONFIRMATION
     return BookingStatus.CREATED
 
@@ -68,7 +68,7 @@ def is_post_visit_outcome_pending_for_past_list(
     if master.auto_confirm_bookings is True:
         return False
     t = now or datetime.utcnow()
-    if booking.start_time >= t:
+    if not booking_starts_before(booking, t):
         return False
     eff = get_effective_booking_status(booking, db, now)
     return eff in (

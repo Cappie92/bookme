@@ -15,7 +15,7 @@ from datetime import datetime
 from typing import Optional
 
 import pytz
-from sqlalchemy import delete, or_
+from sqlalchemy import delete, or_, select
 from sqlalchemy.orm import Session
 
 from models import (
@@ -23,6 +23,7 @@ from models import (
     AvailabilitySlot,
     Booking,
     BookingStatus,
+    CalendarBlock,
     ClientFavorite,
     ClientMasterNote,
     ClientNote,
@@ -303,6 +304,16 @@ def _deactivate_master_services(db: Session, master_id: int, indie_master_id: Op
             svc.description = None
 
 
+def _delete_local_contacts(db: Session, condition) -> None:
+    # SQLite runs without FK enforcement and may reuse a freed rowid, so a
+    # booking must never keep pointing at a deleted local contact.
+    contact_ids = select(MasterClientMetadata.id).where(condition)
+    db.query(Booking).filter(Booking.master_client_metadata_id.in_(contact_ids)).update(
+        {Booking.master_client_metadata_id: None}, synchronize_session=False
+    )
+    db.query(MasterClientMetadata).filter(condition).delete(synchronize_session=False)
+
+
 def _delete_master_crm_and_loyalty(
     db: Session, master_id: int, indie_master_id: Optional[int] = None
 ) -> None:
@@ -340,7 +351,8 @@ def _delete_master_crm_and_loyalty(
     db.query(ClientRestrictionRule).filter(ClientRestrictionRule.master_id == master_id).delete(
         synchronize_session=False
     )
-    db.query(MasterClientMetadata).filter(MasterClientMetadata.master_id == master_id).delete(
+    _delete_local_contacts(db, MasterClientMetadata.master_id == master_id)
+    db.query(CalendarBlock).filter(CalendarBlock.master_id == master_id).delete(
         synchronize_session=False
     )
     db.query(ClientMasterNote).filter(ClientMasterNote.master_id == master_id).delete(
@@ -488,9 +500,7 @@ def _delete_client_phone_keyed(db: Session, phone: Optional[str]) -> None:
     db.query(ClientRestriction).filter(ClientRestriction.client_phone == phone).delete(
         synchronize_session=False
     )
-    db.query(MasterClientMetadata).filter(MasterClientMetadata.client_phone == phone).delete(
-        synchronize_session=False
-    )
+    _delete_local_contacts(db, MasterClientMetadata.client_phone == phone)
     db.query(ClientNote).filter(ClientNote.client_phone == phone).delete(
         synchronize_session=False
     )

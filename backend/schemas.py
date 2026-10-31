@@ -416,7 +416,7 @@ class Booking(BaseModel):
     id: int
     public_reference: Optional[str] = None
     client_id: Optional[int] = None
-    service_id: int
+    service_id: Optional[int] = None
     master_id: Optional[int] = None
     indie_master_id: Optional[int] = None
     salon_id: Optional[int] = None
@@ -709,6 +709,13 @@ class AvailableSlotOut(BaseModel):
     """Один доступный слот для бронирования (start/end — datetime в API)."""
     start_time: datetime
     end_time: datetime
+
+
+class TimedAvailableSlotOut(AvailableSlotOut):
+    """Слот с naive start/end (время мастера) и offset-aware start_at/end_at."""
+    start_at: Optional[str] = None
+    end_at: Optional[str] = None
+    time_zone: Optional[str] = None
 
 
 class DomainSubdomainInfoOut(BaseModel):

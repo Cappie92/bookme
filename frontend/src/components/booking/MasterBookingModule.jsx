@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { CalendarIcon, ClockIcon, TagIcon, ExclamationTriangleIcon } from '@heroicons/react/24/outline'
 import { apiGet, apiPost } from '../../utils/api'
 import { dateToISOString, formatTime, getMinDate, getSelectedCity } from '../../utils/dateUtils'
+import { bookingSlotChoice, formatLocalDate } from '../../utils/scheduleDates'
 import { useToast } from '../../contexts/ToastContext'
 import {
   cancelPublicBookingVerification,
@@ -39,6 +40,7 @@ export default function MasterBookingModule({
   
   const [services, setServices] = useState([])
   const [availableSlots, setAvailableSlots] = useState([])
+  const [selectedSlot, setSelectedSlot] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
@@ -269,10 +271,7 @@ export default function MasterBookingModule({
       if (response.ok) {
         const data = await response.json()
         const slots = slug ? (data.slots || []) : data
-        const timeSlots = slots.map(slot => {
-          const startTime = new Date(slot.start_time)
-          return startTime.toTimeString().slice(0, 5)
-        })
+        const timeSlots = slots.map(bookingSlotChoice).filter(Boolean)
         
         setAvailableSlots(timeSlots)
       } else {
@@ -294,7 +293,7 @@ export default function MasterBookingModule({
       for (let i = 0; i < 30; i++) {
         const date = new Date(today)
         date.setDate(today.getDate() + i)
-        const dateStr = date.toISOString().split('T')[0]
+        const dateStr = formatLocalDate(date)
         
         let response
         if (slug) {
@@ -353,6 +352,7 @@ export default function MasterBookingModule({
     }))
     
     setAvailableSlots([])
+    setSelectedSlot(null)
     setFormData(prev => ({
       ...prev,
       time: ''
@@ -368,6 +368,7 @@ export default function MasterBookingModule({
     }))
     
     setAvailableSlots([])
+    setSelectedSlot(null)
     setFormData(prev => ({
       ...prev,
       time: ''
@@ -375,9 +376,10 @@ export default function MasterBookingModule({
   }
   
   const handleTimeSlotSelect = (slot) => {
+    setSelectedSlot(slot)
     setFormData(prev => ({
       ...prev,
-      time: slot
+      time: slot.label
     }))
   }
   
@@ -452,19 +454,16 @@ export default function MasterBookingModule({
   }
   
   const createBooking = async (clientPhone = null) => {
-    const [hours, minutes] = formData.time.split(':')
-    const startTimeStr = `${formData.date}T${hours.padStart(2, '0')}:${minutes.padStart(2, '0')}:00`
-    const startTime = new Date(startTimeStr)
-    
-    const endTime = new Date(startTime)
-    endTime.setMinutes(endTime.getMinutes() + selectedService.duration)
-    
+    if (!selectedSlot) {
+      throw new Error('Некорректное время записи')
+    }
+
     let response
     if (slug && currentUser) {
       const publicBody = {
         service_id: parseInt(formData.service_id),
-        start_time: startTime.toISOString(),
-        end_time: endTime.toISOString(),
+        start_time: selectedSlot.start_time,
+        end_time: selectedSlot.end_time,
       }
       response = await fetch(`/api/public/masters/${slug}/bookings`, {
         method: 'POST',
@@ -480,8 +479,8 @@ export default function MasterBookingModule({
         master_id: ownerType === 'indie_master' ? null : parseInt(masterId),
         indie_master_id: ownerType === 'indie_master' ? parseInt(masterId) : null,
         salon_id: null,
-        start_time: startTime.toISOString(),
-        end_time: endTime.toISOString(),
+        start_time: selectedSlot.start_time,
+        end_time: selectedSlot.end_time,
         notes: formData.notes,
         use_loyalty_points: useLoyaltyPoints && isLoyaltyEnabled && availablePoints > 0,
         client_name: currentUser?.full_name || currentUser?.phone || 'Клиент',
@@ -852,12 +851,12 @@ export default function MasterBookingModule({
                     data-testid={index === 0 ? 'slot-time-first' : undefined}
                     onClick={() => handleTimeSlotSelect(slot)}
                     className={`p-3 text-sm border rounded-lg transition-colors ${
-                      formData.time === slot
+                      formData.time === slot.label
                         ? 'bg-[#4CAF50] text-white border-[#4CAF50]'
                         : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
                     }`}
                   >
-                    {formatTime(slot)}
+                    {formatTime(slot.label)}
                   </button>
                 ))}
               </div>

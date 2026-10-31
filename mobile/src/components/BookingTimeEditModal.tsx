@@ -163,8 +163,8 @@ export function BookingTimeEditModal({
     setUpdating(true);
     try {
       await updateBooking(bookingId, {
-        start_time: selectedSlot.start_time,
-        end_time: selectedSlot.end_time,
+        start_time: selectedSlot.start_at || selectedSlot.start_time,
+        end_time: selectedSlot.end_at || selectedSlot.end_time,
       }, actor);
       
       Alert.alert('Успешно', 'Время бронирования изменено');

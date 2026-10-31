@@ -26,9 +26,11 @@ import {
   formatLocalDate,
   localCalendarDateStringsForMonth,
   rescheduleCalendarDate,
+  rescheduleSlotSelection,
   rescheduleSlotsHeading,
   timeEditAvailableDateSet as buildTimeEditAvailableDateSet,
 } from '../utils/scheduleDates'
+import { formatTimeShort } from '../utils/dateFormat'
 
 // Вспомогательные функции
 function formatDate(dateStr) {
@@ -211,6 +213,7 @@ export default function ClientDashboard() {
   })
   const [showTimeEditModal, setShowTimeEditModal] = useState(false)
   const [newDateTime, setNewDateTime] = useState('')
+  const [rescheduleSelection, setRescheduleSelection] = useState(null)
   const [timeEditLoading, setTimeEditLoading] = useState(false)
   const [availableSlots, setAvailableSlots] = useState([])
   const [slotsLoading, setSlotsLoading] = useState(false)
@@ -1131,6 +1134,7 @@ export default function ClientDashboard() {
     const dateOnly = calendarDateFromValue(date)
     setSelectedDate(dateOnly)
     setNewDateTime('')
+    setRescheduleSelection(null)
     
     // Показываем загрузку для конкретной даты
     setLoadingDates(prev => new Set(prev).add(dateOnly))
@@ -1148,14 +1152,9 @@ export default function ClientDashboard() {
   }
 
   const handleSlotSelect = (slot) => {
-    const slotDate = new Date(slot.start_time)
-    const year = slotDate.getFullYear()
-    const month = String(slotDate.getMonth() + 1).padStart(2, '0')
-    const day = String(slotDate.getDate()).padStart(2, '0')
-    const hours = String(slotDate.getHours()).padStart(2, '0')
-    const minutes = String(slotDate.getMinutes()).padStart(2, '0')
-    
-    setNewDateTime(`${year}-${month}-${day}T${hours}:${minutes}`)
+    const selection = rescheduleSlotSelection(slot)
+    setRescheduleSelection(selection)
+    setNewDateTime(selection.wall)
   }
 
   const handleTimeEditConfirm = async () => {
@@ -1167,9 +1166,11 @@ export default function ClientDashboard() {
       const response = await apiFetch(`/api/client/bookings/${selectedBooking.id}`, {
         method: 'PUT',
         headers: getAuthHeaders(),
-        body: JSON.stringify({
-          start_time: newDateTime
-        })
+        body: JSON.stringify(
+          rescheduleSelection?.wall === newDateTime
+            ? rescheduleSelection.payload
+            : { start_time: newDateTime }
+        )
       })
       
       if (response.ok) {
@@ -1184,6 +1185,7 @@ export default function ClientDashboard() {
         setShowEditBookingModal(false)
         setSelectedBooking(null)
         setNewDateTime('')
+        setRescheduleSelection(null)
         setSelectedDate('')
         setAvailableSlots([])
         setDateAvailability({})
@@ -2187,6 +2189,7 @@ export default function ClientDashboard() {
                   setDateAvailability({})
                   setSelectedDate('')
                   setNewDateTime('')
+                  setRescheduleSelection(null)
                   setAvailableSlots([])
                 }}
               />
@@ -2275,7 +2278,7 @@ export default function ClientDashboard() {
                       >
                         <div className="font-medium text-sm">{slot.formatted_time}</div>
                         <div className="text-xs text-gray-500">
-                          {new Date(slot.end_time).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
+                          {formatTimeShort(slot.end_time)}
                         </div>
                       </button>
                     ))}
@@ -2308,6 +2311,7 @@ export default function ClientDashboard() {
                   setDateAvailability({})
                   setSelectedDate('')
                   setNewDateTime('')
+                  setRescheduleSelection(null)
                   setAvailableSlots([])
                   setLoadingDates(new Set())
                   setShowCalendar(false)

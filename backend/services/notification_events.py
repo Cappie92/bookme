@@ -172,12 +172,18 @@ def _create_and_fanout(
     return row, created
 
 
+def _manual_booking(booking: Booking) -> bool:
+    return getattr(booking, "source", None) == "manual"
+
+
 def record_booking_created_notification(
     db: Session,
     booking: Booking,
     *,
     actor_user_id: Optional[int],
 ) -> Optional[tuple[Any, bool]]:
+    if _manual_booking(booking):
+        return None
     recipient = recipient_user_id(db, booking)
     if not _should_notify(recipient, actor_user_id) or not booking.id:
         return None
@@ -209,6 +215,8 @@ def record_booking_cancelled_notification(
     actor_user_id: Optional[int],
     schedule_start: Optional[datetime] = None,
 ) -> Optional[tuple[Any, bool]]:
+    if _manual_booking(booking):
+        return None
     recipient = recipient_user_id(db, booking)
     if not _should_notify(recipient, actor_user_id) or not booking.id:
         return None
@@ -242,6 +250,8 @@ def record_booking_rescheduled_notification(
     old_start: Optional[datetime],
     new_start: Optional[datetime] = None,
 ) -> Optional[tuple[Any, bool]]:
+    if _manual_booking(booking):
+        return None
     recipient = recipient_user_id(db, booking)
     if not _should_notify(recipient, actor_user_id) or not booking.id:
         return None

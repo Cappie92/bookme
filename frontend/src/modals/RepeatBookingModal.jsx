@@ -3,6 +3,7 @@ import { XMarkIcon, UserIcon, TagIcon, CalendarIcon } from '@heroicons/react/24/
 import { apiGet, apiRequest } from '../utils/api'
 import { CalendarGrid } from '../components/booking/PublicBookingCalendarGrid'
 import { useModal } from '../hooks/useModal'
+import { formatTimeShort } from '../utils/dateFormat'
 import {
   bookingLikeFromSuccess,
   downloadClientBookingIcsFile,
@@ -569,8 +570,8 @@ export default function RepeatBookingModal({
         service_id: booking.service_id,
         master_id: masterIdForCreate,
         indie_master_id: indieMasterIdForCreate,
-        start_time: selectedSlot.start_time,
-        end_time: selectedSlot.end_time,
+        start_time: selectedSlot.start_at || selectedSlot.start_time,
+        end_time: selectedSlot.end_at || selectedSlot.end_time,
         client_name: clientName,
         service_name: serviceNameForCreate,
         service_duration: Number(serviceDurationForCreate),
@@ -784,7 +785,7 @@ export default function RepeatBookingModal({
                   </label>
                   {selectedDate && (
                     <span className="text-xs text-gray-500 tabular-nums">
-                      {new Date(selectedDate).toLocaleDateString('ru-RU', {
+                      {new Date(`${selectedDate}T00:00:00`).toLocaleDateString('ru-RU', {
                         year: 'numeric',
                         month: 'long',
                         day: 'numeric',
@@ -820,18 +821,7 @@ export default function RepeatBookingModal({
                   </label>
                   <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
                     {availableSlots.map((slot, index) => {
-                      // Извлекаем только время из start_time
-                      let timeDisplay = ''
-                      if (slot.start_time) {
-                        const time = new Date(slot.start_time)
-                        timeDisplay = time.toLocaleTimeString('ru-RU', {
-                          hour: '2-digit',
-                          minute: '2-digit',
-                          hour12: false
-                        })
-                      } else {
-                        timeDisplay = 'Время'
-                      }
+                      const timeDisplay = formatTimeShort(slot.start_time) || 'Время'
 
                       const isActive = selectedSlot?.start_time === slot.start_time
                       return (

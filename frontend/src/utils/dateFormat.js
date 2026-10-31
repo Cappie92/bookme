@@ -23,13 +23,21 @@ export function formatDateShort(value) {
   return `${day}.${month}.${year}`;
 }
 
+const ISO_WALL_TIME = /^\d{4}-\d{2}-\d{2}[T ](\d{2}):(\d{2})/
+
 /**
- * Форматирует время HH:MM
+ * Форматирует время HH:MM.
+ * Для ISO-строки берётся время, записанное в самой строке (время мастера:
+ * naive или со смещением мастера), без перевода в часовой пояс браузера.
  * @param {string|Date} value - ISO-строка или Date
  * @returns {string}
  */
 export function formatTimeShort(value) {
   if (!value) return '';
+  if (typeof value === 'string') {
+    const match = ISO_WALL_TIME.exec(value);
+    if (match) return `${match[1]}:${match[2]}`;
+  }
   const d = typeof value === 'string' ? new Date(value) : value;
   if (Number.isNaN(d.getTime())) return '';
   return d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
