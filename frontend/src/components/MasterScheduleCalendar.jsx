@@ -19,6 +19,8 @@ import { masterZClass } from '../config/masterOverlayZIndex'
 import { isFutureCancelled } from './master/mobile/masterBookingShared'
 import { calculateWeekOffset, getMonthName, getWeekDates } from '../utils/calendarUtils'
 import MonthOverviewCalendar from './MonthOverviewCalendar'
+import CalendarB3Composer from './master/CalendarB3Composer'
+import { categoryLabel, clipStartsInSlot, dayClipMinutes, listCalendarBlocks, rememberVersion, wallClock, wallLabel } from '../utils/calendarB3'
 
 /** Tailwind lg — совпадает с Phase 4 booking layer */
 function useIsLgViewport() {
@@ -139,6 +141,9 @@ export default function MasterScheduleCalendar({
   const [scheduleRules, setScheduleRules] = useState(null)
   const [bookings, setBookings] = useState([])
   const [bookingsLoading, setBookingsLoading] = useState(false)
+  const [blocks, setBlocks] = useState([])
+  const [blocksError, setBlocksError] = useState('')
+  const [composer, setComposer] = useState(null)
   const [popupVisible, setPopupVisible] = useState(false)
   const [popupBooking, setPopupBooking] = useState(null)
   const [popupPosition, setPopupPosition] = useState({ x: 0, y: 0 })
@@ -189,11 +194,35 @@ export default function MasterScheduleCalendar({
     setBookingsLoading(true)
     try {
       const data = await apiGet('/api/master/bookings/detailed')
-      setBookings(data)
+      const rows = Array.isArray(data) ? data : []
+      rows.forEach((row) => {
+        if (row?.source === 'manual' && row.version) rememberVersion('booking', row.id, row.version)
+      })
+      setBookings(rows)
+      return rows
     } catch (error) {
       console.error('Ошибка при загрузке записей:', error)
+      return []
     } finally {
       setBookingsLoading(false)
+    }
+  }
+
+  const loadBlocks = async () => {
+    try {
+      const data = await listCalendarBlocks()
+      const rows = Array.isArray(data) ? data : []
+      rows.forEach((row) => {
+        if (row?.id && row.version) rememberVersion('block', row.id, row.version)
+      })
+      const visible = rows.filter((row) => !row.deleted_at)
+      setBlocks(visible)
+      setBlocksError('')
+      return visible
+    } catch (error) {
+      console.error('Ошибка при загрузке блоков:', error)
+      setBlocksError('Не удалось загрузить личные блоки')
+      return []
     }
   }
 
@@ -201,11 +230,13 @@ export default function MasterScheduleCalendar({
   React.useEffect(() => {
     loadScheduleRules()
     loadBookings()
+    loadBlocks()
   }, [])
 
   // Загружаем записи при изменении недели
   React.useEffect(() => {
     loadBookings()
+    loadBlocks()
   }, [currentWeekOffset])
 
   const tableRef = useRef(null)
@@ -236,13 +267,12 @@ export default function MasterScheduleCalendar({
   // Функция для получения записей для конкретного слота
   const getBookingsForSlot = (date, hour, minute) => {
     const dateStr = formatLocalDate(date)
-    const timeStr = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`
-    
-    return bookings.filter(booking => {
-      const bookingDate = formatLocalDate(new Date(booking.start_time))
-      const bookingTime = new Date(booking.start_time).toTimeString().slice(0, 5)
-      return bookingDate === dateStr && bookingTime === timeStr
-    })
+    return bookings.filter((booking) => clipStartsInSlot(dateStr, hour, minute, booking.start_time, booking.end_time))
+  }
+
+  const getBlocksForSlot = (date, hour, minute) => {
+    const dateStr = formatLocalDate(date)
+    return blocks.filter((block) => clipStartsInSlot(dateStr, hour, minute, block.start_time, block.end_time))
   }
 
   // Обработчики для поп-апа (задержка 500ms при уходе курсора)
@@ -308,7 +338,21 @@ export default function MasterScheduleCalendar({
   }, [currentWeekOffset])
 
   /** Те же guards и API, что в AllBookingsModal / Phase 4 (canPreVisit + canConfirmPostVisit + ранний return) */
+  const openManualComposer = (booking) => {
+    setMobileDetailBooking(null)
+    setCancelBookingId(null)
+    setComposer({
+      mode: 'manual',
+      dateStr: wallClock(booking?.start_time)?.date || '',
+      event: booking,
+    })
+  }
+
   const handleMobileConfirm = async (bookingId, booking) => {
+    if (booking?.source === 'manual') {
+      openManualComposer(booking)
+      return
+    }
     const master = masterSettings?.master ?? null
     const b = normalizeBookingForDetail(booking)
     const preVisit = canPreVisitConfirmBooking(b, master, undefined, hasExtendedStats)
@@ -336,6 +380,12 @@ export default function MasterScheduleCalendar({
   }
 
   const handleMobileCancelWithReason = async (bookingId, reason) => {
+    const booking = bookings.find((item) => item.id === bookingId) || mobileDetailBooking
+    if (booking?.source === 'manual') {
+      setCancelBookingId(null)
+      openManualComposer(booking)
+      return
+    }
     setCancelBookingId(null)
     if (!reason) return
     try {
@@ -1781,6 +1831,7 @@ export default function MasterScheduleCalendar({
                     const isSelected = selected.has(slotKey)
                     const timeIndex = hour * 2 + (minute / 30)
                     const slotBookings = getBookingsForSlot(day.date, hour, minute)
+                    const slotBlocks = getBlocksForSlot(day.date, hour, minute)
                     
                     // Определяем цвет ячейки
                     let cellClass = 'h-6 cursor-pointer transition-colors border border-gray-200 relative '
@@ -1813,10 +1864,8 @@ export default function MasterScheduleCalendar({
                       >
                         {/* Отображение записей в виде карточек */}
                         {slotBookings.map((booking, index) => {
-                          const startTime = new Date(booking.start_time)
-                          const endTime = new Date(booking.end_time)
-                          const duration = (endTime - startTime) / (1000 * 60) // в минутах
-                          // 30-мин сетка: 1 ряд = TIMELINE_ROW_HEIGHT_PX (10 мин. была ошибка — визуал в ~3 ряза выше)
+                          const clip = dayClipMinutes(booking.start_time, booking.end_time, formatLocalDate(day.date))
+                          const duration = clip ? clip.endMinute - clip.startMinute : 0
                           const height = Math.max(16, (duration / 30) * TIMELINE_ROW_HEIGHT_PX)
                           
                           return (
@@ -1841,14 +1890,22 @@ export default function MasterScheduleCalendar({
                               onClick={(e) => {
                                 e.stopPropagation()
                                 if (!isLg) {
-                                  openMobileBookingDetail(booking)
+                                  if (booking.source === 'manual') {
+                                    setComposer({ mode: 'manual', dateStr: wallClock(booking.start_time)?.date || formatLocalDate(day.date), event: booking })
+                                  } else {
+                                    openMobileBookingDetail(booking)
+                                  }
                                 }
                               }}
                               onKeyDown={(e) => {
                                 if (!isLg && (e.key === 'Enter' || e.key === ' ')) {
                                   e.preventDefault()
                                   e.stopPropagation()
-                                  openMobileBookingDetail(booking)
+                                  if (booking.source === 'manual') {
+                                    setComposer({ mode: 'manual', dateStr: wallClock(booking.start_time)?.date || formatLocalDate(day.date), event: booking })
+                                  } else {
+                                    openMobileBookingDetail(booking)
+                                  }
                                 }
                               }}
                               {...(isLg
@@ -1859,7 +1916,8 @@ export default function MasterScheduleCalendar({
                                 : {})}
                             >
                               <div className="font-medium text-blue-800 truncate flex items-center gap-1">
-                                {(booking.client_display_name || booking.client_name) || 'Клиент'}
+                                {booking.source === 'manual' ? <span className="text-[9px] font-semibold text-gray-500">Вручную</span> : null}
+                                {(booking.guest_name || booking.client_display_name || booking.client_name) || 'Клиент'}
                                 {booking.client_phone && <span className="text-xs text-gray-500 font-normal">({booking.client_phone})</span>}
                                 {booking.has_client_note ? (
                                   <span title={booking.client_note || ''} className="text-gray-900 cursor-help flex-shrink-0 no-underline">
@@ -1871,7 +1929,7 @@ export default function MasterScheduleCalendar({
                                 {booking.service_name}
                               </div>
                               <div className="text-gray-500 text-xs">
-                                {startTime.toTimeString().slice(0, 5)}-{endTime.toTimeString().slice(0, 5)}
+                                {wallLabel(booking.start_time)}-{wallLabel(booking.end_time)}
                               </div>
                               {booking.service_price != null && booking.service_price !== '' && !Number.isNaN(Number(booking.service_price)) ? (
                                 <div className="text-green-700 font-semibold text-[10px] mt-0.5">
@@ -1879,6 +1937,27 @@ export default function MasterScheduleCalendar({
                                 </div>
                               ) : null}
                             </div>
+                          )
+                        })}
+                        {slotBlocks.map((block) => {
+                          const blockClip = dayClipMinutes(block.start_time, block.end_time, formatLocalDate(day.date))
+                          const blockHeight = Math.max(16, ((blockClip ? blockClip.endMinute - blockClip.startMinute : 30) / 30) * TIMELINE_ROW_HEIGHT_PX)
+                          return (
+                          <div
+                            key={`block-${block.id}`}
+                            role="button"
+                            tabIndex={0}
+                            className="absolute left-0 right-0 z-[1] cursor-pointer overflow-hidden rounded border border-amber-400 bg-amber-50 p-1 text-xs"
+                            style={{ top: '1px', height: `${blockHeight}px`, fontSize: '10px' }}
+                            onMouseDown={(e) => e.stopPropagation()}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setComposer({ mode: 'block', dateStr: formatLocalDate(day.date), event: block })
+                            }}
+                          >
+                            <div className="truncate font-medium text-amber-900">{block.title || categoryLabel(block.category)}</div>
+                            <div className="text-amber-800">{wallLabel(block.start_time)}–{wallLabel(block.end_time)}</div>
+                          </div>
                           )
                         })}
                       </td>
@@ -1920,8 +1999,14 @@ export default function MasterScheduleCalendar({
               <div className="w-4 h-4 rounded" style={{ backgroundColor: '#DFF5EC', border: '1px solid #4CAF50' }}></div>
               <span className="text-gray-600">Выделено для изменения</span>
             </div>
+            <div className="flex items-center gap-2">
+              <div className="w-4 h-4 rounded border border-amber-400 bg-amber-50"></div>
+              <span className="text-gray-600">Личный блок</span>
+            </div>
           </div>
         </div>
+        {blocksError ? <p className="text-xs text-red-600">{blocksError}</p> : null}
+        {bookingsLoading ? <p className="text-xs text-gray-500">Загрузка записей…</p> : null}
         <div className="hidden text-xs text-gray-400 lg:block">
           * Для массового выделения используйте drag&drop или клики по заголовкам дней/времени
         </div>
@@ -2066,10 +2151,43 @@ export default function MasterScheduleCalendar({
         dateStr={dayDrawerDateStr}
         slotsForDay={dayDrawerSlots}
         bookings={bookings}
+        blocks={blocks}
+        onCreateManual={() => {
+          setDayDrawerOpen(false)
+          setComposer({ mode: 'manual', dateStr: dayDrawerDateStr, event: null })
+        }}
+        onCreateBlock={() => {
+          setDayDrawerOpen(false)
+          setComposer({ mode: 'block', dateStr: dayDrawerDateStr, event: null })
+        }}
+        onEditManual={(booking) => {
+          setDayDrawerOpen(false)
+          setComposer({ mode: 'manual', dateStr: dayDrawerDateStr, event: booking })
+        }}
+        onEditBlock={(block) => {
+          setDayDrawerOpen(false)
+          setComposer({ mode: 'block', dateStr: dayDrawerDateStr, event: block })
+        }}
         onSaved={() => {
           loadBookings()
+          loadBlocks()
           if (typeof onDayScheduleSaved === 'function') onDayScheduleSaved()
         }}
+      />
+      <CalendarB3Composer
+        open={Boolean(composer)}
+        mode={composer?.mode || 'manual'}
+        event={composer?.event || null}
+        dateStr={composer?.dateStr || ''}
+        timeZone={masterSettings?.timezone || ''}
+        bookings={bookings}
+        blocks={blocks}
+        onClose={() => setComposer(null)}
+        onSaved={() => {
+          loadBookings()
+          loadBlocks()
+        }}
+        onReload={async () => ({ bookings: await loadBookings(), blocks: await loadBlocks() })}
       />
 
       {/* Поп-ап с информацией о записи */}
@@ -2083,6 +2201,14 @@ export default function MasterScheduleCalendar({
         masterSettings={masterSettings}
         onMouseEnter={handlePopupMouseEnter}
         onMouseLeave={handlePopupMouseLeave}
+        onEditManual={popupBooking?.source === 'manual' ? () => {
+          setPopupVisible(false)
+          setComposer({
+            mode: 'manual',
+            dateStr: formatLocalDate(new Date(popupBooking.start_time)),
+            event: popupBooking,
+          })
+        } : null}
       />
 
       {/* Mobile: см. MASTER_OVERLAY_Z — выше sticky-хрома календаря; desktop PopupCard */}
@@ -2135,6 +2261,7 @@ export default function MasterScheduleCalendar({
           actionBookingId={actionBookingId}
           onConfirm={handleMobileConfirm}
           onCancelRequest={(id) => setCancelBookingId(id)}
+          onEditManual={(booking) => openManualComposer(booking)}
           zIndexClass={masterZClass('scheduleDetail')}
         />
         <MasterBookingCancelSheet

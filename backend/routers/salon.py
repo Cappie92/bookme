@@ -7,6 +7,7 @@ import os
 import uuid
 
 from database import get_db
+from services.calendar_b3 import SERVICE_IN_USE, delete_canonical_service, run_service_writer
 from models import (
     Salon, Service, ServiceCategory, Master, User, Booking, SalonMasterInvitation, SalonMasterInvitationStatus, MasterScheduleSettings, SalonMasterServiceSettings, SalonBranch, SalonPlace, MasterSchedule, BranchManagerInvitation as BranchManagerInvitationModel, ClientRestriction, ExpenseType, Expense, ExpenseTemplate
 )
@@ -193,15 +194,26 @@ def delete_category(
     if not category:
         raise HTTPException(status_code=404, detail="Category not found")
     
-    # Удаляем все услуги в этой категории
-    services = db.query(Service).filter(Service.category_id == category_id).all()
-    for service in services:
-        db.delete(service)
-    
-    # Удаляем саму категорию
-    db.delete(category)
-    db.commit()
-    
+    category_id_value = category.id
+    salon_id = salon.id
+
+    def operation(session: Session) -> None:
+        current = session.query(ServiceCategory).filter(
+            ServiceCategory.id == category_id_value,
+            ServiceCategory.salon_id == salon_id,
+        ).first()
+        if current is None:
+            raise HTTPException(status_code=404, detail="Category not found")
+        services = session.query(Service).filter(Service.category_id == category_id_value).all()
+        for service in services:
+            referenced = session.query(Booking.id).filter(Booking.service_id == service.id).first()
+            if referenced is not None:
+                raise HTTPException(status_code=409, detail=SERVICE_IN_USE)
+        for service in services:
+            session.delete(service)
+        session.delete(current)
+
+    run_service_writer(db, operation)
     return {"message": "Category and all related services deleted successfully"}
 
 # Публичный endpoint для получения услуг салона (для клиентов)
@@ -362,9 +374,22 @@ def delete_service(
     if not service:
         raise HTTPException(status_code=404, detail="Service not found")
 
-    db.delete(service)
-    db.commit()
-    return service
+    created = service.created_at or datetime.utcnow()
+    service_type = getattr(service.service_type, "value", service.service_type) or "subscription"
+    payload = ServiceSchema(
+        id=service.id,
+        name=service.name,
+        description=service.description,
+        duration=service.duration,
+        price=service.price,
+        service_type=service_type,
+        salon_id=service.salon_id,
+        indie_master_id=service.indie_master_id,
+        created_at=created,
+        updated_at=created,
+    )
+    delete_canonical_service(db, service.id, salon_id=service.salon_id)
+    return payload
 
 
 # Управление мастерами

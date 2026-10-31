@@ -256,6 +256,7 @@ export interface Booking {
   client_id: number | null;
   client_name: string;
   service_id: number;
+  master_service_id?: number | null;
   service_name: string;
   service_duration: number;
   /** Цена услуги из каталога (как в GET /bookings/detailed); может отсутствовать в старых ответах */
@@ -268,6 +269,13 @@ export interface Booking {
   end_time: string;
   status: string;
   notes: string | null;
+  guest_name?: string | null;
+  client_phone?: string | null;
+  source?: string | null;
+  version?: number | null;
+  time_zone?: string | null;
+  start_utc_us?: number | null;
+  end_utc_us?: number | null;
   payment_method: string | null;
   payment_amount: number | null;
   created_at: string | null;

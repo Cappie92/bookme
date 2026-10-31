@@ -29,6 +29,7 @@ import { CancelReasonSheet } from '@src/components/bookings/CancelReasonSheet';
 import { NoteSheet } from '@src/components/bookings/NoteSheet';
 import { isIosFreeCompanion } from '@src/config/iosProductModel';
 import { BookingCardCompact } from '@src/components/bookings/BookingCardCompact';
+import { CalendarBlock, categoryLabel, wallLabel } from '@src/services/calendarB3';
 import {
   SLOT_MINUTE_STEPS,
   resolveDayRangeMinutes,
@@ -39,6 +40,8 @@ interface DayDrawerProps {
   visible: boolean;
   date: string;
   bookings: Booking[];
+  blocks?: CalendarBlock[];
+  onCompose?: (mode: 'manual' | 'block', event?: Booking | CalendarBlock | null) => void;
   slots: ScheduleSlot[];
   onClose: () => void;
   /** После отмены/подтверждения записи */
@@ -139,6 +142,8 @@ export function DayDrawer({
   visible,
   date,
   bookings,
+  blocks = [],
+  onCompose,
   slots,
   onClose,
   onCancelSuccess,
@@ -357,23 +362,30 @@ export function DayDrawer({
                 keyboardShouldPersistTaps="handled"
                 nestedScrollEnabled
               >
-                {sortedBookings.length === 0 && availableSlots === 0 ? (
+                {sortedBookings.length === 0 && blocks.length === 0 && availableSlots === 0 ? (
                   <View style={styles.emptyState}>
                     <Text style={styles.emptyText}>Нет записей и доступных слотов</Text>
                   </View>
                 ) : (
                   <>
+                    {blocks.map((block) => (
+                      <TouchableOpacity key={`block-${block.id}`} onPress={() => onCompose?.('block', block)} style={{ borderWidth: 1, borderColor: '#F9A825', backgroundColor: '#FFF8E1', borderRadius: 8, padding: 8, marginBottom: 8 }}>
+                        <Text style={{ color: '#F57F17', fontWeight: '700' }}>{block.title || categoryLabel(block.category)}</Text>
+                        <Text style={{ color: '#F57F17' }}>{wallLabel(block.start_time)}–{wallLabel(block.end_time)}</Text>
+                      </TouchableOpacity>
+                    ))}
                     {sortedBookings.map((booking) => {
                       const master = masterSettings?.master ?? null;
                       const now = new Date();
                       const bookingIsPast = isPast(booking, now);
-                      const showConfirm =
+                      const manual = booking.source === 'manual';
+                      const showConfirm = !manual && (
                         canPreVisitConfirmBooking(booking, master, now, hasExtendedStats) ||
-                        canConfirmPostVisit(booking, master);
+                        canConfirmPostVisit(booking, master));
                       debugConfirmUI(booking, master, 'DayDrawer');
                       return (
+                        <View key={booking.id}>
                         <BookingCardCompact
-                          key={booking.id}
                           booking={booking}
                           statusLabel={
                             bookingIsPast
@@ -387,9 +399,18 @@ export function DayDrawer({
                           }
                           showConfirm={showConfirm}
                           onPressConfirm={() => handleConfirm(booking.id, booking)}
-                          onPressCancel={() => setCancelSheetBookingId(booking.id)}
+                          onPressCancel={() => {
+                            if (manual) onCompose?.('manual', booking);
+                            else setCancelSheetBookingId(booking.id);
+                          }}
                           onNotePress={(b) => setNoteSheetBooking(b)}
                         />
+                        {manual ? (
+                          <TouchableOpacity onPress={() => onCompose?.('manual', booking)} accessibilityLabel="Изменить ручную запись">
+                            <Text style={{ color: '#4CAF50', marginBottom: 8 }}>Изменить или отменить</Text>
+                          </TouchableOpacity>
+                        ) : null}
+                        </View>
                       );
                     })}
 
@@ -406,6 +427,22 @@ export function DayDrawer({
               </ScrollView>
 
               <View style={[styles.actions, { paddingBottom: sheetBottomPadding }]}>
+                <TouchableOpacity
+                  style={[styles.actionButton, saving && styles.actionButtonDisabled]}
+                  onPress={() => onCompose?.('manual', null)}
+                  disabled={saving}
+                  accessibilityLabel="Запись вручную"
+                >
+                  <Text style={styles.actionButtonText}>Запись вручную</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.actionButton, styles.actionButtonSecondary, saving && styles.actionButtonDisabled]}
+                  onPress={() => onCompose?.('block', null)}
+                  disabled={saving}
+                  accessibilityLabel="Занять время"
+                >
+                  <Text style={styles.actionButtonTextSecondary}>Занять время</Text>
+                </TouchableOpacity>
                 <TouchableOpacity
                   style={[styles.actionButton, saving && styles.actionButtonDisabled]}
                   onPress={openAvailabilityPicker}

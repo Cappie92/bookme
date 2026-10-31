@@ -47,6 +47,10 @@ jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
 }));
 jest.mock('@src/components/schedule/DayDrawer', () => ({ DayDrawer: 'DayDrawer' }));
+jest.mock('@src/components/schedule/CalendarB3Sheet', () => ({ CalendarB3Sheet: () => null }));
+jest.mock('@src/services/api/client', () => ({
+  apiClient: { get: jest.fn(), post: jest.fn(), put: jest.fn(), delete: jest.fn() },
+}));
 
 const { act, create } = require('react-test-renderer');
 const { WeekView } = require('@src/components/schedule/WeekView');
