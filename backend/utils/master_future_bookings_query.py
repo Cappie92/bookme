@@ -180,6 +180,40 @@ def active_future_bookings_sql_filter(master: Any, now_utc: datetime | None = No
     return and_(owner, active_future_core(now_utc))
 
 
+def free_cap_source_filter() -> Any:
+    """Rows that consume Free capacity.
+
+    NULL source is legacy history and still counts. Only an explicit manual
+    booking is outside the cap. Blocks are not bookings and never reach here.
+    """
+
+    return or_(Booking.source.is_(None), Booking.source != "manual")
+
+
+def active_future_bookings_cap_sql_filter(master: Any, now_utc: datetime | None = None) -> Any:
+    """Active future rows that count toward the plan limit for one master."""
+
+    return and_(active_future_bookings_sql_filter(master, now_utc), free_cap_source_filter())
+
+
+def active_future_bookings_cap_owner_filter(
+    *,
+    master_id: int | None = None,
+    indie_master_id: int | None = None,
+    now_utc: datetime | None = None,
+) -> Any:
+    """Same owner scope as the active-future filter, excluding manual bookings."""
+
+    return and_(
+        active_future_bookings_owner_filter(
+            master_id=master_id,
+            indie_master_id=indie_master_id,
+            now_utc=now_utc,
+        ),
+        free_cap_source_filter(),
+    )
+
+
 def active_future_bookings_owner_filter(
     *,
     master_id: int | None = None,

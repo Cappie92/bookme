@@ -47,6 +47,7 @@ from schemas import (
     PhoneVerificationResponse,
 )
 from services.scheduling import check_booking_conflicts, get_available_slots, get_available_slots_any_master_logic, get_best_master_for_slot
+from utils.booking_access import reject_legacy_manual_mutation, require_booking_actor, validate_booking_changes
 from services.booking_admission import (
     AdmissionDecision,
     admit_booking_request,
@@ -76,7 +77,6 @@ from services.zvonok_service import zvonok_service
 from settings import get_settings
 from utils.loyalty_discounts import evaluate_and_prepare_applied_discount, build_applied_discount_info
 from utils.phone import normalize_to_canonical
-from utils.booking_access import require_booking_actor, validate_booking_changes
 
 router = APIRouter(
     prefix="/bookings",
@@ -870,6 +870,7 @@ async def update_booking(
     
     changes = booking.dict(exclude_unset=True)
     validate_booking_changes(db, current_user, db_booking, changes)
+    reject_legacy_manual_mutation(db_booking)
     old_start = db_booking.start_time
     old_status = db_booking.status
 
@@ -967,6 +968,7 @@ async def delete_booking(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Бронирование не найдено"
         )
+    reject_legacy_manual_mutation(db_booking)
 
     blockers = get_hard_delete_blockers(db, db_booking)
     if blockers:
@@ -1009,6 +1011,7 @@ async def create_edit_request(
             status_code=status.HTTP_404_NOT_FOUND, detail="Бронирование не найдено"
         )
     require_booking_actor(db, current_user, db_booking)
+    reject_legacy_manual_mutation(db_booking)
     if edit_request.booking_id != booking_id:
         raise HTTPException(400, "Несогласованный идентификатор бронирования")
 
@@ -1101,6 +1104,7 @@ async def update_edit_request(
 
     db_booking = db_request.booking
     require_booking_actor(db, current_user, db_booking)
+    reject_legacy_manual_mutation(db_booking)
     if update.status == EditRequestStatus.ACCEPTED:
         instants = _proposed_instants(db_request)
         new_start, new_end, time_columns = db_request.proposed_start, db_request.proposed_end, {}

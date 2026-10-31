@@ -38,6 +38,7 @@ LATER_COLUMNS = {
         "proposed_end_utc_us",
         "proposed_time_zone",
     ],
+    "bookings": ["guest_name"],
 }
 BOOKING_COLUMNS = (
     "id, client_id, master_id, start_time, end_time, status, public_reference"

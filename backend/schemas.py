@@ -416,7 +416,7 @@ class Booking(BaseModel):
     id: int
     public_reference: Optional[str] = None
     client_id: Optional[int] = None
-    service_id: int
+    service_id: Optional[int] = None
     master_id: Optional[int] = None
     indie_master_id: Optional[int] = None
     salon_id: Optional[int] = None

@@ -1090,7 +1090,7 @@ def update_booking(
         .first()
     )
 
-    if not booking:
+    if not booking or getattr(booking, "source", None) == "manual":
         raise HTTPException(status_code=404, detail="Booking not found")
 
     if booking.status == BookingStatus.CANCELLED:
@@ -1207,7 +1207,7 @@ def cancel_booking(
         .first()
     )
 
-    if not booking:
+    if not booking or getattr(booking, "source", None) == "manual":
         raise HTTPException(status_code=404, detail="Booking not found")
 
     if booking.status == BookingStatus.CANCELLED:

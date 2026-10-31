@@ -490,7 +490,7 @@ def admit_calendar_block(
     interval: CanonicalInterval,
     exclude_block_id: Optional[int] = None,
 ) -> AdmissionDecision:
-    """Admission for future CalendarBlock create/move; no route uses it yet."""
+    """Admission for a CalendarBlock create or move."""
 
     owner = resolve_admission_owner(db, master_id=master_id)
     return admit_interval(db, owner, interval, exclude_block_id=exclude_block_id)
@@ -520,6 +520,18 @@ def online_booking_metadata(decision: AdmissionDecision, actor_user_id: Optional
     return {
         **decision.time_columns(),
         "source": BookingSource.ONLINE.value,
+        "created_by_user_id": actor_user_id,
+    }
+
+
+def manual_booking_metadata(decision: AdmissionDecision, actor_user_id: Optional[int]) -> dict:
+    """Server-assigned provenance for a master-created booking."""
+
+    from services.calendar_adapters import BookingSource
+
+    return {
+        **decision.time_columns(),
+        "source": BookingSource.MANUAL.value,
         "created_by_user_id": actor_user_id,
     }
 

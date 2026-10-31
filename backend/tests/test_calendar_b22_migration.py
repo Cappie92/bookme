@@ -52,7 +52,7 @@ def test_b22_upgrade_keeps_existing_proposals_unresolved_and_downgrades_cleanly(
     b1._alembic(url, "upgrade", B1_HEAD)
     before = _snapshot(legacy_db)
 
-    b1._alembic(url, "upgrade", "head")
+    b1._alembic(url, "upgrade", HEAD)
     after = _snapshot(legacy_db)
     assert after["proposals"] == before["proposals"]
     assert after["bookings"] == before["bookings"]
@@ -63,7 +63,7 @@ def test_b22_upgrade_keeps_existing_proposals_unresolved_and_downgrades_cleanly(
     b1._alembic(url, "downgrade", B1_HEAD)
     assert _snapshot(legacy_db) == before
 
-    b1._alembic(url, "upgrade", "head")
+    b1._alembic(url, "upgrade", HEAD)
     assert _snapshot(legacy_db)["proposals"] == before["proposals"]
 
 

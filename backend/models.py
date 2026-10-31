@@ -334,6 +334,7 @@ class Booking(Base):
     end_time = Column(DateTime)
     status = Column(String(16), default=BookingStatus.CREATED.value)
     notes = Column(Text, nullable=True)
+    guest_name = Column(String(255), nullable=True)
     
     # Информация об оплате
     payment_method = Column(String, nullable=True)  # 'on_visit' или 'advance'

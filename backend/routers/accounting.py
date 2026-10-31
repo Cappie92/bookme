@@ -19,6 +19,7 @@ from models import (
     Service, BookingStatus, TaxRate, MasterClientMetadata
 )
 from auth import get_current_active_user
+from utils.booking_access import reject_legacy_manual_mutation
 from utils.booking_loyalty_reserve import clear_loyalty_points_reserve
 from utils.client_display_name import get_client_display_name, get_meta_for_client, strip_indie_service_prefix
 from utils.subscription_features import has_finance_access
@@ -112,6 +113,8 @@ async def update_booking_status(
             owner_cond
         ).first()
         if not booking:
+            raise HTTPException(status_code=404, detail="Бронирование не найдено")
+        if getattr(booking, "source", None) == "manual" and new_status != "completed":
             raise HTTPException(status_code=404, detail="Бронирование не найдено")
 
         # Ручное подтверждение будущей записи — часть booking workflow, не «Финансы».
@@ -208,7 +211,7 @@ async def update_booking_status(
             except ValueError as ve:
                 raise HTTPException(status_code=400, detail=str(ve)) from ve
 
-        if unified:
+        if unified and getattr(booking, "source", None) != "manual":
             mark_booking_mutated(booking, admission)
 
         from services.notification_events import is_cancel_status, record_booking_cancelled_notification
@@ -275,6 +278,8 @@ def auto_confirm_awaiting_on_manual_switch(db: Session, user_id: int) -> int:
 
     confirmed_count = 0
     for booking in pending_bookings:
+        if getattr(booking, "source", None) == "manual":
+            continue
         confirmation = BookingConfirmation(
             booking_id=booking.id,
             master_id=master_user_id,
@@ -1110,6 +1115,7 @@ async def cancel_booking(
         
         if not booking:
             raise HTTPException(status_code=404, detail="Бронирование не найдено или не может быть отклонено")
+        reject_legacy_manual_mutation(booking)
         
         # Проверяем, не подтверждено ли уже
         existing_confirmation = db.query(BookingConfirmation).filter(
@@ -1170,6 +1176,8 @@ async def cancel_all_bookings(
         cancelled_count = 0
         from services.notification_events import record_booking_cancelled_notification
         for booking in pending_bookings:
+            if getattr(booking, "source", None) == "manual":
+                continue
             booking.status = BookingStatus.CANCELLED
             clear_loyalty_points_reserve(booking)
             record_booking_cancelled_notification(db, booking, actor_user_id=current_user.id)

@@ -25,6 +25,12 @@ from utils.loyalty import earn_points, get_loyalty_settings, spend_points
 logger = logging.getLogger(__name__)
 
 
+def _is_completed(booking: Booking) -> bool:
+    status = booking.status
+    value = status.value if hasattr(status, "value") else status
+    return str(value or "").lower() == BookingStatus.COMPLETED.value
+
+
 def _loyalty_spent_exists(db: Session, booking_id: int) -> bool:
     return (
         db.query(LoyaltyTransaction.id)
@@ -61,8 +67,27 @@ def finalize_post_visit_booking(
     Создаёт BookingConfirmation + Income, списывает баллы (если были зарезервированы), начисляет earned.
     Идемпотентно по наличию BookingConfirmation.
     """
+    if getattr(booking, "source", None) == "manual":
+        from utils.booking_limit_guard import begin_booking_creation_transaction
+
+        begin_booking_creation_transaction(db)
+        db.refresh(booking)
+
     if require_past_start and booking_starts_after(booking):
         raise ValueError("Нельзя подтвердить будущую запись.")
+
+    if getattr(booking, "source", None) == "manual":
+        already = _is_completed(booking)
+        if not already:
+            booking.status = BookingStatus.COMPLETED
+            booking.version = int(booking.version or 1) + 1
+        return {
+            "already": already,
+            "confirmed_income": 0.0,
+            "message": "Ручная запись закрыта без оплаты и баллов",
+            "points_spent": 0,
+            "expenses_created": 0,
+        }
 
     existing_confirmation = (
         db.query(BookingConfirmation).filter(BookingConfirmation.booking_id == booking.id).first()

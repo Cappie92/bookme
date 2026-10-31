@@ -20,7 +20,7 @@ from models import (
     User,
 )
 from utils.master_future_bookings_query import (
-    active_future_bookings_owner_filter,
+    active_future_bookings_cap_owner_filter,
     inactive_future_statuses_tuple,
 )
 from utils.subscription_features import get_active_subscription_readonly
@@ -189,7 +189,7 @@ def enforce_booking_creation_limit(
     count = (
         db.query(func.count(Booking.id))
         .filter(
-            active_future_bookings_owner_filter(
+            active_future_bookings_cap_owner_filter(
                 master_id=master.id,
                 indie_master_id=indie_id,
                 now_utc=now,
