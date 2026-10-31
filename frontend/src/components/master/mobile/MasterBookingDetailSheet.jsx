@@ -32,6 +32,7 @@ export default function MasterBookingDetailSheet({
   actionBookingId,
   onConfirm,
   onCancelRequest,
+  onEditManual,
   /** Переопределение z-index (напр. расписание поверх вложенных sticky-слоёв) */
   zIndexClass,
   /** Родитель (AllBookingsModal / дашборд) обрабатывает Escape — не дублировать */
@@ -47,9 +48,10 @@ export default function MasterBookingDetailSheet({
     sectionType === 'cancelled'
       ? isMasterHubCancelledTabStatus(b.status)
       : isFutureCancelled(b.status);
+  const manual = b.source === 'manual';
   const showConfirm =
-    !hideActions && !isCancelled && canMasterConfirmBooking(b, master, hasExtendedStats);
-  const showCancel = !hideActions && !isCancelled && canCancelBooking(b);
+    !manual && !hideActions && !isCancelled && canMasterConfirmBooking(b, master, hasExtendedStats);
+  const showCancel = !manual && !hideActions && !isCancelled && canCancelBooking(b);
   const isBusy = actionBookingId === b.id;
 
   const priceLabel = resolveBookingPriceDisplay(b);
@@ -129,6 +131,15 @@ export default function MasterBookingDetailSheet({
           </div>
         ) : null}
 
+        {manual ? (
+          <button
+            type="button"
+            onClick={() => onEditManual?.(b)}
+            className="inline-flex w-full items-center justify-center rounded-xl border-2 border-green-600 py-3 text-sm font-semibold text-green-700"
+          >
+            Изменить или отменить
+          </button>
+        ) : null}
         {(showConfirm || showCancel) && (
           <div className="flex flex-col gap-2 border-t border-gray-100 pt-4">
             {showConfirm && (

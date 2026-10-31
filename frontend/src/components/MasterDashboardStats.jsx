@@ -20,6 +20,7 @@ import { canCancelBooking, canPreVisitConfirmBooking, canConfirmPostVisit, CANCE
 import AllBookingsModal from './AllBookingsModal';
 import MasterBookingCardMobile from './master/mobile/MasterBookingCardMobile';
 import MasterBookingDetailSheet from './master/mobile/MasterBookingDetailSheet';
+import CalendarB3Composer from './master/CalendarB3Composer';
 import MasterBookingCancelSheet from './master/mobile/MasterBookingCancelSheet';
 import { isMasterHubCancelledTabStatus } from './master/mobile/masterBookingShared';
 import { getPlanDisplayName } from '../utils/subscriptionPlanNames';
@@ -160,6 +161,7 @@ export default function MasterDashboardStats({
   const [chartsExpanded, setChartsExpanded] = useState(false);
   /** Mobile: { booking, sectionType } для detail sheet */
   const [mobileBookingDetail, setMobileBookingDetail] = useState(null);
+  const [manualEvent, setManualEvent] = useState(null);
   const chartsAnchorRef = useRef(null);
   /** Только desktop: единая панель «Активность за неделю» (график + список по табам) */
   const [activityChartKind, setActivityChartKind] = useState('bookings');
@@ -340,6 +342,10 @@ export default function MasterDashboardStats({
   };
 
   const handleCancelClick = (booking) => {
+    if (booking?.source === 'manual') {
+      setManualEvent(booking);
+      return;
+    }
     setCancelBookingId(booking.id);
   };
 
@@ -1912,6 +1918,7 @@ export default function MasterDashboardStats({
             onClose={() => setMobileBookingDetail(null)}
             onConfirm={handleConfirmUnified}
             onCancelRequest={(id) => setCancelBookingId(id)}
+            onEditManual={(booking) => setManualEvent(booking)}
             disableEscapeKey
           />
         ) : null}
@@ -1922,6 +1929,24 @@ export default function MasterDashboardStats({
           disableEscapeKey
         />
       </div>
+      <CalendarB3Composer
+        open={Boolean(manualEvent)}
+        mode="manual"
+        event={manualEvent}
+        dateStr=""
+        timeZone={masterSettings?.master?.timezone || ''}
+        bookings={[]}
+        blocks={[]}
+        onClose={() => setManualEvent(null)}
+        onSaved={() => {
+          loadDashboardStats()
+          loadPastBookings()
+        }}
+        onReload={async () => {
+          const data = await apiGet('/api/master/bookings/detailed')
+          return { bookings: Array.isArray(data) ? data : [], blocks: [] }
+        }}
+      />
 
       {/* Модальное окно со всеми записями */}
       {showAllBookingsModal && (

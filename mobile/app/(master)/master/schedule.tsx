@@ -8,6 +8,7 @@ import { WeekView } from '@src/components/schedule/WeekView';
 import { DayView } from '@src/components/schedule/DayView';
 import { RulesView } from '@src/components/schedule/RulesView';
 import { getWeeklySchedule, getDetailedBookings, getMasterSettings, ScheduleWeek, Booking, MasterSettings } from '@src/services/api/master';
+import { CalendarBlock, listCalendarBlocks, rememberVersion } from '@src/services/calendarB3';
 
 type TabIndex = 0 | 1 | 2;
 
@@ -19,6 +20,8 @@ export default function MasterScheduleScreen() {
   const [selectedTab, setSelectedTab] = useState<TabIndex>(0);
   const [schedule, setSchedule] = useState<ScheduleWeek | null>(null);
   const [bookings, setBookings] = useState<Booking[]>([]);
+  const [blocks, setBlocks] = useState<CalendarBlock[]>([]);
+  const [blocksError, setBlocksError] = useState<string | null>(null);
   const [masterSettings, setMasterSettings] = useState<MasterSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -46,20 +49,32 @@ export default function MasterScheduleScreen() {
         setLoading(true);
       }
 
-      const [scheduleData, bookingsData, settingsData] = await Promise.all([
+      const [scheduleData, bookingsData, settingsData, blockResult] = await Promise.all([
         getWeeklySchedule(weekOffset, 1),
         getDetailedBookings(),
         getMasterSettings(),
+        listCalendarBlocks().then(
+          (rows) => ({ rows, error: null as string | null }),
+          () => ({ rows: [] as CalendarBlock[], error: 'Не удалось загрузить личные блоки' }),
+        ),
       ]);
 
       if (!isCurrent()) return;
       setSchedule(scheduleData);
+      bookingsData.forEach((row) => {
+        if (row.source === 'manual' && row.version) rememberVersion('booking', row.id, row.version);
+      });
       setBookings(bookingsData);
+      blockResult.rows.forEach((row) => rememberVersion('block', row.id, row.version));
+      setBlocks(blockResult.rows);
+      setBlocksError(blockResult.error);
       setMasterSettings(settingsData);
+      return { bookings: bookingsData, blocks: blockResult.rows };
     } catch (err: any) {
       if (!isCurrent()) return;
       setError(err.message || 'Ошибка загрузки данных');
       console.error('Error loading schedule data:', err);
+      return { bookings: [] as Booking[], blocks: [] as CalendarBlock[] };
     } finally {
       if (isCurrent() && !silent) {
         setLoading(false);
@@ -129,20 +144,27 @@ export default function MasterScheduleScreen() {
             bookings={bookings}
             weekOffset={weekOffset}
             onWeekChange={handleWeekChange}
-            onScheduleUpdated={() => loadData({ silent: true })}
+            onScheduleUpdated={() => { void loadData({ silent: true }); }}
             masterSettings={masterSettings}
             refreshControl={scheduleRefreshControl}
             hasExtendedStats={false}
+            blocks={blocks}
+            onEventsChanged={() => { void loadData({ silent: true }); }}
+            onReload={() => loadData({ silent: true })}
           />
         )}
         {selectedTab === 1 && schedule && (
           <DayView
             schedule={schedule}
             bookings={bookings}
+            blocks={blocks}
+            blocksError={blocksError}
             weekOffset={weekOffset}
             onWeekChange={handleWeekChange}
             masterSettings={masterSettings}
-            onScheduleUpdated={() => loadData({ silent: true })}
+            onScheduleUpdated={() => { void loadData({ silent: true }); }}
+            onEventsChanged={() => { void loadData({ silent: true }); }}
+            onReload={() => loadData({ silent: true })}
             refreshControl={scheduleRefreshControl}
             hasExtendedStats={false}
           />

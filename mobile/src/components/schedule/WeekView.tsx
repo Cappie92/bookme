@@ -15,7 +15,9 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ScheduleWeek, Booking, ScheduleSlot, MasterSettings } from '@src/services/api/master';
+import { bookingsOnDay, CalendarBlock, categoryLabel, dayClipMinutes, overlapsDay, wallLabel } from '@src/services/calendarB3';
 import { DayDrawer } from './DayDrawer';
+import { CalendarB3Sheet } from './CalendarB3Sheet';
 import { apiClient } from '@src/services/api/client';
 import { isIosFreeCompanion } from '@src/config/iosProductModel';
 
@@ -28,6 +30,9 @@ interface WeekViewProps {
   masterSettings?: MasterSettings | null;
   refreshControl?: React.ComponentProps<typeof FlatList>['refreshControl'];
   hasExtendedStats?: boolean;
+  blocks?: CalendarBlock[];
+  onEventsChanged?: () => void;
+  onReload?: () => Promise<{ bookings?: Booking[]; blocks?: CalendarBlock[] } | void>;
 }
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
@@ -203,10 +208,19 @@ type WeekBookingLayout = {
   endMinute: number;
 };
 
+type WeekBlockLayout = {
+  block: CalendarBlock;
+  dayIndex: number;
+  startMinute: number;
+  endMinute: number;
+};
+
 type WeekGridScrollProps = React.ComponentProps<typeof ScrollView> & {
   bookingLayouts: WeekBookingLayout[];
+  blockLayouts: WeekBlockLayout[];
   isEditMode: boolean;
   onBookingPress: (date: string) => void;
+  onBlockPress: (block: CalendarBlock) => void;
   gridHeight: number;
 };
 
@@ -216,7 +230,7 @@ type WeekGridScrollProps = React.ComponentProps<typeof ScrollView> & {
  * inside one ScrollView, forwarding the list ref onto that ScrollView.
  */
 const WeekGridScroll = React.forwardRef<ScrollView, WeekGridScrollProps>(function WeekGridScroll(
-  { children, bookingLayouts, isEditMode, onBookingPress, gridHeight, ...scrollProps },
+  { children, bookingLayouts, blockLayouts, isEditMode, onBookingPress, onBlockPress, gridHeight, ...scrollProps },
   ref,
 ) {
   return (
@@ -248,9 +262,30 @@ const WeekGridScroll = React.forwardRef<ScrollView, WeekGridScrollProps>(functio
             ]}
           >
             <Text style={styles.bookingTime} numberOfLines={1}>
-              {new Date(booking.start_time).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
+              {wallLabel(booking.start_time)}
             </Text>
             <Text style={styles.bookingService} numberOfLines={1}>{booking.service_name || ''}</Text>
+          </Pressable>
+        ))}
+        {blockLayouts.map(({ block, dayIndex, startMinute, endMinute }) => (
+          <Pressable
+            key={`block-${block.id}`}
+            testID={`week-block-${block.id}`}
+            onPress={() => onBlockPress(block)}
+            style={{
+              position: 'absolute',
+              top: startMinute * PIXELS_PER_MINUTE,
+              height: (endMinute - startMinute) * PIXELS_PER_MINUTE,
+              left: 60 + dayIndex * DAY_COLUMN_WIDTH,
+              width: DAY_COLUMN_WIDTH - 1,
+              backgroundColor: '#FFF8E1',
+              borderWidth: 1,
+              borderColor: '#F9A825',
+              zIndex: 2,
+            }}
+          >
+            <Text numberOfLines={1} style={{ color: '#F57F17', fontSize: 10 }}>{block.title || categoryLabel(block.category)}</Text>
+            <Text numberOfLines={1} style={{ color: '#F57F17', fontSize: 10 }}>{wallLabel(block.start_time)}</Text>
           </Pressable>
         ))}
       </View>
@@ -267,7 +302,11 @@ export function WeekView({
   masterSettings,
   refreshControl,
   hasExtendedStats = false,
+  blocks = [],
+  onEventsChanged,
+  onReload,
 }: WeekViewProps) {
+  const [composer, setComposer] = useState<{ mode: 'manual' | 'block'; date: string; event: Booking | CalendarBlock | null } | null>(null);
   const insets = useSafeAreaInsets();
   const [isEditMode, setIsEditMode] = useState(false);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
@@ -324,10 +363,7 @@ export function WeekView({
     const grouped: { [date: string]: Booking[] } = {};
     weekDates.forEach((date) => {
       const dateStr = formatLocalDate(date);
-      grouped[dateStr] = bookings.filter((booking) => {
-        const bookingDate = formatLocalDate(new Date(booking.start_time));
-        return bookingDate === dateStr;
-      });
+      grouped[dateStr] = bookingsOnDay(bookings, dateStr);
     });
     return grouped;
   }, [bookings, weekDates]);
@@ -371,15 +407,18 @@ export function WeekView({
   }, [weekDateStrings, slotsByDay]);
 
   const bookingLayouts = useMemo(() => weekDateStrings.flatMap((date, dayIndex) =>
-    (bookingsByDay[date] || []).flatMap((booking) => {
-      const start = new Date(booking.start_time);
-      const duration = (new Date(booking.end_time).getTime() - start.getTime()) / 60000;
-      const startMinute = start.getHours() * 60 + start.getMinutes() + start.getSeconds() / 60;
-      const endMinute = Math.min(1440, startMinute + duration);
-      if (!Number.isFinite(startMinute) || !Number.isFinite(duration) || duration <= 0) return [];
-      return [{ booking, date, dayIndex, startMinute, endMinute }];
+    bookings.flatMap((booking) => {
+      const clip = dayClipMinutes(booking.start_time, booking.end_time, date);
+      return clip ? [{ booking, date, dayIndex, ...clip }] : [];
     })
-  ), [weekDateStrings, bookingsByDay]);
+  ), [weekDateStrings, bookings]);
+
+  const blockLayouts = useMemo(() => weekDateStrings.flatMap((date, dayIndex) =>
+    blocks.flatMap((block) => {
+      const clip = dayClipMinutes(block.start_time, block.end_time, date);
+      return clip ? [{ block, dayIndex, ...clip }] : [];
+    })
+  ), [blocks, weekDateStrings]);
 
   const initialScrollIndex = useMemo(() => {
     const idx = timeSlots.findIndex((slot) => slot.hour === INITIAL_SCROLL_HOUR && slot.minute === 0);
@@ -425,11 +464,13 @@ export function WeekView({
     <WeekGridScroll
       {...props}
       bookingLayouts={bookingLayouts}
+      blockLayouts={blockLayouts}
       isEditMode={isEditMode}
       onBookingPress={handleDayPress}
+      onBlockPress={(block) => setComposer({ mode: 'block', date: block.start_time.slice(0, 10), event: block })}
       gridHeight={timeSlots.length * TIME_SLOT_HEIGHT}
     />
-  ), [bookingLayouts, handleDayPress, isEditMode, timeSlots.length]);
+  ), [blockLayouts, bookingLayouts, handleDayPress, isEditMode, timeSlots.length]);
 
   // Сохраняем состояние для UNDO
   const saveStateForUndo = () => {
@@ -915,11 +956,25 @@ export function WeekView({
       ) : null}
 
       {/* Day Drawer */}
+      <CalendarB3Sheet
+        visible={composer != null}
+        mode={composer?.mode || 'manual'}
+        date={composer?.date || ''}
+        event={composer?.event || null}
+        timeZone={masterSettings?.master?.timezone}
+        bookings={bookings}
+        blocks={blocks}
+        onClose={() => setComposer(null)}
+        onSaved={() => onEventsChanged?.()}
+        onReload={onReload}
+      />
       {selectedDate && (
         <DayDrawer
           visible={!!selectedDate}
           date={selectedDate}
           bookings={getDayBookings(selectedDate)}
+          blocks={blocks.filter((block) => overlapsDay(block.start_time, block.end_time, selectedDate))}
+          onCompose={(mode, event) => setComposer({ mode, date: selectedDate, event: event || null })}
           slots={slotsByDay[selectedDate] || []}
           onClose={handleCloseDayDrawer}
           onCancelSuccess={onScheduleUpdated}

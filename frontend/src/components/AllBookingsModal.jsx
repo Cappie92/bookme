@@ -11,6 +11,7 @@ import { masterZClass } from '../config/masterOverlayZIndex';
 import { useModal } from '../hooks/useModal';
 import { useMasterOverlayScrollLock } from '../hooks/useMasterOverlayScrollLock';
 import { apiGet, apiPost } from '../utils/api';
+import CalendarB3Composer from './master/CalendarB3Composer';
 import {
   canCancelBooking,
   canConfirmPostVisit,
@@ -64,13 +65,14 @@ function buildPastAppointmentsUrl(page, limit, filters) {
   return `/api/master/past-appointments?${params.toString()}`;
 }
 
-function BookingRow({ booking, sectionType, masterSettings, actionBookingId, onConfirm, onCancelClick, onNoteClick, onCancellationReasonClick, hideActions, hasExtendedStats = false }) {
+function BookingRow({ booking, sectionType, masterSettings, actionBookingId, onConfirm, onCancelClick, onNoteClick, onCancellationReasonClick, onEditManual, hideActions, hasExtendedStats = false }) {
   const bookingDate = formatDateShort(booking.start_time || booking.date);
   const bookingTime = formatTimeShort(booking.start_time) || booking.time || '';
   const isCancelled = isFutureCancelled(booking.status);
   const master = masterSettings?.master ?? null;
-  const showConfirm = !hideActions && !isCancelled && canMasterConfirmBooking(booking, master, hasExtendedStats);
-  const showCancel = !hideActions && !isCancelled && canCancelBooking(booking);
+  const manual = booking.source === 'manual';
+  const showConfirm = !manual && !hideActions && !isCancelled && canMasterConfirmBooking(booking, master, hasExtendedStats);
+  const showCancel = !manual && !hideActions && !isCancelled && canCancelBooking(booking);
   const isBusy = actionBookingId === booking.id;
 
   return (
@@ -132,6 +134,15 @@ function BookingRow({ booking, sectionType, masterSettings, actionBookingId, onC
                 {isBusy ? '…' : <CheckIcon className="w-3.5 h-3.5" />}
               </button>
             )}
+            {manual && onEditManual ? (
+              <button
+                type="button"
+                onClick={() => onEditManual(booking)}
+                className="text-xs font-medium text-green-700"
+              >
+                Изменить
+              </button>
+            ) : null}
             {showCancel && (
               <button
                 onClick={() => onCancelClick(booking.id)}
@@ -350,6 +361,7 @@ export default function AllBookingsModal({ isOpen, onClose, onConfirmSuccess, in
   const mode = initialMode === 'past' ? 'past' : 'future';
   const [page, setPage] = useState(1);
   const [items, setItems] = useState([]);
+  const [manualEvent, setManualEvent] = useState(null);
   const [total, setTotal] = useState(0);
   const [totalPages, setTotalPages] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -549,6 +561,12 @@ export default function AllBookingsModal({ isOpen, onClose, onConfirmSuccess, in
   }, []);
 
   const handleCancelWithReason = async (bookingId, reason) => {
+    const target = items.find((item) => item.id === bookingId);
+    if (target?.source === 'manual') {
+      setCancelBookingId(null);
+      setManualEvent(target);
+      return;
+    }
     setCancelBookingId(null);
     if (!reason) return;
     try {
@@ -757,7 +775,7 @@ export default function AllBookingsModal({ isOpen, onClose, onConfirmSuccess, in
                     <h4 className="mb-1 text-xs font-medium text-amber-700">На подтверждении</h4>
                     <div className="divide-y divide-gray-100">
                       {futureGroups.pending.map((b) => (
-                        <BookingRow key={getBookingKey(b)} booking={b} sectionType={sectionType} masterSettings={masterSettings} actionBookingId={actionBookingId} onConfirm={handleConfirm} onCancelClick={handleCancelClick} onNoteClick={handleNoteClick} onCancellationReasonClick={handleCancellationReasonClick} hasExtendedStats={hasExtendedStats} />
+                        <BookingRow key={getBookingKey(b)} booking={b} sectionType={sectionType} masterSettings={masterSettings} actionBookingId={actionBookingId} onConfirm={handleConfirm} onCancelClick={handleCancelClick} onNoteClick={handleNoteClick} onCancellationReasonClick={handleCancellationReasonClick} onEditManual={setManualEvent} hasExtendedStats={hasExtendedStats} />
                       ))}
                     </div>
                   </div>
@@ -767,7 +785,7 @@ export default function AllBookingsModal({ isOpen, onClose, onConfirmSuccess, in
                     <h4 className="mb-1 text-xs font-medium text-gray-600">Подтверждённые</h4>
                     <div className="divide-y divide-gray-100">
                       {futureGroups.confirmed.map((b) => (
-                        <BookingRow key={getBookingKey(b)} booking={b} sectionType={sectionType} masterSettings={masterSettings} actionBookingId={actionBookingId} onConfirm={handleConfirm} onCancelClick={handleCancelClick} onNoteClick={handleNoteClick} onCancellationReasonClick={handleCancellationReasonClick} hasExtendedStats={hasExtendedStats} />
+                        <BookingRow key={getBookingKey(b)} booking={b} sectionType={sectionType} masterSettings={masterSettings} actionBookingId={actionBookingId} onConfirm={handleConfirm} onCancelClick={handleCancelClick} onNoteClick={handleNoteClick} onCancellationReasonClick={handleCancellationReasonClick} onEditManual={setManualEvent} hasExtendedStats={hasExtendedStats} />
                       ))}
                     </div>
                   </div>
@@ -777,7 +795,7 @@ export default function AllBookingsModal({ isOpen, onClose, onConfirmSuccess, in
                     <h4 className="mb-1 text-xs font-medium text-red-600">Отменено</h4>
                     <div className="divide-y divide-gray-100">
                       {futureGroups.cancelled.map((b) => (
-                        <BookingRow key={getBookingKey(b)} booking={b} sectionType={sectionType} masterSettings={masterSettings} actionBookingId={actionBookingId} onConfirm={handleConfirm} onCancelClick={handleCancelClick} onNoteClick={handleNoteClick} onCancellationReasonClick={handleCancellationReasonClick} hideActions hasExtendedStats={hasExtendedStats} />
+                        <BookingRow key={getBookingKey(b)} booking={b} sectionType={sectionType} masterSettings={masterSettings} actionBookingId={actionBookingId} onConfirm={handleConfirm} onCancelClick={handleCancelClick} onNoteClick={handleNoteClick} onCancellationReasonClick={handleCancellationReasonClick} onEditManual={setManualEvent} hideActions hasExtendedStats={hasExtendedStats} />
                       ))}
                     </div>
                   </div>
@@ -863,6 +881,7 @@ export default function AllBookingsModal({ isOpen, onClose, onConfirmSuccess, in
             actionBookingId={actionBookingId}
             onConfirm={handleConfirmFromSheet}
             onCancelRequest={(id) => setCancelBookingId(id)}
+            onEditManual={(booking) => setManualEvent(booking)}
             disableEscapeKey
           />
           <MasterBookingCancelSheet
@@ -899,6 +918,22 @@ export default function AllBookingsModal({ isOpen, onClose, onConfirmSuccess, in
             </div>
           </div>
         )}
+        <CalendarB3Composer
+          open={Boolean(manualEvent)}
+          mode="manual"
+          event={manualEvent}
+          dateStr=""
+          timeZone={masterSettings?.master?.timezone || masterSettings?.timezone || ''}
+          bookings={items}
+          blocks={[]}
+          onClose={() => setManualEvent(null)}
+          onSaved={() => loadPage(page)}
+          onReload={async () => {
+            const data = await apiGet('/api/master/bookings/detailed')
+            const rows = Array.isArray(data) ? data : []
+            return { bookings: rows, blocks: [] }
+          }}
+        />
       </div>
     </div>
   );
