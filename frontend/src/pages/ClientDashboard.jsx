@@ -31,6 +31,8 @@ import {
   timeEditAvailableDateSet as buildTimeEditAvailableDateSet,
 } from '../utils/scheduleDates'
 import { formatTimeShort } from '../utils/dateFormat'
+import { startAvailabilityRequest } from '../components/booking/availabilityRequest'
+import { loadGuardedAvailableSlots, loadGuardedDateAvailability } from './clientRescheduleAvailability'
 
 // Вспомогательные функции
 function formatDate(dateStr) {
@@ -201,6 +203,14 @@ export default function ClientDashboard() {
   const { changeCounter } = useFavorites()
   const [showPasswordModal, setShowPasswordModal] = useState(false)
   const [selectedBooking, setSelectedBooking] = useState(null)
+  const activeBookingIdRef = useRef(selectedBooking?.id ?? null)
+  activeBookingIdRef.current = selectedBooking?.id ?? null
+  const slotsRequestStore = useRef(0)
+  const dateAvailabilityStore = useRef(0)
+  useEffect(() => () => {
+    slotsRequestStore.current += 1
+    dateAvailabilityStore.current += 1
+  }, [])
   const [managedBranches, setManagedBranches] = useState([])
   const [showEditBookingModal, setShowEditBookingModal] = useState(false)
   const [showDeleteBookingModal, setShowDeleteBookingModal] = useState(false)
@@ -975,84 +985,50 @@ export default function ClientDashboard() {
     }
   }
 
+  const bookingStillSelected = (bookingId) => activeBookingIdRef.current === bookingId
+
   const loadAvailableSlots = async (date) => {
     if (!selectedBooking || !date) return
     const dateOnly = calendarDateFromValue(date)
     if (!dateOnly) return
-    
-    setSlotsLoading(true)
-    setAvailableSlots([])
-    
-    try {
-      const url = `/api/client/bookings/${selectedBooking.id}/available-slots?date=${dateOnly}`
-      const response = await fetch(url, {
-        headers: getAuthHeaders()
-      })
-      
-      if (response.ok) {
-        const data = await response.json()
-        setAvailableSlots(data.available_slots || [])
-      } else {
-        console.error('Ошибка при загрузке слотов:', response.status)
-      }
-    } catch (error) {
-      console.error('Ошибка при загрузке слотов:', error)
-    } finally {
-      setSlotsLoading(false)
-    }
+    const bookingId = selectedBooking.id
+    const request = startAvailabilityRequest(slotsRequestStore)
+    await loadGuardedAvailableSlots({
+      bookingId,
+      dateOnly,
+      request,
+      isBookingCurrent: bookingStillSelected,
+      fetcher: (id, day) => fetch(`/api/client/bookings/${id}/available-slots?date=${day}`, {
+        headers: getAuthHeaders(),
+      }),
+      onStart: () => {
+        setSlotsLoading(true)
+        setAvailableSlots([])
+      },
+      onSlots: setAvailableSlots,
+      onSettled: () => setSlotsLoading(false),
+    })
   }
 
   const loadDateAvailabilityForMonth = async (month) => {
     if (!selectedBooking) return
-    
-    setAvailabilityLoading(true)
-    const availability = {}
-    
-    try {
-      const promises = []
-      const todayStr = formatLocalDate(new Date())
-      for (const dateStr of localCalendarDateStringsForMonth(month.getFullYear(), month.getMonth())) {
-        // Пропускаем прошедшие даты
-        if (dateStr < todayStr) {
-          continue
-        }
-        
-        const promise = apiFetch(`/api/client/bookings/${selectedBooking.id}/available-slots?date=${dateStr}`, {
-          headers: getAuthHeaders()
-        })
-        .then(response => {
-          if (response.ok) {
-            return response.json().then(data => {
-              const hasSlots = data.available_slots && data.available_slots.length > 0
-              return {
-                date: dateStr,
-                hasSlots: hasSlots
-              }
-            })
-          } else {
-            return { date: dateStr, hasSlots: false }
-          }
-        }).catch((error) => {
-          return { date: dateStr, hasSlots: false }
-        })
-        
-        promises.push(promise)
-      }
-      
-      // Выполняем все запросы параллельно
-      const results = await Promise.all(promises)
-      
-      // Формируем объект доступности
-      results.forEach(result => {
-        availability[result.date] = result.hasSlots
-      })
-      
-      setDateAvailability(availability)
-    } catch (error) {
-      console.error('Ошибка при загрузке доступности дат для месяца:', error)
-    } finally {
-      setAvailabilityLoading(false)
-    }
+    const bookingId = selectedBooking.id
+    const request = startAvailabilityRequest(dateAvailabilityStore)
+    const todayStr = formatLocalDate(new Date())
+    const dateStrs = localCalendarDateStringsForMonth(month.getFullYear(), month.getMonth())
+      .filter((dateStr) => dateStr >= todayStr)
+    await loadGuardedDateAvailability({
+      bookingId,
+      dateStrs,
+      request,
+      isBookingCurrent: bookingStillSelected,
+      fetcher: (id, dateStr) => apiFetch(`/api/client/bookings/${id}/available-slots?date=${dateStr}`, {
+        headers: getAuthHeaders(),
+      }),
+      onStart: () => setAvailabilityLoading(true),
+      onAvailability: setDateAvailability,
+      onSettled: () => setAvailabilityLoading(false),
+    })
   }
 
   const loadDateAvailability = async () => {
@@ -1075,47 +1051,24 @@ export default function ClientDashboard() {
 
   const loadMonthAvailability = async (month) => {
     if (!selectedBooking) return
-    
-    setAvailabilityLoading(true)
-    const availability = { ...dateAvailability } // Сохраняем существующие данные
-    
-    try {
-      const promises = []
-      const todayStr = formatLocalDate(new Date())
-      for (const dateStr of localCalendarDateStringsForMonth(month.getFullYear(), month.getMonth())) {
-        if (dateStr < todayStr) continue
-        
-        const promise = apiFetch(`/api/client/bookings/${selectedBooking.id}/available-slots?date=${dateStr}`, {
-          headers: getAuthHeaders()
-        })
-        .then(response => {
-          if (response.ok) {
-            return response.json().then(data => ({
-              date: dateStr,
-              hasSlots: data.available_slots && data.available_slots.length > 0
-            }))
-          } else {
-            return { date: dateStr, hasSlots: false }
-          }
-        }).catch(() => ({ date: dateStr, hasSlots: false }))
-        
-        promises.push(promise)
-      }
-      
-      // Выполняем все запросы параллельно
-      const results = await Promise.all(promises)
-      
-      // Формируем объект доступности
-      results.forEach(result => {
-        availability[result.date] = result.hasSlots
-      })
-      
-      setDateAvailability(availability)
-    } catch (error) {
-      console.error('Ошибка при загрузке доступности дат для месяца:', error)
-    } finally {
-      setAvailabilityLoading(false)
-    }
+    const bookingId = selectedBooking.id
+    const request = startAvailabilityRequest(dateAvailabilityStore)
+    const todayStr = formatLocalDate(new Date())
+    const dateStrs = localCalendarDateStringsForMonth(month.getFullYear(), month.getMonth())
+      .filter((dateStr) => dateStr >= todayStr)
+    await loadGuardedDateAvailability({
+      bookingId,
+      dateStrs,
+      request,
+      isBookingCurrent: bookingStillSelected,
+      fetcher: (id, dateStr) => apiFetch(`/api/client/bookings/${id}/available-slots?date=${dateStr}`, {
+        headers: getAuthHeaders(),
+      }),
+      mergePrevious: dateAvailability,
+      onStart: () => setAvailabilityLoading(true),
+      onAvailability: setDateAvailability,
+      onSettled: () => setAvailabilityLoading(false),
+    })
   }
 
   // Закрываем календарь при клике вне его
@@ -2237,6 +2190,7 @@ export default function ClientDashboard() {
                   availableDateSet={timeEditAvailableDateSet}
                   minDateStr={timeEditMinDateStr}
                   maxDateStr={timeEditMaxDateStr}
+                  viewResetKey={selectedBooking?.id ?? null}
                   selectedDate={selectedDate || null}
                   onSelectDate={(dateStr) => handleDateChange(dateStr)}
                   onMonthChange={({ year, month }) => {
