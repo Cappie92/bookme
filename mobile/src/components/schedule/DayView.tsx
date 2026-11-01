@@ -4,7 +4,9 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Pressable, Modal 
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { Ionicons } from '@expo/vector-icons';
 import { ScheduleWeek, Booking, ScheduleSlot, MasterSettings } from '@src/services/api/master';
+import { bookingsOnDay, CalendarBlock, categoryLabel, dayClipMinutes, overlapsDay, wallLabel } from '@src/services/calendarB3';
 import { DayDrawer } from './DayDrawer';
+import { CalendarB3Sheet } from './CalendarB3Sheet';
 
 interface DayViewProps {
   schedule: ScheduleWeek;
@@ -17,6 +19,10 @@ interface DayViewProps {
   onScheduleUpdated?: () => void;
   refreshControl?: React.ComponentProps<typeof ScrollView>['refreshControl'];
   hasExtendedStats?: boolean;
+  blocks?: CalendarBlock[];
+  blocksError?: string | null;
+  onEventsChanged?: () => void;
+  onReload?: () => Promise<{ bookings?: Booking[]; blocks?: CalendarBlock[] } | void>;
 }
 
 const TIME_SLOT_HEIGHT = 60; // Высота слота 30 минут
@@ -39,7 +45,12 @@ export function DayView({
   onScheduleUpdated,
   refreshControl,
   hasExtendedStats = false,
+  blocks = [],
+  blocksError = null,
+  onEventsChanged,
+  onReload,
 }: DayViewProps) {
+  const [composer, setComposer] = useState<{ mode: 'manual' | 'block'; event: Booking | CalendarBlock | null } | null>(null);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [dayDrawerVisible, setDayDrawerVisible] = useState(false);
   const [calendarVisible, setCalendarVisible] = useState(false);
@@ -92,10 +103,7 @@ export function DayView({
     const grouped: { [date: string]: Booking[] } = {};
     weekDates.forEach((date) => {
       const dateStr = formatLocalDate(date);
-      grouped[dateStr] = bookings.filter((booking) => {
-        const bookingDate = formatLocalDate(new Date(booking.start_time));
-        return bookingDate === dateStr;
-      });
+      grouped[dateStr] = bookingsOnDay(bookings, dateStr);
     });
     return grouped;
   }, [bookings, weekDates]);
@@ -179,14 +187,15 @@ export function DayView({
 
   // One card per API booking, independent of the background's 30-minute grid.
   // Keep the existing API/status filtering and day summary unchanged.
-  const bookingLayouts = useMemo(() => dayBookings.flatMap((booking) => {
-    const start = new Date(booking.start_time);
-    const duration = (new Date(booking.end_time).getTime() - start.getTime()) / 60000;
-    const startMinute = start.getHours() * 60 + start.getMinutes() + start.getSeconds() / 60;
-    const endMinute = Math.min(24 * 60, startMinute + duration);
-    if (!Number.isFinite(startMinute) || !Number.isFinite(duration) || duration <= 0) return [];
-    return [{ booking, startMinute, endMinute }];
-  }), [dayBookings]);
+  const blockLayouts = useMemo(() => blocks.flatMap((block) => {
+    const clip = dayClipMinutes(block.start_time, block.end_time, currentDate);
+    return clip ? [{ block, ...clip }] : [];
+  }), [blocks, currentDate]);
+
+  const bookingLayouts = useMemo(() => bookings.flatMap((booking) => {
+    const clip = dayClipMinutes(booking.start_time, booking.end_time, currentDate);
+    return clip ? [{ booking, ...clip }] : [];
+  }), [bookings, currentDate]);
 
   // Only subtract painted booking ranges; do not change schedule availability.
   // Splitting at exact endpoints also preserves free time after e.g. 13:15.
@@ -194,12 +203,13 @@ export function DayView({
     const endMinute = startMinute + MINUTES_PER_SLOT;
     const boundaries = [...new Set([
       startMinute, endMinute,
-      ...bookingLayouts.flatMap(layout => [layout.startMinute, layout.endMinute])
+      ...[...bookingLayouts, ...blockLayouts].flatMap(layout => [layout.startMinute, layout.endMinute])
         .filter(minute => minute > startMinute && minute < endMinute),
     ])].sort((a, b) => a - b);
     return boundaries.slice(0, -1).flatMap((start, index) => {
       const end = boundaries[index + 1];
       return bookingLayouts.some(layout => layout.startMinute < end && layout.endMinute > start)
+        || blockLayouts.some(layout => layout.startMinute < end && layout.endMinute > start)
         ? [] : [{ start, end }];
     });
   };
@@ -209,9 +219,9 @@ export function DayView({
     const availableSlots = daySlots.filter(s => s.is_working || s.is_available).length;
     const availableHours = (availableSlots * 30) / 60; // В часах
     const bookedHours = dayBookings.reduce((sum, booking) => {
-      const duration = (new Date(booking.end_time).getTime() - new Date(booking.start_time).getTime()) / (1000 * 60);
-      return sum + duration;
-    }, 0) / 60; // В часах
+      const clip = dayClipMinutes(booking.start_time, booking.end_time, currentDate);
+      return sum + (clip ? clip.endMinute - clip.startMinute : 0);
+    }, 0) / 60; // В часах, только пересечение с этим днём
     const bookingsCount = dayBookings.length;
 
     return {
@@ -317,6 +327,23 @@ export function DayView({
           <Text style={styles.statValue}>{stats.bookingsCount}</Text>
         </View>
       </View>
+      {blocksError ? <Text style={{ color: '#C62828', paddingHorizontal: 16, paddingBottom: 8 }}>{blocksError}</Text> : null}
+      <View style={{ flexDirection: 'row', gap: 8, paddingHorizontal: 16, paddingBottom: 8 }}>
+        <TouchableOpacity
+          style={{ flex: 1, backgroundColor: '#4CAF50', borderRadius: 8, paddingVertical: 10, alignItems: 'center' }}
+          onPress={() => setComposer({ mode: 'manual', event: null })}
+          accessibilityLabel="Запись вручную"
+        >
+          <Text style={{ color: '#fff', fontWeight: '700' }}>Запись вручную</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={{ flex: 1, borderWidth: 1, borderColor: '#F9A825', borderRadius: 8, paddingVertical: 10, alignItems: 'center' }}
+          onPress={() => setComposer({ mode: 'block', event: null })}
+          accessibilityLabel="Занять время"
+        >
+          <Text style={{ color: '#F57F17', fontWeight: '700' }}>Занять время</Text>
+        </TouchableOpacity>
+      </View>
 
       {/* Таймлайн дня */}
       <ScrollView
@@ -383,17 +410,16 @@ export function DayView({
                 top: startMinute * PIXELS_PER_MINUTE,
                 height: (endMinute - startMinute) * PIXELS_PER_MINUTE,
               }]}
-              onPress={() => setDayDrawerVisible(true)}
+              onPress={() => {
+                if (booking.source === 'manual') setComposer({ mode: 'manual', event: booking });
+                else setDayDrawerVisible(true);
+              }}
               accessibilityRole="button"
-              accessibilityLabel="Открыть день"
+              accessibilityLabel={booking.source === 'manual' ? 'Ручная запись' : 'Открыть день'}
             >
               <View style={styles.bookingBlock}>
                 <Text style={styles.bookingTime} numberOfLines={1}>
-                  {new Date(booking.start_time).toLocaleTimeString('ru-RU', {
-                    hour: '2-digit', minute: '2-digit',
-                  })}–{new Date(booking.end_time).toLocaleTimeString('ru-RU', {
-                    hour: '2-digit', minute: '2-digit',
-                  })}
+                  {wallLabel(booking.start_time)}–{wallLabel(booking.end_time)}
                 </Text>
                 <Text style={styles.bookingService} numberOfLines={1}>
                   {booking.service_name}
@@ -409,6 +435,26 @@ export function DayView({
                   ) : null}
                 </View>
               </View>
+            </TouchableOpacity>
+          ))}
+          {blockLayouts.map(({ block, startMinute, endMinute }) => (
+            <TouchableOpacity
+              key={`block-${block.id}`}
+              testID={`day-block-${block.id}`}
+              activeOpacity={0.75}
+              style={[styles.bookingOverlay, {
+                top: startMinute * PIXELS_PER_MINUTE,
+                height: (endMinute - startMinute) * PIXELS_PER_MINUTE,
+                backgroundColor: '#FFF8E1',
+                borderColor: '#F9A825',
+                borderWidth: 1,
+              }]}
+              onPress={() => setComposer({ mode: 'block', event: block })}
+              accessibilityRole="button"
+              accessibilityLabel="Личный блок"
+            >
+              <Text numberOfLines={1} style={{ color: '#F57F17', fontSize: 12 }}>{block.title || categoryLabel(block.category)}</Text>
+              <Text numberOfLines={1} style={{ color: '#F57F17', fontSize: 11 }}>{wallLabel(block.start_time)}–{wallLabel(block.end_time)}</Text>
             </TouchableOpacity>
           ))}
         </View>
@@ -431,10 +477,27 @@ export function DayView({
           </View>
         </View>
       </Modal>
+      <CalendarB3Sheet
+        visible={composer != null}
+        mode={composer?.mode || 'manual'}
+        date={currentDate}
+        event={composer?.event || null}
+        timeZone={masterSettings?.master?.timezone}
+        bookings={bookings}
+        blocks={blocks}
+        onClose={() => setComposer(null)}
+        onSaved={() => onEventsChanged?.()}
+        onReload={onReload}
+      />
       <DayDrawer
         visible={dayDrawerVisible}
         date={currentDate}
         bookings={dayBookings}
+        blocks={blocks.filter((block) => overlapsDay(block.start_time, block.end_time, currentDate))}
+        onCompose={(mode, event) => {
+          setDayDrawerVisible(false);
+          setComposer({ mode, event: event || null });
+        }}
         slots={daySlots}
         onClose={() => setDayDrawerVisible(false)}
         onCancelSuccess={onScheduleUpdated}

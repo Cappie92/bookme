@@ -12,7 +12,7 @@ jest.mock('react-native', () => {
     return React.createElement('ScrollView', props, props.children);
   });
   return {
-    ...Object.fromEntries(['View', 'Text', 'TouchableOpacity', 'Pressable'].map(name => [name, name])),
+    ...Object.fromEntries(['View', 'Text', 'TouchableOpacity', 'Pressable', 'TextInput', 'ActivityIndicator'].map(name => [name, name])),
     ScrollView,
     Modal: () => null,
     StyleSheet: { create: (styles: any) => styles },
@@ -21,6 +21,10 @@ jest.mock('react-native', () => {
 jest.mock('@expo/vector-icons', () => ({ Ionicons: 'Icon' }));
 jest.mock('@react-native-community/datetimepicker', () => ({ __esModule: true, default: 'DateTimePicker' }));
 jest.mock('@src/components/schedule/DayDrawer', () => ({ DayDrawer: 'DayDrawer' }));
+jest.mock('@src/components/schedule/CalendarB3Sheet', () => ({ CalendarB3Sheet: () => null }));
+jest.mock('@src/services/api/client', () => ({
+  apiClient: { get: jest.fn(), post: jest.fn(), put: jest.fn(), delete: jest.fn() },
+}));
 
 const { act, create } = require('react-test-renderer');
 const { DayView } = require('@src/components/schedule/DayView');
@@ -171,6 +175,29 @@ describe('DayView continuous booking rendering', () => {
     await render([booking(1, '12:00', '13:30', 'cancelled_by_client_early')]);
     expect(cards()).toHaveLength(1);
     expect(tree.root.findByType('DayDrawer').props.bookings[0].status).toBe('cancelled_by_client_early');
+  });
+
+  it('puts an overnight booking and a multiday block in the destination day drawer once', async () => {
+    const overnight = {
+      ...booking(9, '22:00', '23:00'),
+      start_time: '2030-01-06T22:00:00',
+      end_time: '2030-01-07T02:00:00',
+    };
+    const endedAtMidnight = {
+      ...booking(8, '22:00', '23:00'),
+      start_time: '2030-01-06T21:00:00',
+      end_time: '2030-01-07T00:00:00',
+    };
+    await act(async () => {
+      tree = create(<DayView schedule={schedule} bookings={[overnight, endedAtMidnight]}
+        blocks={[{ id: 4, master_id: 1, category: 'busy', start_time: '2030-01-05T18:00:00', end_time: '2030-01-08T10:00:00', version: 1 }]}
+        weekOffset={0} onWeekChange={jest.fn()} />);
+    });
+    expect(cards().map((node: any) => node.props.testID)).toEqual(['day-booking-9']);
+    expect(style(cards()[0])).toMatchObject({ top: 0, height: 240 });
+    const drawer = tree.root.findByType('DayDrawer').props;
+    expect(drawer.bookings.map((item: Booking) => item.id)).toEqual([9]);
+    expect(drawer.blocks.map((item: { id: number }) => item.id)).toEqual([4]);
   });
 });
 

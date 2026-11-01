@@ -13,6 +13,10 @@ const mockApi = {
   getMasterSettings: jest.fn().mockResolvedValue({ master: {} }),
 };
 jest.mock('@src/services/api/master', () => mockApi);
+jest.mock('@src/services/api/client', () => ({
+  apiClient: { get: jest.fn(), post: jest.fn(), put: jest.fn(), delete: jest.fn() },
+}));
+jest.mock('@src/components/schedule/CalendarB3Sheet', () => ({ CalendarB3Sheet: () => null }));
 jest.mock('react-native', () => {
   const R = require('react');
   return {

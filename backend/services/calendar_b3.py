@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import HTTPException
+from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -23,6 +24,7 @@ from models import (
     IndieMaster,
     Master,
     MasterClientMetadata,
+    MasterService,
     Service,
     master_services,
 )
@@ -57,6 +59,9 @@ BLOCK_MAX_US = 62 * 24 * 60 * 60 * 1_000_000
 _PHONE_RE = re.compile(r"^\+?[0-9]{10,15}$")
 
 
+SERVICE_IN_USE = "Услугу нельзя удалить: на неё ссылаются записи. Историческая услуга сохранена."
+
+
 @dataclass(frozen=True)
 class ManualWrite:
     client_name: str
@@ -64,8 +69,11 @@ class ManualWrite:
     end_time: datetime
     client_phone: Optional[str] = None
     service_id: Optional[int] = None
+    master_service_id: Optional[int] = None
     notes: Optional[str] = None
     version: Optional[int] = None
+    service_id_set: bool = False
+    master_service_id_set: bool = False
 
 
 @dataclass(frozen=True)
@@ -190,6 +198,62 @@ def delete_calendar_block(db: Session, master: Master, block_id: int, version: i
         return _translate(db, exc, master.user_id, BLOCK_SCOPE, None, "", _block_payload)
 
 
+def list_owned_services(db: Session, master: Master) -> list[dict]:
+    """Services a master can attach to a manual booking.
+
+    service_id is Service.id. master_service_id is MasterService.id.
+    A row never carries both, and the two sequences are not substituted.
+    """
+    listed = [
+        {
+            "service_id": row.id,
+            "master_service_id": None,
+            "name": row.name,
+            "duration": row.duration,
+            "price": row.price,
+        }
+        for row in _canonical_services(db, master)
+    ]
+    catalog = (
+        db.query(MasterService)
+        .filter(MasterService.master_id == master.id)
+        .order_by(MasterService.name, MasterService.id)
+        .all()
+    )
+    listed.extend(
+        {
+            "service_id": None,
+            "master_service_id": row.id,
+            "name": row.name,
+            "duration": row.duration,
+            "price": row.price,
+        }
+        for row in catalog
+    )
+    return listed
+
+
+def _canonical_services(db: Session, master: Master) -> list:
+    linked_ids = [
+        row.service_id
+        for row in db.execute(
+            master_services.select().where(master_services.c.master_id == master.id)
+        ).all()
+    ]
+    indie_ids = [
+        row.id
+        for row in db.query(IndieMaster.id).filter(IndieMaster.master_id == master.id).all()
+    ]
+    clauses = []
+    if linked_ids:
+        clauses.append(Service.id.in_(linked_ids))
+    if indie_ids:
+        clauses.append(Service.indie_master_id.in_(indie_ids))
+    if not clauses:
+        return []
+    return db.query(Service).filter(or_(*clauses)).order_by(Service.name, Service.id).all()
+
+
 def list_calendar_blocks(db: Session, master: Master) -> list[dict]:
     rows = (
         db.query(CalendarBlock)
@@ -202,14 +266,15 @@ def list_calendar_blocks(db: Session, master: Master) -> list[dict]:
 
 def _insert_manual(db: Session, master: Master, actor_user_id: int, body: ManualWrite) -> Booking:
     interval = _admitted_interval(db, master.id, body.start_time, body.end_time, MANUAL_MIN_US, MANUAL_MAX_US)
-    service = _owned_service(db, master, body.service_id)
-    _duration_matches_service(interval, service)
+    service, catalog = _service_choice(db, master, body)
+    _duration_matches_service(interval, service or catalog)
     decision = admit_booking_request(db, start=body.start_time, end=body.end_time, master_id=master.id)
     contact = _link_contact(db, master, body.client_phone, body.client_name)
     booking = Booking(
         master_id=master.id,
         client_id=None,
         service_id=service.id if service is not None else None,
+        master_service_id=catalog.id if catalog is not None else None,
         indie_master_id=None,
         salon_id=None,
         branch_id=None,
@@ -232,8 +297,8 @@ def _apply_manual_update(db: Session, master: Master, booking: Booking, body: Ma
     interval = _admitted_interval(
         db, master.id, body.start_time, body.end_time, MANUAL_MIN_US, MANUAL_MAX_US, exclude_booking_id=booking.id
     )
-    service = _owned_service(db, master, body.service_id)
-    _duration_matches_service(interval, service)
+    service_id, master_service_id = _service_update(db, master, booking, body)
+    _duration_matches_service(interval, _duration_source(db, master, service_id, master_service_id))
     decision = admit_booking_update(
         db,
         booking,
@@ -242,7 +307,8 @@ def _apply_manual_update(db: Session, master: Master, booking: Booking, body: Ma
     contact = _link_contact(db, master, body.client_phone, body.client_name)
     booking.guest_name = body.client_name
     booking.notes = body.notes
-    booking.service_id = service.id if service is not None else None
+    booking.service_id = service_id
+    booking.master_service_id = master_service_id
     booking.master_client_metadata_id = contact.id if contact is not None else None
     booking.client_id = None
     booking.status = BookingStatus.CONFIRMED.value
@@ -316,12 +382,151 @@ def _admitted_interval(
     return interval
 
 
-def _duration_matches_service(interval: CanonicalInterval, service: Optional[Service]) -> None:
-    if service is None or not service.duration:
+def _duration_matches_service(interval: CanonicalInterval, service) -> None:
+    duration = getattr(service, "duration", None) if service is not None else None
+    if not duration:
         return
     minutes = interval.duration_microseconds / 60_000_000
-    if abs(minutes - float(service.duration)) > 1:
+    if abs(minutes - float(duration)) > 1:
         raise _error(400, "BOOKING_TIME_INVALID", "Продолжительность услуги не соответствует времени записи")
+
+
+def _service_choice(db: Session, master: Master, body: ManualWrite):
+    if body.service_id is not None and body.master_service_id is not None:
+        raise HTTPException(status_code=400, detail="Укажите service_id или master_service_id, но не оба.")
+    if body.master_service_id is not None:
+        catalog = (
+            db.query(MasterService)
+            .filter(MasterService.id == body.master_service_id, MasterService.master_id == master.id)
+            .first()
+        )
+        if catalog is None:
+            raise HTTPException(status_code=404, detail="Услуга не найдена")
+        return None, catalog
+    return _owned_service(db, master, body.service_id), None
+
+
+def _service_update(db: Session, master: Master, booking: Booking, body: ManualWrite):
+    """Resolve the service link for PUT.
+
+    Omitted fields keep the stored identity. An explicit null is a clear.
+    A new id replaces the other side. Both ids together stay invalid.
+    """
+    sent_service = body.service_id_set
+    sent_catalog = body.master_service_id_set
+    if not sent_service and not sent_catalog:
+        return booking.service_id, booking.master_service_id
+    if body.service_id is not None and body.master_service_id is not None:
+        raise HTTPException(status_code=400, detail="Укажите service_id или master_service_id, но не оба.")
+    if body.master_service_id is not None:
+        _, catalog = _service_choice(db, master, body)
+        return None, catalog.id
+    if body.service_id is not None:
+        service, _ = _service_choice(db, master, body)
+        return service.id, None
+    if sent_service and sent_catalog:
+        return None, None
+    if sent_service:
+        return None, booking.master_service_id
+    return booking.service_id, None
+
+
+def _duration_source(db: Session, master: Master, service_id: Optional[int], master_service_id: Optional[int]):
+    if master_service_id is not None:
+        return (
+            db.query(MasterService)
+            .filter(MasterService.id == master_service_id, MasterService.master_id == master.id)
+            .first()
+        )
+    if service_id is not None:
+        return db.query(Service).filter(Service.id == service_id).first()
+    return None
+
+
+def booking_service_snapshot(db: Session, master_id: int, booking: Booking) -> dict:
+    """Owned service facts. A MasterService id is never read as Service.id."""
+    snapshot = {
+        "service_id": booking.service_id,
+        "master_service_id": booking.master_service_id,
+        "name": None,
+        "duration": None,
+        "price": None,
+        "known": False,
+    }
+    if booking.service_id:
+        service = getattr(booking, "service", None)
+        if service is None or getattr(service, "id", None) != booking.service_id:
+            service = db.query(Service).filter(Service.id == booking.service_id).first()
+        if service is not None:
+            snapshot.update(name=service.name, duration=service.duration, price=service.price, known=True)
+        return snapshot
+    if booking.master_service_id:
+        catalog = (
+            db.query(MasterService)
+            .filter(
+                MasterService.id == booking.master_service_id,
+                MasterService.master_id == master_id,
+            )
+            .first()
+        )
+        if catalog is not None:
+            snapshot.update(name=catalog.name, duration=catalog.duration, price=catalog.price, known=True)
+        return snapshot
+    return snapshot
+
+
+def run_service_writer(db: Session, operation) -> None:
+    """Check and delete in one writer transaction.
+
+    SQLite BEGIN IMMEDIATE serializes this with manual-booking creation.
+    The reference check does not depend on PRAGMA foreign_keys.
+    """
+    if db.get_bind().dialect.name == "sqlite":
+        try:
+            with SQLiteAdmissionTransaction(db):
+                operation(db)
+        except AdmissionBusy as exc:
+            raise HTTPException(status_code=503, detail="База занята, повторите удаление услуги.") from exc
+        return
+    operation(db)
+    db.commit()
+
+
+def delete_owned_master_service(db: Session, master_id: int, service_id: int) -> None:
+    def operation(session: Session) -> None:
+        query = session.query(MasterService).filter(
+            MasterService.id == service_id,
+            MasterService.master_id == master_id,
+        )
+        if session.get_bind().dialect.name != "sqlite":
+            query = query.with_for_update()
+        row = query.first()
+        if row is None:
+            raise HTTPException(status_code=404, detail="Услуга не найдена")
+        referenced = session.query(Booking.id).filter(Booking.master_service_id == row.id).first()
+        if referenced is not None:
+            raise HTTPException(status_code=409, detail=SERVICE_IN_USE)
+        session.delete(row)
+
+    run_service_writer(db, operation)
+
+
+def delete_canonical_service(db: Session, service_id: int, *, salon_id: Optional[int] = None) -> None:
+    def operation(session: Session) -> None:
+        query = session.query(Service).filter(Service.id == service_id)
+        if salon_id is not None:
+            query = query.filter(Service.salon_id == salon_id)
+        if session.get_bind().dialect.name != "sqlite":
+            query = query.with_for_update()
+        row = query.first()
+        if row is None:
+            raise HTTPException(status_code=404, detail="Service not found")
+        referenced = session.query(Booking.id).filter(Booking.service_id == row.id).first()
+        if referenced is not None:
+            raise HTTPException(status_code=409, detail=SERVICE_IN_USE)
+        session.delete(row)
+
+    run_service_writer(db, operation)
 
 
 def _owned_service(db: Session, master: Master, service_id: Optional[int]) -> Optional[Service]:
@@ -470,6 +675,7 @@ def _manual_payload(db: Session, booking_id: int) -> dict:
         "client_name": booking.guest_name,
         "client_phone": contact.client_phone if contact is not None else None,
         "service_id": booking.service_id,
+        "master_service_id": booking.master_service_id,
         "master_id": booking.master_id,
         "start_time": _iso(booking.start_time),
         "end_time": _iso(booking.end_time),

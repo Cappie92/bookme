@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { XMarkIcon, UserIcon, TagIcon, CalendarIcon } from '@heroicons/react/24/outline'
 import { apiGet, apiRequest } from '../utils/api'
 import { CalendarGrid } from '../components/booking/PublicBookingCalendarGrid'
+import { startAvailabilityRequest } from '../components/booking/availabilityRequest'
 import { useModal } from '../hooks/useModal'
 import { formatTimeShort } from '../utils/dateFormat'
 import {
@@ -125,6 +126,8 @@ export default function RepeatBookingModal({
   /** Уже загруженные месяцы (y-m0) в рамках открытой модалки — без повторного шторма при смене месяца туда-обратно. */
   const loadedMonthsRef = useRef(new Set())
   const monthLoadAbortRef = useRef(null)
+  const availabilityStore = useRef(0)
+  const monthAvailabilityStore = useRef(0)
 
   useEffect(() => {
     if (isOpen && booking) {
@@ -226,7 +229,7 @@ export default function RepeatBookingModal({
    * AbortController отменяет при закрытии модалки / смене параметров (499 на nginx при уходе).
    */
   const loadAvailabilityMonth = useCallback(
-    async (year, month0, signal, serviceDurationPassed) => {
+    async (year, month0, signal, serviceDurationPassed, isCurrent = () => true) => {
       const serviceDuration = serviceDurationPassed ?? booking?.duration
       if (serviceDuration == null || !owner.owner_type || !owner.owner_id) return
       const lastDay = new Date(year, month0 + 1, 0).getDate()
@@ -238,7 +241,7 @@ export default function RepeatBookingModal({
       }
 
       for (let i = 0; i < days.length; i += SLOT_FETCH_CONCURRENCY) {
-        if (signal.aborted) return
+        if (signal?.aborted || !isCurrent()) return
         const chunk = days.slice(i, i + SLOT_FETCH_CONCURRENCY)
         const results = await Promise.all(
           chunk.map(async (dateStr) => {
@@ -261,7 +264,7 @@ export default function RepeatBookingModal({
             }
           })
         )
-        if (signal.aborted) return
+        if (signal?.aborted || !isCurrent()) return
         const patch = {}
         for (const { dateStr, slots } of results) {
           if (slots.length > 0) patch[dateStr] = slots
@@ -315,6 +318,8 @@ export default function RepeatBookingModal({
     }
 
     const ac = new AbortController()
+    const request = startAvailabilityRequest(availabilityStore)
+    const isCurrent = () => request.isCurrent()
     setSlotsByDate({})
     setAvailabilityHint('')
     setCalendarLoading(true)
@@ -339,10 +344,10 @@ export default function RepeatBookingModal({
         loadedMonthsRef.current.add(`${viewY}-${viewM}`)
       }
 
-      await loadAvailabilityMonth(minY, minM, signal, serviceDuration)
-      if (signal.aborted) return
+      await loadAvailabilityMonth(minY, minM, signal, serviceDuration, isCurrent)
+      if (!isCurrent() || signal.aborted) return
       if (`${viewY}-${viewM}` !== `${minY}-${minM}`) {
-        await loadAvailabilityMonth(viewY, viewM, signal, serviceDuration)
+        await loadAvailabilityMonth(viewY, viewM, signal, serviceDuration, isCurrent)
       }
     }
 
@@ -360,13 +365,13 @@ export default function RepeatBookingModal({
             if (e?.name === 'AbortError') throw e
             console.warn('[RepeatBookingModal] public profile недоступен → узкий fallback repeat', e?.message || e)
             await runFallbackInitial(ac.signal, resolveDuration)
-            if (!ac.signal.aborted && owner.owner_type && owner.owner_id) {
+            if (isCurrent() && !ac.signal.aborted && owner.owner_type && owner.owner_id) {
               setAvailabilitySource('repeat')
             }
             return
           }
 
-          if (ac.signal.aborted) return
+          if (!isCurrent() || ac.signal.aborted) return
 
           const nServices = Array.isArray(profile?.services) ? profile.services.length : 0
           console.log('[RepeatBookingModal] profile OK', { slug, servicesCount: nServices })
@@ -383,6 +388,7 @@ export default function RepeatBookingModal({
               '[RepeatBookingModal] MasterService.id не сопоставлена; массовый repeat НЕ запускаем',
               { slug, resolveName, resolveDuration, sampleServices: (profile?.services || []).slice(0, 5) }
             )
+            if (!isCurrent() || ac.signal.aborted) return
             setAvailabilityHint(
               'Не удалось сопоставить услугу записи с услугами мастера на публичной странице. Обратитесь в поддержку или выберите время у мастера по ссылке на его страницу записи.'
             )
@@ -401,26 +407,30 @@ export default function RepeatBookingModal({
             `/api/public/masters/${encodeURIComponent(slug)}/availability?${q.toString()}`,
             { method: 'GET', signal: ac.signal }
           )
-          if (ac.signal.aborted) return
+          if (!isCurrent() || ac.signal.aborted) return
           setSlotsByDate(slotsFlatToByDate(data.slots || []))
           setAvailabilitySource('public')
           return
         }
 
         await runFallbackInitial(ac.signal, durationForRepeat)
-        if (!ac.signal.aborted && owner.owner_type && owner.owner_id) {
+        if (isCurrent() && !ac.signal.aborted && owner.owner_type && owner.owner_id) {
           setAvailabilitySource('repeat')
         }
       } catch (e) {
         if (e?.name === 'AbortError') return
+        if (!isCurrent()) return
         console.error('Ошибка загрузки доступности:', e)
       } finally {
-        if (!ac.signal.aborted) setCalendarLoading(false)
+        if (isCurrent() && !ac.signal.aborted) setCalendarLoading(false)
       }
     })()
 
     return () => {
       ac.abort()
+      request.invalidate()
+      monthAvailabilityStore.current += 1
+      monthLoadAbortRef.current?.abort()
     }
   }, [
     isOpen,
@@ -451,12 +461,14 @@ export default function RepeatBookingModal({
       monthLoadAbortRef.current?.abort()
       const ac = new AbortController()
       monthLoadAbortRef.current = ac
+      const request = startAvailabilityRequest(monthAvailabilityStore)
+      const isCurrent = () => request.isCurrent() && !ac.signal.aborted
 
       ;(async () => {
         try {
-          await loadAvailabilityMonth(year, month, ac.signal, repeatDur)
+          await loadAvailabilityMonth(year, month, ac.signal, repeatDur, isCurrent)
         } catch (e) {
-          if (e?.name !== 'AbortError') console.error('Ошибка дозагрузки месяца:', e)
+          if (e?.name !== 'AbortError' && isCurrent()) console.error('Ошибка дозагрузки месяца:', e)
         }
       })()
     },
@@ -800,6 +812,7 @@ export default function RepeatBookingModal({
                   selectedDate={selectedDate || null}
                   onSelectDate={(dateStr) => setSelectedDate(dateStr)}
                   onMonthChange={availabilitySource === 'repeat' ? handleCalendarMonthChange : undefined}
+                  viewResetKey={booking?.id ?? null}
                 />
                 {calendarLoading && (
                   <p className="text-xs text-gray-500 mt-2">

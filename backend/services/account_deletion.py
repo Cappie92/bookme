@@ -284,16 +284,24 @@ def _delete_master_schedule(db: Session, master_id: int, indie_master_id: Option
 
 def _deactivate_master_services(db: Session, master_id: int, indie_master_id: Optional[int]) -> None:
     """
-    Услуги: удаляем актуальные MasterService/категории и M2M-связи.
-    Service rows, на которые ссылаются bookings, не hard-delete — история имён услуг сохраняется.
+    Услуги: снимаем M2M и удаляем только те MasterService, на которые нет записей.
+    Строка, на которую ссылается booking, остаётся: SQLite иначе переиспользует её id.
+    Service rows тоже не hard-delete — история имён услуг сохраняется.
     """
     db.execute(delete(master_services).where(master_services.c.master_id == master_id))
-    db.query(MasterService).filter(MasterService.master_id == master_id).delete(
-        synchronize_session=False
+    referenced = select(Booking.master_service_id).where(Booking.master_service_id.isnot(None))
+    db.query(MasterService).filter(
+        MasterService.master_id == master_id,
+        MasterService.id.notin_(referenced),
+    ).delete(synchronize_session=False)
+    kept_categories = select(MasterService.category_id).where(
+        MasterService.master_id == master_id,
+        MasterService.category_id.isnot(None),
     )
-    db.query(MasterServiceCategory).filter(MasterServiceCategory.master_id == master_id).delete(
-        synchronize_session=False
-    )
+    db.query(MasterServiceCategory).filter(
+        MasterServiceCategory.master_id == master_id,
+        MasterServiceCategory.id.notin_(kept_categories),
+    ).delete(synchronize_session=False)
     if indie_master_id:
         # Не удаляем Service с bookings; убираем публичную привязку к indie.
         services = db.query(Service).filter(Service.indie_master_id == indie_master_id).all()

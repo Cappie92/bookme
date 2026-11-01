@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react'
 import { XMarkIcon } from '@heroicons/react/24/outline'
 import { apiPost } from '../utils/api'
 import { formatLocalDate, localizeScheduleError } from '../utils/scheduleDates'
+import { categoryLabel, overlapsDay, wallLabel } from '../utils/calendarB3'
 import {
   SLOT_MINUTE_STEPS,
   resolveDayRangeMinutes,
@@ -53,6 +54,11 @@ export default function MasterDayDrawerModal({
   dateStr,
   slotsForDay,
   bookings,
+  blocks = [],
+  onCreateManual,
+  onCreateBlock,
+  onEditManual,
+  onEditBlock,
   onSaved,
 }) {
   const [saving, setSaving] = useState(false)
@@ -66,12 +72,14 @@ export default function MasterDayDrawerModal({
 
   const dayBookings = useMemo(() => {
     return (bookings || [])
-      .filter((b) => {
-        const bd = formatLocalDate(new Date(b.start_time))
-        return bd === dateStr
-      })
-      .sort((a, b) => new Date(a.start_time) - new Date(b.start_time))
+      .filter((b) => overlapsDay(b.start_time, b.end_time, dateStr))
+      .sort((a, b) => String(a.start_time).localeCompare(String(b.start_time)))
   }, [bookings, dateStr])
+
+  const dayBlocks = useMemo(
+    () => (blocks || []).filter((block) => overlapsDay(block.start_time, block.end_time, dateStr)),
+    [blocks, dateStr],
+  )
 
   const openKeySet = useMemo(() => {
     const set = new Set()
@@ -228,7 +236,18 @@ export default function MasterDayDrawerModal({
           </div>
 
           <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2">
-            {dayBookings.length === 0 && availableCount === 0 ? (
+            {dayBlocks.map((block) => (
+              <button
+                key={`block-${block.id}`}
+                type="button"
+                className="w-full rounded-lg border border-amber-400 bg-amber-50 p-2 text-left text-sm"
+                onClick={() => onEditBlock?.(block)}
+              >
+                <div className="font-medium text-amber-950">{block.title || categoryLabel(block.category)}</div>
+                <div className="text-xs text-amber-900">{wallLabel(block.start_time)}–{wallLabel(block.end_time)}</div>
+              </button>
+            ))}
+            {dayBookings.length === 0 && dayBlocks.length === 0 && availableCount === 0 ? (
               <p className="text-gray-500 text-sm text-center py-6">Нет записей и открытых слотов</p>
             ) : (
               <>
@@ -236,13 +255,18 @@ export default function MasterDayDrawerModal({
                   const priceStr = formatPriceRub(b.service_price)
                   return (
                     <div key={b.id} className="border border-gray-200 rounded-lg p-2 text-sm bg-orange-50/40">
-                      <div className="font-medium text-gray-900">{b.service_name || 'Услуга'}</div>
+                      <div className="font-medium text-gray-900">{b.source === 'manual' ? 'Вручную · ' : ''}{b.service_name || (b.guest_name ? 'Без услуги' : 'Услуга')}</div>
                       <div className="text-gray-700">
-                        {(b.client_display_name || b.client_name) || 'Клиент'}
+                        {(b.guest_name || b.client_display_name || b.client_name) || 'Клиент'}
+                        {b.client_phone ? ` · ${b.client_phone}` : ''}
                       </div>
+                      {b.source === 'manual' ? (
+                        <button type="button" className="mt-1 text-xs font-medium text-green-700" onClick={() => onEditManual?.(b)}>
+                          Изменить или отменить
+                        </button>
+                      ) : null}
                       <div className="text-xs text-gray-600">
-                        {new Date(b.start_time).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })} –{' '}
-                        {new Date(b.end_time).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
+                        {wallLabel(b.start_time)} – {wallLabel(b.end_time)}
                       </div>
                       {priceStr ? <div className="text-xs font-semibold text-green-700 mt-1">{priceStr}</div> : null}
                     </div>
@@ -258,6 +282,22 @@ export default function MasterDayDrawerModal({
           </div>
 
           <div className="px-4 py-3 border-t space-y-2 bg-white">
+            <button
+              type="button"
+              disabled={saving}
+              onClick={onCreateManual}
+              className="w-full py-2.5 rounded-lg bg-green-600 text-white font-semibold text-sm hover:bg-green-700 disabled:opacity-50"
+            >
+              Запись вручную
+            </button>
+            <button
+              type="button"
+              disabled={saving}
+              onClick={onCreateBlock}
+              className="w-full py-2.5 rounded-lg border border-amber-500 text-amber-800 font-semibold text-sm hover:bg-amber-50 disabled:opacity-50"
+            >
+              Занять время
+            </button>
             <button
               type="button"
               disabled={saving}

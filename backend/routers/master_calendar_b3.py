@@ -19,6 +19,7 @@ from services.calendar_b3 import (
     delete_calendar_block,
     delete_manual_booking,
     list_calendar_blocks,
+    list_owned_services,
     update_calendar_block,
     update_manual_booking,
 )
@@ -35,6 +36,7 @@ class ManualBookingIn(BaseModel):
     end_time: datetime
     client_phone: Optional[str] = None
     service_id: Optional[int] = None
+    master_service_id: Optional[int] = None
     notes: Optional[str] = Field(default=None, max_length=2000)
 
 
@@ -77,14 +79,18 @@ def _manual(body: ManualBookingIn, version: Optional[int] = None) -> ManualWrite
     name = body.client_name.strip()
     if not name:
         raise HTTPException(status_code=422, detail="client_name is required")
+    fields = set(getattr(body, "model_fields_set", ()) or ())
     return ManualWrite(
         client_name=name,
         start_time=body.start_time,
         end_time=body.end_time,
         client_phone=_blank(body.client_phone),
         service_id=body.service_id,
+        master_service_id=body.master_service_id,
         notes=_blank(body.notes),
         version=version,
+        service_id_set="service_id" in fields,
+        master_service_id_set="master_service_id" in fields,
     )
 
 
@@ -152,6 +158,15 @@ def post_calendar_block(
 ):
     master = _master(db, current_user)
     return create_calendar_block(db, master, current_user.id, _block(body), _key(idempotency_key))
+
+
+@router.get("/calendar-services")
+def get_calendar_services(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    master = _master(db, current_user)
+    return list_owned_services(db, master)
 
 
 @router.get("/calendar-blocks")

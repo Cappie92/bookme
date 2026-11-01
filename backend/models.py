@@ -326,6 +326,8 @@ class Booking(Base):
     id = Column(Integer, primary_key=True, index=True)
     client_id = Column(Integer, ForeignKey("users.id"))
     service_id = Column(Integer, ForeignKey("services.id"))
+    # Identity of a master-owned catalog row. Distinct from service_id.
+    master_service_id = Column(Integer, ForeignKey("master_services_list.id"), nullable=True, index=True)
     master_id = Column(Integer, ForeignKey("masters.id"), nullable=True)
     indie_master_id = Column(Integer, ForeignKey("indie_masters.id"), nullable=True)
     salon_id = Column(Integer, ForeignKey("salons.id"), nullable=True)
