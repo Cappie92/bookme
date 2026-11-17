@@ -48,8 +48,8 @@ Replaceable operational state. После CI или deploy обновить ст
 
 | Field | State |
 |-------|-------|
-| release candidate | branch `release/calendar-b3-20261117` ([PR #7](https://github.com/Cappie92/bookme/pull/7)); docs tip `9930809`, E2E/grid fixes pending push (see next CI run) |
-| CI status | **FAIL** on last remote check ([run 44104884292](https://github.com/Cappie92/bookme/actions/runs/44104884292): Playwright **147** passed **31** failed, aggregate gate **fail**); backend/frontend/mobile/gitleaks **pass**. Re-run after E2E push |
+| release candidate | `a3c6dda` on branch `release/calendar-b3-20261117` ([PR #7](https://github.com/Cappie92/bookme/pull/7)); PR merge commit **none** (open PR) — CI head SHA matches branch tip |
+| CI status | **PASS** Application tests [run 44173241178](https://github.com/Cappie92/bookme/actions/runs/44173241178) @ `a3c6dda`: Playwright **178** passed, backend shards **1733** total passed, mobile/frontend/gate **success**. Prior fail [run 44104884292](https://github.com/Cappie92/bookme/actions/runs/44104884292) @ `9930809`: **147** passed **31** failed Playwright |
 | local full backend (release worktree) | **CONFIRMED 2026-11-17:** **1733** passed, **7** skipped, **0** failed, exit **0** |
 | local Playwright (release worktree) | **CONFIRMED 2026-11-17:** **178** passed, **0** failed, exit **0** |
 | production deploy | **not performed** — blocked before cutover |
