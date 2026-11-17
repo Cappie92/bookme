@@ -4,7 +4,7 @@ project: DeDato
 knowledge_class: living
 environment: prod
 status: active
-last_verified: 2026-11-13
+last_verified: 2026-11-17
 ---
 
 # Production topology
@@ -48,12 +48,15 @@ Replaceable operational state. После CI или deploy обновить ст
 
 | Field | State |
 |-------|-------|
-| commit | `d072998` |
-| CI status | pending as of 2026-10-19 |
-| production deploy | not performed |
-| next gate | green CI → backend-only deploy |
-| migration | none |
-| mobile rebuild | none |
+| release candidate | `b4fee32` on branch `release/calendar-b3-20261117` ([PR #7](https://github.com/Cappie92/bookme/pull/7)) |
+| CI status | **FAIL** on PR #7 (Playwright + aggregate gate); backend/frontend/mobile/gitleaks **pass** ([run 44104884292](https://github.com/Cappie92/bookme/actions/runs/44104884292)) |
+| local full backend (release worktree) | 1732 passed, 7 skipped, **1 failed** `test_cleanup_deletes_smoke_not_admin` |
+| production deploy | **not performed** — blocked before cutover |
+| production runtime (host check 2026-11-17) | backend `dedato_backend:a3fa405`, frontend `dedato_frontend:a3fa405`; Alembic **`20260914_push_notifications_v1`** |
+| migration preflight (copy of prod DB) | upgrades through `20261031_b3_master_svc` OK; **`20261114_calendar_grid_guard` aborts**: **29** invalid `bookings` (off-grid wall times / bad intervals; mostly stats-smoke masters 11/15/16, one `#145` sub-second timestamps, one `#1067` inverted interval) |
+| backup | `/opt/dedato/backups/dedato_backup_20261117_173441.tar.gz`; SQLite `PRAGMA integrity_check` **ok** |
+| next gate | owner-approved repair of flagged rows (no auto-snap/delete) → migration dry-run on copy → green full CI → controlled container cutover |
+| mobile rebuild | none (native tree unchanged vs `main`) |
 
 Marketing version **1.1.0**. Production is not at `d072998`, пока эта строка deploy не заменена.
 
