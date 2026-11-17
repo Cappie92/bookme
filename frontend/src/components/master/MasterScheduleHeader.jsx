@@ -132,7 +132,7 @@ export default function MasterScheduleHeader({
       >
         <ChevronLeftIcon className="size-[18px]" strokeWidth={2} aria-hidden />
       </button>
-      <p className={`${mcCalPeriodLabel} text-balance max-lg:max-w-[166px]`}>
+      <p className={`${mcCalPeriodLabel} pointer-events-none text-balance max-lg:max-w-[166px]`}>
         {formatMasterSchedulePeriodLabel(calendarLayoutMode, focusDay, weekDates)}
       </p>
       <button

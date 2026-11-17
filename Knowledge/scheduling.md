@@ -4,7 +4,7 @@ project: DeDato
 knowledge_class: living
 environment: common
 status: active
-last_verified: 2026-11-14
+last_verified: 2026-11-17
 ---
 
 # Scheduling and availability
@@ -159,3 +159,50 @@ Mutations используют version, create поддерживает idempote
 `calendar_availability.py`, `calendar_b3.py`, `calendar_readiness.py`;
 `backend/tests/test_calendar_b3_backend.py`, `test_calendar_b2_unified_admission.py`.
 API: [Booking API](booking-api.md#calendar-b3-master-api).
+
+## Production grid-guard remediation plan (owner approval required)
+
+**CONFIRMED, 2026-11-17, изолированная копия prod SQLite (backup `20261117_173441`):**
+миграция `20261114_calendar_grid_guard` **падает** на **29** строках `bookings`.
+Ниже — план **без** автоматического округления, удаления записей или ослабления
+guard. Исполняемый отчёт: артефакт `prod-grid-report.json` (локальный анализ,
+не в git).
+
+### Сводка нарушений
+
+| Класс | Count | Пример |
+|-------|------:|--------|
+| `end:off_grid_wall` + `duration_not_30_multiple` | 27 | 45‑мин окончание (:15/:45), чаще `created`/`completed` smoke |
+| subsecond + off-grid start/end (**#145**) | 1 | `2026-04-14 22:02:38.047306` → `22:32:38.047306`, `completed`, `master_id=1` |
+| `inverted_interval` (**#1067**) | 1 | `start 16:00` / `end 15:00`, `cancelled`, `master_id=9`, `client_id=14` |
+
+**Происхождение (confidence):** для всех 29 строк в отчёте стоит
+`INFERRED` (пакетные даты `2026-04-23`, `2026-06-04/07`, subsecond/inverted).
+Это **не** доказательство тестовости: признак — совокупность метаданных, не
+только `master_id` 11/15/16.
+
+### Связанные сущности (копия prod)
+
+Перед правкой на копии для каждого `id` проверять: `booking_confirmations`,
+`incomes` / accounting, `loyalty_transactions`, canonical UTC columns.
+В отчёте: у части `completed` есть `incomes` (напр. #912–914); у `created`
+smoke — обычно без доходов; у #145 — confirmation без income; у #1067 — пусто.
+
+### Предлагаемые действия (согласование владельца)
+
+1. **Тип A (27× :15/:45 end, duration 45):** ручной repair **на копии** — для
+   каждой строки зафиксировать целевой on-grid интервал (сдвиг **только** конца
+   на ближайший допустимый :00/:30 **без** изменения бизнес-смысла, либо
+   пересчёт `end` из `start` + service duration, кратной 30). Повторно прогнать
+   `calendar_admission_readiness` / apply migration head на копии. Сверить
+   incomes/loyalty; при расхождении — отдельное решение, не тихий delete.
+2. **#145 (subsecond):** нормализация wall до целых секунд и сетки (напр.
+   truncate subsecond → `22:00–22:30` или фактическая 30‑мин сетка по service);
+   обновить canonical UTC **в той же транзакции**, что и wall; dry-run на копии.
+3. **#1067 (inverted, cancelled):** минимальный fix `end > start` on-grid
+   (напр. `16:00–16:30` или согласованный отменённый интервал); проверить, что
+   статус `cancelled` сохранён и occupancy не меняется для активных слотов.
+
+**Gate:** cutover `20261114_calendar_grid_guard` на prod разрешён только после
+подтверждённого owner SQL/script на копии + зелёный full CI релиз-кандидата +
+миграция dry-run на той же копии. См. [Production topology](production-topology.md#current-release-gate).

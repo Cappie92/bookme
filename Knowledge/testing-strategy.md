@@ -180,8 +180,8 @@ Managed `.local/dedato/local.db` pytest не использует.
 | Frontend build | `cd frontend && npm run build` | OK (`envDir: .local/dedato/empty-env`) |
 | Mobile unit | `cd mobile && npm test` | **1003** passed |
 | Mobile integration | `cd mobile && npm run test:integration` | **17** passed |
-| Playwright | `./scripts/run-playwright-e2e.sh` | **147** passed |
-| Backend full | `cd backend && .venv/bin/python -m pytest` | **2026-11-16, calendar grid fixture pass (явный `on_grid_interval` в 13 test-модулях, прозрачный `conftest`, FK plan в Robokassa):** **1733** passed, **7** skipped, **0** failed (~9.8 min), exit **0**. Лог: `…/private/backend-pytest-full-20261116-grid-final2.log` |
+| Playwright | `./scripts/run-playwright-e2e.sh` | **CONFIRMED 2026-11-17, release worktree:** **178** passed, **0** failed, exit **0** (~2.3 min) |
+| Backend full | `cd backend && .venv/bin/python -m pytest` | **CONFIRMED 2026-11-17, release worktree:** **1733** passed, **7** skipped, **0** failed (~26 min), exit **0** (`test_cleanup_deletes_smoke_not_admin` included) |
 | Maestro | `cd mobile && npm run test:e2e` | **NOT RUN** — в package placeholder app IDs, нет установленной test build |
 | git diff --check | из корня репо | без ошибок |
 

@@ -507,10 +507,11 @@ async def seed_e2e(
         db.add(past_booking)
         db.flush()
 
-      # 2) Будущая запись Master A для client cancel flow
+    # 2) Будущая запись Master A для client cancel flow (завтра: не зависит от времени суток seed)
+    client_cancel_day = today + timedelta(days=1)
     client_cancel_start, client_cancel_end = _e2e_slot(
-        today,
-        14,
+        client_cancel_day,
+        10,
         0,
         int(svcs_a[0].duration or 30),
         zone_a,
