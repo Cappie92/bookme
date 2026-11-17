@@ -279,13 +279,15 @@ def test_confirm_disabled_spent_no_earned(client, db, test_user):
     m = ctx["master"]
     mu = ctx["master_user"]
     svc_id = ctx["canonical_service_id"]
-    now = datetime.utcnow()
+    from tests.booking_fixture import on_grid_interval
+
+    st, en = on_grid_interval(datetime.utcnow() - timedelta(hours=3))
     b = Booking(
         client_id=test_user.id,
         service_id=svc_id,
         master_id=m.id,
-        start_time=now - timedelta(hours=3),
-        end_time=now - timedelta(hours=2),
+        start_time=st,
+        end_time=en,
         status=BookingStatus.CREATED.value,
         payment_amount=1500.0,
         loyalty_points_used=80,
@@ -331,13 +333,15 @@ def test_confirm_enabled_spent_and_earned(client, db, test_user):
     m = ctx["master"]
     mu = ctx["master_user"]
     svc_id = ctx["canonical_service_id"]
-    now = datetime.utcnow()
+    from tests.booking_fixture import on_grid_interval
+
+    st, en = on_grid_interval(datetime.utcnow() - timedelta(hours=5))
     b = Booking(
         client_id=test_user.id,
         service_id=svc_id,
         master_id=m.id,
-        start_time=now - timedelta(hours=5),
-        end_time=now - timedelta(hours=4),
+        start_time=st,
+        end_time=en,
         status=BookingStatus.CREATED.value,
         payment_amount=1500.0,
         loyalty_points_used=100,
@@ -378,13 +382,15 @@ def test_confirm_no_settings_spent_no_earned(client, db, test_user):
     m = ctx["master"]
     mu = ctx["master_user"]
     svc_id = ctx["canonical_service_id"]
-    now = datetime.utcnow()
+    from tests.booking_fixture import on_grid_interval
+
+    st, en = on_grid_interval(datetime.utcnow() - timedelta(hours=6))
     b = Booking(
         client_id=test_user.id,
         service_id=svc_id,
         master_id=m.id,
-        start_time=now - timedelta(hours=6),
-        end_time=now - timedelta(hours=5),
+        start_time=st,
+        end_time=en,
         status=BookingStatus.CREATED.value,
         payment_amount=800.0,
         loyalty_points_used=50,
@@ -429,13 +435,16 @@ def test_active_reservation_reduces_points_to_use(client, db, test_user):
     )
     m = ctx["master"]
     svc_id = ctx["canonical_service_id"]
+    from tests.booking_fixture import on_grid_interval
+
+    res_st, res_en = on_grid_interval(datetime.utcnow() + timedelta(days=1))
     db.add(
         Booking(
             client_id=test_user.id,
             service_id=svc_id,
             master_id=m.id,
-            start_time=datetime.utcnow() + timedelta(days=1),
-            end_time=datetime.utcnow() + timedelta(days=1, hours=1),
+            start_time=res_st,
+            end_time=res_en,
             status=BookingStatus.CREATED.value,
             payment_amount=500.0,
             loyalty_points_used=60,

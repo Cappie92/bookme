@@ -15,6 +15,7 @@ from models import (
     User,
     UserRole,
 )
+from tests.booking_fixture import on_grid_interval
 from services.booking_visit_finalize import finalize_post_visit_booking
 
 
@@ -54,13 +55,13 @@ def test_client_bookings_list_shows_amount_to_pay_with_reserve(client, db, test_
     db.commit()
     db.refresh(svc)
 
-    start = datetime.utcnow() + timedelta(days=3)
+    st, en = on_grid_interval(datetime.utcnow() + timedelta(days=3))
     b = Booking(
         client_id=test_user.id,
         service_id=svc.id,
         master_id=master.id,
-        start_time=start,
-        end_time=start + timedelta(hours=1),
+        start_time=st,
+        end_time=en,
         status=BookingStatus.CREATED.value,
         payment_amount=1000.0,
         loyalty_points_used=100,
@@ -124,14 +125,14 @@ def test_client_loyalty_points_effective_with_reserve(client, db, test_user):
     db.add(svc)
     db.commit()
     db.refresh(svc)
-    start = datetime.utcnow() + timedelta(days=2)
+    st, en = on_grid_interval(datetime.utcnow() + timedelta(days=2))
     db.add(
         Booking(
             client_id=test_user.id,
             service_id=svc.id,
             master_id=master_id,
-            start_time=start,
-            end_time=start + timedelta(hours=1),
+            start_time=st,
+            end_time=en,
             status=BookingStatus.CREATED.value,
             payment_amount=500.0,
             loyalty_points_used=100,
@@ -194,13 +195,13 @@ def test_client_loyalty_after_cancel_releases_reserve(client, db, test_user):
     db.add(svc)
     db.commit()
     db.refresh(svc)
-    start = datetime.utcnow() + timedelta(days=4)
+    st, en = on_grid_interval(datetime.utcnow() + timedelta(days=4))
     b = Booking(
         client_id=test_user.id,
         service_id=svc.id,
         master_id=master_id,
-        start_time=start,
-        end_time=start + timedelta(hours=1),
+        start_time=st,
+        end_time=en,
         status=BookingStatus.CREATED.value,
         payment_amount=500.0,
         loyalty_points_used=100,
@@ -272,12 +273,13 @@ def test_client_loyalty_points_lists_spent_when_balance_zero(client, db, test_us
     db.commit()
     db.refresh(svc)
     now = datetime.utcnow()
+    st, en = on_grid_interval(now - timedelta(hours=2))
     b = Booking(
         client_id=test_user.id,
         service_id=svc.id,
         master_id=mid,
-        start_time=now - timedelta(hours=2),
-        end_time=now - timedelta(hours=1),
+        start_time=st,
+        end_time=en,
         status=BookingStatus.AWAITING_CONFIRMATION.value,
         payment_amount=1000.0,
         loyalty_points_used=100,
@@ -363,12 +365,13 @@ def test_client_loyalty_history_endpoint_returns_spent(client, db, test_user):
     db.commit()
     db.refresh(svc)
     now = datetime.utcnow()
+    st, en = on_grid_interval(now - timedelta(hours=3))
     b = Booking(
         client_id=test_user.id,
         service_id=svc.id,
         master_id=mid,
-        start_time=now - timedelta(hours=3),
-        end_time=now - timedelta(hours=2),
+        start_time=st,
+        end_time=en,
         status=BookingStatus.AWAITING_CONFIRMATION.value,
         payment_amount=1000.0,
         loyalty_points_used=100,
@@ -421,13 +424,13 @@ def test_client_past_bookings_include_loyalty_price_fields(client, db, test_user
     db.add(svc)
     db.commit()
     db.refresh(svc)
-    now = datetime.utcnow()
+    st, en = on_grid_interval(datetime.utcnow() - timedelta(days=1))
     b = Booking(
         client_id=test_user.id,
         service_id=svc.id,
         master_id=master.id,
-        start_time=now - timedelta(days=1),
-        end_time=now - timedelta(days=1) + timedelta(hours=1),
+        start_time=st,
+        end_time=en,
         status=BookingStatus.COMPLETED.value,
         payment_amount=1000.0,
         loyalty_points_used=100,

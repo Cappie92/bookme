@@ -1,0 +1,20 @@
+version = 1
+name = "Dedato Local"
+
+[setup]
+script = ""
+
+[[actions]]
+name = "Открыть Dedato"
+icon = "run"
+command = "python3 scripts/dev/local.py start"
+
+[[actions]]
+name = "Остановить Dedato"
+icon = "tool"
+command = "python3 scripts/dev/local.py stop"
+
+[[actions]]
+name = "Статус Dedato"
+icon = "debug"
+command = "python3 scripts/dev/local.py status"

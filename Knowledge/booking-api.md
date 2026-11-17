@@ -87,3 +87,26 @@ Generic update and edit-request create/accept/reject share `require_booking_acto
 - `BookingUpdate.status` is not enum-constrained.
 - Public generic phone-bootstrap and salon any-master paths remain mounted, but tracked modern web/mobile usage is not established for every path.
 - **UNKNOWN:** external consumers outside this repository.
+
+## Calendar B3 master API
+
+**CONFIRMED, 2026-11-14, local B3 source:** `backend/routers/master_calendar_b3.py`
+зарегистрирован в `backend/main.py`. Все следующие endpoints требуют active user
+с ролью master и собственный Master profile:
+
+| Endpoint | Контракт |
+|---|---|
+| `POST /api/master/bookings/manual` | guest `client_name`, start/end, optional phone/service/notes; optional `Idempotency-Key` |
+| `PUT /api/master/bookings/manual/{id}` | собственная manual booking, body с version |
+| `DELETE /api/master/bookings/manual/{id}?version=…` | отмена manual booking, не hard delete |
+| `GET /api/master/calendar-services` | собственные selectable services |
+| `GET/POST /api/master/calendar-blocks` | список собственных / создание private block |
+| `PUT /api/master/calendar-blocks/{id}` | обновление собственного блока с version |
+| `DELETE /api/master/calendar-blocks/{id}?version=…` | soft delete собственного блока |
+
+Writes требуют unified mode; stale version → `409 CALENDAR_VERSION_CONFLICT`.
+Manual booking различает `service_id` и `master_service_id`: второй — catalog
+`MasterService`, не `Service.id`. Проверки ownership, occupied intervals,
+DST ambiguity/gaps, explicit offsets, idempotency и legacy mutator isolation
+покрыты `backend/tests/test_calendar_b3_backend.py` (30 passed локально).
+Time/occupancy owner: [Scheduling](scheduling.md#calendar-b3-and-unified-admission).

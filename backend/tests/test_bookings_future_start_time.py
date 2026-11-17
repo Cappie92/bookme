@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 import pytest
 
 from auth import get_password_hash
+from tests.booking_fixture import grid_booking_walls
 from models import Booking, BookingStatus, Master, Service, User, UserRole
 
 
@@ -42,8 +43,10 @@ def test_bookings_future_returns_start_time_iso(client, db):
     db.refresh(service)
 
     now = datetime.utcnow()
-    future_start = now + timedelta(hours=2)
-    future_end = future_start + timedelta(hours=1)
+    future_start, future_end = grid_booking_walls(
+        now + timedelta(hours=2),
+        now + timedelta(hours=3),
+    )
 
     booking = Booking(
         client_id=user.id,

@@ -4,7 +4,7 @@ project: DeDato
 knowledge_class: living
 environment: common
 status: active
-last_verified: 2026-09-27
+last_verified: 2026-11-14
 ---
 
 # Scheduling and availability
@@ -28,11 +28,56 @@ Current HTTP surface: weekly, monthly, day, rules, create/update/bulk. Legacy `G
 
 **Source:** `backend/models.py` — schedule models; `backend/routers/master.py` — schedule/rules, weekly/day/bulk endpoints; `backend/services/scheduling.py`; `backend/tests/test_master_schedule_day.py`; `backend/tests/test_legacy_master_schedule_retired.py`; `backend/alembic/versions/07de82665594_add_master_schedule_settings.py`.
 
-## 2. Slot generation
+## 2. Slot generation and calendar interval grid (канон)
 
-`get_available_slots` принимает owner, date, service duration и optional branch. Candidate starts выравниваются на `:00`/`:30` и идут с шагом 30 минут. Конец услуги должен помещаться в availability window. Date argument for HTTP availability/reschedule is strict `YYYY-MM-DD`. Adjacent half-open occupancy is allowed; current booking is excluded from GET collision checks on reschedule. Weekend is not a hard-ban at this layer.
+**CONFIRMED, 2026-11-14 (утверждение владельца):** все **календарные** интервалы
+записи (online/client, manual master, public) и **личных дел** (calendar blocks)
+должны иметь **начало и конец** на сетке **:00 / :30**, **секунды и доли секунды =
+0**, **длительность — положительное кратное 30 мин**. Без legacy exemption:
+off-grid wall time отклоняется на API (`BOOKING_INTERVAL_OFF_GRID`) и на SQLite
+через UDF-триггеры (`dedato_sqlite_validate_*`) на `bookings` (wall + optional
+canonical) и `calendar_blocks` (UTC us + zone). UDF регистрируются на каждом
+app/test `connect`; без UDF SQLite/CLI fail closed. Пустые интервалы и частичные
+NULL reject; canonical elapsed проверяется по UTC микросекундам (DST-safe), wall
+согласуется с zone без обнуления subsecond. `enforce_calendar_interval_wall_grid`
+для **aware** instant сравнивает положительный UTC-elapsed, а не naive
+`end <= start` (fall-back aware 01:30→01:00 с тем же `ZoneInfo` допустим при
+30‑мин UTC span, как SQL guard). `request_interval` сначала независимо
+нормализует каждую границу (naive → `resolve_wall_datetime`, aware →
+`canonical_instant`; DST fold ambiguity → `BOOKING_TIME_INVALID`), затем
+`enforce_calendar_interval_wall_grid` на aware wall в zone владельца; смешанный
+naive+aware в одном запросе поддерживается. `duration_minutes` на сыром mixed
+вводе отклоняет с `CalendarIntervalGridError`, а не `TypeError`.
+`service_duration_allowed_for_grid` — строго
+положительное целое, кратное 30 (без `int(30.9)` и неположительных). Migration `20261114_calendar_grid_guard`
+— fail-fast на dirty legacy; `Base.metadata.after_create` ставит DDL только для
+**впервые созданных** `bookings` / `calendar_blocks` в текущем `create_all`
+(повторный `create_all` на существующую dirty `bookings` не переустанавливает
+booking triggers). UDF: `deterministic=True`.
+Каталожная `MasterService.duration` / выбранная длительность manual, задающая
+конец интервала, должна быть кратна 30 мин; иначе 4xx без скрытого округления.
 
-Для date-specific master schedule service duration округляется вверх до числа последовательных 30-minute rows, после чего из найденного окна снова генерируются starts с реальной duration. Несмежные rows не образуют общее окно.
+Master day agenda **не** синтезирует «нейтральные промежутки» и не показывает
+клиентскую availability — только bookings и personal blocks из API (включая
+awaiting), без подписей про «неподтверждённую доступность»
+([Web architecture](web.md)).
+
+`get_available_slots` принимает owner, date, service duration и optional branch.
+Candidate starts выравниваются на `:00`/`:30` и идут с шагом 30 минут. Конец
+услуги должен помещаться в availability window и лежать на той же сетке.
+Date argument for HTTP availability/reschedule is strict `YYYY-MM-DD`. Adjacent
+half-open occupancy is allowed; current booking is excluded from GET collision
+checks on reschedule. Weekend is not a hard-ban at this layer.
+
+Для date-specific master schedule service duration округляется вверх до числа
+последовательных 30-minute rows, после чего из найденного окна снова
+генерируются starts с реальной duration. Несмежные rows не образуют общее окно.
+
+**Sources:** `backend/utils/calendar_interval_grid.py`,
+`backend/utils/sqlite_calendar_grid_triggers.py`,
+`backend/services/booking_admission.py` (`request_interval`),
+`backend/routers/dev_e2e.py` (on-grid fixtures),
+`frontend/src/utils/masterDayAgenda.js`.
 
 Public master availability использует `MasterService.duration`, вызывает общий `get_available_slots` по каждой дате, отбрасывает уже начавшиеся slots и дополнительно отфильтровывает candidate slots, которые `check_master_working_hours` отвергнет на create. Это закрывает weekly-only GET slot, который public MASTER POST гарантированно отклонит. Изменение ограничено public MASTER availability route; salon/private scheduling consumers не менялись.
 
@@ -63,7 +108,7 @@ Public API возвращает aware ISO timestamps в timezone мастера 
 
 Общий helper `backend/utils/booking_occupancy.py` задаёт один predicate для conflict и availability: пересечение half-open `existing.start < requested.end AND existing.end > requested.start`. Соприкасающиеся границы разрешены.
 
-Следствия текущего predicate:
+Следствия legacy predicate (режим по умолчанию вне локального запускателя):
 
 - `cancelled`, `cancelled_by_client_early/late`, `payment_expired` и compatibility status `rejected` не блокируют slots;
 - temporary bookings вообще не входят в общий query;
@@ -83,8 +128,34 @@ Salon any-master availability объединяет weekly windows подходя
 
 ## 7. Concurrency и UNKNOWN
 
-Availability — вычисляемая проекция, не reservation. DB constraint, запрещающий overlap, отсутствует, но актуальные SQLite create paths начинают одну request-owned `BEGIN IMMEDIATE` transaction до conflict/limit reads и сохраняют side effects вместе с Booking. Writer serialization закрывает same-slot race; busy contention возвращает retryable `503`. Temporary hold по-прежнему не виден основному calculator до payment confirmation.
+Availability — вычисляемая проекция, не reservation. DB constraint, запрещающий overlap, отсутствует, но актуальные SQLite create paths начинают одну request-owned `BEGIN IMMEDIATE` transaction до conflict/limit reads и сохраняют side effects вместе с Booking. Writer serialization закрывает same-slot race; busy contention возвращает retryable `503`. В legacy-режиме temporary hold не виден основному calculator до payment confirmation; в unified pending non-expired holds включены в occupancy.
 
 - **UNKNOWN:** фактическая нагрузка и частота races.
 - **UNKNOWN:** используются ли weekly `AvailabilitySlot` внешними clients как primary source после materialized schedule rollout.
 - **CONFIRMED debt:** на уровне схемы всё ещё нет overlap constraint; гарантия сериализации относится к актуальным SQLite create paths. См. [Debt](booking-scheduling.md).
+
+## Calendar B3 and unified admission
+
+**CONFIRMED, 2026-11-14, код локальной B3-ветки:**
+`CALENDAR_ADMISSION_MODE=unified` включает общий admission для master occupancy:
+занимающие bookings, pending non-expired holds и личные calendar blocks.
+Иное значение сохраняет legacy predicate. B3 write endpoints требуют unified
+и иначе возвращают `503 CALENDAR_UNIFIED_REQUIRED`.
+
+Канонический интервал хранится как UTC microseconds плюс IANA timezone; wall time
+сохраняется для совместимости. Новый код пишет эти metadata и в legacy-mode
+(shadow writes), но неизвестный timezone старых naive rows не угадывает.
+Unresolved актуальные интервалы блокируют unified admission с
+`BOOKING_TIME_UNRESOLVED`. Перед активацией используйте read-only
+`backend/scripts/calendar_admission_readiness.py`, не произвольный backfill.
+
+Manual booking и личный блок проверяют пересечения в общей SQLite writer
+transaction. У блока в публичную доступность попадает занятость интервала;
+название, описание и категория остаются приватными. Удаление блока — soft delete.
+Mutations используют version, create поддерживает idempotency key. B3 не заменяет
+настройку рабочих слотов: «Открыть слот» остаётся изменением availability.
+
+**Источники:** `backend/services/booking_admission.py`, `calendar_admission.py`,
+`calendar_availability.py`, `calendar_b3.py`, `calendar_readiness.py`;
+`backend/tests/test_calendar_b3_backend.py`, `test_calendar_b2_unified_admission.py`.
+API: [Booking API](booking-api.md#calendar-b3-master-api).

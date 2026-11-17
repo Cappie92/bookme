@@ -315,7 +315,7 @@ def get_subscription_access_summary(
 
     from models import Booking, IndieMaster
     from utils.booking_limit_guard import FREE_ACTIVE_FUTURE_BOOKINGS_LIMIT
-    from utils.master_future_bookings_query import active_future_bookings_owner_filter
+    from utils.master_future_bookings_query import active_future_bookings_cap_owner_filter
     from utils.subscription_features import get_active_subscription_readonly
 
     now_utc = datetime.utcnow()
@@ -326,7 +326,7 @@ def get_subscription_access_summary(
     current_active_bookings = (
         db.query(func.count(Booking.id))
         .filter(
-            active_future_bookings_owner_filter(
+            active_future_bookings_cap_owner_filter(
                 master_id=master.id,
                 indie_master_id=indie.id if indie else None,
                 now_utc=now_utc,

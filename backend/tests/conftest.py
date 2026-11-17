@@ -24,14 +24,17 @@ os.environ["DATABASE_URL"] = f"sqlite:///{Path(_TEST_DB_DIR) / 'import.db'}"
 import httpx
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy import event
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 
 from auth import get_password_hash
-from database import Base, get_db
+from database import Base, get_db, install_sqlite_calendar_guard_hooks
 from main import app
 from models import User, UserRole
+
+# Positive booking rows: set on-grid ``start_time``/``end_time`` in fixtures via
+# ``tests.booking_fixture.grid_booking_walls``. Negative grid tests use
+# ``_preserve_off_grid_wall_times`` or dedicated sessions — not ``db.add`` hooks.
 
 # Per-process tempfile SQLite: isolates parallel pytest invocations from each
 # other without StaticPool, which livelocks threaded tests (Robokassa InvId).
@@ -40,6 +43,7 @@ engine = create_engine(
     SQLALCHEMY_DATABASE_URL,
     connect_args={"check_same_thread": False},
 )
+install_sqlite_calendar_guard_hooks(engine)
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
@@ -95,7 +99,6 @@ def db():
     # Создаем таблицы перед каждым тестом
     Base.metadata.create_all(bind=engine)
 
-    # Создаем сессию
     db = TestingSessionLocal()
     try:
         yield db

@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 import pytest
 
 from auth import create_user_access_token, get_password_hash
+from tests.booking_fixture import grid_booking_walls
 from models import (
     Booking,
     BookingStatus,
@@ -96,38 +97,50 @@ def booking_read_world(db):
     db.add(branch)
     db.flush()
 
-    start = datetime.utcnow() + timedelta(days=7)
+    base = datetime.utcnow() + timedelta(days=7)
+
+    def _slot(hours: int) -> tuple[datetime, datetime]:
+        return grid_booking_walls(
+            base + timedelta(hours=hours),
+            base + timedelta(hours=hours + 1),
+        )
+
+    s0, e0 = _slot(0)
+    s2, e2 = _slot(2)
+    s4, e4 = _slot(4)
+    s6, e6 = _slot(6)
+    s8, e8 = _slot(8)
     bookings = {
         "master_a": Booking(
             client_id=users["client_a"].id,
             service_id=service.id,
             master_id=masters["master_a"].id,
-            start_time=start,
-            end_time=start + timedelta(hours=1),
+            start_time=s0,
+            end_time=e0,
             status=BookingStatus.CREATED,
         ),
         "master_b": Booking(
             client_id=users["client_b"].id,
             service_id=service.id,
             master_id=masters["master_b"].id,
-            start_time=start + timedelta(hours=2),
-            end_time=start + timedelta(hours=3),
+            start_time=s2,
+            end_time=e2,
             status=BookingStatus.CREATED,
         ),
         "indie": Booking(
             client_id=users["client_a"].id,
             service_id=service.id,
             indie_master_id=indie.id,
-            start_time=start + timedelta(hours=4),
-            end_time=start + timedelta(hours=5),
+            start_time=s4,
+            end_time=e4,
             status=BookingStatus.CREATED,
         ),
         "salon": Booking(
             client_id=users["client_b"].id,
             service_id=service.id,
             salon_id=salon.id,
-            start_time=start + timedelta(hours=6),
-            end_time=start + timedelta(hours=7),
+            start_time=s6,
+            end_time=e6,
             status=BookingStatus.CREATED,
         ),
         "salon_branch": Booking(
@@ -135,8 +148,8 @@ def booking_read_world(db):
             service_id=service.id,
             salon_id=salon.id,
             branch_id=branch.id,
-            start_time=start + timedelta(hours=8),
-            end_time=start + timedelta(hours=9),
+            start_time=s8,
+            end_time=e8,
             status=BookingStatus.CREATED,
         ),
     }

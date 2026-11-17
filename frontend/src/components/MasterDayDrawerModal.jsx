@@ -2,11 +2,13 @@ import React, { useMemo, useState } from 'react'
 import { XMarkIcon } from '@heroicons/react/24/outline'
 import { apiPost } from '../utils/api'
 import { formatLocalDate, localizeScheduleError } from '../utils/scheduleDates'
+import { categoryLabel, overlapsDay, wallLabel } from '../utils/calendarB3'
 import {
   SLOT_MINUTE_STEPS,
   resolveDayRangeMinutes,
   thirtyMinuteSlotsInRange,
 } from '../utils/dayAvailabilityRange'
+import { summarizeDaySlots } from '../utils/daySlotSummary'
 
 const HOURS_0_23 = Array.from({ length: 24 }, (_, i) => i)
 const HOURS_END_0_24 = Array.from({ length: 25 }, (_, i) => i)
@@ -53,8 +55,16 @@ export default function MasterDayDrawerModal({
   dateStr,
   slotsForDay,
   bookings,
+  blocks = [],
+  onCreateManual,
+  onCreateBlock,
+  onEditManual,
+  onEditBlock,
   onSaved,
+  purpose = 'day-menu',
+  schedule = {},
 }) {
+  const slotsOnly = purpose === 'slots'
   const [saving, setSaving] = useState(false)
   const [closePickerOpen, setClosePickerOpen] = useState(false)
   const [keysToClose, setKeysToClose] = useState(() => new Set())
@@ -66,12 +76,14 @@ export default function MasterDayDrawerModal({
 
   const dayBookings = useMemo(() => {
     return (bookings || [])
-      .filter((b) => {
-        const bd = formatLocalDate(new Date(b.start_time))
-        return bd === dateStr
-      })
-      .sort((a, b) => new Date(a.start_time) - new Date(b.start_time))
+      .filter((b) => overlapsDay(b.start_time, b.end_time, dateStr))
+      .sort((a, b) => String(a.start_time).localeCompare(String(b.start_time)))
   }, [bookings, dateStr])
+
+  const dayBlocks = useMemo(
+    () => (blocks || []).filter((block) => overlapsDay(block.start_time, block.end_time, dateStr)),
+    [blocks, dateStr],
+  )
 
   const openKeySet = useMemo(() => {
     const set = new Set()
@@ -166,6 +178,16 @@ export default function MasterDayDrawerModal({
     void submitOpenKeys(next)
   }
 
+  const slotSummary = useMemo(
+    () => (dateStr
+      ? summarizeDaySlots({ dateStr, slotsForDay, bookings, blocks, schedule })
+      : { openGridCount: 0, openHours: 0, occupiedHours: 0 }),
+    [dateStr, slotsForDay, bookings, blocks, schedule],
+  )
+  const availableCount = slotSummary.openGridCount
+  const availableHours = slotSummary.openHours
+  const bookedHours = slotSummary.occupiedHours
+
   if (!isOpen || !dateStr) return null
 
   const dateTitle = new Date(dateStr + 'T12:00:00').toLocaleDateString('ru-RU', {
@@ -174,14 +196,6 @@ export default function MasterDayDrawerModal({
     month: 'long',
     year: 'numeric',
   })
-
-  const availableCount = (slotsForDay || []).filter((s) => s.is_working).length
-  const availableHours = (availableCount * 30) / 60
-  const bookedHours =
-    dayBookings.reduce((sum, b) => {
-      const dur = (new Date(b.end_time) - new Date(b.start_time)) / (1000 * 60)
-      return sum + dur
-    }, 0) / 60
 
   const selectCls =
     'border border-gray-300 rounded-lg px-2 py-2 text-sm w-full bg-white text-gray-900'
@@ -199,8 +213,14 @@ export default function MasterDayDrawerModal({
         >
           <div className="flex justify-between items-start px-4 py-3 border-b">
             <div>
-              <h2 className="text-lg font-bold text-gray-900 capitalize">{dateTitle}</h2>
-              <p className="text-xs text-gray-500">Локальные правки только на эту дату · правило недели не меняется</p>
+              <h2 className="text-lg font-bold text-gray-900 capitalize">
+                {slotsOnly ? 'Управление слотами' : dateTitle}
+              </h2>
+              <p className="text-xs text-gray-500">
+                {slotsOnly
+                  ? `${dateTitle} · открытые и закрытые интервалы на день`
+                  : 'Локальные правки только на эту дату · правило недели не меняется'}
+              </p>
             </div>
             <button
               type="button"
@@ -214,35 +234,86 @@ export default function MasterDayDrawerModal({
 
           <div className="flex justify-around py-2 border-b bg-gray-50 text-sm">
             <div className="text-center">
-              <div className="text-gray-500 text-xs">Доступно</div>
-              <div className="font-semibold">{availableHours.toFixed(1)} ч</div>
+              <div className="text-gray-500 text-xs">{slotsOnly ? 'Открыто по графику' : 'По графику'}</div>
+              <div className="font-semibold">{availableCount} сл.</div>
+              <div className="text-[10px] text-gray-500">~{availableHours.toFixed(1)} ч</div>
             </div>
             <div className="text-center">
-              <div className="text-gray-500 text-xs">Занято</div>
+              <div className="text-gray-500 text-xs">Занято событиями</div>
               <div className="font-semibold">{bookedHours.toFixed(1)} ч</div>
             </div>
             <div className="text-center">
               <div className="text-gray-500 text-xs">Записей</div>
-              <div className="font-semibold">{dayBookings.length}</div>
+              <div className="font-semibold">{slotSummary.activeBookingCount}</div>
             </div>
           </div>
 
           <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2">
-            {dayBookings.length === 0 && availableCount === 0 ? (
+            {slotsOnly ? (
+              <>
+                <p className="text-xs text-gray-600">
+                  Счётчик показывает <strong>открытые 30‑мин ячейки графика</strong> на дату, а не гарантированную онлайн‑доступность для клиентов (holds, правила и admission учитываются отдельно).
+                </p>
+                {slotSummary.workingIntervalLabels.length ? (
+                  <p className="text-sm text-gray-800">
+                    Рабочие интервалы по сетке: {slotSummary.workingIntervalLabels.join(', ')}
+                  </p>
+                ) : (
+                  <p className="text-sm text-gray-600">На эту дату в редакторе нет открытых интервалов графика.</p>
+                )}
+                {slotSummary.bucketsWithPartialOverlap > 0 ? (
+                  <p className="text-xs text-amber-800">
+                    {slotSummary.bucketsWithPartialOverlap} ячеек графика частично пересекаются с записью (например, начало в :05) — это не означает свободное окно для клиента.
+                  </p>
+                ) : null}
+                {slotSummary.outOfHours.length ? (
+                  <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
+                    <p className="font-semibold">Вне рабочего графика</p>
+                    <ul className="mt-2 space-y-1 text-xs">
+                      {slotSummary.outOfHours.map((row) => (
+                        <li key={`${row.kind}-${row.id}`}>{row.time} · {row.label}</li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+                {dayBookings.some(bookingBlocksSlotClose) ? (
+                  <p className="text-xs text-gray-700">
+                    Активные записи и блоки уменьшают число слотов, которые можно закрыть без конфликта.
+                  </p>
+                ) : null}
+              </>
+            ) : null}
+            {!slotsOnly && dayBlocks.map((block) => (
+              <button
+                key={`block-${block.id}`}
+                type="button"
+                className="w-full rounded-lg border border-amber-400 bg-amber-50 p-2 text-left text-sm"
+                onClick={() => onEditBlock?.(block)}
+              >
+                <div className="font-medium text-amber-950">{block.title || categoryLabel(block.category)}</div>
+                <div className="text-xs text-amber-900">{wallLabel(block.start_time)}–{wallLabel(block.end_time)}</div>
+              </button>
+            ))}
+            {!slotsOnly && dayBookings.length === 0 && dayBlocks.length === 0 && availableCount === 0 ? (
               <p className="text-gray-500 text-sm text-center py-6">Нет записей и открытых слотов</p>
-            ) : (
+            ) : !slotsOnly ? (
               <>
                 {dayBookings.map((b) => {
                   const priceStr = formatPriceRub(b.service_price)
                   return (
                     <div key={b.id} className="border border-gray-200 rounded-lg p-2 text-sm bg-orange-50/40">
-                      <div className="font-medium text-gray-900">{b.service_name || 'Услуга'}</div>
+                      <div className="font-medium text-gray-900">{b.source === 'manual' ? 'Вручную · ' : ''}{b.service_name || (b.guest_name ? 'Без услуги' : 'Услуга')}</div>
                       <div className="text-gray-700">
-                        {(b.client_display_name || b.client_name) || 'Клиент'}
+                        {(b.guest_name || b.client_display_name || b.client_name) || 'Клиент'}
+                        {b.client_phone ? ` · ${b.client_phone}` : ''}
                       </div>
+                      {b.source === 'manual' ? (
+                        <button type="button" className="mt-1 text-xs font-medium text-green-700" onClick={() => onEditManual?.(b)}>
+                          Изменить или отменить
+                        </button>
+                      ) : null}
                       <div className="text-xs text-gray-600">
-                        {new Date(b.start_time).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })} –{' '}
-                        {new Date(b.end_time).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
+                        {wallLabel(b.start_time)} – {wallLabel(b.end_time)}
                       </div>
                       {priceStr ? <div className="text-xs font-semibold text-green-700 mt-1">{priceStr}</div> : null}
                     </div>
@@ -254,10 +325,30 @@ export default function MasterDayDrawerModal({
                   </div>
                 ) : null}
               </>
-            )}
+            ) : null}
           </div>
 
           <div className="px-4 py-3 border-t space-y-2 bg-white">
+            {!slotsOnly ? (
+              <>
+                <button
+                  type="button"
+                  disabled={saving}
+                  onClick={onCreateManual}
+                  className="w-full py-2.5 rounded-lg bg-green-600 text-white font-semibold text-sm hover:bg-green-700 disabled:opacity-50"
+                >
+                  Запись вручную
+                </button>
+                <button
+                  type="button"
+                  disabled={saving}
+                  onClick={onCreateBlock}
+                  className="w-full py-2.5 rounded-lg border border-amber-500 text-amber-800 font-semibold text-sm hover:bg-amber-50 disabled:opacity-50"
+                >
+                  Занять время
+                </button>
+              </>
+            ) : null}
             <button
               type="button"
               disabled={saving}

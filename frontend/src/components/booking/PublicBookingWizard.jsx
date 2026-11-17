@@ -20,6 +20,7 @@ import {
   sendClientCalendarEmail,
 } from '../../utils/clientBookingCalendarActions'
 import { CalendarGrid } from './PublicBookingCalendarGrid'
+import { publicAvailabilityIdentity, useGuardedAvailability } from './availabilityRequest'
 import {
   adoptOrStartPublicBookingCreate,
   findServiceByDraftId,
@@ -501,9 +502,6 @@ export default function PublicBookingWizard({
   const [usePoints, setUsePoints] = useState(false)
   const pricePreviewRef = useRef(null)
   const [showAuthPrompt, setShowAuthPrompt] = useState(false)
-  const [slots, setSlots] = useState([])
-  const [slotsLoading, setSlotsLoading] = useState(false)
-  const [slotsError, setSlotsError] = useState(null)
   const [submitting, setSubmitting] = useState(false)
   const [success, setSuccess] = useState(null)
   const [submitError, setSubmitError] = useState(null)
@@ -618,6 +616,44 @@ export default function PublicBookingWizard({
     }
   }, [showServiceDropdown, serviceSearch, groups])
 
+  const { minDateStr, maxDateStr } = useMemo(() => {
+    const from = new Date()
+    const to = new Date()
+    to.setDate(to.getDate() + DAYS_AHEAD)
+    return {
+      minDateStr: from.toISOString().slice(0, 10),
+      maxDateStr: to.toISOString().slice(0, 10),
+    }
+  }, [])
+  const availabilityQueryRef = useRef({ slug: '', serviceId: null, from: '', to: '' })
+  const availabilityIdentity = publicAvailabilityIdentity({
+    slug,
+    serviceId: selectedService?.id,
+    from: minDateStr,
+    to: maxDateStr,
+  })
+  availabilityQueryRef.current = {
+    slug,
+    serviceId: selectedService?.id ?? null,
+    from: minDateStr,
+    to: maxDateStr,
+  }
+  const availability = useGuardedAvailability({
+    enabled: Boolean(availabilityIdentity),
+    identityKey: availabilityIdentity,
+    fetcher: async () => {
+      const query = availabilityQueryRef.current
+      const res = await fetch(
+        `/api/public/masters/${encodeURIComponent(query.slug)}/availability?service_id=${query.serviceId}&from_date=${query.from}&to_date=${query.to}`
+      )
+      if (!res.ok) throw new Error('Не удалось загрузить свободные слоты')
+      const data = await res.json()
+      return data.slots || []
+    },
+  })
+  const slots = availability.slots
+  const slotsLoading = availability.loading
+  const slotsError = availability.error
   const dateOptions = useMemo(() => buildDateOptionsFromSlots(slots), [slots])
   const availableDateSet = useMemo(() => new Set(dateOptions.map((o) => o.dateStr)), [dateOptions])
 
@@ -637,15 +673,6 @@ export default function PublicBookingWizard({
       timezoneOrCity,
     }
   }, [selectedService, selectedDate, selectedSlot, dateOptions, profile])
-  const { minDateStr, maxDateStr } = useMemo(() => {
-    const from = new Date()
-    const to = new Date()
-    to.setDate(to.getDate() + DAYS_AHEAD)
-    return {
-      minDateStr: from.toISOString().slice(0, 10),
-      maxDateStr: to.toISOString().slice(0, 10),
-    }
-  }, [])
   const slotsForDate = useMemo(() => {
     if (!selectedDate) return []
     return (slots || [])
@@ -671,41 +698,16 @@ export default function PublicBookingWizard({
     [selectedSlot, masterTz, hhVisualRules],
   )
 
-  const loadAvailability = useCallback(async () => {
-    if (!slug || !selectedService) return
-    setSlotsLoading(true)
-    setSlotsError(null)
-    setSlots([])
-    try {
-      const from = new Date()
-      const to = new Date()
-      to.setDate(to.getDate() + DAYS_AHEAD)
-      const fromStr = from.toISOString().slice(0, 10)
-      const toStr = to.toISOString().slice(0, 10)
-      const res = await fetch(
-        `/api/public/masters/${encodeURIComponent(slug)}/availability?service_id=${selectedService.id}&from_date=${fromStr}&to_date=${toStr}`
+  useEffect(() => {
+    const slotIsCurrent = Boolean(
+      selectedSlot
+      && !slotsLoading
+      && !slotsError
+      && slotsForDate.some(
+        (slot) => slot.start_time === selectedSlot.start_time && slot.end_time === selectedSlot.end_time
       )
-      if (!res.ok) throw new Error('Не удалось загрузить свободные слоты')
-      const data = await res.json()
-      setSlots(data.slots || [])
-    } catch (err) {
-      setSlotsError('Не удалось загрузить свободные слоты. Проверьте интернет и попробуйте ещё раз.')
-      setSlots([])
-    } finally {
-      setSlotsLoading(false)
-    }
-  }, [slug, selectedService])
-
-  useEffect(() => {
-    if (selectedService) loadAvailability()
-    else {
-      setSlots([])
-      setSlotsError(null)
-    }
-  }, [selectedService, loadAvailability])
-
-  useEffect(() => {
-    if (!slug || !selectedService || !selectedSlot) {
+    )
+    if (!slug || !selectedService || !slotIsCurrent) {
       setPricePreview(null)
       setPricePreviewError(null)
       setPricePreviewLoading(false)
@@ -746,7 +748,7 @@ export default function PublicBookingWizard({
     return () => {
       cancelled = true
     }
-  }, [slug, selectedService, selectedSlot, currentUser?.id, usePoints, eligibility?.points])
+  }, [slug, selectedService, selectedSlot, slotsForDate, slotsLoading, slotsError, currentUser?.id, usePoints, eligibility?.points])
 
   useEffect(() => {
     pricePreviewRef.current = pricePreview
@@ -1088,7 +1090,20 @@ export default function PublicBookingWizard({
   }
 
   const canSelectDate = !!selectedService
-  const canSubmit = !!selectedService && !!selectedDate && !!selectedSlot
+  const selectedDateIsCurrent = Boolean(
+    selectedDate
+    && !slotsLoading
+    && !slotsError
+    && dateOptions.some((option) => option.dateStr === selectedDate)
+  )
+  const slotStillAvailable = Boolean(
+    selectedDateIsCurrent
+    && selectedSlot
+    && slotsForDate.some(
+      (slot) => slot.start_time === selectedSlot.start_time && slot.end_time === selectedSlot.end_time
+    )
+  )
+  const canSubmit = !!selectedService && slotStillAvailable
   const bookingBlocked = profile?.booking_blocked === true || eligibility?.booking_blocked === true
   const requiresAdvancePayment = profile?.requires_advance_payment === true || eligibility?.requires_advance_payment === true
   const loyaltyHintCopy = useMemo(() => buildLoyaltyHintCopy(eligibility?.loyalty_hint), [eligibility?.loyalty_hint])
@@ -1673,6 +1688,7 @@ export default function PublicBookingWizard({
                 maxDateStr={maxDateStr}
                 selectedDate={selectedDate}
                 onSelectDate={handleSelectDate}
+                viewResetKey={`${slug ?? ''}:${selectedService?.id ?? ''}`}
               />
             )}
           </>
@@ -1680,7 +1696,7 @@ export default function PublicBookingWizard({
       </div>
 
       {/* Step 3: Время — карточка + сетка слотов (бейдж скидки только при данных API, напр. HH). */}
-      {selectedDate && (
+      {selectedDateIsCurrent && (
         <div className="rounded-[14px] border border-[#E8E2DD] bg-white px-4 py-4 sm:px-5 shadow-[0_2px_8px_rgba(45,45,45,0.06)]">
           <div className="mb-3">
             <h3 className="text-[15px] font-medium text-[#4B4F59]">3. Время</h3>
@@ -1734,7 +1750,7 @@ export default function PublicBookingWizard({
       )}
 
       {/* Сводка — .summary */}
-      {selectedService && selectedDate && selectedSlot && (
+      {canSubmit && (
         <div
           className="mt-7 rounded-[14px] border border-[#BDE6CC] bg-[#EAF9EE] px-[18px] py-4 text-[#2F6F44]"
           data-testid="public-booking-summary"

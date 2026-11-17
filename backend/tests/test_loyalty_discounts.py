@@ -18,7 +18,12 @@ from models import (
     AppliedDiscount,
 )
 from database import Base
+from tests.booking_fixture import grid_booking_walls
 from tests.conftest import engine, TestingSessionLocal
+
+
+def _on_grid_booking_interval(start: datetime, *, minutes: int = 60) -> tuple[datetime, datetime]:
+    return grid_booking_walls(start, start + timedelta(minutes=minutes))
 
 
 @pytest.fixture(scope="function")
@@ -385,12 +390,13 @@ def test_regular_visits_period_days(db, master, client_user, service):
     now = datetime.utcnow()
     # Два completed визита в последние 60 дней
     for i in range(2):
+        start, end = _on_grid_booking_interval(now - timedelta(days=30 - i * 15))
         b = Booking(
             master_id=master.id,
             client_id=client_user.id,
             service_id=service.id,
-            start_time=now - timedelta(days=30 - i * 15),
-            end_time=now - timedelta(days=30 - i * 15) + timedelta(hours=1),
+            start_time=start,
+            end_time=end,
             status=BookingStatus.COMPLETED.value,
         )
         db.add(b)
@@ -420,12 +426,13 @@ def test_regular_visits_old_period(db, master, client_user, service):
     db.commit()
 
     now = datetime.utcnow()
+    start, end = _on_grid_booking_interval(now - timedelta(days=7))
     b = Booking(
         master_id=master.id,
         client_id=client_user.id,
         service_id=service.id,
-        start_time=now - timedelta(days=7),
-        end_time=now - timedelta(days=7) + timedelta(hours=1),
+        start_time=start,
+        end_time=end,
         status=BookingStatus.COMPLETED.value,
     )
     db.add(b)
@@ -462,12 +469,13 @@ def test_returning_client_min_max(db, master, client_user, service):
 
     now = datetime.utcnow()
     last_visit = now - timedelta(days=30)
+    start, end = _on_grid_booking_interval(last_visit)
     b = Booking(
         master_id=master.id,
         client_id=client_user.id,
         service_id=service.id,
-        start_time=last_visit,
-        end_time=last_visit + timedelta(hours=1),
+        start_time=start,
+        end_time=end,
         status=BookingStatus.COMPLETED.value,
     )
     db.add(b)
@@ -547,12 +555,13 @@ def test_returning_client_too_old(db, master, client_user, service):
 
     now = datetime.utcnow()
     last_visit = now - timedelta(days=100)
+    start, end = _on_grid_booking_interval(last_visit)
     b = Booking(
         master_id=master.id,
         client_id=client_user.id,
         service_id=service.id,
-        start_time=last_visit,
-        end_time=last_visit + timedelta(hours=1),
+        start_time=start,
+        end_time=end,
         status=BookingStatus.COMPLETED.value,
     )
     db.add(b)
@@ -584,12 +593,13 @@ def test_returning_client_old_format(db, master, client_user, service):
 
     now = datetime.utcnow()
     last_visit = now - timedelta(days=35)
+    start, end = _on_grid_booking_interval(last_visit)
     b = Booking(
         master_id=master.id,
         client_id=client_user.id,
         service_id=service.id,
-        start_time=last_visit,
-        end_time=last_visit + timedelta(hours=1),
+        start_time=start,
+        end_time=end,
         status=BookingStatus.COMPLETED.value,
     )
     db.add(b)
@@ -987,8 +997,7 @@ def test_applied_discount_unchanged_after_rule_deactivation(db, master, client_u
     db.commit()
     db.refresh(rule)
 
-    start = datetime.utcnow() + timedelta(days=1)
-    end = start + timedelta(hours=1)
+    start, end = _on_grid_booking_interval(datetime.utcnow() + timedelta(days=1))
     booking = Booking(
         master_id=master.id,
         client_id=client_user.id,
@@ -1278,8 +1287,7 @@ def test_first_visit_not_matched_when_client_has_created_booking(db, master, cli
         conditions={"condition_type": "first_visit", "parameters": {}},
     )
     db.add(rule)
-    start = datetime.utcnow() + timedelta(days=2)
-    end = start + timedelta(hours=1)
+    start, end = _on_grid_booking_interval(datetime.utcnow() + timedelta(days=2))
     b = Booking(
         master_id=master.id,
         client_id=client_user.id,
@@ -1315,8 +1323,7 @@ def test_first_visit_matched_when_only_cancelled_booking(db, master, client_user
         conditions={"condition_type": "first_visit", "parameters": {}},
     )
     db.add(rule)
-    start = datetime.utcnow() + timedelta(days=2)
-    end = start + timedelta(hours=1)
+    start, end = _on_grid_booking_interval(datetime.utcnow() + timedelta(days=2))
     b = Booking(
         master_id=master.id,
         client_id=client_user.id,

@@ -10,6 +10,8 @@ import {
   ClockIcon,
   Cog6ToothIcon,
   InformationCircleIcon,
+  LinkIcon,
+  PlusIcon,
   PresentationChartLineIcon,
   XMarkIcon,
 } from '@heroicons/react/24/outline';
@@ -20,10 +22,12 @@ import { canCancelBooking, canPreVisitConfirmBooking, canConfirmPostVisit, CANCE
 import AllBookingsModal from './AllBookingsModal';
 import MasterBookingCardMobile from './master/mobile/MasterBookingCardMobile';
 import MasterBookingDetailSheet from './master/mobile/MasterBookingDetailSheet';
+import CalendarB3Composer from './master/CalendarB3Composer';
 import MasterBookingCancelSheet from './master/mobile/MasterBookingCancelSheet';
 import { isMasterHubCancelledTabStatus } from './master/mobile/masterBookingShared';
 import { getPlanDisplayName } from '../utils/subscriptionPlanNames';
 import { formatMoney } from '../utils/formatMoney';
+import { mcHubTabActive, mcHubTabInactive, mcSegmentTrack } from '../utils/masterCabinetUi';
 import { masterDisplayMainRub, masterLoyaltyRub } from '../utils/masterBookingMoney';
 import { formatDateShort, formatTimeShort } from '../utils/dateFormat';
 import { getStatusBadgeForPast } from '../utils/bookingStatusDisplay';
@@ -118,7 +122,9 @@ export default function MasterDashboardStats({
   hasExtendedStats = false,
   isDemoMode = false,
   onOpenSubscriptionModal,
-  onOpenSchedule,
+  onNavigateSchedule,
+  onCopyPublicLink,
+  onNewManualBooking,
   onOpenServices,
   onOpenTariff,
   onOpenStoryImage,
@@ -160,6 +166,7 @@ export default function MasterDashboardStats({
   const [chartsExpanded, setChartsExpanded] = useState(false);
   /** Mobile: { booking, sectionType } для detail sheet */
   const [mobileBookingDetail, setMobileBookingDetail] = useState(null);
+  const [manualEvent, setManualEvent] = useState(null);
   const chartsAnchorRef = useRef(null);
   /** Только desktop: единая панель «Активность за неделю» (график + список по табам) */
   const [activityChartKind, setActivityChartKind] = useState('bookings');
@@ -340,6 +347,10 @@ export default function MasterDashboardStats({
   };
 
   const handleCancelClick = (booking) => {
+    if (booking?.source === 'manual') {
+      setManualEvent(booking);
+      return;
+    }
     setCancelBookingId(booking.id);
   };
 
@@ -1162,21 +1173,13 @@ export default function MasterDashboardStats({
       </div>
 
       <div className="border-b border-[#E7E2DF] bg-[linear-gradient(180deg,#FFFFFF_0%,#FAF8F6_100%)] px-6 py-4">
-        <div
-          className="flex w-full min-w-0 items-center gap-0.5 rounded-[12px] border border-[#E7E2DF] bg-[#F4F1EF] p-[3px] shadow-[inset_0_1px_0_rgba(255,255,255,0.55)]"
-          role="tablist"
-          aria-label="Записи по статусу"
-        >
+        <div className={`${mcSegmentTrack} flex w-full min-w-0 items-center gap-0.5 p-[3px]`} role="tablist" aria-label="Записи по статусу">
           <button
             type="button"
             role="tab"
             aria-selected={desktopBookingTab === 'future'}
             onClick={() => setDesktopBookingTab('future')}
-            className={`min-h-[40px] min-w-0 flex-1 rounded-[10px] px-3 py-2 text-[13px] font-semibold transition ${
-              desktopBookingTab === 'future'
-                ? 'bg-white text-[#2D2D2D] shadow-[0_1px_2px_rgba(45,45,45,0.10)]'
-                : 'text-[#6B6B6B] hover:text-[#2D2D2D] hover:bg-white/30'
-            }`}
+            className={desktopBookingTab === 'future' ? mcHubTabActive : mcHubTabInactive}
           >
             <span className="whitespace-nowrap">Будущие</span>
             <span
@@ -1192,11 +1195,7 @@ export default function MasterDashboardStats({
             role="tab"
             aria-selected={desktopBookingTab === 'pending'}
             onClick={() => setDesktopBookingTab('pending')}
-            className={`min-h-[40px] min-w-0 flex-1 rounded-[10px] px-3 py-2 text-[13px] font-semibold transition ${
-              desktopBookingTab === 'pending'
-                ? 'bg-white text-[#2D2D2D] shadow-[0_1px_2px_rgba(45,45,45,0.10)]'
-                : 'text-[#6B6B6B] hover:text-[#2D2D2D] hover:bg-white/30'
-            }`}
+            className={desktopBookingTab === 'pending' ? mcHubTabActive : mcHubTabInactive}
           >
             <span className="whitespace-nowrap">Ожидают</span>
             <span
@@ -1212,11 +1211,7 @@ export default function MasterDashboardStats({
             role="tab"
             aria-selected={desktopBookingTab === 'past'}
             onClick={() => setDesktopBookingTab('past')}
-            className={`min-h-[40px] min-w-0 flex-1 rounded-[10px] px-3 py-2 text-[13px] font-semibold transition ${
-              desktopBookingTab === 'past'
-                ? 'bg-white text-[#2D2D2D] shadow-[0_1px_2px_rgba(45,45,45,0.10)]'
-                : 'text-[#6B6B6B] hover:text-[#2D2D2D] hover:bg-white/30'
-            }`}
+            className={desktopBookingTab === 'past' ? mcHubTabActive : mcHubTabInactive}
           >
             <span className="whitespace-nowrap">Прошедшие</span>
             <span
@@ -1359,7 +1354,7 @@ export default function MasterDashboardStats({
             </div>
           </div>
           {/* Desktop KPI 3-card grid — unchanged; hidden on mobile */}
-          <div className="hidden lg:mt-0 lg:grid lg:grid-cols-3 lg:gap-4 lg:border-t lg:border-[#E7E2DF]/45 lg:pt-6">
+          <div className="hidden lg:mt-0 lg:grid lg:grid-cols-2 lg:gap-4 lg:border-t lg:border-[#E7E2DF]/45 lg:pt-6">
           <div className="relative overflow-hidden rounded-[16px] border border-transparent bg-gradient-to-br from-[#4CAF50] to-[#2E7D32] p-4 text-white shadow-[0_10px_28px_-8px_rgba(46,125,50,0.55)] after:pointer-events-none after:absolute after:-right-8 after:-top-8 after:h-32 after:w-32 after:rounded-full after:bg-white/10 after:content-[''] max-lg:rounded-2xl max-lg:p-4 lg:rounded-2xl lg:from-[#4CAF50] lg:to-[#45A049] lg:p-[18px] lg:shadow-[0_8px_28px_-12px_rgba(76,175,80,0.45)]">
             <div className="relative z-[1] flex items-start justify-between gap-3">
               <div className="min-w-0">
@@ -1400,13 +1395,18 @@ export default function MasterDashboardStats({
                     {currentStatsBucket.bookings_change}%
                   </span>
                 )}
+                <p className="mt-2 text-[12px] text-[#6B6B6B] lg:mt-2.5">
+                  <span className="font-semibold text-[#3D8B42]">{Number(currentStatsBucket.bookings_confirmed ?? 0)}</span>
+                  <span className="mx-1">·</span>
+                  <span className="font-semibold text-amber-700">{Number(currentStatsBucket.bookings_pending ?? 0)}</span> ожидают
+                </p>
               </div>
               <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] bg-[#DFF5EC] text-[#3D8B42] lg:h-[34px] lg:w-[34px]">
                 <ChartBarIcon className="h-6 w-6 lg:h-[18px] lg:w-[18px]" strokeWidth={2} aria-hidden />
               </div>
             </div>
           </div>
-          <div className="rounded-[16px] border-2 border-[#E7E2DF] bg-white p-4 shadow-[0_8px_24px_-14px_rgba(45,45,45,0.14)] max-lg:border-2 max-lg:shadow-lg lg:rounded-2xl lg:border lg:border-[#E7E2DF] lg:p-[18px] lg:shadow-[0_4px_24px_-16px_rgba(45,45,45,0.08)]">
+          <div className="rounded-[16px] border-2 border-[#E7E2DF] bg-white p-4 shadow-[0_8px_24px_-14px_rgba(45,45,45,0.14)] max-lg:border-2 max-lg:shadow-lg lg:hidden lg:rounded-2xl lg:border lg:border-[#E7E2DF] lg:p-[18px] lg:shadow-[0_4px_24px_-16px_rgba(45,45,45,0.08)]">
             <div className="flex items-start justify-between gap-2 lg:mb-0">
               <div className="min-w-0">
                 <p className="text-xs font-medium text-[#A0A0A0] lg:text-[12px] lg:font-medium lg:text-[#6B6B6B]">Подтверждённые / ожидают</p>
@@ -1429,21 +1429,45 @@ export default function MasterDashboardStats({
       )}
 
       {/* Mobile quick-nav pills — practical short row (mobile-only) */}
-      {(onOpenSchedule || onOpenServices || onOpenTariff || onOpenSettings) && (
+      {(onNavigateSchedule || onNewManualBooking || onCopyPublicLink || onOpenServices || onOpenTariff || onOpenSettings) && (
         <nav
           className="flex gap-2 overflow-x-auto px-0.5 pb-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden lg:hidden"
           aria-label="Быстрая навигация"
         >
-          {onOpenSchedule && (
+          {onNavigateSchedule && (
             <button
               type="button"
-              onClick={onOpenSchedule}
+              onClick={onNavigateSchedule}
               className="flex shrink-0 flex-col items-center gap-1.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4CAF50] focus-visible:ring-offset-2 rounded-xl"
             >
               <span className="relative flex h-[46px] w-[46px] items-center justify-center rounded-[14px] border border-[#C8E8D8] bg-[#DFF5EC] text-[#45A049]">
                 <CalendarDaysIcon className="h-[18px] w-[18px]" strokeWidth={2} aria-hidden />
               </span>
               <span className="text-[10.5px] font-medium leading-tight text-[#6B6B6B]">Расписание</span>
+            </button>
+          )}
+          {onNewManualBooking && (
+            <button
+              type="button"
+              onClick={onNewManualBooking}
+              className="flex shrink-0 flex-col items-center gap-1.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4CAF50] focus-visible:ring-offset-2 rounded-xl"
+            >
+              <span className="flex h-[46px] w-[46px] items-center justify-center rounded-[14px] border border-[#4CAF50]/35 bg-[#4CAF50] text-white shadow-sm">
+                <PlusIcon className="h-[18px] w-[18px]" strokeWidth={2.5} aria-hidden />
+              </span>
+              <span className="text-[10.5px] font-medium leading-tight text-[#6B6B6B]">Новая запись</span>
+            </button>
+          )}
+          {onCopyPublicLink && (
+            <button
+              type="button"
+              onClick={onCopyPublicLink}
+              className="flex shrink-0 flex-col items-center gap-1.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4CAF50] focus-visible:ring-offset-2 rounded-xl"
+            >
+              <span className="flex h-[46px] w-[46px] items-center justify-center rounded-[14px] border border-[#E7E2DF] bg-white text-[#6B6B6B]">
+                <LinkIcon className="h-[18px] w-[18px]" strokeWidth={2} aria-hidden />
+              </span>
+              <span className="text-[10.5px] font-medium leading-tight text-[#6B6B6B]">Ссылка записи</span>
             </button>
           )}
           {onOpenServices && (
@@ -1912,6 +1936,7 @@ export default function MasterDashboardStats({
             onClose={() => setMobileBookingDetail(null)}
             onConfirm={handleConfirmUnified}
             onCancelRequest={(id) => setCancelBookingId(id)}
+            onEditManual={(booking) => setManualEvent(booking)}
             disableEscapeKey
           />
         ) : null}
@@ -1922,6 +1947,24 @@ export default function MasterDashboardStats({
           disableEscapeKey
         />
       </div>
+      <CalendarB3Composer
+        open={Boolean(manualEvent)}
+        mode="manual"
+        event={manualEvent}
+        dateStr=""
+        timeZone={masterSettings?.master?.timezone || ''}
+        bookings={[]}
+        blocks={[]}
+        onClose={() => setManualEvent(null)}
+        onSaved={() => {
+          loadDashboardStats()
+          loadPastBookings()
+        }}
+        onReload={async () => {
+          const data = await apiGet('/api/master/bookings/detailed')
+          return { bookings: Array.isArray(data) ? data : [], blocks: [] }
+        }}
+      />
 
       {/* Модальное окно со всеми записями */}
       {showAllBookingsModal && (
@@ -2267,7 +2310,7 @@ export default function MasterDashboardStats({
               </div>
             );
           })()}
-          {(onOpenSchedule || onOpenTariff || onOpenStoryImage || onOpenSettings) && (
+          {(onCopyPublicLink || onOpenTariff || onOpenStoryImage || onOpenSettings) && (
             <div className="hidden overflow-hidden rounded-[22px] border-2 border-[#E7E2DF] bg-gradient-to-b from-white to-[#F0EBE7] p-4 shadow-[0_20px_44px_-28px_rgba(28,25,23,0.4)] ring-2 ring-[#4CAF50]/15">
               <div className="mb-3 flex items-end justify-between gap-2">
                 <div>
@@ -2276,14 +2319,14 @@ export default function MasterDashboardStats({
                 </div>
               </div>
               <nav className="grid grid-cols-2 gap-3" aria-label="Быстрые действия">
-                {onOpenSchedule && (
+                {onCopyPublicLink && (
                   <button
                     type="button"
-                    onClick={onOpenSchedule}
+                    onClick={onCopyPublicLink}
                     className="flex flex-col items-center gap-2 rounded-2xl border-2 border-[#E7E2DF] bg-white px-2 py-4 text-center shadow-[0_8px_20px_-12px_rgba(45,45,45,0.2)] transition active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4CAF50] focus-visible:ring-offset-2"
                   >
                     <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-[#DFF5EC] to-[#B8E8D0] text-[#14532D] shadow-inner ring-2 ring-[#4CAF50]/25">
-                      <CalendarDaysIcon className="h-7 w-7" strokeWidth={2} aria-hidden />
+                      <LinkIcon className="h-7 w-7" strokeWidth={2} aria-hidden />
                     </span>
                     <span className="text-[13px] font-extrabold leading-tight text-[#1C1917]">Скопировать ссылку</span>
                     <span className="text-[10px] font-medium leading-snug text-[#78716C]">Публичная страница</span>
@@ -2306,7 +2349,7 @@ export default function MasterDashboardStats({
                   <button
                     type="button"
                     onClick={onOpenSettings}
-                    className={`flex flex-col items-center gap-2 rounded-2xl border-2 border-[#E7E2DF] bg-white px-2 py-4 text-center shadow-[0_8px_20px_-12px_rgba(45,45,45,0.2)] transition active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4CAF50] focus-visible:ring-offset-2 ${onOpenSchedule && onOpenStoryImage && onOpenSettings ? 'col-span-2' : ''}`}
+                    className={`flex flex-col items-center gap-2 rounded-2xl border-2 border-[#E7E2DF] bg-white px-2 py-4 text-center shadow-[0_8px_20px_-12px_rgba(45,45,45,0.2)] transition active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4CAF50] focus-visible:ring-offset-2 ${onCopyPublicLink && onOpenStoryImage && onOpenSettings ? 'col-span-2' : ''}`}
                   >
                     <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-[#F5F5F4] to-[#E7E5E4] text-[#44403C] shadow-inner ring-2 ring-[#A8A29E]/30">
                       <Cog6ToothIcon className="h-7 w-7" strokeWidth={2} aria-hidden />
@@ -2318,7 +2361,7 @@ export default function MasterDashboardStats({
               </nav>
             </div>
           )}
-          {(onOpenSchedule || onOpenStoryImage || onOpenSettings) && (
+          {(onCopyPublicLink || onOpenStoryImage || onOpenSettings) && (
             <div className="hidden overflow-hidden rounded-[18px] border border-[#E7E2DF] bg-white px-4 py-3 shadow-[0_24px_60px_-22px_rgba(45,45,45,0.18)] ring-1 ring-[#2D2D2D]/[0.04] lg:block">
               <div className="mb-2 flex items-end justify-between gap-3 border-b border-[#E7E2DF]/70 pb-2">
                 <div>
@@ -2327,14 +2370,14 @@ export default function MasterDashboardStats({
                 </div>
               </div>
               <nav className="flex flex-col gap-1.5" aria-label="Быстрые действия">
-                {onOpenSchedule && (
+                {onCopyPublicLink && (
                   <button
                     type="button"
-                    onClick={onOpenSchedule}
+                    onClick={onCopyPublicLink}
                     className="group flex w-full items-center gap-3 rounded-[12px] border border-[#E7E2DF]/70 bg-gradient-to-b from-white to-[#FDFCFB] px-3 py-2 text-left shadow-[0_6px_20px_-16px_rgba(45,45,45,0.14)] transition hover:bg-[#F4F1EF] active:scale-[0.99] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4CAF50]/30 focus-visible:ring-offset-2"
                   >
                     <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-[#DFF5EC] text-[#3D8B42] ring-1 ring-[#4CAF50]/12 transition-colors group-hover:bg-[#C8E8D8]">
-                      <CalendarDaysIcon className="h-5 w-5" strokeWidth={2} aria-hidden />
+                      <LinkIcon className="h-5 w-5" strokeWidth={2} aria-hidden />
                     </span>
                     <span className="min-w-0 flex-1 text-[13.5px] font-semibold text-[#2D2D2D]">Скопировать ссылку</span>
                     <ChevronRightIcon

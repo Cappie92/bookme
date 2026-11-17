@@ -17,6 +17,10 @@ from sqlalchemy.orm import Session
 
 from auth import get_password_hash
 from database import get_db
+from utils.calendar_interval_grid import (
+    enforce_calendar_interval_wall_grid,
+    grid_interval_from_duration,
+)
 from models import (
     User,
     UserRole,
@@ -47,6 +51,8 @@ MASTER_A_PHONE = "+79991111111"
 MASTER_B_PHONE = "+79992222222"
 CLIENT_C_PHONE = "+79993333333"
 E2E_PASSWORD = "e2e123"
+# Master A: длиннее минимума формы входа (6 символов). Остальные E2E-аккаунты не меняются.
+MASTER_A_PASSWORD = "e2e123456"
 E2E_EMAILS = {
     MASTER_A_PHONE: "e2e.master.a@example.com",
     MASTER_B_PHONE: "e2e.master.b@example.com",
@@ -207,12 +213,13 @@ async def seed_e2e(
         role: UserRole,
         full_name: str,
         birth_date: Optional[date] = None,
+        password: str = E2E_PASSWORD,
     ) -> User:
         email = E2E_EMAILS.get(phone, f"e2e+{phone.replace('+', '')}@example.com")
         u = db.query(User).filter(User.phone == phone).first()
         if u:
             u.email = email
-            u.hashed_password = get_password_hash(E2E_PASSWORD)
+            u.hashed_password = get_password_hash(password)
             u.role = role
             u.full_name = full_name
             u.is_active = True
@@ -225,7 +232,7 @@ async def seed_e2e(
         u = User(
             phone=phone,
             email=email,
-            hashed_password=get_password_hash(E2E_PASSWORD),
+            hashed_password=get_password_hash(password),
             role=role,
             full_name=full_name,
             birth_date=birth_date,
@@ -288,7 +295,7 @@ async def seed_e2e(
         db.flush()
 
     # Master A (Free): manual confirm, post-visit pending
-    u_a = get_or_create_user(MASTER_A_PHONE, UserRole.MASTER, "E2E Master A")
+    u_a = get_or_create_user(MASTER_A_PHONE, UserRole.MASTER, "E2E Master A", password=MASTER_A_PASSWORD)
     m_a = get_or_create_master(u_a, MASTER_A_DOMAIN)
     m_a.auto_confirm_bookings = False
     manual_at = now - timedelta(days=7)
@@ -417,9 +424,9 @@ async def seed_e2e(
             db.flush()
 
     svcs_a = ensure_services(im_a, [("E2E Стрижка", 30, 1000), ("E2E Окрашивание", 60, 2000)])
-    svcs_b = ensure_services(im_b, [("E2E Укладка", 45, 1500)])
+    svcs_b = ensure_services(im_b, [("E2E Укладка", 60, 1500)])
     ensure_master_services(m_a, [("E2E Стрижка", 30, 1000), ("E2E Окрашивание", 60, 2000)])
-    ensure_master_services(m_b, [("E2E Укладка", 45, 1500)])
+    ensure_master_services(m_b, [("E2E Укладка", 60, 1500)])
     ensure_master_availability(m_a)
     ensure_master_availability(m_b)
     ensure_master_calendar(m_a)
@@ -449,9 +456,29 @@ async def seed_e2e(
                 ))
                 db.flush()
 
-    # 1) Прошлая AWAITING_CONFIRMATION для post-visit (Master A): created_at >= manual_confirm_enabled_at
-    past_start = now - timedelta(hours=2)
-    past_end = past_start + timedelta(minutes=svcs_a[0].duration or 30)
+    def _e2e_slot(
+        day: date,
+        hour: int,
+        minute: int,
+        duration: int,
+        zone: str,
+    ) -> tuple[datetime, datetime]:
+        start = datetime.combine(day, time(hour, minute))
+        end = start + timedelta(minutes=duration)
+        enforce_calendar_interval_wall_grid(start, end, zone)
+        return start, end
+
+    zone_a = m_a.timezone or "Europe/Moscow"
+    zone_b = m_b.timezone or "Europe/Moscow"
+
+    # 1) Прошлая AWAITING_CONFIRMATION для post-visit (Master A): в materialized 10:00–20:00
+    past_start, past_end = _e2e_slot(
+        today,
+        11,
+        0,
+        int(svcs_a[0].duration or 30),
+        zone_a,
+    )
     past_booking = db.query(Booking).filter(
         Booking.indie_master_id == im_a.id,
         Booking.client_id == u_c.id,
@@ -480,9 +507,14 @@ async def seed_e2e(
         db.add(past_booking)
         db.flush()
 
-    # 2) Будущая запись Master A для client cancel flow
-    client_cancel_start = now + timedelta(hours=2)
-    client_cancel_end = client_cancel_start + timedelta(minutes=svcs_a[0].duration or 30)
+      # 2) Будущая запись Master A для client cancel flow
+    client_cancel_start, client_cancel_end = _e2e_slot(
+        today,
+        14,
+        0,
+        int(svcs_a[0].duration or 30),
+        zone_a,
+    )
     client_cancel_booking = db.query(Booking).filter(
         Booking.indie_master_id == im_a.id,
         Booking.client_id == u_c.id,
@@ -510,8 +542,16 @@ async def seed_e2e(
         db.flush()
 
     # 3) Будущая CREATED для pre-visit (Master B): canConfirmPreVisit требует status=created
-    pre_visit_start = now + timedelta(hours=3)
-    pre_visit_end = pre_visit_start + timedelta(minutes=svcs_b[0].duration or 45)
+    pre_visit_duration = int(svcs_b[0].duration or 60)
+    if pre_visit_duration % 30 != 0:
+        pre_visit_duration = 60
+    pre_visit_start, pre_visit_end = _e2e_slot(
+        today,
+        15,
+        0,
+        pre_visit_duration,
+        zone_b,
+    )
     pre_visit_booking = db.query(Booking).filter(
         Booking.indie_master_id == im_b.id,
         Booking.client_id == u_c.id,
@@ -556,7 +596,7 @@ async def seed_e2e(
 
     return {
         "success": True,
-        "master_a": {"phone": MASTER_A_PHONE, "password": E2E_PASSWORD, "domain": MASTER_A_DOMAIN},
+        "master_a": {"phone": MASTER_A_PHONE, "password": MASTER_A_PASSWORD, "domain": MASTER_A_DOMAIN},
         "master_b": {"phone": MASTER_B_PHONE, "password": E2E_PASSWORD, "domain": MASTER_B_DOMAIN},
         "client_c": {"phone": CLIENT_C_PHONE, "password": E2E_PASSWORD},
         "past_booking_id": past_booking.id,

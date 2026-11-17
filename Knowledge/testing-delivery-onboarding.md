@@ -4,7 +4,7 @@ project: DeDato
 knowledge_class: living
 environment: common
 status: active
-last_verified: 2026-09-27
+last_verified: 2026-11-13
 ---
 
 # Debt — testing, delivery and onboarding
@@ -110,8 +110,8 @@ Confirmed gaps in executable quality gates and developer entrypoints.
 ## Onboarding surface is fragmented and sensitive
 
 - **Severity:** `high` for sensitive artifact boundary.
-- **Confidence:** CONFIRMED for repository structure.
-- **Evidence:** root contains current package wrappers alongside historical reports, production scripts and access/credential-like artifacts. Backend/frontend/mobile READMEs have different maturity and source priority.
+- **Confidence:** CONFIRMED for repository structure; partial mitigation CONFIRMED for everyday web UI only.
+- **Evidence:** root contains current package wrappers alongside historical reports, production scripts and access/credential-like artifacts. Backend/frontend/mobile READMEs have different maturity and source priority. Managed local web entry `scripts/dev/local.py` (see [Local development](local-development.md#one-click-local-web-development)) reduces manual port hunting for web review but does not replace mobile bootstrap, disposable Playwright/E2E or production hygiene. In some working copies launcher files may still be uncommitted until integrated — verify presence before relying on them.
 - **Failure scenario:** a new contributor follows a stale deployment/setup path, uses the wrong package root or opens/copies sensitive repository material.
-- **Sources:** root file inventory; root and package `README.md`; `scripts/dev/README.md`; [Security and privacy Debt](security-and-privacy.md).
+- **Sources:** root file inventory; root and package `README.md`; `scripts/dev/README.md`; `scripts/dev/local.py`; [Security and privacy Debt](security-and-privacy.md).
 - **Required action:** use [Onboarding](onboarding.md) as safe entrypoint; repository cleanup and security remediation are separate tracks.

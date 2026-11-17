@@ -9,6 +9,7 @@ import pytest
 
 from auth import get_password_hash
 from constants import duration_months_to_days
+from tests.booking_fixture import on_grid_interval
 from models import (
     Booking,
     BookingConfirmation,
@@ -108,13 +109,15 @@ class TestManualConfirmSwitch:
 
         now = datetime.utcnow()
         past = now - timedelta(hours=2)
+        st1, en1 = on_grid_interval(past)
+        st2, en2 = on_grid_interval(past - timedelta(hours=1))
         b1 = Booking(
             client_id=user.id,
             service_id=service.id,
             master_id=master.id,
             indie_master_id=None,
-            start_time=past,
-            end_time=past + timedelta(hours=1),
+            start_time=st1,
+            end_time=en1,
             status=BookingStatus.AWAITING_CONFIRMATION,
             payment_amount=500,
         )
@@ -123,8 +126,8 @@ class TestManualConfirmSwitch:
             service_id=service.id,
             master_id=master.id,
             indie_master_id=None,
-            start_time=past - timedelta(hours=1),
-            end_time=past,
+            start_time=st2,
+            end_time=en2,
             status=BookingStatus.AWAITING_CONFIRMATION,
             payment_amount=400,
         )
@@ -211,13 +214,14 @@ class TestManualConfirmSwitch:
         # Создаём новую запись (после manual_enabled_at) в AWAITING_CONFIRMATION
         now = datetime.utcnow()
         past = now - timedelta(hours=1)
+        st, en = on_grid_interval(past)
         new_booking = Booking(
             client_id=user.id,
             service_id=service.id,
             master_id=master_id,
             indie_master_id=None,
-            start_time=past,
-            end_time=past + timedelta(hours=1),
+            start_time=st,
+            end_time=en,
             status=BookingStatus.AWAITING_CONFIRMATION,
             payment_amount=600,
         )
@@ -258,13 +262,14 @@ class TestManualConfirmSwitch:
 
         now = datetime.utcnow()
         past = now - timedelta(hours=3)
+        st, en = on_grid_interval(past)
         completed_booking = Booking(
             client_id=user.id,
             service_id=service.id,
             master_id=master.id,
             indie_master_id=None,
-            start_time=past,
-            end_time=past + timedelta(hours=1),
+            start_time=st,
+            end_time=en,
             status=BookingStatus.COMPLETED,
             payment_amount=500,
         )

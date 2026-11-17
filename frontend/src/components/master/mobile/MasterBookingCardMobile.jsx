@@ -53,9 +53,10 @@ export default function MasterBookingCardMobile({
 
   const isCancelledTab = sectionType === 'cancelled';
   const isCancelled = isCancelledTab ? isMasterHubCancelledTabStatus(b.status) : isFutureCancelled(b.status);
+  const manual = b.source === 'manual';
   const showConfirm =
-    !hideActions && !isCancelledTab && !isCancelled && canMasterConfirmBooking(b, master, hasExtendedStats);
-  const showCancel = !hideActions && !isCancelledTab && !isCancelled && canCancelBooking(b);
+    !manual && !hideActions && !isCancelledTab && !isCancelled && canMasterConfirmBooking(b, master, hasExtendedStats);
+  const showCancel = !manual && !hideActions && !isCancelledTab && !isCancelled && canCancelBooking(b);
   const isBusy = actionBookingId === b.id;
   const hasNote = !!(b.has_client_note && (b.client_note || '').trim());
   const pastMeta = sectionType === 'past' ? getStatusBadgeForPast(b, master) : null;

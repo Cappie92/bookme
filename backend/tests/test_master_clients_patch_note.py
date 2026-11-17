@@ -4,7 +4,21 @@ from datetime import datetime, timedelta
 from fastapi.testclient import TestClient
 
 from database import SessionLocal
-from models import User, Master, MasterClientMetadata, Booking, Service, BookingStatus, Salon, Subscription, SubscriptionPlan, SubscriptionStatus, SubscriptionType
+from models import (
+    Booking,
+    BookingStatus,
+    Master,
+    MasterClientMetadata,
+    Salon,
+    Service,
+    Subscription,
+    SubscriptionPlan,
+    SubscriptionStatus,
+    SubscriptionType,
+    User,
+    UserRole,
+)
+from tests.booking_fixture import on_grid_interval
 from auth import get_password_hash
 
 
@@ -15,7 +29,7 @@ def master_user(db):
         hashed_password=get_password_hash("test123"),
         phone="+79990000006",
         full_name="Master Patch",
-        role="master",
+        role=UserRole.MASTER,
         is_active=True,
         is_verified=True,
     )
@@ -32,7 +46,7 @@ def client_user(db):
         hashed_password=get_password_hash("test123"),
         phone="+79991234567",
         full_name="Client Patch",
-        role="client",
+        role=UserRole.CLIENT,
         is_active=True,
         is_verified=True,
     )
@@ -110,14 +124,14 @@ def service(db, salon):
 @pytest.fixture
 def completed_booking(db, master_record, client_user, service, salon):
     from datetime import datetime, timedelta
-    dt = datetime.utcnow() - timedelta(days=1)
+    st, en = on_grid_interval(datetime.utcnow() - timedelta(days=1))
     b = Booking(
         master_id=master_record.id,
         client_id=client_user.id,
         service_id=service.id,
         salon_id=salon.id,
-        start_time=dt,
-        end_time=dt + timedelta(minutes=60),
+        start_time=st,
+        end_time=en,
         status=BookingStatus.COMPLETED,
         payment_amount=1000,
     )

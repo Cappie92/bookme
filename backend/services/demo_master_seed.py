@@ -28,6 +28,7 @@ from models import (
     UserRole,
     master_services,
 )
+from services.booking_time_shadow import wall_time_columns
 from settings import get_settings
 
 
@@ -203,6 +204,8 @@ def _make_booking(
         salon_id=None,
         start_time=start,
         end_time=end,
+        # Demo walls are placed inside the demo master's schedule, in its own zone.
+        **wall_time_columns(start, end, master.timezone),
         status=status,
         notes=notes or None,
         payment_method="on_visit",
@@ -348,7 +351,7 @@ def reseed_demo_master(db: Session) -> dict[str, Any]:
             service=S("Стрижка мужская"),
             master=master,
             start=dt(monday + timedelta(days=0), 9, 30),
-            duration_min=45,
+            duration_min=60,
             status=BookingStatus.COMPLETED.value,
             payment_amount=1200.0,
             notes="Пн, текущая неделя",
@@ -361,7 +364,7 @@ def reseed_demo_master(db: Session) -> dict[str, Any]:
             service=S("Укладка"),
             master=master,
             start=dt(monday + timedelta(days=2), 11, 0),
-            duration_min=45,
+            duration_min=60,
             status=BookingStatus.COMPLETED.value,
             payment_amount=1400.0,
             notes="Ср",
@@ -442,7 +445,7 @@ def reseed_demo_master(db: Session) -> dict[str, Any]:
             service=S("Укладка"),
             master=master,
             start=fut_base.replace(hour=11, minute=0) + timedelta(days=3),
-            duration_min=45,
+            duration_min=60,
             status=BookingStatus.CREATED.value,
             payment_amount=1400.0,
         )
@@ -453,7 +456,7 @@ def reseed_demo_master(db: Session) -> dict[str, Any]:
             service=S("Стрижка мужская"),
             master=master,
             start=fut_base.replace(hour=15, minute=0) + timedelta(days=5),
-            duration_min=45,
+            duration_min=60,
             status=BookingStatus.CREATED.value,
             payment_amount=1200.0,
         )
@@ -466,7 +469,7 @@ def reseed_demo_master(db: Session) -> dict[str, Any]:
             service=S("Укладка"),
             master=master,
             start=dt(today_d - timedelta(days=5), 11, 0),
-            duration_min=45,
+            duration_min=60,
             status=BookingStatus.CANCELLED.value,
             payment_amount=0.0,
             cancellation_reason="client_no_show",

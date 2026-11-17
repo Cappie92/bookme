@@ -50,6 +50,7 @@ from models import (
     UserRole,
 )
 from constants import duration_months_to_days
+from services.booking_time_shadow import wall_time_columns
 from utils.balance_utils import deposit_balance, get_or_create_user_balance, get_user_available_balance
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
@@ -829,6 +830,8 @@ def _create_smoke_booking(
         salon_id=None,
         start_time=start_time,
         end_time=end_time,
+        # Callers pass naive UTC (_msk_naive_utc).
+        **wall_time_columns(start_time, end_time, "UTC"),
         status=status,
         payment_amount=payment_amount,
         loyalty_points_used=loyalty_points_used,

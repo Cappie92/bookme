@@ -1,7 +1,7 @@
 import { formatLocalDate, localizeScheduleError } from '../utils/scheduleDates';
 import React, { useState, useRef, useEffect } from 'react'
 import { useAuth } from '../contexts/AuthContext'
-import { CalendarDaysIcon, EyeSlashIcon, TrashIcon, AdjustmentsHorizontalIcon } from '@heroicons/react/24/outline'
+import { CalendarDaysIcon, AdjustmentsHorizontalIcon } from '@heroicons/react/24/outline'
 import { apiGet, apiPut, apiPost, apiDelete } from '../utils/api'
 import { useHoverCloseDelay } from '../hooks/useHoverCloseDelay'
 import { useToast } from '../contexts/ToastContext'
@@ -19,6 +19,23 @@ import { masterZClass } from '../config/masterOverlayZIndex'
 import { isFutureCancelled } from './master/mobile/masterBookingShared'
 import { calculateWeekOffset, getMonthName, getWeekDates } from '../utils/calendarUtils'
 import MonthOverviewCalendar from './MonthOverviewCalendar'
+import CalendarB3Composer from './master/CalendarB3Composer'
+import { categoryLabel, clipStartsInSlot, dayClipMinutes, listCalendarBlocks, rememberVersion, wallClock, wallLabel } from '../utils/calendarB3'
+import { manualCreateComposerState, useConsumeManualCreateIntent } from '../utils/masterManualCreateIntent'
+import { syncMasterDaySelection } from '../utils/masterDaySelection'
+import MasterScheduleDayCompact from './master/MasterScheduleDayCompact'
+import MasterScheduleDayMobileSheet from './master/MasterScheduleDayMobileSheet'
+import MasterScheduleWeekTimeline from './master/MasterScheduleWeekTimeline'
+import MasterScheduleHeader from './master/MasterScheduleHeader'
+import MasterScheduleTemplatePanel from './master/MasterScheduleTemplatePanel'
+import { blockEventSource, bookingEventSource, gridEventSurface } from '../utils/dedatoCalendarEventTokens'
+import {
+  mcBtnPrimary,
+  mcBtnSecondary,
+  mcCard,
+  mcFormTitle,
+  mcWeekCanvas,
+} from '../utils/masterCabinetUi'
 
 /** Tailwind lg — совпадает с Phase 4 booking layer */
 function useIsLgViewport() {
@@ -55,7 +72,7 @@ const HOURS = Array.from({ length: 24 }, (_, i) => i) // 0:00 - 23:00
 
 // CSS стили для выделенных ячеек
 const selectedSlotStyles = `
-  #schedule-table td.selected-slot {
+  .selected-slot {
     background-color: #DFF5EC !important;
     border-top: 1px solid #4CAF50 !important;
     border-right: 1px solid #4CAF50 !important;
@@ -94,7 +111,7 @@ const MINUTES = [0, 30]  // Слоты по 30 минут для компакт�
 const TIMELINE_ROW_HEIGHT_PX = 24
 const SLOTS_PER_HOUR = MINUTES.length
 /** Стартовая прокрутка: верх видимой области ≈ 08:00 */
-const TIMELINE_INITIAL_SCROLL_HOUR = 8
+const TIMELINE_INITIAL_SCROLL_HOUR = 9
 
 function getScrollTopForTimelineHour(hour) {
   return hour * SLOTS_PER_HOUR * TIMELINE_ROW_HEIGHT_PX
@@ -118,6 +135,10 @@ export default function MasterScheduleCalendar({
   masterSettings = null,
   onDayScheduleSaved = null,
   hasExtendedStats = false,
+  manualCreateIntentKey = 0,
+  onManualCreateIntentConsumed = null,
+  onOpenPastAppointments = null,
+  scheduleSurfaceKey = 0,
 }) {
   const { isIosRestrictedContext } = useAuth()
   // schedule: { [slotKey]: true/false } — true = рабочий, false = нерабочий
@@ -127,7 +148,6 @@ export default function MasterScheduleCalendar({
   const [saving, setSaving] = useState(false)
   const [dragStart, setDragStart] = useState(null) // { slotKey, dayIndex, timeIndex }
   const [showCreateModal, setShowCreateModal] = useState(false)
-  const [showViewModal, setShowViewModal] = useState(false)
   const [lastCreatedSchedule, setLastCreatedSchedule] = useState(null)
   const [showScrollIndicator, setShowScrollIndicator] = useState({ top: false, bottom: false })
   const [conflicts, setConflicts] = useState([])
@@ -137,14 +157,80 @@ export default function MasterScheduleCalendar({
   const [monthlyScheduleLoading, setMonthlyScheduleLoading] = useState(false)
   const [currentMonth, setCurrentMonth] = useState(new Date())
   const [scheduleRules, setScheduleRules] = useState(null)
+  const [scheduleRulesLoading, setScheduleRulesLoading] = useState(true)
+  const [scheduleRulesError, setScheduleRulesError] = useState('')
   const [bookings, setBookings] = useState([])
   const [bookingsLoading, setBookingsLoading] = useState(false)
+  const [bookingsError, setBookingsError] = useState('')
+  const [blocks, setBlocks] = useState([])
+  const [blocksError, setBlocksError] = useState('')
+  const [composer, setComposer] = useState(null)
+  const [calendarLayoutMode, setCalendarLayoutMode] = useState('week')
+  const [focusDay, setFocusDay] = useState(() => new Date())
+  const [daySelection, setDaySelection] = useState(null)
+  const [dayCreatePrefill, setDayCreatePrefill] = useState(null)
+  const dayCreatePrefillSeqRef = useRef(0)
+
+  const goDayCreateManual = (prefill) => {
+    dayCreatePrefillSeqRef.current += 1
+    setCalendarLayoutMode('day')
+    setDaySelection(null)
+    setDayCreatePrefill(prefill
+      ? { ...prefill, commandId: dayCreatePrefillSeqRef.current }
+      : { commandId: dayCreatePrefillSeqRef.current })
+    if (prefill?.dateStr) {
+      const [y, m, d] = prefill.dateStr.split('-').map(Number)
+      if (y && m && d) setFocusDay(new Date(y, m - 1, d))
+    }
+  }
+
+  const openNewManualBooking = () => {
+    if (isLg && calendarLayoutMode === 'day') {
+      goDayCreateManual({ mode: 'manual' })
+      return
+    }
+    setComposer(manualCreateComposerState(focusDay))
+  }
+
+  const openNewPersonalBlock = () => {
+    if (isLg && calendarLayoutMode === 'day') {
+      goDayCreateManual({ mode: 'block' })
+      return
+    }
+    setComposer({
+      mode: 'block',
+      dateStr: formatLocalDate(focusDay),
+      event: null,
+    })
+  }
+
+  useEffect(() => {
+    if (manualCreateIntentKey) return
+    setCalendarLayoutMode('week')
+    setDaySelection(null)
+    setDayCreatePrefill(null)
+    setShowMonthlyView(false)
+  }, [scheduleSurfaceKey, manualCreateIntentKey])
+
+  useConsumeManualCreateIntent({
+    intentKey: manualCreateIntentKey,
+    setComposer,
+    onConsumed: onManualCreateIntentConsumed,
+  })
+
+  const closeComposer = () => {
+    setComposer(null)
+    if (manualCreateIntentKey) {
+      onManualCreateIntentConsumed?.()
+    }
+  }
   const [popupVisible, setPopupVisible] = useState(false)
   const [popupBooking, setPopupBooking] = useState(null)
   const [popupPosition, setPopupPosition] = useState({ x: 0, y: 0 })
   const [dayDrawerOpen, setDayDrawerOpen] = useState(false)
   const [dayDrawerDateStr, setDayDrawerDateStr] = useState(null)
   const [dayDrawerSlots, setDayDrawerSlots] = useState([])
+  const [dayDrawerPurpose, setDayDrawerPurpose] = useState('day-menu')
 
   const { showToast } = useToast()
   const isLg = useIsLgViewport()
@@ -174,13 +260,17 @@ export default function MasterScheduleCalendar({
 
   // Загружаем правила расписания из API
   const loadScheduleRules = async () => {
+    setScheduleRulesLoading(true)
+    setScheduleRulesError('')
     try {
       const data = await apiGet('/api/master/schedule/rules')
-      if (data.has_settings) {
-        setScheduleRules(data)
-      }
+      setScheduleRules(data?.has_settings ? data : null)
     } catch (error) {
       console.error('Ошибка при загрузке правил расписания:', error)
+      setScheduleRules(null)
+      setScheduleRulesError('Не удалось загрузить правила расписания. Повторите позже.')
+    } finally {
+      setScheduleRulesLoading(false)
     }
   }
 
@@ -189,11 +279,41 @@ export default function MasterScheduleCalendar({
     setBookingsLoading(true)
     try {
       const data = await apiGet('/api/master/bookings/detailed')
-      setBookings(data)
+      const rows = Array.isArray(data) ? data : []
+      rows.forEach((row) => {
+        if (row?.source === 'manual' && row.version) rememberVersion('booking', row.id, row.version)
+      })
+      setBookings(rows)
+      setBookingsError('')
+      return rows
     } catch (error) {
       console.error('Ошибка при загрузке записей:', error)
+      setBookingsError('Не удалось загрузить записи')
+      return []
     } finally {
       setBookingsLoading(false)
+    }
+  }
+
+  const syncDaySelection = (rows, blockRows) => {
+    setDaySelection((prev) => syncMasterDaySelection(prev, rows, blockRows))
+  }
+
+  const loadBlocks = async () => {
+    try {
+      const data = await listCalendarBlocks()
+      const rows = Array.isArray(data) ? data : []
+      rows.forEach((row) => {
+        if (row?.id && row.version) rememberVersion('block', row.id, row.version)
+      })
+      const visible = rows.filter((row) => !row.deleted_at)
+      setBlocks(visible)
+      setBlocksError('')
+      return visible
+    } catch (error) {
+      console.error('Ошибка при загрузке блоков:', error)
+      setBlocksError('Не удалось загрузить личные блоки')
+      return []
     }
   }
 
@@ -201,16 +321,27 @@ export default function MasterScheduleCalendar({
   React.useEffect(() => {
     loadScheduleRules()
     loadBookings()
+    loadBlocks()
   }, [])
 
   // Загружаем записи при изменении недели
   React.useEffect(() => {
     loadBookings()
+    loadBlocks()
   }, [currentWeekOffset])
+
+  useEffect(() => {
+    setDaySelection(null)
+  }, [formatLocalDate(focusDay)])
+
+  useEffect(() => {
+    syncDaySelection(bookings, blocks)
+  }, [bookings, blocks])
 
   const tableRef = useRef(null)
   const dayHeaderLongPressTimerRef = useRef(null)
   const suppressNextDayLabelClickRef = useRef(false)
+  const userAdjustedWeekScrollRef = useRef(false)
 
   /** Только lg: прокрутка таймлайна внутри таблицы. На mobile web без window.scrollTo — иначе страница «прыгает» к середине. */
   const scrollToTimelineInitialHour = React.useCallback(() => {
@@ -236,13 +367,12 @@ export default function MasterScheduleCalendar({
   // Функция для получения записей для конкретного слота
   const getBookingsForSlot = (date, hour, minute) => {
     const dateStr = formatLocalDate(date)
-    const timeStr = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`
-    
-    return bookings.filter(booking => {
-      const bookingDate = formatLocalDate(new Date(booking.start_time))
-      const bookingTime = new Date(booking.start_time).toTimeString().slice(0, 5)
-      return bookingDate === dateStr && bookingTime === timeStr
-    })
+    return bookings.filter((booking) => clipStartsInSlot(dateStr, hour, minute, booking.start_time, booking.end_time))
+  }
+
+  const getBlocksForSlot = (date, hour, minute) => {
+    const dateStr = formatLocalDate(date)
+    return blocks.filter((block) => clipStartsInSlot(dateStr, hour, minute, block.start_time, block.end_time))
   }
 
   // Обработчики для поп-апа (задержка 500ms при уходе курсора)
@@ -308,7 +438,21 @@ export default function MasterScheduleCalendar({
   }, [currentWeekOffset])
 
   /** Те же guards и API, что в AllBookingsModal / Phase 4 (canPreVisit + canConfirmPostVisit + ранний return) */
+  const openManualComposer = (booking) => {
+    setMobileDetailBooking(null)
+    setCancelBookingId(null)
+    setComposer({
+      mode: 'manual',
+      dateStr: wallClock(booking?.start_time)?.date || '',
+      event: booking,
+    })
+  }
+
   const handleMobileConfirm = async (bookingId, booking) => {
+    if (booking?.source === 'manual') {
+      openManualComposer(booking)
+      return
+    }
     const master = masterSettings?.master ?? null
     const b = normalizeBookingForDetail(booking)
     const preVisit = canPreVisitConfirmBooking(b, master, undefined, hasExtendedStats)
@@ -326,8 +470,10 @@ export default function MasterScheduleCalendar({
         await apiPost(`/api/master/accounting/confirm-booking/${bookingId}`)
         showToast('Запись подтверждена', 'success')
       }
-      await loadBookings()
+      const rows = await loadBookings()
+      syncDaySelection(rows, blocks)
       setMobileDetailBooking(null)
+      setDaySelection(null)
     } catch (err) {
       showToast(err?.response?.data?.detail || 'Ошибка при подтверждении записи', 'error')
     } finally {
@@ -336,14 +482,22 @@ export default function MasterScheduleCalendar({
   }
 
   const handleMobileCancelWithReason = async (bookingId, reason) => {
+    const booking = bookings.find((item) => item.id === bookingId) || mobileDetailBooking
+    if (booking?.source === 'manual') {
+      setCancelBookingId(null)
+      openManualComposer(booking)
+      return
+    }
     setCancelBookingId(null)
     if (!reason) return
     try {
       setActionBookingId(bookingId)
       await apiPost(`/api/master/accounting/cancel-booking/${bookingId}?cancellation_reason=${reason}`)
       showToast('Запись отменена', 'success')
-      await loadBookings()
+      const rows = await loadBookings()
+      syncDaySelection(rows, blocks)
       setMobileDetailBooking(null)
+      setDaySelection(null)
     } catch (err) {
       showToast(err?.response?.data?.detail || 'Ошибка при отмене записи', 'error')
     } finally {
@@ -631,7 +785,7 @@ export default function MasterScheduleCalendar({
   }
 
   // Массовое выделение по клику на заголовок дня
-  const openDayDrawerMenu = (day) => {
+  const openDayDrawerMenu = (day, purpose = 'day-menu') => {
     const dateStr = formatLocalDate(day.date)
     const slotsForDay = []
     HOURS.forEach((hour) => {
@@ -647,7 +801,35 @@ export default function MasterScheduleCalendar({
     })
     setDayDrawerDateStr(dateStr)
     setDayDrawerSlots(slotsForDay)
+    setDayDrawerPurpose(purpose)
     setDayDrawerOpen(true)
+  }
+
+  const openSlotManagement = () => {
+    openDayDrawerMenu({ date: focusDay, label: formatLocalDate(focusDay) }, 'slots')
+  }
+
+  const reloadCalendarEvents = async () => {
+    const rows = await loadBookings()
+    const blockRows = await loadBlocks()
+    return { bookings: rows, blocks: blockRows }
+  }
+
+  const handleDayDetailSaved = async (saved) => {
+    const { bookings: rows, blocks: blockRows } = await reloadCalendarEvents()
+    if (saved?.id != null && daySelection) {
+      if (daySelection.kind === 'booking') {
+        const hit = rows.find((row) => row.id === saved.id)
+        if (hit) setDaySelection({ kind: 'booking', data: hit })
+        else setDaySelection(null)
+      } else {
+        const hit = blockRows.find((row) => row.id === saved.id)
+        if (hit) setDaySelection({ kind: 'block', data: hit })
+        else setDaySelection(null)
+      }
+      return
+    }
+    syncDaySelection(rows, blockRows)
   }
 
   const handleDayHeaderClick = (dayKey) => {
@@ -744,20 +926,36 @@ export default function MasterScheduleCalendar({
     }
   }
 
-  // Автопрокрутка к 08:00 (раньше была ошибка 8*6*24 → clamp к max → визуально ~12:30)
-  React.useEffect(() => {
+  const applyWeekTimelineScroll = React.useCallback(() => {
+    if (calendarLayoutMode !== 'week' || showMonthlyView) return
     scrollToTimelineInitialHour()
-    setTimeout(scrollToTimelineInitialHour, 50)
-    setTimeout(scrollToTimelineInitialHour, 200)
-    setTimeout(scrollToTimelineInitialHour, 500)
-  }, [scrollToTimelineInitialHour])
+    window.setTimeout(scrollToTimelineInitialHour, 50)
+    window.setTimeout(scrollToTimelineInitialHour, 200)
+  }, [calendarLayoutMode, showMonthlyView, scrollToTimelineInitialHour])
 
   React.useEffect(() => {
-    if (schedule) {
-      scrollToTimelineInitialHour()
-      setTimeout(scrollToTimelineInitialHour, 100)
+    const wrap = tableRef.current
+    if (!wrap || calendarLayoutMode !== 'week') return undefined
+    const onScroll = () => {
+      userAdjustedWeekScrollRef.current = true
     }
-  }, [schedule, scrollToTimelineInitialHour])
+    wrap.addEventListener('scroll', onScroll, { passive: true })
+    return () => wrap.removeEventListener('scroll', onScroll)
+  }, [calendarLayoutMode, currentWeekOffset])
+
+  /** Первый заход в неделю и возврат День → Неделя: прокрутка к TIMELINE_INITIAL_SCROLL_HOUR (08:00). */
+  React.useEffect(() => {
+    if (calendarLayoutMode !== 'week' || showMonthlyView) return undefined
+    userAdjustedWeekScrollRef.current = false
+    applyWeekTimelineScroll()
+    return undefined
+  }, [calendarLayoutMode, showMonthlyView, currentWeekOffset, applyWeekTimelineScroll])
+
+  React.useEffect(() => {
+    if (userAdjustedWeekScrollRef.current) return
+    if (calendarLayoutMode !== 'week' || showMonthlyView || !schedule) return
+    applyWeekTimelineScroll()
+  }, [schedule, calendarLayoutMode, showMonthlyView, applyWeekTimelineScroll])
 
   // Загружаем месячное расписание при изменении месяца или переключении вида
   React.useEffect(() => {
@@ -781,6 +979,40 @@ export default function MasterScheduleCalendar({
     const [effectiveStartDate, setEffectiveStartDate] = useState('')
     const [validUntil, setValidUntil] = useState('')
     const [errors, setErrors] = useState({})
+
+    useEffect(() => {
+      if (!showCreateModal || !scheduleRules?.fixed_schedule) return
+      const fixed = scheduleRules.fixed_schedule
+      const type = fixed.type || fixed.schedule_type
+      if (type === 'weekdays') {
+        setScheduleType('weekdays')
+        const src = fixed.weekdays || fixed.weekdayTimes || {}
+        const next = {}
+        Object.entries(src).forEach(([dayId, times]) => {
+          if (times?.enabled === false) return
+          const open = times.open || times.start
+          const close = times.close || times.end
+          if (open && close) next[dayId] = { start: open, end: close }
+        })
+        setWeekdays(next)
+      } else if (type === 'monthdays' && fixed.monthdays) {
+        setScheduleType('monthdays')
+        const next = {}
+        Object.entries(fixed.monthdays).forEach(([day, times]) => {
+          if (times?.start && times?.end) next[day] = { start: times.start, end: times.end }
+        })
+        setMonthdays(next)
+      } else if (type === 'shift' || type === 'shift_schedule') {
+        setScheduleType('shift')
+        const cfg = fixed.shiftConfig || fixed
+        setShiftConfig({
+          workDays: cfg.workDays ?? 2,
+          restDays: cfg.restDays ?? 1,
+          startDate: cfg.startDate || '',
+        })
+      }
+      if (scheduleRules.valid_until) setValidUntil(scheduleRules.valid_until)
+    }, [showCreateModal, scheduleRules])
 
     const weekDays = [
       { id: 1, name: 'Понедельник' },
@@ -985,6 +1217,7 @@ export default function MasterScheduleCalendar({
         
         // Закрываем модальное окно
         setShowCreateModal(false)
+        await loadScheduleRules()
         
       } catch (error) {
         console.error('Ошибка при создании расписания:', error)
@@ -1250,231 +1483,6 @@ export default function MasterScheduleCalendar({
     )
   }
 
-  const ViewScheduleModal = () => {
-    if (!showViewModal) return null
-
-    // Используем данные из API, если они есть, иначе из localStorage
-    const scheduleData = scheduleRules || lastCreatedSchedule
-    if (!scheduleData) return null
-
-    const formatScheduleData = () => {
-      // Если данные из API, используем fixed_schedule
-      if (scheduleRules) {
-        const { fixed_schedule, created_at, updated_at } = scheduleRules
-        const weekDays = [
-          { id: 1, name: 'Понедельник' },
-          { id: 2, name: 'Вторник' },
-          { id: 3, name: 'Среда' },
-          { id: 4, name: 'Четверг' },
-          { id: 5, name: 'Пятница' },
-          { id: 6, name: 'Суббота' },
-          { id: 7, name: 'Воскресенье' }
-        ]
-        
-        if (fixed_schedule.schedule_type === 'weekdays') {
-          return (
-            <div className="space-y-4">
-              <h3 className="text-lg font-semibold text-gray-800">Дни недели</h3>
-              <div className="space-y-2">
-                {Object.entries(fixed_schedule.weekdays).map(([dayId, times]) => {
-                  const dayName = weekDays.find(d => d.id === parseInt(dayId))?.name || `День ${dayId}`
-                  const isEnabled = times.enabled
-                  return (
-                    <div key={dayId} className={`flex items-center justify-between p-3 rounded ${
-                      isEnabled ? 'bg-green-50 border border-green-200' : 'bg-gray-50'
-                    }`}>
-                      <span className={`font-medium ${isEnabled ? 'text-green-800' : 'text-gray-500'}`}>
-                        {dayName}
-                      </span>
-                      <span className={`text-sm ${isEnabled ? 'text-green-600' : 'text-gray-400'}`}>
-                        {isEnabled ? `${times.open} - ${times.close}` : 'Отключено'}
-                      </span>
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-          )
-        }
-      }
-      
-      // Если данные из localStorage (старый формат)
-      const { type, data, validUntil, slotsCreated, createdAt } = scheduleData
-      
-      if (type === 'weekdays') {
-        const weekDays = [
-          { id: 1, name: 'Понедельник' },
-          { id: 2, name: 'Вторник' },
-          { id: 3, name: 'Среда' },
-          { id: 4, name: 'Четверг' },
-          { id: 5, name: 'Пятница' },
-          { id: 6, name: 'Суббота' },
-          { id: 7, name: 'Воскресенье' }
-        ]
-        
-        return (
-          <div className="space-y-4">
-            <h3 className="text-lg font-semibold text-gray-800">Дни недели</h3>
-            <div className="space-y-2">
-              {Object.entries(data).map(([dayId, times]) => {
-                const dayName = weekDays.find(d => d.id === parseInt(dayId))?.name || `День ${dayId}`
-                return (
-                  <div key={dayId} className="flex items-center justify-between p-3 bg-gray-50 rounded">
-                    <span className="font-medium">{dayName}</span>
-                    <span className="text-sm text-gray-600">{times.start} - {times.end}</span>
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-        )
-      } else if (type === 'monthdays') {
-        return (
-          <div className="space-y-4">
-            <h3 className="text-lg font-semibold text-gray-800">Числа месяца</h3>
-            <div className="space-y-2">
-              {Object.entries(data).map(([day, times]) => (
-                <div key={day} className="flex items-center justify-between p-3 bg-gray-50 rounded">
-                  <span className="font-medium">{day} число</span>
-                  <span className="text-sm text-gray-600">{times.start} - {times.end}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )
-      } else if (type === 'shift') {
-        return (
-          <div className="space-y-4">
-            <h3 className="text-lg font-semibold text-gray-800">Сменный график</h3>
-            <div className="space-y-2">
-              <div className="flex items-center justify-between p-3 bg-gray-50 rounded">
-                <span className="font-medium">Рабочих дней</span>
-                <span className="text-sm text-gray-600">{data.workDays}</span>
-              </div>
-              <div className="flex items-center justify-between p-3 bg-gray-50 rounded">
-                <span className="font-medium">Нерабочих дней</span>
-                <span className="text-sm text-gray-600">{data.restDays}</span>
-              </div>
-              <div className="flex items-center justify-between p-3 bg-gray-50 rounded">
-                <span className="font-medium">Дата начала</span>
-                <span className="text-sm text-gray-600">{data.startDate}</span>
-              </div>
-            </div>
-          </div>
-        )
-      }
-    }
-
-    return (
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onClick={() => setShowViewModal(false)}>
-        <div className="bg-white rounded-lg p-6 w-full max-w-2xl mx-4" onClick={e => e.stopPropagation()}>
-          <h2 className="text-xl font-bold mb-4">
-            {scheduleRules ? 'Текущие настройки расписания' : 'Последнее созданное расписание'}
-          </h2>
-          
-          {formatScheduleData()}
-          
-          <div className="mt-6 space-y-3">
-            {scheduleRules ? (
-              <>
-                <div className="flex items-center justify-between p-3 bg-gray-50 rounded">
-                  <span className="font-medium text-gray-800">Дата создания</span>
-                  <span className="text-sm text-gray-600">
-                    {new Date(scheduleRules.created_at).toLocaleDateString('ru-RU', {
-                      day: '2-digit',
-                      month: '2-digit',
-                      year: 'numeric',
-                      hour: '2-digit',
-                      minute: '2-digit'
-                    })}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between p-3 bg-gray-50 rounded">
-                  <span className="font-medium text-gray-800">Последнее обновление</span>
-                  <span className="text-sm text-gray-600">
-                    {new Date(scheduleRules.updated_at).toLocaleDateString('ru-RU', {
-                      day: '2-digit',
-                      month: '2-digit',
-                      year: 'numeric',
-                      hour: '2-digit',
-                      minute: '2-digit'
-                    })}
-                  </span>
-                </div>
-              </>
-            ) : (
-              <>
-                <div className="flex items-center justify-between p-3 bg-blue-50 rounded">
-                  <span className="font-medium text-blue-800">Действует до</span>
-                  <span className="text-sm text-blue-600">
-                    {(() => {
-                      // Конвертируем дату из YYYY-MM-DD в DD-MM-YYYY для отображения
-                      const date = new Date(lastCreatedSchedule.validUntil)
-                      const day = date.getDate().toString().padStart(2, '0')
-                      const month = (date.getMonth() + 1).toString().padStart(2, '0')
-                      const year = date.getFullYear()
-                      return `${day}-${month}-${year}`
-                    })()}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between p-3 bg-green-50 rounded">
-                  <span className="font-medium text-green-800">Создано слотов</span>
-                  <span className="text-sm text-green-600">{lastCreatedSchedule.slotsCreated}</span>
-                </div>
-                <div className="flex items-center justify-between p-3 bg-gray-50 rounded">
-                  <span className="font-medium text-gray-800">Дата создания</span>
-                  <span className="text-sm text-gray-600">{lastCreatedSchedule.createdAt}</span>
-                </div>
-              </>
-            )}
-          </div>
-          
-          <div className="flex justify-between mt-6">
-            <button
-              onClick={async () => {
-                if (confirm('Вы уверены, что хотите удалить все будущее расписание? Это действие нельзя отменить.')) {
-                  try {
-                    const token = localStorage.getItem('access_token')
-                    if (!token) {
-                      alert('Ошибка авторизации')
-                      return
-                    }
-
-                    const result = await apiDelete('/api/master/schedule/future')
-                    alert(`Расписание успешно удалено. Удалено слотов: ${result.deleted_slots}`)
-                    
-                    // Очищаем локальное хранилище и закрываем модальное окно
-                    localStorage.removeItem('lastCreatedSchedule')
-                    setLastCreatedSchedule(null)
-                    setShowViewModal(false)
-                    
-                    // Перезагружаем расписание
-                    if (onChange) {
-                      onChange({})
-                    }
-                  } catch (error) {
-                    console.error('Ошибка при удалении расписания:', error)
-                    alert('Ошибка при удалении расписания')
-                  }
-                }
-              }}
-              className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 transition-colors"
-            >
-              Удалить расписание
-            </button>
-            <button
-              onClick={() => setShowViewModal(false)}
-              className="px-4 py-2 bg-gray-300 text-gray-700 rounded hover:bg-gray-400 transition-colors"
-            >
-              Закрыть
-            </button>
-          </div>
-        </div>
-      </div>
-    )
-  }
-
-
   const MonthlyCalendarModal = () => {
     if (!showMonthlyView) return null
 
@@ -1527,154 +1535,73 @@ export default function MasterScheduleCalendar({
 
   return (
     <div
-      className={`mx-auto max-w-full overflow-x-hidden rounded-lg border bg-white px-2 lg:max-w-8xl lg:overflow-hidden lg:px-4 ${
+      data-testid="master-schedule-surface"
+      className={`mx-auto w-full min-w-0 max-w-[350px] lg:max-w-[1120px] ${
         !isLg && selected.size > 0 && !showMonthlyView ? 'pb-[max(5.5rem,env(safe-area-inset-bottom,0px))]' : ''
       }`}
     >
-      {allConflicts.length > 0 ? (
-        <div
-          className="-mx-2 mb-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900 lg:hidden"
-          role="status"
-        >
-          <span className="font-medium">Конфликты расписания: {allConflicts.length}</span>
-          <span className="text-red-700"> — см. блок ниже, действия без hover.</span>
-        </div>
-      ) : null}
-      {/* Верхняя строка: заголовок и кнопки навигации */}
-      <div className="-mx-2 flex min-h-[40px] items-center justify-between border-b bg-gray-50 px-2 py-1.5 lg:mx-0 lg:min-h-0 lg:px-6 lg:py-2">
-        <div className="flex min-w-0 flex-1 flex-col items-start gap-0 sm:max-w-[55%] lg:max-w-none lg:flex-row lg:items-center lg:gap-4">
-          <div className="truncate text-sm font-semibold lg:text-base">
-            {showMonthlyView ? 'Расписание на месяц' : 'Расписание на неделю'}
-          </div>
-          {!showMonthlyView && weekDates.length >= 7 ? (
-            <span className="max-w-full truncate text-[10px] font-normal leading-tight text-gray-500 lg:text-xs">
-              {weekDates[0].date.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })} —{' '}
-              {weekDates[6].date.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' })}
-            </span>
-          ) : null}
-        </div>
-        <div className="flex shrink-0 items-center gap-1 lg:gap-2">
-          {showMonthlyView ? (
-            <>
-              <button
-                onClick={goToPreviousMonth}
-                className="p-1 rounded hover:bg-gray-200 transition-colors"
-                title="Предыдущий месяц"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                </svg>
-              </button>
-              <div className="px-3 py-1 text-sm font-medium">
-                {currentMonth.toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' })}
-              </div>
-              <button
-                onClick={goToNextMonth}
-                className="p-1 rounded hover:bg-gray-200 transition-colors"
-                title="Следующий месяц"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                </svg>
-              </button>
-            </>
-          ) : (
-            <>
-              <button
-                type="button"
-                onClick={goToPreviousWeek}
-                className="inline-flex min-h-8 min-w-8 items-center justify-center rounded p-1 transition-colors hover:bg-gray-200 lg:min-h-0 lg:min-w-0"
-                title="Предыдущая неделя"
-                aria-label="Предыдущая неделя"
-              >
-                <svg className="h-4 w-4 lg:h-4 lg:w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                </svg>
-              </button>
-              <button
-                type="button"
-                onClick={goToCurrentWeek}
-                className="min-h-8 rounded bg-gray-200 px-2 py-1 text-[11px] transition-colors hover:bg-gray-300 lg:min-h-0 lg:px-2 lg:py-1 lg:text-xs"
-                title="Текущая неделя"
-              >
-                Сегодня
-              </button>
-              <button
-                type="button"
-                onClick={goToNextWeek}
-                className="inline-flex min-h-8 min-w-8 items-center justify-center rounded p-1 transition-colors hover:bg-gray-200 lg:min-h-0 lg:min-w-0"
-                title="Следующая неделя"
-                aria-label="Следующая неделя"
-              >
-                <svg className="h-4 w-4 lg:h-4 lg:w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                </svg>
-              </button>
-            </>
-          )}
-        </div>
-      </div>
-
-      {/* Вторая строка: кнопки управления расписанием (на <lg — заметно компактнее) */}
-      <div className="-mx-2 flex flex-col gap-1 border-b bg-gray-50 px-2 py-1 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between lg:mx-0 lg:gap-2 lg:px-6 lg:py-2">
-        <div className="flex flex-wrap items-center gap-1 lg:gap-2">
-          <button
-            type="button"
-            onClick={() => setShowCreateModal(true)}
-            className="min-h-[26px] rounded px-1.5 py-0.5 text-[10px] font-medium leading-tight text-white transition-colors lg:min-h-0 lg:rounded lg:px-3 lg:py-2 lg:text-sm"
-            style={{ backgroundColor: '#4CAF50' }}
-            onMouseEnter={(e) => e.target.style.backgroundColor = '#45a049'}
-            onMouseLeave={(e) => e.target.style.backgroundColor = '#4CAF50'}
-            title="Создать расписание"
-          >
-            Создать расписание
-          </button>
-          <button
-            type="button"
-            onClick={() => setShowViewModal(true)}
-            className="min-h-[26px] rounded px-1.5 py-0.5 text-[10px] font-medium leading-tight text-white transition-colors disabled:opacity-50 lg:min-h-0 lg:rounded lg:px-3 lg:py-2 lg:text-sm"
-            style={{ backgroundColor: '#2196F3' }}
-            onMouseEnter={(e) => !e.target.disabled && (e.target.style.backgroundColor = '#1976D2')}
-            onMouseLeave={(e) => !e.target.disabled && (e.target.style.backgroundColor = '#2196F3')}
-            disabled={!lastCreatedSchedule}
-            title="Посмотреть расписание"
-          >
-            Посмотреть расписание
-          </button>
-          <button
-            type="button"
-            onClick={() => setShowMonthlyView(true)}
-            className="min-h-[26px] rounded px-1.5 py-0.5 text-[10px] font-medium leading-tight text-white transition-colors lg:min-h-0 lg:rounded lg:px-3 lg:py-2 lg:text-sm"
-            style={{ backgroundColor: '#FF9800' }}
-            onMouseEnter={(e) => e.target.style.backgroundColor = '#F57C00'}
-            onMouseLeave={(e) => e.target.style.backgroundColor = '#FF9800'}
-            title="Обзор месяца"
-          >
-            Обзор месяца
-          </button>
-        </div>
-        <div className="hidden flex-wrap gap-2 lg:flex">
-          <button
-            className="rounded px-3 py-2 text-sm text-white transition-colors disabled:opacity-50 lg:min-h-0 lg:py-1"
-            style={{ backgroundColor: '#4CAF50' }}
-            onMouseEnter={(e) => e.target.style.backgroundColor = '#45a049'}
-            onMouseLeave={(e) => e.target.style.backgroundColor = '#4CAF50'}
-            onClick={() => handleSetWorking(true)}
-            disabled={selected.size === 0 || saving}
-          >
-            {saving ? 'Сохранение...' : 'Установить рабочее время'}
-          </button>
-          <button
-            className="rounded bg-gray-300 px-3 py-2 text-sm text-gray-700 transition-colors hover:bg-gray-400 disabled:opacity-50 lg:min-h-0 lg:py-1"
-            onClick={() => handleSetWorking(false)}
-            disabled={selected.size === 0 || saving}
-          >
-            {saving ? 'Сохранение...' : 'Установить нерабочее время'}
-          </button>
-        </div>
-      </div>
+      <MasterScheduleHeader
+        calendarLayoutMode={calendarLayoutMode}
+        onLayoutModeChange={(mode) => {
+          setShowMonthlyView(false)
+          setCalendarLayoutMode(mode)
+        }}
+        showMonthlyView={showMonthlyView}
+        showCreateActions={!showMonthlyView && calendarLayoutMode !== 'schedule'}
+        focusDay={focusDay}
+        weekDates={weekDates}
+        masterTimezone={masterSettings?.timezone || masterSettings?.master?.timezone || ''}
+        onOpenNewBooking={openNewManualBooking}
+        onOpenNewBlock={openNewPersonalBlock}
+        onPreviousPeriod={() => {
+          if (calendarLayoutMode === 'day') {
+            setFocusDay((d) => {
+              const next = new Date(d)
+              next.setDate(next.getDate() - 1)
+              return next
+            })
+          } else {
+            goToPreviousWeek()
+          }
+        }}
+        onNextPeriod={() => {
+          if (calendarLayoutMode === 'day') {
+            setFocusDay((d) => {
+              const next = new Date(d)
+              next.setDate(next.getDate() + 1)
+              return next
+            })
+          } else {
+            goToNextWeek()
+          }
+        }}
+        onToday={() => {
+          if (calendarLayoutMode === 'day') {
+            setFocusDay(new Date())
+          } else {
+            goToCurrentWeek()
+          }
+        }}
+        monthNav={
+          showMonthlyView
+            ? {
+                label: currentMonth.toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' }),
+                onPrevious: goToPreviousMonth,
+                onNext: goToNextMonth,
+              }
+            : null
+        }
+      />
       <div
-        className={`relative max-w-full overflow-x-auto overscroll-x-contain [-webkit-overflow-scrolling:touch] lg:max-h-[600px] lg:overflow-auto ${isLg ? 'touch-pan-x' : 'touch-auto'}`}
+        data-testid="master-schedule-calendar-card"
+        className="mt-3 overflow-x-hidden rounded-[var(--dedato-radius-card,16px)] border border-[var(--dedato-border-decorative,#e7e2df)] bg-[var(--dedato-surface-elevated,#fff)] lg:mt-6 lg:px-4"
+      >
+      <div
+        className={`relative min-w-0 max-w-full overflow-x-auto overscroll-x-contain [-webkit-overflow-scrolling:touch] ${
+          calendarLayoutMode === 'day' && isLg
+            ? 'lg:max-h-[600px] lg:overflow-y-auto lg:overflow-x-visible'
+            : 'lg:max-h-[600px] lg:overflow-auto'
+        } ${isLg ? 'touch-pan-x' : 'touch-auto'}`}
         ref={tableRef}
         onMouseUp={handleMouseUp}
         onPointerUp={handleMouseUp}
@@ -1698,358 +1625,94 @@ export default function MasterScheduleCalendar({
             showLegend
             onDayClick={navigateToWeekForDate}
           />
-        ) : (
-          <table id="schedule-table" className="w-full select-none" style={{ borderCollapse: 'separate', borderSpacing: 0, tableLayout: 'fixed' }}>
-            <thead className="sticky top-0 z-20 bg-white shadow-[0_1px_0_0_rgba(0,0,0,0.06)]">
-              <tr>
-                <th className="w-16"></th>
-                {weekDates.map(day => {
-                  const isTodayCol = isSameCalendarDay(day.date, todayRef)
-                  return (
-                  <th
-                    key={formatLocalDate(day.date)}
-                    className={`text-center px-2 py-1 text-sm font-semibold text-gray-700 ${isTodayCol ? 'bg-green-50 ring-1 ring-inset ring-green-500/40' : ''}`}
-                    style={{ transition: 'background-color 0.2s', width: '160px' }}
-                  >
-                    <div
-                      className="flex flex-col items-center gap-0.5"
-                      onPointerDown={!isLg ? handleDayHeaderPointerDownMobile(day) : undefined}
-                      onPointerUp={!isLg ? handleDayHeaderPointerUpMobile : undefined}
-                      onPointerCancel={!isLg ? handleDayHeaderPointerUpMobile : undefined}
-                      onPointerLeave={!isLg ? handleDayHeaderPointerUpMobile : undefined}
-                    >
-                      {isTodayCol ? (
-                        <span className="mb-0.5 block text-[9px] font-bold uppercase tracking-wide text-green-700 lg:hidden">
-                          Сегодня
-                        </span>
-                      ) : null}
-                      {isLg ? (
-                        <button
-                          type="button"
-                          className="inline-flex shrink-0 items-center justify-center rounded p-0.5 text-green-700 hover:bg-green-50"
-                          title="Настроить день"
-                          aria-label="Настроить день"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            openDayDrawerMenu(day)
-                          }}
-                        >
-                          <AdjustmentsHorizontalIcon className="h-3.5 w-3.5" aria-hidden />
-                        </button>
-                      ) : null}
-                      <span
-                        role="button"
-                        tabIndex={0}
-                        className="cursor-pointer touch-manipulation text-[11px] font-semibold leading-tight hover:text-green-800 lg:text-sm"
-                        title={!isLg ? 'Нажмите — выделить день; удерживайте — настройки дня' : undefined}
-                        onMouseEnter={(e) => { e.currentTarget.closest('th').style.backgroundColor = '#DFF5EC' }}
-                        onMouseLeave={(e) => { e.currentTarget.closest('th').style.backgroundColor = '' }}
-                        onClick={handleDayLabelClick(formatLocalDate(day.date))}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' || e.key === ' ') {
-                            e.preventDefault()
-                            handleDayLabelClick(formatLocalDate(day.date))(e)
-                          }
-                        }}
-                      >
-                        {day.label}
-                      </span>
-                    </div>
-                  </th>
-                )})}
-              </tr>
-            </thead>
-            <tbody>
-              {HOURS.flatMap(hour => MINUTES.map(minute => (
-                <tr key={hour + ':' + minute} style={{ height: 24 }}>
-                  <td
-                    className="text-xs text-gray-500 text-right pr-2 cursor-pointer"
-                    style={{ transition: 'background-color 0.2s', width: '80px' }}
-                    onMouseEnter={(e) => e.target.style.backgroundColor = '#DFF5EC'}
-                    onMouseLeave={(e) => e.target.style.backgroundColor = ''}
-                    onClick={() => handleTimeHeaderClick(hour, minute)}
-                  >
-                    {getTimeLabel(hour, minute)}
-                  </td>
-                  {weekDates.map((day, dayIndex) => {
-                    const slotKey = getSlotKey(day.date, hour, minute)
-                    const slotData = schedule?.[slotKey]
-                    const isActive = slotData?.is_working || false
-                    const workType = slotData?.work_type
-                    const hasConflict = slotData?.has_conflict || false
-                    const isFrozen = !isIosRestrictedContext && (slotData?.is_frozen || false)
-                    const isSelected = selected.has(slotKey)
-                    const timeIndex = hour * 2 + (minute / 30)
-                    const slotBookings = getBookingsForSlot(day.date, hour, minute)
-                    
-                    // Определяем цвет ячейки
-                    let cellClass = 'h-6 cursor-pointer transition-colors border border-gray-200 relative '
-                    if (isSelected) {
-                      cellClass += 'selected-slot'
-                    } else if (isFrozen) {
-                      cellClass += 'bg-cyan-100 hover:bg-cyan-200' // Замороженный день - светло-голубой
-                    } else if (isActive) {
-                      if (hasConflict) {
-                        cellClass += 'bg-red-100 hover:bg-red-200' // Конфликт - красный
-                      } else if (workType === 'salon') {
-                        cellClass += 'bg-blue-100 hover:bg-blue-200' // Работа в салоне - синий
-                      } else {
-                        cellClass += 'bg-green-100 hover:bg-green-200' // Личное расписание - зеленый
-                      }
-                    } else {
-                      cellClass += 'bg-gray-100 hover:bg-gray-200'
-                    }
-                    
-                    return (
-                      <td
-                        key={slotKey}
-                        className={cellClass}
-                        style={{ width: '160px' }}
-                        title={isFrozen ? 'Тариф заморожен' : ''}
-                        onMouseDown={isLg ? handleSlotMouseDown(slotKey, isActive, dayIndex, timeIndex) : undefined}
-                        onClick={!isLg ? handleSlotTapMobile(slotKey) : undefined}
-                        onMouseEnter={handleSlotMouseEnter(slotKey)}
-                        onMouseMove={handleSlotMouseMove(slotKey, dayIndex, timeIndex)}
-                      >
-                        {/* Отображение записей в виде карточек */}
-                        {slotBookings.map((booking, index) => {
-                          const startTime = new Date(booking.start_time)
-                          const endTime = new Date(booking.end_time)
-                          const duration = (endTime - startTime) / (1000 * 60) // в минутах
-                          // 30-мин сетка: 1 ряд = TIMELINE_ROW_HEIGHT_PX (10 мин. была ошибка — визуал в ~3 ряза выше)
-                          const height = Math.max(16, (duration / 30) * TIMELINE_ROW_HEIGHT_PX)
-                          
-                          return (
-                            <div
-                              key={booking.id}
-                              role="button"
-                              tabIndex={0}
-                              className="absolute left-0 right-0 z-[1] min-h-[36px] cursor-pointer overflow-hidden rounded border border-blue-300 bg-white p-1 text-xs shadow-sm transition-shadow [touch-action:manipulation] active:opacity-90 lg:min-h-0 lg:hover:shadow-md"
-                              style={{
-                                top: '1px',
-                                height: `${isLg ? height : Math.max(height, 36)}px`,
-                                fontSize: '10px',
-                                lineHeight: '1.2'
-                              }}
-                              onPointerDown={(e) => {
-                                e.stopPropagation()
-                              }}
-                              onTouchStart={(e) => {
-                                e.stopPropagation()
-                              }}
-                              onMouseDown={(e) => e.stopPropagation()}
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                if (!isLg) {
-                                  openMobileBookingDetail(booking)
-                                }
-                              }}
-                              onKeyDown={(e) => {
-                                if (!isLg && (e.key === 'Enter' || e.key === ' ')) {
-                                  e.preventDefault()
-                                  e.stopPropagation()
-                                  openMobileBookingDetail(booking)
-                                }
-                              }}
-                              {...(isLg
-                                ? {
-                                    onMouseEnter: (e) => handleBookingMouseEnter(booking, e),
-                                    onMouseLeave: handleBookingMouseLeave,
-                                  }
-                                : {})}
-                            >
-                              <div className="font-medium text-blue-800 truncate flex items-center gap-1">
-                                {(booking.client_display_name || booking.client_name) || 'Клиент'}
-                                {booking.client_phone && <span className="text-xs text-gray-500 font-normal">({booking.client_phone})</span>}
-                                {booking.has_client_note ? (
-                                  <span title={booking.client_note || ''} className="text-gray-900 cursor-help flex-shrink-0 no-underline">
-                                    <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" /></svg>
-                                  </span>
-                                ) : null}
-                              </div>
-                              <div className="text-blue-600 truncate">
-                                {booking.service_name}
-                              </div>
-                              <div className="text-gray-500 text-xs">
-                                {startTime.toTimeString().slice(0, 5)}-{endTime.toTimeString().slice(0, 5)}
-                              </div>
-                              {booking.service_price != null && booking.service_price !== '' && !Number.isNaN(Number(booking.service_price)) ? (
-                                <div className="text-green-700 font-semibold text-[10px] mt-0.5">
-                                  {new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB', minimumFractionDigits: 0 }).format(Number(booking.service_price))}
-                                </div>
-                              ) : null}
-                            </div>
-                          )
-                        })}
-                      </td>
-                    )
-                  })}
-                </tr>
-              )))}
-            </tbody>
-          </table>
-        )}
-      </div>
-      
-      {/* Легенда цветографики */}
-      <div className="-mx-2 flex flex-col gap-3 border-t bg-gray-50 px-3 py-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between lg:mx-0 lg:px-6">
-        <div className="flex flex-col gap-2 sm:flex-1 sm:flex-row sm:flex-wrap sm:items-center sm:gap-4">
-          <h4 className="shrink-0 text-sm font-medium text-gray-700">Легенда расписания:</h4>
-          <div className="flex flex-wrap items-center gap-3 text-xs sm:gap-4">
-            <div className="flex items-center gap-2">
-              <div className="w-4 h-4 bg-green-100 border border-gray-200 rounded"></div>
-              <span className="text-gray-600">Личное расписание</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-4 h-4 bg-blue-100 border border-gray-200 rounded"></div>
-              <span className="text-gray-600">Работа в салоне</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-4 h-4 bg-red-100 border border-gray-200 rounded"></div>
-              <span className="text-gray-600">Конфликт расписания</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-4 h-4 bg-gray-100 border border-gray-200 rounded"></div>
-              <span className="text-gray-600">Нерабочее время</span>
-            </div>
-            {!isIosRestrictedContext && <div className="flex items-center gap-2">
-              <div className="w-4 h-4 bg-cyan-100 border border-gray-200 rounded"></div>
-              <span className="text-gray-600">Тариф заморожен</span>
-            </div>}
-            <div className="flex items-center gap-2">
-              <div className="w-4 h-4 rounded" style={{ backgroundColor: '#DFF5EC', border: '1px solid #4CAF50' }}></div>
-              <span className="text-gray-600">Выделено для изменения</span>
-            </div>
+        ) : calendarLayoutMode === 'day' ? (
+          <MasterScheduleDayCompact
+            date={focusDay}
+            schedule={schedule}
+            bookings={bookings}
+            blocks={blocks}
+            bookingsLoading={bookingsLoading}
+            bookingsError={bookingsError}
+            blocksError={blocksError}
+            master={masterSettings?.master ?? null}
+            hasExtendedStats={hasExtendedStats}
+            selection={daySelection}
+            onSelect={(sel) => {
+              setDaySelection(sel)
+              if (sel) setDayCreatePrefill(null)
+            }}
+            createPrefill={dayCreatePrefill}
+            timeZone={masterSettings?.timezone || ''}
+            onConfirmBooking={handleMobileConfirm}
+            onCancelBookingRequest={(id) => setCancelBookingId(id)}
+            actionBookingId={actionBookingId}
+            onDetailSaved={async (saved) => {
+              setDayCreatePrefill(null)
+              await handleDayDetailSaved(saved)
+            }}
+            onDetailReload={reloadCalendarEvents}
+            onIntervalManualCreate={goDayCreateManual}
+          />
+        ) : calendarLayoutMode === 'schedule' ? (
+          <MasterScheduleTemplatePanel
+            scheduleRules={scheduleRules}
+            scheduleRulesLoading={scheduleRulesLoading}
+            scheduleRulesError={scheduleRulesError}
+            materializedSchedule={schedule}
+            masterTimezone={masterSettings?.timezone || masterSettings?.master?.timezone || ''}
+            onCreateSchedule={() => setShowCreateModal(true)}
+            onEditSchedule={() => setShowCreateModal(true)}
+            onOpenMonthly={() => setShowMonthlyView(true)}
+            onOpenSlotManagement={openSlotManagement}
+            onOpenPastAppointments={onOpenPastAppointments}
+          />
+        ) : calendarLayoutMode === 'week' ? (
+          <div className={mcWeekCanvas}>
+            <MasterScheduleWeekTimeline
+              weekDates={weekDates}
+              schedule={schedule}
+              bookings={bookings}
+              blocks={blocks}
+              selected={selected}
+              isLg={isLg}
+              isIosRestrictedContext={isIosRestrictedContext}
+              todayRef={todayRef}
+              formatLocalDate={formatLocalDate}
+              getSlotKey={getSlotKey}
+              getTimeLabel={getTimeLabel}
+              isSameCalendarDay={isSameCalendarDay}
+              onEmptySlotCreate={(day, hour, minute) => {
+                const ds = formatLocalDate(day.date)
+                const hm = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
+                goDayCreateManual({ mode: 'manual', dateStr: ds, startIso: `${ds}T${hm}:00` })
+              }}
+              onSlotMouseDown={handleSlotMouseDown}
+              onSlotTapMobile={handleSlotTapMobile}
+              onSlotMouseEnter={handleSlotMouseEnter}
+              onSlotMouseMove={handleSlotMouseMove}
+              onDayLabelClick={handleDayLabelClick}
+              openDayDrawerMenu={openDayDrawerMenu}
+              onTimeHeaderClick={handleTimeHeaderClick}
+              onBookingClickMobile={(booking) => {
+                if (booking.source === 'manual') {
+                  setComposer({ mode: 'manual', dateStr: wallClock(booking.start_time)?.date || formatLocalDate(focusDay), event: booking })
+                } else openMobileBookingDetail(booking)
+              }}
+              onBookingHover={handleBookingMouseEnter}
+              onBookingHoverEnd={handleBookingMouseLeave}
+              onBlockClick={(block, day) => setComposer({ mode: 'block', dateStr: formatLocalDate(day.date), event: block })}
+              onBookingEditDesktop={(booking, day) => setComposer({ mode: 'manual', dateStr: wallClock(booking.start_time)?.date || formatLocalDate(day.date), event: booking })}
+              wallLabel={wallLabel}
+            />
           </div>
-        </div>
-        <div className="hidden text-xs text-gray-400 lg:block">
-          * Для массового выделения используйте drag&drop или клики по заголовкам дней/времени
-        </div>
+        ) : null}
       </div>
-
-      {/* Список конфликтов расписания */}
-      <div className="-mx-2 border-t bg-gray-50 px-3 py-4 lg:mx-0 lg:px-6">
-        <div className="mb-3">
-          <h4 className="text-sm font-medium text-gray-700">Конфликты расписания</h4>
-          <p className="text-xs text-gray-500 mt-1">
-            {allConflicts.length > 0 
-              ? `Найдено ${allConflicts.length} конфликт${allConflicts.length === 1 ? '' : allConflicts.length < 5 ? 'а' : 'ов'} на ближайшие 12 недель`
-              : 'Конфликтов не найдено'
-            }
-          </p>
-        </div>
-        <div className="bg-white rounded-lg border p-4">
-          {(() => {
-            // Показываем ВСЕ конфликты из allConflicts (уже загружены на 12 недель вперед)
-            // Группируем конфликты по датам
-            const conflictsByDate = {}
-            allConflicts.forEach(conflict => {
-              if (!conflictsByDate[conflict.date]) {
-                conflictsByDate[conflict.date] = []
-              }
-              conflictsByDate[conflict.date].push(conflict)
-            })
-            
-            if (Object.keys(conflictsByDate).length > 0) {
-              return (
-                <div className="space-y-3">
-                  {Object.entries(conflictsByDate).map(([date, conflicts]) => {
-                    const conflictDate = new Date(date)
-                    const hasPersonalWork = conflicts.some(conflict => conflict.work_type === 'personal')
-                    const hasSalonWork = conflicts.some(conflict => conflict.work_type === 'salon')
-                    
-                    return (
-                      <div key={date} className="flex flex-col gap-3 rounded-lg border border-red-200 bg-red-50 p-3 sm:flex-row sm:items-center sm:justify-between">
-                        <div className="flex min-w-0 items-start space-x-3 sm:items-center">
-                          <div className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-red-500 sm:mt-0"></div>
-                          <div className="min-w-0">
-                            <h5 className="text-sm font-medium text-gray-800">
-                              {conflictDate.toLocaleDateString('ru-RU', { 
-                                weekday: 'long', 
-                                year: 'numeric', 
-                                month: 'long', 
-                                day: 'numeric' 
-                              })}
-                            </h5>
-                            <p className="text-xs text-red-600">
-                              {hasPersonalWork && hasSalonWork 
-                                ? 'Конфликт между личным расписанием и работой в салоне'
-                                : hasPersonalWork 
-                                  ? 'Личное расписание конфликтует с работой в салоне'
-                                  : 'Работа в салоне конфликтует с личным расписанием'
-                              }
-                            </p>
-                          </div>
-                        </div>
-                        <div className="flex flex-wrap items-center gap-2 sm:shrink-0">
-                          <button
-                            type="button"
-                            onClick={() => handleGoToDate(conflictDate)}
-                            className="group relative flex min-h-10 min-w-[4.5rem] items-center justify-center gap-1 rounded-lg px-2 text-gray-600 transition-colors hover:bg-blue-100 hover:text-blue-600"
-                            title="Перейти к дню - переключиться на недельный вид и показать выбранную дату"
-                            aria-label="Перейти к дню"
-                          >
-                            <CalendarDaysIcon className="h-4 w-4 shrink-0" strokeWidth={2} aria-hidden />
-                            <span className="text-xs font-medium lg:hidden">К дню</span>
-                            <div className="pointer-events-none absolute bottom-full left-1/2 z-50 mb-2 hidden -translate-x-1/2 whitespace-nowrap rounded bg-gray-800 px-2 py-1 text-xs text-white opacity-0 transition-opacity duration-75 lg:block lg:opacity-0 lg:group-hover:opacity-100">
-                              Перейти к дню
-                            </div>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleResolveConflict(`${date}_${conflicts[0].start_time.replace(':', '_')}`, 'remove')}
-                            className="group relative flex min-h-10 min-w-[4.5rem] items-center justify-center gap-1 rounded-lg px-2 text-gray-600 transition-colors hover:bg-red-100 hover:text-red-600"
-                            title="Удалить конфликт в собственном расписании - пометить личный календарь в этот день как нерабочий"
-                            aria-label="Удалить конфликт"
-                          >
-                            <TrashIcon className="h-4 w-4 shrink-0" strokeWidth={2} aria-hidden />
-                            <span className="text-xs font-medium lg:hidden">Убрать</span>
-                            <div className="pointer-events-none absolute bottom-full left-1/2 z-50 mb-2 hidden -translate-x-1/2 whitespace-nowrap rounded bg-gray-800 px-2 py-1 text-xs text-white opacity-0 transition-opacity duration-75 lg:block lg:opacity-0 lg:group-hover:opacity-100">
-                              Удалить конфликт
-                            </div>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleIgnoreConflict(date)}
-                            className="group relative flex min-h-10 min-w-[4.5rem] items-center justify-center gap-1 rounded-lg px-2 text-gray-600 transition-colors hover:bg-yellow-100 hover:text-yellow-700"
-                            title="Игнорировать - перестать обращать внимание на этот конфликт"
-                            aria-label="Игнорировать конфликт"
-                          >
-                            <EyeSlashIcon className="h-4 w-4 shrink-0" strokeWidth={2} aria-hidden />
-                            <span className="text-xs font-medium lg:hidden">Игнор.</span>
-                            <div className="pointer-events-none absolute bottom-full left-1/2 z-50 mb-2 hidden -translate-x-1/2 whitespace-nowrap rounded bg-gray-800 px-2 py-1 text-xs text-white opacity-0 transition-opacity duration-75 lg:block lg:opacity-0 lg:group-hover:opacity-100">
-                              Игнорировать
-                            </div>
-                          </button>
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
-              )
-            } else {
-              return (
-                <div className="text-center py-8 text-gray-500">
-                  <div className="w-12 h-12 mx-auto mb-3 bg-gray-100 rounded-full flex items-center justify-center">
-                    <svg className="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                  </div>
-                  <p className="text-sm">Конфликтов расписания не найдено</p>
-                  <p className="text-xs text-gray-400 mt-1">Здесь будут отображаться конфликты при пересечении личного расписания с работой в салоне</p>
-                </div>
-              )
-            }
-          })()}
-        </div>
       </div>
       
       {/* Модальное окно создания расписания */}
       <CreateScheduleModal />
       
       {/* Модальное окно просмотра расписания */}
-      <ViewScheduleModal />
-      
       {/* Модальное окно конфликтов */}
       <ConflictsList 
         conflicts={allConflicts}
@@ -2066,10 +1729,45 @@ export default function MasterScheduleCalendar({
         dateStr={dayDrawerDateStr}
         slotsForDay={dayDrawerSlots}
         bookings={bookings}
+        blocks={blocks}
+        purpose={dayDrawerPurpose}
+        schedule={schedule}
+        onCreateManual={() => {
+          setDayDrawerOpen(false)
+          setComposer({ mode: 'manual', dateStr: dayDrawerDateStr, event: null })
+        }}
+        onCreateBlock={() => {
+          setDayDrawerOpen(false)
+          setComposer({ mode: 'block', dateStr: dayDrawerDateStr, event: null })
+        }}
+        onEditManual={(booking) => {
+          setDayDrawerOpen(false)
+          setComposer({ mode: 'manual', dateStr: dayDrawerDateStr, event: booking })
+        }}
+        onEditBlock={(block) => {
+          setDayDrawerOpen(false)
+          setComposer({ mode: 'block', dateStr: dayDrawerDateStr, event: block })
+        }}
         onSaved={() => {
           loadBookings()
+          loadBlocks()
           if (typeof onDayScheduleSaved === 'function') onDayScheduleSaved()
         }}
+      />
+      <CalendarB3Composer
+        open={Boolean(composer)}
+        mode={composer?.mode || 'manual'}
+        event={composer?.event || null}
+        dateStr={composer?.dateStr || ''}
+        timeZone={masterSettings?.timezone || ''}
+        bookings={bookings}
+        blocks={blocks}
+        onClose={closeComposer}
+        onSaved={() => {
+          loadBookings()
+          loadBlocks()
+        }}
+        onReload={async () => ({ bookings: await loadBookings(), blocks: await loadBlocks() })}
       />
 
       {/* Поп-ап с информацией о записи */}
@@ -2083,6 +1781,14 @@ export default function MasterScheduleCalendar({
         masterSettings={masterSettings}
         onMouseEnter={handlePopupMouseEnter}
         onMouseLeave={handlePopupMouseLeave}
+        onEditManual={popupBooking?.source === 'manual' ? () => {
+          setPopupVisible(false)
+          setComposer({
+            mode: 'manual',
+            dateStr: formatLocalDate(new Date(popupBooking.start_time)),
+            event: popupBooking,
+          })
+        } : null}
       />
 
       {/* Mobile: см. MASTER_OVERLAY_Z — выше sticky-хрома календаря; desktop PopupCard */}
@@ -2116,6 +1822,24 @@ export default function MasterScheduleCalendar({
       ) : null}
 
       <div className="lg:hidden">
+        {calendarLayoutMode === 'day' ? (
+          <MasterScheduleDayMobileSheet
+            selection={daySelection}
+            focusDate={focusDay}
+            timeZone={masterSettings?.timezone || ''}
+            bookings={bookings}
+            blocks={blocks}
+            master={masterSettings?.master ?? null}
+            hasExtendedStats={hasExtendedStats}
+            onClearSelection={() => setDaySelection(null)}
+            onConfirmBooking={handleMobileConfirm}
+            onCancelBookingRequest={(id) => setCancelBookingId(id)}
+            actionBookingId={actionBookingId}
+            onSaved={handleDayDetailSaved}
+            onReload={reloadCalendarEvents}
+            zIndexClass={masterZClass('scheduleDetail')}
+          />
+        ) : null}
         <MasterBookingDetailSheet
           isOpen={!!mobileDetailBooking}
           booking={mobileDetailBooking}
@@ -2135,6 +1859,7 @@ export default function MasterScheduleCalendar({
           actionBookingId={actionBookingId}
           onConfirm={handleMobileConfirm}
           onCancelRequest={(id) => setCancelBookingId(id)}
+          onEditManual={(booking) => openManualComposer(booking)}
           zIndexClass={masterZClass('scheduleDetail')}
         />
         <MasterBookingCancelSheet

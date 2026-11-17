@@ -29,7 +29,10 @@ def _user_sub_charge(db, *, email: str, phone: str):
     db.add(user)
     db.commit()
     db.refresh(user)
-    db.add(Master(user_id=user.id, bio="", experience_years=0, city="Москва"))
+    master_kwargs = dict(user_id=user.id, bio="", experience_years=0, city="Москва")
+    if email == smoke_reseed.EMAIL_MASTER:
+        master_kwargs["domain"] = smoke_reseed.DOMAIN_MASTER
+    db.add(Master(**master_kwargs))
     db.commit()
 
     now = datetime.utcnow()

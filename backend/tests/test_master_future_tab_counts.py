@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 
 from auth import get_password_hash
 from models import Booking, BookingStatus, Master, Service, User, UserRole
+from tests.booking_fixture import on_grid_interval
 
 
 def _auth_headers(client, phone: str) -> dict:
@@ -37,12 +38,14 @@ def test_future_tab_total_excludes_cancelled_counts_past_completed(client, db):
     db.refresh(service)
 
     now = datetime.utcnow()
+    fut_st, fut_en = on_grid_interval(now + timedelta(days=5))
+    past_st, past_en = on_grid_interval(now - timedelta(days=2))
     future_cancelled = Booking(
         client_id=user.id,
         service_id=service.id,
         master_id=master.id,
-        start_time=now + timedelta(days=5),
-        end_time=now + timedelta(days=5, hours=1),
+        start_time=fut_st,
+        end_time=fut_en,
         status=BookingStatus.CANCELLED.value,
         payment_amount=1000,
     )
@@ -50,8 +53,8 @@ def test_future_tab_total_excludes_cancelled_counts_past_completed(client, db):
         client_id=user.id,
         service_id=service.id,
         master_id=master.id,
-        start_time=now - timedelta(days=2),
-        end_time=now - timedelta(days=2, hours=1),
+        start_time=past_st,
+        end_time=past_en,
         status=BookingStatus.COMPLETED.value,
         payment_amount=1000,
         loyalty_points_used=100,
@@ -105,13 +108,13 @@ def test_future_tab_total_includes_active_future(client, db):
     db.commit()
     db.refresh(service)
 
-    now = datetime.utcnow()
+    st, en = on_grid_interval(datetime.utcnow() + timedelta(days=3))
     b = Booking(
         client_id=user.id,
         service_id=service.id,
         master_id=master.id,
-        start_time=now + timedelta(days=3),
-        end_time=now + timedelta(days=3, hours=1),
+        start_time=st,
+        end_time=en,
         status=BookingStatus.CREATED.value,
         payment_amount=500,
     )
@@ -148,13 +151,13 @@ def test_future_payment_expired_in_bookings_not_in_active_total(client, db):
     db.commit()
     db.refresh(service)
 
-    now = datetime.utcnow()
+    st, en = on_grid_interval(datetime.utcnow() + timedelta(days=4))
     pe = Booking(
         client_id=user.id,
         service_id=service.id,
         master_id=master.id,
-        start_time=now + timedelta(days=4),
-        end_time=now + timedelta(days=4, hours=1),
+        start_time=st,
+        end_time=en,
         status=BookingStatus.PAYMENT_EXPIRED.value,
         payment_amount=700,
     )

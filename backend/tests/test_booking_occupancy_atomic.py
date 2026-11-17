@@ -20,6 +20,7 @@ from models import (
     User,
     UserRole,
 )
+from tests.booking_fixture import grid_booking_walls
 from services.scheduling import (
     _is_slot_available,
     check_booking_conflicts,
@@ -69,12 +70,13 @@ def _seed_owner(db, suffix: str):
 
 
 def _booking_data(client_id, master_id, service_id, start, *, status_value="created"):
+    start_wall, end_wall = grid_booking_walls(start, start + timedelta(hours=1))
     return {
         "client_id": client_id,
         "master_id": master_id,
         "service_id": service_id,
-        "start_time": start,
-        "end_time": start + timedelta(hours=1),
+        "start_time": start_wall,
+        "end_time": end_wall,
         "status": status_value,
         "payment_amount": 1000,
     }

@@ -76,6 +76,9 @@ def run_migrations_online() -> None:
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
     )
+    from database import install_sqlite_calendar_guard_hooks
+
+    install_sqlite_calendar_guard_hooks(connectable)
 
     with connectable.connect() as connection:
         context.configure(

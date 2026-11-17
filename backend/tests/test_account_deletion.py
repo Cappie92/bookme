@@ -6,6 +6,7 @@ from unittest.mock import patch
 import pytest
 
 from auth import create_access_token, get_password_hash
+from tests.booking_fixture import apply_grid_walls_to_booking
 from models import (
     AvailabilitySlot,
     Booking,
@@ -166,6 +167,8 @@ def deletion_world(db, fixture_password_hash):
         status=BookingStatus.COMPLETED.value,
         payment_amount=800.0,
     )
+    for row in (past, future, other_booking):
+        apply_grid_walls_to_booking(row)
     db.add_all([past, future, other_booking])
 
     db.add(

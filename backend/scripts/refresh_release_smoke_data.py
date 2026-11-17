@@ -56,6 +56,7 @@ from models import (  # noqa: E402
     UserRole,
     master_services,
 )
+from services.booking_time_shadow import wall_time_columns  # noqa: E402
 from services.booking_visit_finalize import finalize_post_visit_booking  # noqa: E402
 from services.scheduling import get_available_slots  # noqa: E402
 from settings import get_settings  # noqa: E402
@@ -1566,6 +1567,11 @@ def _new_booking(
     loyalty_points_used: int = 0,
     payment_amount: float | None = None,
 ) -> Booking:
+    end = start + timedelta(minutes=int(service.duration))
+    # Smoke walls come from the managed MasterSchedule, i.e. the master's own zone.
+    time_columns = wall_time_columns(start, end, master.timezone)
+    if not time_columns:
+        _fail(f"Smoke booking {label} has no unambiguous instant in {master.timezone}")
     booking = Booking(
         client_id=client.id,
         service_id=service.id,
@@ -1574,7 +1580,8 @@ def _new_booking(
         salon_id=None,
         branch_id=None,
         start_time=start,
-        end_time=start + timedelta(minutes=int(service.duration)),
+        end_time=end,
+        **time_columns,
         status=status,
         notes=manifest["ownership"]["booking_notes"][label],
         payment_method="on_visit",

@@ -14,6 +14,7 @@ from models import (
     User,
     UserRole,
 )
+from tests.booking_fixture import on_grid_interval
 from services.booking_visit_finalize import finalize_post_visit_booking
 from utils.booking_real_money import booking_amount_to_pay, booking_money_api_fields
 
@@ -86,12 +87,13 @@ def test_finalize_income_real_money_after_loyalty_points(db):
     )
     db.commit()
 
+    st, en = on_grid_interval(now - timedelta(hours=2))
     b = Booking(
         client_id=cu.id,
         service_id=svc.id,
         master_id=master.id,
-        start_time=now - timedelta(hours=2),
-        end_time=now - timedelta(hours=1),
+        start_time=st,
+        end_time=en,
         status=BookingStatus.CREATED.value,
         payment_amount=1000.0,
         loyalty_points_used=100,
@@ -153,12 +155,13 @@ def test_past_appointments_json_has_amount_to_pay(client, db, test_master):
     db.refresh(svc)
 
     now = datetime.utcnow()
+    st, en = on_grid_interval(now - timedelta(hours=1))
     b = Booking(
         client_id=cu.id,
         service_id=svc.id,
         master_id=mrow.id,
-        start_time=now - timedelta(hours=1),
-        end_time=now,
+        start_time=st,
+        end_time=en,
         status=BookingStatus.COMPLETED.value,
         payment_amount=1000.0,
         loyalty_points_used=100,
@@ -213,12 +216,13 @@ def test_dashboard_stats_week_with_loyalty_no_sqlite_greatest(client, db, test_m
     db.refresh(svc)
 
     now = datetime.utcnow()
+    st, en = on_grid_interval(now - timedelta(days=1))
     b = Booking(
         client_id=cu.id,
         service_id=svc.id,
         master_id=mrow.id,
-        start_time=now - timedelta(days=1),
-        end_time=now - timedelta(days=1) + timedelta(hours=1),
+        start_time=st,
+        end_time=en,
         status=BookingStatus.COMPLETED.value,
         payment_amount=1000.0,
         loyalty_points_used=100,
@@ -281,12 +285,13 @@ def test_future_bookings_money_with_loyalty_reserve(client, db, test_master):
     db.refresh(svc)
 
     now = datetime.utcnow()
+    st, en = on_grid_interval(now + timedelta(days=2))
     b = Booking(
         client_id=cu.id,
         service_id=svc.id,
         master_id=mrow.id,
-        start_time=now + timedelta(days=2),
-        end_time=now + timedelta(days=2, hours=1),
+        start_time=st,
+        end_time=en,
         status=BookingStatus.CREATED.value,
         payment_amount=1000.0,
         loyalty_points_used=100,
@@ -339,12 +344,13 @@ def test_future_bookings_money_no_loyalty(client, db, test_master):
     db.refresh(svc)
 
     now = datetime.utcnow()
+    st, en = on_grid_interval(now + timedelta(days=3))
     b = Booking(
         client_id=cu.id,
         service_id=svc.id,
         master_id=mrow.id,
-        start_time=now + timedelta(days=3),
-        end_time=now + timedelta(days=3, hours=1),
+        start_time=st,
+        end_time=en,
         status=BookingStatus.CREATED.value,
         payment_amount=1000.0,
         loyalty_points_used=0,
@@ -395,12 +401,13 @@ def test_future_bookings_money_fallback_service_price(client, db, test_master):
     db.refresh(svc)
 
     now = datetime.utcnow()
+    st, en = on_grid_interval(now + timedelta(days=4))
     b = Booking(
         client_id=cu.id,
         service_id=svc.id,
         master_id=mrow.id,
-        start_time=now + timedelta(days=4),
-        end_time=now + timedelta(days=4, hours=1),
+        start_time=st,
+        end_time=en,
         status=BookingStatus.CREATED.value,
         payment_amount=None,
         loyalty_points_used=0,
