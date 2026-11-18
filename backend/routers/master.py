@@ -14,7 +14,13 @@ from auth import get_current_active_user, require_master
 import models
 from database import get_db
 from utils.booking_status import get_effective_booking_status, apply_effective_status_to_bookings
-from utils.client_display_name import get_client_display_name, get_meta_for_client, strip_indie_service_prefix
+from utils.master_future_bookings_query import start_at_or_before_now, start_before_now
+from utils.client_display_name import (
+    booking_visible_client_name,
+    resolve_booking_client_contact,
+    strip_indie_service_prefix,
+)
+from services.calendar_b3 import booking_service_snapshot, delete_owned_master_service
 from utils.ios_free_companion import (
     is_ios_free_surface,
     omit_schedule_freeze,
@@ -24,6 +30,47 @@ from utils.ios_free_companion import (
 
 logger = logging.getLogger(__name__)
 from models import Booking, Master, MasterSchedule, MasterScheduleSettings, User, BookingStatus, Service, ServiceCategory, MasterServiceCategory, MasterService, SalonMasterInvitation, SalonMasterInvitationStatus, ClientRestriction, Salon, SalonBranch, Income, Subscription, SubscriptionType, SubscriptionStatus, SubscriptionFreeze, ClientRestrictionRule, MasterPaymentSettings, IndieMaster, AppliedDiscount, MasterClientMetadata
+
+
+def _service_duration_text(service_duration: int) -> str:
+    if service_duration < 60:
+        return f"{service_duration} минут"
+    if service_duration == 60:
+        return "1 час"
+    hours = service_duration // 60
+    minutes = service_duration % 60
+    if minutes == 0:
+        return f"{hours} час" if hours == 1 else f"{hours} часа"
+    if minutes == 30:
+        if hours > 0:
+            return f"{hours},{minutes // 30 * 5} часа"
+        return "1,5 часа"
+    return f"{hours} ч {minutes} мин"
+
+
+def _dashboard_service_fields(db: Session, master_id: int, booking: Booking) -> dict:
+    snap = booking_service_snapshot(db, master_id, booking)
+    if snap["known"]:
+        raw_name = snap["name"] or "Неизвестная услуга"
+        minutes = int(snap["duration"] or 60)
+        price = float(snap["price"]) if snap["price"] is not None else 0.0
+    else:
+        raw_name = "Неизвестная услуга"
+        minutes = 60
+        price = 0.0
+    name = strip_indie_service_prefix(raw_name) or raw_name
+    return {
+        "service_name": name,
+        "service_duration": _service_duration_text(minutes),
+        "service_price": price,
+        "service_id": snap["service_id"],
+        "master_service_id": snap["master_service_id"],
+        "source": booking.source,
+        "version": booking.version,
+        "time_zone": booking.time_zone,
+        "start_utc_us": booking.start_utc_us,
+        "end_utc_us": booking.end_utc_us,
+    }
 
 
 def _parse_optional_master_birth_date(raw: Any) -> Optional[date]:
@@ -201,7 +248,7 @@ def get_detailed_bookings(
             Booking.status != BookingStatus.CANCELLED,
             or_(
                 Booking.status != BookingStatus.COMPLETED,
-                Booking.start_time <= now_u,
+                start_at_or_before_now(now_u),
             ),
         )
         .order_by(Booking.start_time.desc())
@@ -227,22 +274,38 @@ def get_detailed_bookings(
         )
         applied_map = {a.booking_id: a for a in applied_list}
 
-    meta_map = {}
-    for m in db.query(MasterClientMetadata).filter(MasterClientMetadata.master_id == master.id).all():
-        meta_map[m.client_phone] = m
+    metas = db.query(MasterClientMetadata).filter(MasterClientMetadata.master_id == master.id).all()
+    meta_map = {m.client_phone: m for m in metas}
+    meta_by_id = {m.id: m for m in metas}
 
     for booking in bookings:
         # Получаем услугу
-        service = db.query(Service).filter(Service.id == booking.service_id).first()
+        service = db.query(Service).filter(Service.id == booking.service_id).first() if booking.service_id else None
+        catalog = None
+        if service is None and booking.master_service_id:
+            catalog = db.query(MasterService).filter(
+                MasterService.id == booking.master_service_id,
+                MasterService.master_id == master.id,
+            ).first()
         
         # Получаем клиента
         client = db.query(User).filter(User.id == booking.client_id).first()
-        client_phone = client.phone if client and client.phone else None
-        meta = get_meta_for_client(meta_map, client_phone)
-        client_name = get_client_display_name(meta, client)
+        client_phone, meta = resolve_booking_client_contact(booking, client, meta_map, meta_by_id)
+        client_name = booking_visible_client_name(booking, meta, client)
         has_client_note = bool(meta and meta.note)
         client_note = meta.note if meta and meta.note else None
-        svc_name = strip_indie_service_prefix(service.name if service else None) or "Услуга"
+        if service is not None:
+            svc_name = strip_indie_service_prefix(service.name) or "Услуга"
+            svc_duration = service.duration if service.duration else 60
+            svc_price = service.price if service.price else 0
+        elif catalog is not None:
+            svc_name = catalog.name or "Услуга"
+            svc_duration = catalog.duration or 60
+            svc_price = catalog.price or 0
+        else:
+            svc_name = "Услуга"
+            svc_duration = 60
+            svc_price = 0
         client_master_alias = (str(meta.alias_name).strip() if meta and getattr(meta, 'alias_name', None) else None) or None
         client_account_name = (str(client.full_name).strip() if client and getattr(client, 'full_name', None) else None) or None
 
@@ -254,15 +317,18 @@ def get_detailed_bookings(
             "client_id": booking.client_id,
             "client_display_name": client_name,
             "client_name": client_name,
+            "guest_name": booking.guest_name,
+            "source": booking.source,
             "client_phone": client_phone,
             "client_master_alias": client_master_alias,
             "client_account_name": client_account_name,
             "has_client_note": has_client_note,
             "client_note": client_note,
             "service_id": booking.service_id,
+            "master_service_id": booking.master_service_id,
             "service_name": svc_name,
-            "service_duration": service.duration if service else 60,
-            "service_price": service.price if service else 0,
+            "service_duration": svc_duration,
+            "service_price": svc_price,
             "master_id": booking.master_id,
             "indie_master_id": booking.indie_master_id,
             "salon_id": booking.salon_id,
@@ -271,6 +337,10 @@ def get_detailed_bookings(
             "end_time": booking.end_time.isoformat(),
             "status": booking.status,
             "notes": booking.notes,
+            "version": booking.version,
+            "time_zone": booking.time_zone,
+            "start_utc_us": booking.start_utc_us,
+            "end_utc_us": booking.end_utc_us,
             "payment_method": booking.payment_method,
             **booking_money_api_fields(booking),
             "created_at": booking.created_at.isoformat() if booking.created_at else None,
@@ -364,13 +434,23 @@ def get_future_bookings_paginated(
     # Применяем актуальные статусы с учетом времени
     apply_effective_status_to_bookings(bookings, db)
 
-    meta_map = {m.client_phone: m for m in db.query(MasterClientMetadata).filter(MasterClientMetadata.master_id == master.id).all()}
+    metas = db.query(MasterClientMetadata).filter(MasterClientMetadata.master_id == master.id).all()
+    meta_map = {m.client_phone: m for m in metas}
+    meta_by_id = {m.id: m for m in metas}
 
     # Формируем ответ в том же формате, что и next_bookings_list
     result = []
     for booking in bookings:
-        service_name = booking.service.name if booking.service else "Неизвестная услуга"
-        service_duration = booking.service.duration if booking.service else 60
+        catalog = None
+        if booking.service is None and booking.master_service_id:
+            catalog = db.query(MasterService).filter(
+                MasterService.id == booking.master_service_id,
+                MasterService.master_id == master.id,
+            ).first()
+        service_name = booking.service.name if booking.service else (catalog.name if catalog else "Неизвестная услуга")
+        service_duration = (
+            booking.service.duration if booking.service else (catalog.duration if catalog and catalog.duration else 60)
+        )
         
         # Форматируем продолжительность: 30 минут, 1 час, 1,5 часа
         duration_text = ""
@@ -396,13 +476,17 @@ def get_future_bookings_paginated(
         date_formatted = booking_date.strftime("%d-%m-%y")
         
         client = booking.client
-        client_phone = client.phone if client else None
-        meta = get_meta_for_client(meta_map, client_phone)
-        client_name = get_client_display_name(meta, client, "Неизвестный клиент")
+        client_phone, meta = resolve_booking_client_contact(booking, client, meta_map, meta_by_id)
+        client_name = booking_visible_client_name(booking, meta, client, "Неизвестный клиент")
         svc_name = strip_indie_service_prefix(service_name)
         client_master_alias = (str(meta.alias_name).strip() if meta and getattr(meta, 'alias_name', None) else None) or None
         client_account_name = (str(client.full_name).strip() if client and getattr(client, 'full_name', None) else None) or None
-        svc_price = float(booking.service.price) if booking.service and booking.service.price is not None else 0.0
+        if booking.service and booking.service.price is not None:
+            svc_price = float(booking.service.price)
+        elif catalog is not None and catalog.price is not None:
+            svc_price = float(catalog.price)
+        else:
+            svc_price = 0.0
         result.append({
             "id": booking.id,
             "start_time": booking.start_time.isoformat(),
@@ -422,6 +506,14 @@ def get_future_bookings_paginated(
             "client_account_name": client_account_name,
             "has_client_note": bool(meta and meta.note),
             "client_note": meta.note if meta and meta.note else None,
+            "guest_name": booking.guest_name,
+            "source": booking.source,
+            "service_id": booking.service_id,
+            "master_service_id": booking.master_service_id,
+            "version": booking.version,
+            "time_zone": booking.time_zone,
+            "start_utc_us": booking.start_utc_us,
+            "end_utc_us": booking.end_utc_us,
         })
 
     if is_ios_free_surface(client_surface, current_user):
@@ -467,6 +559,8 @@ def get_master_booking_available_slots(
     except ValueError as error:
         raise HTTPException(status_code=400, detail="Неверный формат даты. Используйте YYYY-MM-DD") from error
 
+    from services.booking_time_shadow import owner_time_zone, slot_instant_fields
+
     slots = get_available_slots(
         db=db,
         owner_type=models.OwnerType.MASTER,
@@ -476,17 +570,26 @@ def get_master_booking_available_slots(
         branch_id=booking.branch_id,
         exclude_booking_id=booking.id,
     )
+    zone_name = owner_time_zone(db, master_id=master.id)
+
+    def serialize(slot: dict) -> dict:
+        # Only the mobile app reads this endpoint and every released build echoes
+        # start_time/end_time verbatim, so they carry the offset when it is unique.
+        instant = slot_instant_fields(slot["start_time"], slot["end_time"], zone_name)
+        return {
+            "start_time": instant["start_at"] or slot["start_time"].isoformat(),
+            "end_time": instant["end_at"] or slot["end_time"].isoformat(),
+            "formatted_time": slot["start_time"].strftime("%H:%M"),
+            **instant,
+        }
+
     return {
         "booking_id": booking.id,
         "service_name": service.name,
         "service_duration": service.duration,
         "current_start_time": booking.start_time.isoformat(),
         "available_slots": [
-            {
-                "start_time": slot["start_time"].isoformat(),
-                "end_time": slot["end_time"].isoformat(),
-                "formatted_time": slot["start_time"].strftime("%H:%M"),
-            }
+            serialize(slot)
             for slot in slots
             if abs((slot["start_time"] - booking.start_time).total_seconds()) > 300
         ],
@@ -500,7 +603,20 @@ def update_master_booking_time(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ) -> Any:
+    from services.booking_admission import (
+        admit_booking_update,
+        mark_booking_mutated,
+        reserve_booking_writer,
+        unified_admission_enabled,
+    )
+    from services.booking_time_shadow import legacy_request_times
+
+    unified = unified_admission_enabled()
+    if unified:
+        reserve_booking_writer(db)
     master, booking = _owned_master_booking(db, current_user, booking_id)
+    if getattr(booking, "source", None) == "manual":
+        raise HTTPException(status_code=404, detail="Запись не найдена")
     if booking.status in {
         BookingStatus.CANCELLED.value,
         BookingStatus.COMPLETED.value,
@@ -527,19 +643,33 @@ def update_master_booking_time(
         salon_id=booking.salon_id,
     ):
         raise HTTPException(status_code=400, detail="Мастер не работает в указанное время")
-    if check_booking_conflicts(
-        db,
-        body.start_time,
-        body.end_time,
-        models.OwnerType.MASTER,
-        master.id,
-        exclude_booking_id=booking.id,
-    ):
-        raise HTTPException(status_code=400, detail="Выбранное время уже занято")
+    admission = None
+    new_start, new_end, time_columns = body.start_time, body.end_time, {}
+    if unified:
+        admission = admit_booking_update(
+            db, booking, {"start_time": body.start_time, "end_time": body.end_time}
+        )
+    else:
+        new_start, new_end, time_columns = legacy_request_times(
+            db, body.start_time, body.end_time, master_id=master.id
+        )
+        if check_booking_conflicts(
+            db,
+            new_start,
+            new_end,
+            models.OwnerType.MASTER,
+            master.id,
+            exclude_booking_id=booking.id,
+        ):
+            raise HTTPException(status_code=400, detail="Выбранное время уже занято")
 
     old_start = booking.start_time
-    booking.start_time = body.start_time
-    booking.end_time = body.end_time
+    booking.start_time = new_start
+    booking.end_time = new_end
+    for key, value in time_columns.items():
+        setattr(booking, key, value)
+    if unified:
+        mark_booking_mutated(booking, admission)
     from services.notification_events import record_booking_rescheduled_notification
     record_booking_rescheduled_notification(
         db,
@@ -581,7 +711,7 @@ def get_past_appointments(
     # Строим запрос к базе данных
     query = db.query(Booking).filter(
         Booking.master_id == master.id,
-        Booking.start_time < datetime.utcnow()  # Только прошедшие записи
+        start_before_now(datetime.utcnow()),
     )
 
     # Применяем фильтры
@@ -641,7 +771,9 @@ def get_past_appointments(
     # Применяем актуальные статусы с учетом времени
     apply_effective_status_to_bookings(bookings, db)
 
-    meta_map = {m.client_phone: m for m in db.query(MasterClientMetadata).filter(MasterClientMetadata.master_id == master.id).all()}
+    metas = db.query(MasterClientMetadata).filter(MasterClientMetadata.master_id == master.id).all()
+    meta_map = {m.client_phone: m for m in metas}
+    meta_by_id = {m.id: m for m in metas}
     
     # Формируем ответ
     appointments = []
@@ -651,9 +783,8 @@ def get_past_appointments(
         
         # Получаем клиента
         client = db.query(User).filter(User.id == booking.client_id).first()
-        client_phone = client.phone if client else None
-        meta = get_meta_for_client(meta_map, client_phone)
-        client_name = get_client_display_name(meta, client)
+        client_phone, meta = resolve_booking_client_contact(booking, client, meta_map, meta_by_id)
+        client_name = booking_visible_client_name(booking, meta, client)
         svc_name = strip_indie_service_prefix(service.name if service else None) or "Услуга"
         client_master_alias = (str(meta.alias_name).strip() if meta and getattr(meta, 'alias_name', None) else None) or None
         client_account_name = (str(client.full_name).strip() if client and getattr(client, 'full_name', None) else None) or None
@@ -992,12 +1123,12 @@ def get_master_bookings_limit(
         raise HTTPException(status_code=404, detail="Master profile not found")
     
     # Активные будущие записи: та же семантика, что GET /bookings/future (без отменённых и completed)
-    from utils.master_future_bookings_query import active_future_bookings_sql_filter
+    from utils.master_future_bookings_query import active_future_bookings_cap_sql_filter
 
     _now_lim = datetime.utcnow()
     active_bookings_count = (
         db.query(func.count(Booking.id))
-        .filter(active_future_bookings_sql_filter(master, _now_lim))
+        .filter(active_future_bookings_cap_sql_filter(master, _now_lim))
         .scalar() or 0
     )
 
@@ -2698,17 +2829,8 @@ def delete_master_service(
     master = db.query(Master).filter(Master.user_id == current_user.id).first()
     if not master:
         raise HTTPException(status_code=404, detail="Профиль мастера не найден")
-    
-    service = db.query(MasterService).filter(
-        MasterService.id == service_id,
-        MasterService.master_id == master.id
-    ).first()
-    if not service:
-        raise HTTPException(status_code=404, detail="Услуга не найдена")
-    
-    db.delete(service)
-    db.commit()
-    
+
+    delete_owned_master_service(db, master.id, service_id)
     return {"message": "Услуга успешно удалена"}
 
 @router.post("/invitations/{invitation_id}/respond")
@@ -3800,48 +3922,25 @@ def get_master_dashboard_stats(
             .all()
         )
         
-        meta_map_dash = {m.client_phone: m for m in db.query(MasterClientMetadata).filter(MasterClientMetadata.master_id == master.id).all()}
+        metas_dash = db.query(MasterClientMetadata).filter(MasterClientMetadata.master_id == master.id).all()
+        meta_map_dash = {m.client_phone: m for m in metas_dash}
+        meta_by_id_dash = {m.id: m for m in metas_dash}
         # Формируем массив из 3 ближайших записей для фронтенда
         next_bookings_list = []
         for booking in next_bookings:
-            service_name_raw = booking.service.name if booking.service else "Неизвестная услуга"
-            service_name = strip_indie_service_prefix(service_name_raw) or service_name_raw
-            service_duration = booking.service.duration if booking.service else 60
+            service_fields = _dashboard_service_fields(db, master.id, booking)
             client = booking.client
-            client_phone = client.phone if client else None
-            meta = get_meta_for_client(meta_map_dash, client_phone)
-            client_name = get_client_display_name(meta, client, "Неизвестный клиент")
+            client_phone, meta = resolve_booking_client_contact(booking, client, meta_map_dash, meta_by_id_dash)
+            client_name = booking_visible_client_name(booking, meta, client, "Неизвестный клиент")
             account_name = (
                 str(client.full_name).strip()
                 if client and getattr(client, "full_name", None)
                 else ""
             ) or None
 
-            # Форматируем продолжительность: 30 минут, 1 час, 1,5 часа
-            duration_text = ""
-            if service_duration < 60:
-                duration_text = f"{service_duration} минут"
-            elif service_duration == 60:
-                duration_text = "1 час"
-            else:
-                hours = service_duration // 60
-                minutes = service_duration % 60
-                if minutes == 0:
-                    duration_text = f"{hours} час" if hours == 1 else f"{hours} часа"
-                elif minutes == 30:
-                    # Для 90 минут = 1,5 часа, для 150 минут = 2,5 часа и т.д.
-                    if hours > 0:
-                        duration_text = f"{hours},{minutes // 30 * 5} часа"
-                    else:
-                        duration_text = "1,5 часа"
-                else:
-                    duration_text = f"{hours} ч {minutes} мин"
-            
-            # Форматируем дату в DD-MM-YY
             booking_date = booking.start_time.date()
             date_formatted = booking_date.strftime("%d-%m-%y")
-            
-            svc = booking.service
+
             next_bookings_list.append({
                 "id": booking.id,
                 "status": booking.status,
@@ -3849,10 +3948,8 @@ def get_master_dashboard_stats(
                 "start_time": booking.start_time.isoformat() if booking.start_time else None,
                 "date": date_formatted,
                 "time": booking.start_time.time().strftime("%H:%M"),
-                "service_name": service_name,
-                "service_duration": duration_text,
-                "service_price": svc.price if svc else 0,
-                **booking_money_api_fields(booking),
+                **service_fields,
+                **booking_money_api_fields(booking, service_price=service_fields["service_price"]),
                 "client_display_name": client_name,
                 "client_name": client_name,
                 "client_phone": client_phone,
@@ -3889,15 +3986,15 @@ def get_master_dashboard_stats(
             booking_time = next_booking.start_time.time() if hasattr(next_booking.start_time, 'time') else None
             
             _client = next_booking.client
-            _client_phone = _client.phone if _client else None
-            _meta = get_meta_for_client(meta_map_dash, _client_phone)
-            _client_name = get_client_display_name(_meta, _client, "Неизвестный клиент")
+            _client_phone, _meta = resolve_booking_client_contact(
+                next_booking, _client, meta_map_dash, meta_by_id_dash
+            )
+            _client_name = booking_visible_client_name(next_booking, _meta, _client, "Неизвестный клиент")
             _account_name = (
                 str(_client.full_name).strip()
                 if _client and getattr(_client, "full_name", None)
                 else ""
             ) or None
-            _svc_name = strip_indie_service_prefix(next_booking.service.name if next_booking.service else None) or "Неизвестная услуга"
             next_working_info = {
                 "next_booking_date": booking_date.isoformat() if booking_date else None,
                 "next_booking_time": booking_time.isoformat() if booking_time else None,
@@ -3906,7 +4003,7 @@ def get_master_dashboard_stats(
                 "client_display_name": _client_name,
                 "client_phone": _client_phone,
                 "client_account_name": _account_name,
-                "service_name": _svc_name
+                **_dashboard_service_fields(db, master.id, next_booking),
             }
             if ios_free:
                 next_working_info = project_ios_booking(next_working_info)

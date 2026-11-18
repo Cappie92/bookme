@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 import pytest
 
 from auth import get_password_hash
+from tests.booking_fixture import apply_grid_walls_to_booking
 from constants import duration_months_to_days
 from models import (
     Booking,
@@ -139,6 +140,7 @@ class TestPostVisitNoFinance:
             status=BookingStatus.AWAITING_CONFIRMATION,
             payment_amount=500,
         )
+        apply_grid_walls_to_booking(booking)
         db.add(booking)
         db.commit()
         db.refresh(booking)
@@ -188,6 +190,7 @@ class TestPostVisitNoFinance:
             status=BookingStatus.AWAITING_CONFIRMATION,
             payment_amount=500,
         )
+        apply_grid_walls_to_booking(booking)
         db.add(booking)
         db.commit()
         db.refresh(booking)
@@ -239,6 +242,7 @@ class TestPostVisitNoFinance:
             status=BookingStatus.AWAITING_CONFIRMATION,
             payment_amount=500,
         )
+        apply_grid_walls_to_booking(booking)
         db.add(booking)
         db.commit()
 
@@ -283,6 +287,7 @@ class TestPostVisitNoFinance:
             status=BookingStatus.AWAITING_CONFIRMATION,
             payment_amount=500,
         )
+        apply_grid_walls_to_booking(booking)
         db.add(booking)
         db.commit()
 
@@ -459,6 +464,7 @@ class TestIndieMasterPostVisit:
             status=BookingStatus.AWAITING_CONFIRMATION,
             payment_amount=800,
         )
+        apply_grid_walls_to_booking(booking)
         db.add(booking)
         db.commit()
         db.refresh(booking)
@@ -559,6 +565,7 @@ class TestIndieMasterPostVisit:
             status=BookingStatus.AWAITING_CONFIRMATION,
             payment_amount=900,
         )
+        apply_grid_walls_to_booking(booking)
         db.add(booking)
         db.commit()
         db.refresh(booking)

@@ -5,6 +5,7 @@ from unittest.mock import patch
 import pytest
 from sqlalchemy.orm import Session
 
+from tests.booking_fixture import grid_booking_walls
 from models import (
     AppliedDiscount,
     Booking,
@@ -143,6 +144,8 @@ def _future_booking(
     else:
         start = start_time
     end = (start + timedelta(hours=1)) if start is not None else None
+    if start is not None and end is not None:
+        start, end = grid_booking_walls(start, end)
     booking = Booking(
         client_id=client.id,
         service_id=service.id,

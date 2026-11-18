@@ -89,13 +89,14 @@ def _create_plan(db: Session) -> SubscriptionPlan:
 
 
 def _pending_payment(db: Session, user: User, amount: float = 1160.0) -> Payment:
+    plan = _create_plan(db)
     payment = Payment(
         user_id=user.id,
         amount=amount,
         status="pending",
         payment_type="subscription",
         robokassa_invoice_id="tmp-pending",
-        plan_id=1,
+        plan_id=plan.id,
         subscription_apply_status="pending",
     )
     return persist_new_robokassa_payment(db, payment)

@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 from auth import get_password_hash
 from models import Booking, BookingStatus, Master, Service, User, UserRole
+from tests.booking_fixture import on_grid_interval
 
 
 def _auth_headers(client, phone: str, password: str) -> dict:
@@ -44,12 +45,14 @@ def test_future_excludes_todays_past_slots_and_includes_later_today(client, db):
     past_booking_start = datetime.combine(today, datetime.min.time().replace(hour=10, minute=0, second=0, microsecond=0))
     future_booking_start = datetime.combine(today, datetime.min.time().replace(hour=18, minute=0, second=0, microsecond=0))
 
+    past_st, past_en = on_grid_interval(past_booking_start)
+    future_st, future_en = on_grid_interval(future_booking_start)
     booking_past = Booking(
         client_id=user.id,
         service_id=service.id,
         master_id=master.id,
-        start_time=past_booking_start,
-        end_time=past_booking_start + timedelta(hours=1),
+        start_time=past_st,
+        end_time=past_en,
         status=BookingStatus.CONFIRMED,
         payment_amount=500,
         loyalty_points_used=0,
@@ -58,8 +61,8 @@ def test_future_excludes_todays_past_slots_and_includes_later_today(client, db):
         client_id=user.id,
         service_id=service.id,
         master_id=master.id,
-        start_time=future_booking_start,
-        end_time=future_booking_start + timedelta(hours=1),
+        start_time=future_st,
+        end_time=future_en,
         status=BookingStatus.CONFIRMED,
         payment_amount=500,
         loyalty_points_used=0,
@@ -116,12 +119,13 @@ def test_future_excludes_completed_even_if_start_in_future(client, db):
     frozen_now = datetime.utcnow().replace(hour=12, minute=0, second=0, microsecond=0)
     st = frozen_now + timedelta(days=1)
 
+    st_grid, en_grid = on_grid_interval(st)
     b_bad = Booking(
         client_id=user.id,
         service_id=service.id,
         master_id=master.id,
-        start_time=st,
-        end_time=st + timedelta(hours=1),
+        start_time=st_grid,
+        end_time=en_grid,
         status=BookingStatus.COMPLETED,
         payment_amount=500,
         loyalty_points_used=0,
@@ -173,12 +177,14 @@ def test_detailed_bookings_excludes_completed_future_anomaly(client, db):
     st_future = now + timedelta(days=2)
     st_past = now - timedelta(days=2)
 
+    fut_st, fut_en = on_grid_interval(st_future)
+    past_st, past_en = on_grid_interval(st_past)
     b_future_bad = Booking(
         client_id=user.id,
         service_id=service.id,
         master_id=master.id,
-        start_time=st_future,
-        end_time=st_future + timedelta(hours=1),
+        start_time=fut_st,
+        end_time=fut_en,
         status=BookingStatus.COMPLETED,
         payment_amount=100,
         loyalty_points_used=0,
@@ -187,8 +193,8 @@ def test_detailed_bookings_excludes_completed_future_anomaly(client, db):
         client_id=user.id,
         service_id=service.id,
         master_id=master.id,
-        start_time=st_past,
-        end_time=st_past + timedelta(hours=1),
+        start_time=past_st,
+        end_time=past_en,
         status=BookingStatus.COMPLETED,
         payment_amount=100,
         loyalty_points_used=0,

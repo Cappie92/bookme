@@ -4,14 +4,14 @@ project: DeDato
 knowledge_class: living
 environment: common
 status: active
-last_verified: 2026-09-27
+last_verified: 2026-11-13
 ---
 
 # Mobile architecture
 
 Живой канон repository-known Expo/React Native client. Текущий iOS product — native-only operational companion; Android/web сохраняют полный cabinet/monetization.
 
-Marketing version **1.1.0**. Tracked native versions in `mobile/app.config.ts`: **iOS 1.1.0 (13)** и **Android 1.1.0 (6)**. Store/review status — `REPORTED` operational fact в [Production topology](production-topology.md): iOS **SUBMITTED / IN APP REVIEW PROCESS**, Android/RuStore **SUBMITTED FOR MODERATION**. Не писать approved / released, пока нет moderation result. Native Maestro E2E is not a root CI gate; web Playwright is — [Testing strategy](testing-strategy.md).
+Marketing version **1.1.0**. Tracked native versions: **iOS 1.1.0 (16)** (`buildNumber`, `CURRENT_PROJECT_VERSION`, `CFBundleVersion`) и **Android 1.1.0 (6)**. Bundle ID `com.dedato.app`. Build 16 is the current App Store candidate. Build 15 is superseded and is not the current version. Store/ASC status: [Production topology](production-topology.md). Prior rejections: [iOS App Store releases](ios-app-store-releases.md). Не писать approved / released. Native Maestro E2E is not a root CI gate; web Playwright is — [Testing strategy](testing-strategy.md).
 
 ## Runtime and route composition
 
@@ -55,21 +55,43 @@ Dynamic Expo config independently формирует native scheme, associated d
 
 ## iOS companion versus native
 
-Текущий iOS master product (submission 1.1.0 (13)): **native-only operational companion**. User-visible surfaces: Dashboard, Schedule, Services, Settings, Bookings. Paid и Free iOS видят один и тот же native graph.
+Текущий App Store product — **Free Companion**, кандидат **1.1.0 (16)**. Native requests marked `client_surface=ios_fixed`. Маркер **не удалён**. Удалён только специальный booking-cap `min(plan, 20)`. Booking capacity — обычное account business rule; контракт лимита: [Feature entitlements](feature-entitlements.md#6-limits).
 
-Free-companion remediation для этой submission **CLOSED** (это не Apple approval):
+`ios_fixed` по-прежнему задаёт native capabilities, paid-field projection, ограничения CRM, Finance, Loyalty, subscription/commerce, а также web handoff и native Free Companion isolation. Paid web entitlement не открывает дополнительные native digital capabilities.
 
+Master bottom navigation: Dashboard, Schedule, Services, Settings.
+
+Commit `19120d2` добавил optional **guided master onboarding tour** (`MasterTourProvider`): авто-приглашение с Dashboard после eligible login, overlay по основным master-экранам, переключение Schedule Day/Week во время тура, replay из Settings. Статус (`started` / `completed` / `skipped`) хранится локально (`masterTourStorage`); тур координируется с push-registration prompt через `PromptCoordinationContext`. Юнит-покрытие: `mobile/__tests__/unit/components/onboarding/`. Store-review impact `UNKNOWN`; это не меняет Free Companion commerce isolation.
+
+**CONFIRMED, 2026-11-14, исходники локальной B3-ветки:** `CalendarB3Sheet` добавляет master manual booking и private blocks в DayView/WeekView; используется отдельный B3 API, описанный в [Booking API](booking-api.md#calendar-b3-master-api). «Открыть слот» делает время доступным и не создаёт Booking. Paid и Free видят один native graph. Guided tour сохранён при merge. Проверены 147 focused mobile tests календаря, layout и tour; новая native сборка и App Store состояние не проверялись.
+
+Free-companion presentation **CLOSED** как implementation (это не Apple approval):
+
+- нет покупки/upgrade/checkout подписки DeDato, Restore Purchases и external purchase CTA;
 - browser/editor CTA сняты; `WebEditorButton.ios` возвращает `null`;
-- pricing / subscription / tariff / Restore / IAP UI unreachable;
 - iOS Welcome без monetization и revenue KPI;
 - retired commerce / browser-editor deep links редиректятся на dashboard;
-- IAP остаётся dormant и **не** является current release solution.
+- IAP и RevenueCat не являются current release strategy; StoreKit path остаётся dormant.
 
-Android и ordinary web **не** наследуют эту iOS presentation isolation. Trusted `ios_app` web-editor policy остаётся fail-closed isolation в frontend/backend, если такая сессия появится; это не user-visible iOS CTA текущей submission.
+Android и ordinary web не наследуют эту presentation isolation. Trusted `ios_app` web session остаётся fail-closed для commerce, если такая сессия появится.
 
-Free-20 — backend business rule бесплатного тарифа, не iOS presentation isolation и не blocker этой submission; см. [Feature entitlements](feature-entitlements.md).
+Известные ограничения, не исправленные в 1.1.0: у обычных booking cards нет полного прямого navigation path к details/reschedule; отдельное master-detail cancellation вызывает client endpoint и может вернуть 404 для booking другого клиента. Не описывать это как исправленное и не обещать эти flows в Review Notes.
 
-**Sources:** `mobile/src/config/iosMasterCapabilities.ts`; `mobile/src/components/WebEditorButton.ios.tsx`; `mobile/src/utils/parseAppInternalRoute.ios.ts`; `mobile/src/screens/WelcomeScreen.ios.tsx`; `mobile/src/data/welcomeSlidesData.ios.ts`; `frontend/src/utils/iosAppWebEditorPolicy.js`.
+**Sources:** `mobile/src/config/iosMasterCapabilities.ts`; `mobile/src/components/WebEditorButton.ios.tsx`; `mobile/src/utils/parseAppInternalRoute.ios.ts`; `mobile/src/screens/WelcomeScreen.ios.tsx`; `backend/utils/ios_free_companion.py`; [Feature entitlements](feature-entitlements.md).
+
+## Schedule initial position and booking blocks
+
+Commit `60eba89`. Day и Week открываются на 09:00 и не возвращают пользователя туда при обычном rerender/refetch.
+
+Day: 60 px / 30 min, one-shot `scrollTo({ y: 1080 })` после готовности viewport и content. Жест до позиционирования отменяет автоскролл. `scrollsToTop={false}` на вертикальном `ScrollView`. RefreshControl сохранён. Одна запись — один непрерывный блок, включая 12:10–13:40 и 23:30–00:00.
+
+Week: 40 px / 30 min, `initialScrollIndex = 18`, offset 720, `getItemLayout` по высоте строки, без второго scroll через 80 ms. `scrollsToTop={false}` на вертикальном `FlatList`. `WeekGridScroll` нужен, потому что VirtualizedList заменяет children `renderScrollComponent`; overlay рисуется в том же `ScrollView`.
+
+Самопроизвольный уход к 00:00: runtime diagnostics показали native animated offset 1080→0 без второго JS `scrollTo`, без remount и без смены layout/content size. A/B без RefreshControl это не убрал. `scrollsToTop={false}` убрал скачок в Day и Week и является production regression contract: тесты падают, если prop снят с вертикального timeline. Таймер или retry для начальной позиции 09:00 не требуется.
+
+Focused schedule tests после этого контракта: 3 suites / 107 tests. Full mobile на том же baseline: 103 suites / 951 tests.
+
+**Sources:** `mobile/src/components/schedule/DayView.tsx`; `mobile/src/components/schedule/WeekView.tsx`; `mobile/__tests__/unit/components/DayView.test.tsx`; `mobile/__tests__/unit/components/WeekView.test.tsx`.
 
 ## Deep links and public booking
 
@@ -113,7 +135,19 @@ Push v1 **operational**. Smoke PASS на iOS и Android: permission lifecycle, s
 
 Backend source of truth события — `Notification`; доставка — `PushDevice` + `NotificationOutbox` + in-process Expo sender, receipt polling и dead-token handling. Booking event types: `booking_created`, `booking_rescheduled`, `booking_cancelled`. Sender rollout остаётся controlled: production `PUSH_REGISTRATION_ENABLED=true`, `PUSH_NOTIFICATIONS_ENABLED=true`, allowlist `user_id 11`. Global sender rollout не канонизировать без отдельного runtime evidence.
 
+Клиентская регистрация устройства, commit `60eba89`. Зависимость `expo-device ~8.0.10` зафиксирована как ExpoDevice **8.0.10**.
+
+Native sync invariant: `Podfile.lock` содержит ExpoDevice; canonical `project.pbxproj` содержит `ExpoDevice_privacy.bundle` в Pods resource input и output lists. `DevelopmentTeam`, `ProvisioningStyle`, `DEVELOPMENT_TEAM`, `CODE_SIGN_IDENTITY` и `CODE_SIGN_STYLE`, которые локально дописывает `expo run:ios`, — local signing drift. В canonical repo diff их быть не должно.
+
+iOS Simulator (`Platform.OS === 'ios' && !Device.isDevice`) пропускает token acquisition и backend registration. Android emulator не пропускается только из-за `Device.isDevice === false`. Сырой APNs/FCM token никогда не уходит на backend как Expo token. Native token event конвертируется через `getExpoPushTokenAsync({ projectId, devicePushToken })`. Backend `provider=expo` принимает только валидный `ExpoPushToken[...]` или `ExponentPushToken[...]`.
+
+Регистрация идёт через sequential queue. Guards держат session generation и access token операции; stale session отбрасывается. Operation ordering не даёт более старому пути записать результат поверх более нового. Timeout acquisition около 10 секунд снимает очередь и допускает recovery; поздний resolve/reject timed-out native promise сам не делает PUT. Listener может восстановить регистрацию после такого timeout, если native token уже есть. Повтор того же Expo token не делает второй PUT. Listener и `AppState` cleanup сохраняются.
+
+Accepted SDK limitation: строгая provenance позднего native listener event недоступна, потому что Expo listener не отдаёт operation provenance. Последний валидный OS/SDK native event считается current. Не переоткрывать этот теоретический вопрос без runtime evidence.
+
 Android fresh-install: Expo `denied` + `canAskAgain=true` трактуется как askable first-run, не как terminal denial. Path: education → system permission → granted → channel → Expo token → PUT device registration. Manual Settings grant: `AppState` active re-checks permission and restores registration. Android notification handler **не** подавляет banner/list/sound. iOS handler behavior остаётся намеренно неизменным.
+
+Focused push tests на этом baseline: 45 PASS.
 
 Notification Center refetch на open/focus и релевантный `AppState` active; manual pull-to-refresh остаётся, но не является единственным способом увидеть новые события.
 

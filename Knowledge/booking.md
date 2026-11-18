@@ -4,7 +4,7 @@ project: DeDato
 knowledge_class: living
 environment: common
 status: active
-last_verified: 2026-09-27
+last_verified: 2026-10-20
 ---
 
 # Booking
@@ -19,6 +19,14 @@ last_verified: 2026-09-27
 
 **Source:** `backend/models.py` — `Booking`, `BookingStatus`; `backend/utils/booking_factory.py`; `backend/alembic/versions/20260128_add_booking_owner_check_constraints.py`; `backend/tests/test_booking_factory.py`.
 
+## 1a. Native iOS master surface
+
+**CONFIRMED, 2026-11-14, локальная B3-ветка:** master calendar теперь имеет отдельный manual create flow через `CalendarB3Sheet` и `/api/master/bookings/manual`; это не generic `POST /api/bookings/`. Web использует `CalendarB3Composer`. «Открыть слот» по-прежнему меняет availability и не создаёт Booking. Это новое состояние исходников, не подтверждение нового iOS binary или App Store release.
+
+`ios_fixed` не удалён и не задаёт booking capacity. Удалён только cap `min(plan, 20)`. Число активных будущих записей — account business rule из [Feature entitlements](feature-entitlements.md#6-limits). Остальные ограничения `ios_fixed` остаются там же.
+
+Не исправлено: обычные booking cards не дают полного прямого пути к details/reschedule; отдельное master-detail cancellation использует client endpoint и может вернуть 404 для booking другого клиента. UI owner: [Mobile architecture](mobile.md).
+
 ## 2. Create paths
 
 Create paths не являются взаимозаменяемыми:
@@ -30,6 +38,7 @@ Create paths не являются взаимозаменяемыми:
 | `POST /api/bookings/` | Generic authenticated compatibility path | `created`, но отдельная auto-confirm ветка пишет `completed` | working hours + интервальное пересечение |
 | `POST /api/bookings/public` | Verify-first public path: до purpose-bound proof хранится только expiring pending ticket | `created`, но отдельная auto-confirm ветка пишет `completed` | working hours + canonical интервальное пересечение после proof |
 | `POST /api/bookings/create-with-any-master` | Public salon allocation | `created` | выбор мастера и проверки salon path |
+| `POST /api/master/bookings/manual` | B3 manual booking: master-owned guest name, optional contact/service; unified required | `confirmed` | unified admission / canonical time |
 | `/api/client/bookings/temporary*` | Compatibility hold/prepayment path | temporary `pending`; confirmation создаёт Booking со статусом `completed` | canonical интервальное пересечение при confirmation |
 
 Основной web route — `frontend/src/App.jsx` → `MasterPublicBookingPage` → `PublicBookingWizard`; mobile использует `mobile/app/(public)/m/[slug].tsx`. Снятый web `/domain/{subdomain}` и `MasterBookingModule` не определяют основной публичный контракт.
@@ -104,6 +113,8 @@ Do not describe web/mobile reschedule as currently broken.
 ## 6. Concurrency и транзакции
 
 Актуальные SQLite create paths используют один request-owned `BEGIN IMMEDIATE`: внутри одной transaction находятся canonical occupancy check, Free/paid limit check, связанные client/service/discount изменения и Booking insert. Same-slot writers сериализуются; конфликт возвращает `409`/`BOOKING_SLOT_CONFLICT`, contention — `503`/`BOOKING_SLOT_BUSY` с `Retry-After: 1`. Отдельной connection-owned transaction и DB exclusion constraint нет. `BookingConfirmation.booking_id` уникален и остаётся главным DB guard повторной финализации, но `Income.booking_id` не unique.
+
+Лимит активных будущих записей — account business rule, одинаковое для web, Android и `ios_fixed`: Free 20, paid finite — лимит плана, paid unlimited и AlwaysFree — без лимита. `ios_fixed` сохранён; удалён только прежний cap `min(plan, 20)` (`d072998`). Occupancy и статусы, которые входят в лимит, этим изменением не менялись. Полный список оставшихся ограничений поверхности: [Feature entitlements](feature-entitlements.md#6-limits).
 
 Temporary rows не участвуют в общем availability/conflict service. Поэтому temporary hold не является глобальной блокировкой слота для всех create paths.
 

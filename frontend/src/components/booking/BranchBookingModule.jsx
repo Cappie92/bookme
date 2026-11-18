@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { CalendarIcon, ClockIcon, UserIcon, TagIcon } from '@heroicons/react/24/outline'
 import { dateToISOString, formatTime, getMinDate, getSelectedCity } from '../../utils/dateUtils'
+import { bookingSlotChoice } from '../../utils/scheduleDates'
 import { metrikaGoal } from '../../analytics/metrika'
 import { M } from '../../analytics/metrikaEvents'
 import {
@@ -36,6 +37,7 @@ export default function BranchBookingModule({
   const [services, setServices] = useState([])
   const [branch, setBranch] = useState(null)
   const [availableSlots, setAvailableSlots] = useState([])
+  const [selectedSlot, setSelectedSlot] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
@@ -192,10 +194,7 @@ export default function BranchBookingModule({
       if (response.ok) {
         const data = await response.json()
         
-        const timeSlots = data.map(slot => {
-          const startTime = new Date(slot.start_time)
-          return startTime.toTimeString().slice(0, 5)
-        })
+        const timeSlots = data.map(bookingSlotChoice).filter(Boolean)
         
         setAvailableSlots(timeSlots)
       } else {
@@ -258,6 +257,7 @@ export default function BranchBookingModule({
     }))
     
     setAvailableSlots([])
+    setSelectedSlot(null)
     setFormData(prev => ({
       ...prev,
       time: ''
@@ -274,6 +274,7 @@ export default function BranchBookingModule({
     }))
     
     setAvailableSlots([])
+    setSelectedSlot(null)
     setFormData(prev => ({
       ...prev,
       time: ''
@@ -289,6 +290,7 @@ export default function BranchBookingModule({
     }))
     
     setAvailableSlots([])
+    setSelectedSlot(null)
     setFormData(prev => ({
       ...prev,
       time: ''
@@ -296,9 +298,10 @@ export default function BranchBookingModule({
   }
   
   const handleTimeSlotSelect = (slot) => {
+    setSelectedSlot(slot)
     setFormData(prev => ({
       ...prev,
-      time: slot
+      time: slot.label
     }))
   }
   
@@ -347,20 +350,17 @@ export default function BranchBookingModule({
   }
   
   const createBooking = async (clientPhone = null) => {
-    const [hours, minutes] = formData.time.split(':')
-    const startTimeStr = `${formData.date}T${hours.padStart(2, '0')}:${minutes.padStart(2, '0')}:00`
-    const startTime = new Date(startTimeStr)
-    
-    const endTime = new Date(startTime)
-    endTime.setMinutes(endTime.getMinutes() + selectedService.duration)
-    
+    if (!selectedSlot) {
+      throw new Error('Некорректное время записи')
+    }
+
     const bookingData = {
       service_id: parseInt(formData.service_id),
       master_id: formData.master_id ? parseInt(formData.master_id) : null,
       salon_id: formData.master_id ? null : parseInt(salonId),
       branch_id: parseInt(branchId), // Всегда передаем branch_id
-      start_time: startTime.toISOString(),
-      end_time: endTime.toISOString(),
+      start_time: selectedSlot.start_time,
+      end_time: selectedSlot.end_time,
       notes: formData.notes,
       client_name: currentUser?.full_name || currentUser?.phone || 'Клиент',
       service_name: selectedService?.name || '',
@@ -373,8 +373,8 @@ export default function BranchBookingModule({
       const params = new URLSearchParams({
         salon_id: salonId,
         service_id: formData.service_id,
-        start_time: startTime.toISOString(),
-        end_time: endTime.toISOString(),
+        start_time: selectedSlot.start_time,
+        end_time: selectedSlot.end_time,
         branch_id: branchId,
         notes: formData.notes || '',
       })
@@ -540,6 +540,7 @@ export default function BranchBookingModule({
     setSelectedService(null)
     setSelectedMaster(null)
     setAvailableSlots([])
+    setSelectedSlot(null)
     setShowPhoneModal(false)
   }
   
@@ -702,12 +703,12 @@ export default function BranchBookingModule({
                   type="button"
                   onClick={() => handleTimeSlotSelect(slot)}
                   className={`px-3 py-2 border rounded-lg text-sm ${
-                    formData.time === slot
+                    formData.time === slot.label
                       ? 'bg-[#4CAF50] text-white border-[#4CAF50]'
                       : 'bg-white text-gray-700 border-gray-300 hover:border-[#4CAF50]'
                   }`}
                 >
-                  {slot}
+                  {slot.label}
                 </button>
               ))}
             </div>

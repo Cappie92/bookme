@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 import pytest
 
 from auth import get_password_hash
+from tests.booking_fixture import apply_grid_walls_to_booking, grid_booking_walls
 from constants import duration_months_to_days
 from models import (
     Booking,
@@ -54,12 +55,15 @@ def _create_master_with_booking(db, *, booking_status: BookingStatus, start_offs
     db.refresh(service)
 
     now = datetime.utcnow()
+    start = now - timedelta(hours=start_offset_hours)
+    end = now - timedelta(hours=start_offset_hours - 1)
+    start, end = grid_booking_walls(start, end)
     booking = Booking(
         client_id=user.id,
         service_id=service.id,
         master_id=master.id,
-        start_time=now - timedelta(hours=start_offset_hours),
-        end_time=now - timedelta(hours=start_offset_hours - 1),
+        start_time=start,
+        end_time=end,
         status=booking_status,
         payment_amount=500,
         loyalty_points_used=0,
@@ -97,8 +101,10 @@ def test_confirm_booking_future_returns_400(client, db):
     )
     # Переводим в будущее
     now = datetime.utcnow()
-    booking.start_time = now + timedelta(hours=1)
-    booking.end_time = now + timedelta(hours=2)
+    booking.start_time, booking.end_time = grid_booking_walls(
+        now + timedelta(hours=1),
+        now + timedelta(hours=2),
+    )
     db.commit()
     db.refresh(booking)
 
@@ -184,8 +190,10 @@ def test_update_booking_status_pre_visit_future_manual_pro_ok_despite_dirty_colu
     )
     booking_id = booking.id
     now = datetime.utcnow()
-    booking.start_time = now + timedelta(hours=1)
-    booking.end_time = now + timedelta(hours=2)
+    booking.start_time, booking.end_time = grid_booking_walls(
+        now + timedelta(hours=1),
+        now + timedelta(hours=2),
+    )
     master.auto_confirm_bookings = False
     master.pre_visit_confirmations_enabled = False
     db.commit()
@@ -208,8 +216,10 @@ def test_update_booking_status_pre_visit_future_manual_ok_without_extended_stats
     )
     booking_id = booking.id
     now = datetime.utcnow()
-    booking.start_time = now + timedelta(hours=1)
-    booking.end_time = now + timedelta(hours=2)
+    booking.start_time, booking.end_time = grid_booking_walls(
+        now + timedelta(hours=1),
+        now + timedelta(hours=2),
+    )
     master.auto_confirm_bookings = False
     master.pre_visit_confirmations_enabled = True
     db.commit()
@@ -232,8 +242,10 @@ def test_update_booking_status_pre_visit_future_manual_ok_without_finance_featur
     )
     booking_id = booking.id
     now = datetime.utcnow()
-    booking.start_time = now + timedelta(hours=1)
-    booking.end_time = now + timedelta(hours=2)
+    booking.start_time, booking.end_time = grid_booking_walls(
+        now + timedelta(hours=1),
+        now + timedelta(hours=2),
+    )
     master.auto_confirm_bookings = False
     db.commit()
 
@@ -256,8 +268,10 @@ def test_update_booking_status_future_awaiting_confirmation_to_confirmed_manual_
     )
     booking_id = booking.id
     now = datetime.utcnow()
-    booking.start_time = now + timedelta(hours=1)
-    booking.end_time = now + timedelta(hours=2)
+    booking.start_time, booking.end_time = grid_booking_walls(
+        now + timedelta(hours=1),
+        now + timedelta(hours=2),
+    )
     master.auto_confirm_bookings = False
     db.commit()
 
@@ -279,8 +293,10 @@ def test_update_booking_status_pre_visit_auto_mode_403(client, db):
     )
     booking_id = booking.id
     now = datetime.utcnow()
-    booking.start_time = now + timedelta(hours=1)
-    booking.end_time = now + timedelta(hours=2)
+    booking.start_time, booking.end_time = grid_booking_walls(
+        now + timedelta(hours=1),
+        now + timedelta(hours=2),
+    )
     master.auto_confirm_bookings = True
     master.pre_visit_confirmations_enabled = False
     db.commit()
@@ -302,8 +318,10 @@ def test_update_booking_status_pre_visit_legacy_override_auto_mode_403(client, d
     )
     booking_id = booking.id
     now = datetime.utcnow()
-    booking.start_time = now + timedelta(hours=1)
-    booking.end_time = now + timedelta(hours=2)
+    booking.start_time, booking.end_time = grid_booking_walls(
+        now + timedelta(hours=1),
+        now + timedelta(hours=2),
+    )
     master.auto_confirm_bookings = True
     master.pre_visit_confirmations_enabled = True
     db.commit()
@@ -361,8 +379,10 @@ def test_update_booking_status_future_awaiting_confirmation_returns_400(client, 
     db.commit()
 
     now = datetime.utcnow()
-    booking.start_time = now + timedelta(hours=1)
-    booking.end_time = now + timedelta(hours=2)
+    booking.start_time, booking.end_time = grid_booking_walls(
+        now + timedelta(hours=1),
+        now + timedelta(hours=2),
+    )
     db.commit()
     db.refresh(booking)
 

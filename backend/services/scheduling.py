@@ -7,6 +7,7 @@ from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 from models import AvailabilitySlot, Booking, OwnerType
+from services.booking_admission import unified_admission_enabled
 from utils.booking_occupancy import (
     apply_occupying_filter,
     has_overlapping_booking,
@@ -410,8 +411,38 @@ def get_available_slots(
             else:
                 logger.debug(f"sched: ❌ Слот {slot_start} занят")
 
+    if unified_admission_enabled() and owner_type in (OwnerType.MASTER, OwnerType.INDIE_MASTER):
+        available_slots = _unified_slot_filter(
+            db,
+            available_slots,
+            master_id=owner_id if owner_type == OwnerType.MASTER else None,
+            indie_master_id=owner_id if owner_type == OwnerType.INDIE_MASTER else None,
+            exclude_booking_id=exclude_booking_id,
+        )
+
     logger.debug(f"sched: Итого доступных слотов: {len(available_slots)}")
     return available_slots
+
+
+def _unified_slot_filter(
+    db: Session,
+    slots: List[dict],
+    *,
+    master_id: Optional[int] = None,
+    indie_master_id: Optional[int] = None,
+    exclude_booking_id: Optional[int] = None,
+) -> List[dict]:
+    from fastapi import HTTPException
+
+    from services.booking_admission import filter_slots_unified, resolve_admission_owner
+
+    try:
+        owner = resolve_admission_owner(
+            db, master_id=master_id, indie_master_id=indie_master_id
+        )
+    except HTTPException:
+        return []
+    return filter_slots_unified(db, owner, slots, exclude_booking_id=exclude_booking_id)
 
 
 def get_available_slots_any_master_logic(
@@ -504,6 +535,7 @@ def get_available_slots_any_master_logic(
         logger.debug(f"sched: Мастер {master.id} имеет {occupied_slots_count} занятых слотов в день")
         
         # Генерируем доступные слоты для мастера
+        master_slots = []
         for availability_slot in availability_slots:
             start_time = availability_slot.start_time
             end_time = availability_slot.end_time
@@ -518,13 +550,16 @@ def get_available_slots_any_master_logic(
                     slot_start_dt = datetime.combine(date, slot_start)
                     slot_end_dt = slot_start_dt + timedelta(minutes=service_duration)
                     
-                    all_available_slots.append({
+                    master_slots.append({
                         "start_time": slot_start_dt,
                         "end_time": slot_end_dt,
                         "master_id": master.id,
                         "master_name": master.user.full_name if master.user else f"Мастер {master.id}",
                         "occupied_slots": occupied_slots_count
                     })
+        if unified_admission_enabled():
+            master_slots = _unified_slot_filter(db, master_slots, master_id=master.id)
+        all_available_slots.extend(master_slots)
     
     if not all_available_slots:
         logger.debug(f"sched: Нет доступных слотов у мастеров")
@@ -607,6 +642,7 @@ def get_best_master_for_slot(
     if not masters:
         logger.debug(f"sched: Нет мастеров для услуги {service_id} в салоне {salon_id}")
         return None
+    skipped_unresolved = False
     
     # Получаем день недели
     day_of_week = start_time.weekday() + 1  # 1=Понедельник, 2=Вторник, etc.
@@ -657,6 +693,14 @@ def get_best_master_for_slot(
         ):
             logger.debug(f"sched: Мастер {master.id} занят в указанное время")
             continue
+        if unified_admission_enabled():
+            from services.booking_admission import slot_occupancy_state
+
+            state = slot_occupancy_state(db, master.id, start_time, end_time)
+            if state == "unresolved":
+                skipped_unresolved = True
+            if state != "free":
+                continue
         
         # Получаем существующие бронирования мастера на эту дату
         existing_bookings = (
@@ -685,6 +729,10 @@ def get_best_master_for_slot(
     
     if not available_masters:
         logger.debug(f"sched: Нет доступных мастеров для указанного времени")
+        if skipped_unresolved:
+            from services.booking_admission import booking_time_unresolved
+
+            raise booking_time_unresolved()
         return None
     
     # Выбираем лучшего мастера по количеству занятых слотов

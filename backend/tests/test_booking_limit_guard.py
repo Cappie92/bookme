@@ -20,6 +20,7 @@ from models import (
     User,
     UserRole,
 )
+from tests.booking_fixture import grid_booking_walls
 from utils.booking_limit_guard import (
     BOOKING_LIMIT_ERROR_CODE,
     FREE_ACTIVE_FUTURE_BOOKINGS_LIMIT,
@@ -50,13 +51,14 @@ def _owner(db, suffix: str, *, always_free: bool = False):
 
 def _data(master, service, now, *, status=BookingStatus.CREATED.value, offset=1):
     start = now + timedelta(hours=offset)
+    start, end = grid_booking_walls(start, start + timedelta(hours=1))
     return {
         "client_id": master.user_id,
         "service_id": service.id,
         "master_id": master.id,
         "indie_master_id": None,
         "start_time": start,
-        "end_time": start + timedelta(hours=1),
+        "end_time": end,
         "status": getattr(status, "value", status),
         "payment_amount": 100,
     }
@@ -259,13 +261,17 @@ def test_sqlite_concurrent_requests_cannot_both_cross_the_boundary(tmp_path):
 
     def attempt(offset: int) -> None:
         session = Session()
+        start_wall, end_wall = grid_booking_walls(
+            now + timedelta(hours=offset),
+            now + timedelta(hours=offset + 1),
+        )
         candidate = {
             "client_id": user_id,
             "service_id": service_id,
             "master_id": master_id,
             "indie_master_id": None,
-            "start_time": now + timedelta(hours=offset),
-            "end_time": now + timedelta(hours=offset + 1),
+            "start_time": start_wall,
+            "end_time": end_wall,
             "status": BookingStatus.CREATED.value,
             "payment_amount": 100,
         }

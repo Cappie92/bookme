@@ -67,11 +67,11 @@ def check_masters_bookings_limits() -> dict:
                     continue
                 
                 # Подсчитываем активные записи
-                from utils.master_future_bookings_query import active_future_bookings_sql_filter
+                from utils.master_future_bookings_query import active_future_bookings_cap_sql_filter
 
                 active_bookings_count = (
                     db.query(func.count(Booking.id))
-                    .filter(active_future_bookings_sql_filter(master, datetime.utcnow()))
+                    .filter(active_future_bookings_cap_sql_filter(master, datetime.utcnow()))
                     .scalar() or 0
                 )
                 

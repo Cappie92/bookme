@@ -4,12 +4,33 @@ project: DeDato
 knowledge_class: living
 environment: common
 status: active
-last_verified: 2026-09-24
+last_verified: 2026-11-13
 ---
 
 # Knowledge — каноническая база знаний DeDato
 
 `Knowledge/` — единая физическая Project Knowledge base для онбординга, безопасной разработки и эксплуатации DeDato. Она хранит актуальную истину по каждому аспекту и не создаёт параллельные snapshots living knowledge.
+
+## Постоянные инструкции агентам
+
+[Общий AGENTS.md](../AGENTS.md) задаёт для Codex и Cursor цикл работы:
+в начале новой сессии — полностью прочитать этот реестр и onboarding, затем
+релевантные разделы; после существенного
+изменения — обновить соответствующий living-документ и проверить ссылки.
+Подробности применения и ограничения — в [onboarding](onboarding.md#knowledge-maintenance-in-agent-tasks).
+
+## Быстрые маршруты для Codex, Cursor и разработчика
+
+- **Открыть локальный web Dedato:** [запуск одной командой/кнопкой](local-development.md#one-click-local-web-development).
+  Основной вход — `python3 scripts/dev/local.py start`; адрес определяется при запуске.
+  Используйте этот путь перед ручным подбором портов и отдельным запуском серверов.
+- **Начать задачу в новой рабочей копии:** [onboarding](onboarding.md).
+- **Выбрать проверку изменения:** [testing strategy](testing-strategy.md).
+  Постоянное локальное окружение и disposable E2E имеют разные данные и жизненный цикл.
+
+Подробный контракт запуска хранится только в `local-development.md`. Перед работой
+в другой копии проверьте наличие файлов запускателя и локальный Git diff: изменения
+могут ещё не быть закоммичены или переданы на другой компьютер.
 
 ## Physical model
 
@@ -139,6 +160,7 @@ last_verified: YYYY-MM-DD
 
 Completed release-adjacent security/operations events. They do not replace living owners above.
 
+- [Release: iOS App Store decisions through 1.1.0](ios-app-store-releases.md)
 - [SEC-01 anonymous test-category](sec-01-anonymous-test-category.md)
 - [Reverse-phone verification bypass](reverse-phone-verification-bypass.md)
 - [Decision: pre-created readonly demo](demo-readonly-redesign.md)

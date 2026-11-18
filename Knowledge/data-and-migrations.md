@@ -54,7 +54,7 @@ Alembic environment:
 - использует `NullPool` для online migration connection;
 - поддерживает online и offline migration modes.
 
-На дату repository-проверки 2026-09-22 Alembic graph имеет один repository head: `20260914_push_notifications_v1` (revises `20260830_free_booking_limit`). Это `CONFIRMED` для текущего checkout. Latest production deploy `96f3f27` не требовал migration delta относительно предыдущего backend `1579f36`: push v1 schema already present. Host DB revision остаётся отдельным фактом и принадлежит [Production topology](production-topology.md).
+**CONFIRMED, 2026-11-14, локальная ветка с Calendar B3:** repository head — `20261031_b3_master_svc`. После прежнего `20260914_push_notifications_v1` идут четыре календарные revisions, описанные ниже. Это состояние кода локальной ветки; host DB revision и release gate принадлежат [Production topology](production-topology.md) и этим изменением не перепроверялись.
 
 В репозитории присутствуют два Alembic ini entry points с различными fallback SQLite paths: root `alembic.ini` и `backend/alembic.ini`. Production migration helper выполняется внутри backend container, где рабочий каталог и скопированный backend config связывают его с container environment. Во всех случаях заданный `DATABASE_URL` имеет приоритет в `backend/alembic/env.py`.
 
@@ -145,7 +145,7 @@ Backend `/health` не обращается к database и поэтому не �
 |---------|------------------|--------------|
 | Production DB identity | SQLite URL `/data/bookme.db`, volume `dedato_data` | Фактический container environment, mount и file identity |
 | ORM schema | Metadata, импортируемая из repository models | Соответствие physical schema текущим models |
-| Alembic graph | Один repository head `20260914_push_notifications_v1` и исторические branches | Current production host DB revision и migration history |
+| Alembic graph | В локальной B3-ветке один head `20261031_b3_master_svc` | Current production host DB revision и migration history |
 | Schema ownership | `create_all()` и Alembic оба исполняемы; current create-all → head path regression-tested | Происходили ли иные конфликты или ручные schema changes |
 | Ordering | Workflow запускает services до Alembic | Фактический активный deploy path и время доступности трафика |
 | SQLite behavior | `check_same_thread=False`; один file path | Journal mode, timeout, active locks и integrity |
@@ -166,7 +166,7 @@ Backend `/health` не обращается к database и поэтому не �
 - `backend/alembic/versions/20260809_apple_iap_subscription_fields.py` — guarded Apple IAP additions.
 - `backend/alembic/versions/20260812_user_session_version.py` — guarded session-version addition.
 - `backend/alembic/versions/20260830_free_active_booking_limit_20.py` — Free-20 limit revision.
-- `backend/alembic/versions/20260914_push_notifications_v1.py` — current repository head: `notifications`, `push_devices`, `notification_outbox`.
+- `backend/alembic/versions/20260914_push_notifications_v1.py` — прежний head перед календарными revisions: `notifications`, `push_devices`, `notification_outbox`.
 - `backend/tests/test_alembic_create_all_then_upgrade.py` — supported compatibility path regression.
 - `scripts/prod/migrate.sh` — Alembic execution inside running backend container.
 - `.github/workflows/deploy.yml` — repository-confirmed start-before-migrate ordering.
@@ -177,3 +177,36 @@ Backend `/health` не обращается к database и поэтому не �
 - [Production topology](production-topology.md) — services, network, persistent volumes and process model.
 - [Staging infrastructure](staging.md) — active production clone, applied revision and integrity state.
 - [Debt — subscriptions billing](subscriptions-billing-debt.md) — billing-specific concurrency and reliability constraints.
+
+## Local calendar schema compatibility
+
+**CONFIRMED, 2026-11-14, local-only:** Calendar B3 добавляет:
+
+- `20261027_calendar_b1_data_model.py`: contact/source/creator/canonical UTC metadata и `version` записей, canonical time holds, `calendar_blocks`, `idempotency_receipts`;
+- `20261028_calendar_b22_edit_request_time.py`: proposed canonical time у edit requests;
+- `20261030_calendar_b3_guest_name.py`: nullable guest name;
+- `20261031_calendar_b3_master_service.py`: nullable `master_service_id`, FK на `master_services_list(id)` и индекс.
+- `20261114_calendar_grid_sqlite_guard.py`: UDF-триггеры off-grid guard; **fail-fast** на prod-копии пока 29 invalid `bookings` (см. [Scheduling](scheduling.md#production-grid-guard-remediation-plan-owner-approval-required)). Read-only planner: `backend/scripts/prod_calendar_grid_repair_plan.py`; apply на disposable копии: `prod_calendar_grid_apply_repairs.py`; consequence diff: `prod_calendar_grid_verify_repairs.py`; owner retro: [calendar-b3-prod-grid-owner-decisions.md](calendar-b3-prod-grid-owner-decisions.md). **CONFIRMED 2026-11-18:** на prod-копии `PRAGMA foreign_key_check` → **134** legacy-нарушения; grid repair **не** увеличивает и **не** чинит их — FK не считать «чистым».
+
+Все четыре файла находятся в `backend/alembic/versions/`. Они добавляют недостающие
+объекты и не backfill-ят неизвестные source/time facts. Legacy rows получают
+`version=1`; остальные новые nullable значения остаются NULL. Последняя revision
+отказывается считать готовой существующую колонку без FK, вместо перестроения
+таблицы bookings с риском потери constraints.
+
+Для текущей локальной БД, созданной через create_all без `alembic_version`,
+пробный полный historical upgrade на отдельной копии успешно завершился, но
+изменил booking status, indie profile created_at, plan features и service-function
+справочник. Поэтому технический успех upgrade не равен сохранению данных.
+В рабочей local.db выполнены только четыре `upgrade()` через
+`Operations.context(MigrationContext.configure(connection))` после backup и
+проверки на копии. Alembic revision не выставлялась: это добавочная локальная
+совместимость, а не доказательство исполнения всего migration graph.
+
+До старта сравнивались все старые колонки всех 73 исходных таблиц, проверялись
+полнота ORM columns, FK `master_service_id`, integrity и отсутствие FK violations.
+Прежние данные совпали полностью. Такая проверка не доказывает идентичность всех
+исторических defaults/constraints; не использовать этот путь как deploy runbook
+или основание для безусловного stamp/upgrade в другой базе. Для отката к прежней
+схеме использовать сохранённую копию с соответствующей веткой, не destructive
+downgrade календарных данных. Локальный процесс: [Local development](local-development.md#локальная-проверка-календаря-b3).

@@ -177,9 +177,10 @@ def test_get_future_bookings_skips_when_master_timezone_empty(client, db, monkey
     db.refresh(master)
     db.refresh(service)
 
+    from tests.booking_fixture import on_grid_interval
+
     # Создаём запись напрямую (write-path блокирует, но в БД может быть legacy)
-    start = datetime.utcnow() + timedelta(days=1)
-    end = start + timedelta(hours=1)
+    start, end = on_grid_interval(datetime.utcnow() + timedelta(days=1))
     booking = Booking(
         client_id=client_user.id,
         service_id=service.id,
@@ -247,12 +248,15 @@ def test_get_future_bookings_raises_when_master_timezone_empty_debug(client, db,
     db.refresh(master)
     db.refresh(service)
 
+    from tests.booking_fixture import on_grid_interval
+
+    start, end = on_grid_interval(datetime.utcnow() + timedelta(days=1))
     booking = Booking(
         client_id=client_user.id,
         service_id=service.id,
         master_id=master.id,
-        start_time=datetime.utcnow() + timedelta(days=1),
-        end_time=datetime.utcnow() + timedelta(days=1, hours=1),
+        start_time=start,
+        end_time=end,
         status=BookingStatus.CREATED.value,
     )
     db.add(booking)

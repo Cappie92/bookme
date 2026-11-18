@@ -207,14 +207,17 @@ def _add_orphan_booking_child(db, kind: str, ids: dict[str, int], booking_id: in
 
 
 def _add_exact_discount_booking(db, ids: dict[str, int]) -> Booking:
+    from tests.booking_fixture import grid_booking_walls
+
     manifest = _manifest()
-    start = datetime.utcnow() + timedelta(days=10)
+    raw = datetime.utcnow() + timedelta(days=10)
+    start, end = grid_booking_walls(raw, raw + timedelta(minutes=30))
     booking = Booking(
         client_id=ids["primary_client"],
         master_id=ids["primary_master"],
         service_id=ids["service30"],
         start_time=start,
-        end_time=start + timedelta(minutes=30),
+        end_time=end,
         status="confirmed",
         notes=manifest["ownership"]["booking_notes"]["WITH_DISCOUNT"],
         is_paid=False,
@@ -427,12 +430,16 @@ def test_two_apply_is_exact_and_preserves_non_owned_state(
 
     db = factory()
     try:
+        from tests.booking_fixture import grid_booking_walls
+
+        raw = datetime.utcnow() + timedelta(days=20, hours=10)
+        look_start, look_end = grid_booking_walls(raw, raw + timedelta(minutes=30))
         lookalike_booking = Booking(
             client_id=ids["primary_client"],
             master_id=ids["primary_master"],
             service_id=ids["service30"],
-            start_time=datetime.utcnow() + timedelta(days=20, hours=10),
-            end_time=datetime.utcnow() + timedelta(days=20, hours=10, minutes=30),
+            start_time=look_start,
+            end_time=look_end,
             status="confirmed",
             notes="[RELEASEXSMOKE:v1][UPCOMING_PAID]",
             is_paid=False,

@@ -4,14 +4,14 @@ project: DeDato
 knowledge_class: living
 environment: prod
 status: active
-last_verified: 2026-09-27
+last_verified: 2026-11-17
 ---
 
 # Production topology
 
 ## Scope
 
-Документ владеет repository-known описанием production-топологии DeDato и текущим operational release state. Compose/network/volume facts без host access остаются repository-CONFIRMED. Current store/review and runtime pointers ниже — living state на 2026-09-24, не snapshots iOS (12), frontend `96f3f27-prod` или «ещё не submitted».
+Документ владеет repository-known описанием production-топологии DeDato и текущим operational release state. Compose/network/volume facts без host access остаются repository-CONFIRMED. Блок **Current release gate** заменяется целиком при смене CI, deploy или store selection. Прошлые отклонения App Store: [iOS App Store releases](ios-app-store-releases.md).
 
 Deploy procedure принадлежит [CI/CD](ci-cd.md) и [Deployment artifact inventory](deployment-artifact-inventory.md). Секреты и container IDs в Knowledge не хранятся.
 
@@ -26,52 +26,68 @@ Deploy procedure принадлежит [CI/CD](ci-cd.md) и [Deployment artifac
 
 ## Current production release state
 
-Это единственная current release truth. Не хранить параллельные snapshots iOS (12), frontend `96f3f27-prod` или «ещё не submitted».
+Это единственная current release truth.
 
 | Pointer | Current value | Confidence |
 |---------|---------------|------------|
 | Public site | `https://dedato.ru` | REPORTED |
 | Production server | `193.160.208.206` | REPORTED |
-| Canonical git `main` / `origin/main` | `aa37b54` | CONFIRMED repository; `ci: add self-contained Playwright regression job`. iOS 1.1.0 (13) / Android 1.1.0 (6) unchanged. |
-| Production backend image | `dedato_backend:96f3f27` | REPORTED authorized deploy 2026-09-22; **not** redeployed for free-companion; **not** equal to current `main` |
-| Production frontend image | `dedato_frontend:fde8033-prod` | REPORTED authorized frontend update for UA / Privacy / free-companion legal surface |
-| Backend release worktree | `/opt/dedato-release-96f3f27` | REPORTED; backend cut pointer, not proof that frontend is still `96f3f27-prod` |
-| iOS | **1.1.0 (13) SUBMITTED / IN APP REVIEW PROCESS** | Version CONFIRMED `mobile/app.config.ts`; store status REPORTED. Not approved. Not released. |
-| Android | **1.1.0 (6) RuStore SUBMITTED FOR MODERATION** | Version CONFIRMED `mobile/app.config.ts`; store status REPORTED. Not published. Not approved. Not released. |
-| Android production AAB | EAS `e3b8e3ec-d3d7-405b-bb65-212e96309248`; package `ru.dedato.mobile`; versionName `1.1.0`; versionCode `6` | REPORTED; built from current `main` with EAS production |
-| Production HTTP | `/` → 200; `/api/health` → 200 | REPORTED frontend deploy smoke PASS |
-| SQLite | pre-deploy backup `integrity_check = ok` | REPORTED |
-| Alembic on production DB | push v1 schema already present; no delta `1579f36` → `96f3f27` | REPORTED |
-| Redis | unchanged by the backend cutover | REPORTED |
-| `DEMO_MASTER_USER_ID` | configured | REPORTED; category only, value never stored here |
+| Canonical git `main` / `origin/main` | release gate still documents `d072998`; local `main` tip checked 2026-11-13: `19120d2` (includes mobile master tour `19120d2`, client nav fix `7d5b070`, CI selective/shard `f370ca6` + ancestors) | **Gate row:** CONFIRMED text in this document. **Tip row:** CONFIRMED `git` locally 2026-11-13; **not** restated as deployed/CI-green for post-`d072998` commits |
+| Prior release commits on that tip | `60eba89` schedule/push; `eca7aff` iOS build 16 | CONFIRMED git history |
+| Production backend/frontend images | last named cut in this document was backend `96f3f27` and frontend `fde8033-prod` | REPORTED historical cut. No newer image tag is recorded. Neither tag nor `d072998` proves the current host image |
+| Free Companion public baseline | `/ios-free-companion`, `/user-agreement`; web/backend runtime reported healthy before the booking-cap change | REPORTED |
+| Booking-cap deploy | see **Current release gate** below | REPORTED |
+| iOS | **1.1.0 (16)** candidate. Build produced; Transporter upload started; ASC processing/selection not confirmed as of 2026-10-19. Not approved. Not released. Build 15 is not this candidate | Version CONFIRMED in repo; ASC status REPORTED |
+| Android | **1.1.0 (6)**, last recorded store status **RuStore SUBMITTED FOR MODERATION** | Version CONFIRMED; store status not reconfirmed on 2026-10-19 |
+| Android production AAB | EAS `e3b8e3ec-d3d7-405b-bb65-212e96309248`; package `ru.dedato.mobile`; versionName `1.1.0`; versionCode `6` | REPORTED earlier build, not restated as rebuilt |
 | Push sender | registration+notifications enabled; allowlist `user_id 11` | REPORTED; not global rollout |
 
-Marketing version **1.1.0**. Production runtime is **intentionally split**: backend `96f3f27`, frontend `fde8033-prod`. Do **not** state that production backend equals current `main` (`aa37b54`). Do **not** state that production frontend is still `96f3f27-prod`.
+### Current release gate
 
-Backend `backend/services/notification_events.py` from `3639e74` (structured `actor_user_id` logging) remains in `main` and is **still not** in production backend `96f3f27`. Observability-only; no schema migration. Mobile 1.1.0 (13)/(6) include the Android push lifecycle from `3639e74` plus later free-companion iOS work.
+Replaceable operational state. После CI или deploy обновить строки этой таблицы на месте. Новый snapshot рядом не дописывать.
 
-`/opt/dedato` git worktree is dirty/legacy and **must not** be used as a clean release checkout.
+| Field | State |
+|-------|-------|
+| release candidate | `95beb70` on branch `release/calendar-b3-20261117` ([PR #7](https://github.com/Cappie92/bookme/pull/7)); код E2E в `a3c6dda`, docs gate в `95beb70`; PR merge commit **none** (open, **MERGEABLE**) |
+| CI status | **PASS** Application tests [run 44175733748](https://github.com/Cappie92/bookme/actions/runs/44175733748) @ `95beb70` (Playwright **178** passed, Full regression gate **success**). Код-only baseline: [44173241178](https://github.com/Cappie92/bookme/actions/runs/44173241178) @ `a3c6dda`. Prior fail [44104884292](https://github.com/Cappie92/bookme/actions/runs/44104884292) @ `9930809`: **147** passed **31** failed |
+| local full backend (release worktree) | **CONFIRMED 2026-11-17:** **1733** passed, **7** skipped, **0** failed, exit **0** |
+| local Playwright (release worktree) | **CONFIRMED 2026-11-17:** **178** passed, **0** failed, exit **0** |
+| production deploy | **not performed** — blocked before cutover |
+| production runtime (host check 2026-11-17) | backend `dedato_backend:a3fa405`, frontend `dedato_frontend:a3fa405`; Alembic **`20260914_push_notifications_v1`** |
+| migration preflight (copy of prod DB) | upgrades through `20261031_b3_master_svc` OK; **`20261114_calendar_grid_guard` aborts**: **29** invalid `bookings`, **0** `calendar_blocks` (27 confirmed_synthetic: 22×`STATS_SMOKE_2026_05` in notes, 5×demo batch; 2×`origin_unknown` #145/#1067). После owner repair на **расходной** копии + consequence verify `passed` → head `20261114_calendar_grid_guard` (lab 2026-11-18, не prod) — [owner decisions](calendar-b3-prod-grid-owner-decisions.md) |
+| backup | `/opt/dedato/backups/dedato_backup_20261117_173441.tar.gz`; SQLite `PRAGMA integrity_check` **ok** |
+| next gate | owner-approved repair of flagged rows (no auto-snap/delete) → migration dry-run on copy → green full CI → controlled container cutover |
+| mobile rebuild | none (native tree unchanged vs `main`) |
 
-Verified pre-deploy SQLite backup: `/opt/dedato/backups/bookme-pre-96f3f27-20260922_130851.db` (`integrity_check: ok`). Rollback containers retained (do not state they were deleted):
+Marketing version **1.1.0**. Production is not at `d072998`, пока эта строка deploy не заменена.
 
-- `dedato_backend_1_rollback_20260922_132751`
-- `dedato_frontend_1_rollback_20260922_132751`
-- latest frontend rollback: `dedato_frontend_1_rollback_20260923_122405`
+`/opt/dedato` git worktree was recorded dirty/legacy and **must not** be used as a clean release checkout. The September 2026 rollback container names remain historical operations notes, not the current release pointer.
 
-Closed for this submission cycle (not store-approved): Android adaptive icon; Android push permission/presentation/Notification Center; booking/reschedule regression; iOS true free-companion remediation. IAP remains dormant/unreachable and is **not** the current release solution. Owner decision: backend Free-20 booking limit is unchanged and is **not** a blocker for this submission.
+Closed as implementation, not store-approved: Free Companion native surface; schedule 09:00 and `scrollsToTop={false}`; push registration hardening; removal of the extra iOS booking cap. IAP remains dormant and is **not** the current release solution. Free accounts stay at 20 active future bookings. Paid and unlimited accounts are not capped at 20 because the client is iOS.
 
 `test/apple-iap-handoff` is not the current production release branch.
 
-### Next steps
+### Obsolete as current truth
 
-Primary work is no longer implementation.
+- Build 15 is the final candidate.
+- `ios_fixed` always means max 20 future bookings.
+- A paid master is limited to 20 bookings from iOS.
+- A master can manually create bookings in normal native iOS UI.
+- RefreshControl caused the schedule jump to 00:00.
+- The 09:00 position needs a timer or retry.
+- A raw APNs token can be registered as an Expo token.
+- RevenueCat or Apple IAP is the 1.1.0 Free Companion strategy.
 
-1. Wait for Apple App Review result for iOS 1.1.0 (13).
-2. Wait for RuStore moderation result for Android 1.1.0 (6).
+### Review constraints while 1.1.0 (16) is the candidate
 
-On rejection: capture exact reviewer/moderator feedback, audit only that issue, avoid speculative rebuilds. On approval: proceed with release/publishing controls, then post-release engineering hygiene.
+Эти правила живут здесь, пока кандидат не сменится. CI и deploy — только в **Current release gate**.
 
-Deferred post-release: production dirty-repo cleanup; old rollback container cleanup; Docker image cleanup; repository/deploy hygiene; backend observability deploy reconciliation (`3639e74` vs prod `96f3f27`); broader Android distribution / store follow-up if needed.
+1. Confirm build 16 is processed and selected in App Store Connect.
+2. Description and Review Notes must not say native iOS supports up to 20 bookings or that paid web status raises native booking limits. Notes, if they name the build, use `DeDato 1.1.0 (16)`.
+3. Do not promise booking detail/reschedule flows that normal native UI does not open.
+4. Submit only after owner approval, with Free Master and Client review credentials checked.
+
+Android 1.1.0 (6) RuStore moderation remains a separate previously reported wait. On rejection, audit the exact feedback only. Deferred hygiene: dirty release checkout, old rollback containers, image cleanup, and confirming whether older observability commits are already inside the unnamed current production image.
 
 ## Repository-confirmed components
 

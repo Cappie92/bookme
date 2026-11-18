@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react'
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import {
   BanknotesIcon,
   BuildingOffice2Icon,
@@ -18,6 +18,7 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import MasterSettings from '../components/MasterSettings'
 import Header from '../components/Header'
 import MasterScheduleCalendar from '../components/MasterScheduleCalendar'
+import { mcBtnPrimary, mcBtnSecondary } from '../utils/masterCabinetUi'
 import SalonWorkSchedule from '../components/SalonWorkSchedule'
 import CategoryEditModal from '../modals/CategoryEditModal'
 import ServiceEditModal from '../modals/ServiceEditModal'
@@ -907,6 +908,9 @@ export default function MasterDashboard() {
   // Обновляем URL при изменении activeTab
   const handleTabChange = (tab) => {
     const next = resolveMasterTabForWebSession(tab, isIosAppWebSession)
+    if (next === 'schedule' && activeTab === 'schedule') {
+      setScheduleSurfaceKey((key) => key + 1)
+    }
     setActiveTab(next)
     navigate(`/master?tab=${encodeURIComponent(next)}`, { replace: true })
   }
@@ -933,6 +937,26 @@ export default function MasterDashboard() {
   const [showSubscriptionModal, setShowSubscriptionModal] = useState(false)
   const [isAuthorized, setIsAuthorized] = useState(false)
   const [scheduleView, setScheduleView] = useState('schedule') // 'schedule' или 'past'
+  const [manualCreateIntentKey, setManualCreateIntentKey] = useState(0)
+  const [scheduleSurfaceKey, setScheduleSurfaceKey] = useState(0)
+  const prevActiveTabRef = useRef(activeTab)
+
+  const consumeManualCreateIntent = useCallback(() => {
+    setManualCreateIntentKey(0)
+  }, [])
+
+  useEffect(() => {
+    if (activeTab === 'schedule' && prevActiveTabRef.current !== 'schedule') {
+      setScheduleSurfaceKey((key) => key + 1)
+    }
+    prevActiveTabRef.current = activeTab
+  }, [activeTab])
+
+  const requestNewManualBooking = () => {
+    setScheduleView('schedule')
+    setManualCreateIntentKey((key) => key + 1)
+    handleTabChange('schedule')
+  }
   const [profileWarnings, setProfileWarnings] = useState([])
   /**
    * Локально скрыть карточку «Требуется внимание» (без API).
@@ -1085,8 +1109,8 @@ export default function MasterDashboard() {
     const navButtonClass = (tab) =>
       `${navItemBase} ${
         activeTab === tab
-          ? 'bg-[#DFF5EC] font-semibold text-[#3D8B42] shadow-[inset_0_0_0_1px_rgba(76,175,80,0.14)]'
-          : 'text-[#6B6B6B] hover:bg-[#F4F1EF] hover:text-[#2D2D2D]'
+          ? 'bg-[var(--dedato-action-selected,#e8f5e9)] font-semibold text-[var(--dedato-action-primary,#2e7d32)] shadow-[inset_0_0_0_1px_rgba(46,125,50,0.12)]'
+          : 'text-[var(--dedato-text-secondary,#5f6368)] hover:bg-[var(--dedato-surface-subtle,#f3f4f6)] hover:text-[var(--dedato-text-primary,#2d2d2d)]'
       }`
 
     const iconClass = 'h-[18px] w-[18px] shrink-0 text-current opacity-[0.92] group-hover:opacity-100'
@@ -1612,7 +1636,7 @@ export default function MasterDashboard() {
                   <p className="mb-0 hidden text-[11px] font-semibold uppercase tracking-[0.14em] text-[#3D8B42]/90 lg:mb-1.5 lg:block">
                     Рабочий стол
                   </p>
-                  <h1 className="text-[18px] font-extrabold leading-tight tracking-[-0.02em] text-[#1C1917] lg:text-[26px] lg:font-bold lg:leading-tight">
+                  <h1 className="text-[18px] font-extrabold leading-tight tracking-[-0.02em] text-[var(--dedato-text-primary,#2d2d2d)] lg:text-[30px] lg:font-bold lg:leading-tight">
                     {(() => {
                       const full = (masterSettingsPayload?.user?.full_name || '').trim()
                       if (!full) return 'Дашборд мастера'
@@ -1629,19 +1653,19 @@ export default function MasterDashboard() {
                     })}
                   </p>
                 </div>
-                <div className="hidden shrink-0 w-full grid-cols-2 gap-2.5 sm:grid sm:w-auto lg:flex lg:w-auto lg:gap-2.5">
+                <div className="grid shrink-0 w-full grid-cols-2 gap-2.5 sm:w-auto lg:flex lg:w-auto lg:gap-2.5">
                   <button
                     type="button"
                     onClick={() => handleTabChange('schedule')}
-                    className="inline-flex h-11 min-h-[48px] items-center justify-center gap-2 rounded-[12px] border-2 border-[#E7E2DF] bg-white px-2 text-[13px] font-bold text-[#292524] shadow-[0_2px_8px_rgba(45,45,45,0.06)] transition-colors hover:bg-[#F4F1EF] lg:h-11 lg:min-w-[10rem] lg:border lg:px-5 lg:text-[13px] lg:font-semibold lg:shadow-sm"
+                    className={`${mcBtnSecondary} h-11 min-h-[48px] w-full lg:min-w-[10rem]`}
                   >
                     <CalendarDaysIcon className="h-4 w-4 shrink-0" strokeWidth={2} aria-hidden />
                     Расписание
                   </button>
                   <button
                     type="button"
-                    onClick={() => handleTabChange('schedule')}
-                    className="inline-flex h-11 min-h-[48px] items-center justify-center gap-2 rounded-[12px] border border-transparent bg-[#4CAF50] px-2 text-[13px] font-bold text-white shadow-[0_4px_16px_-4px_rgba(46,125,50,0.55)] transition-colors hover:bg-[#45A049] lg:h-11 lg:min-w-[10rem] lg:px-5 lg:font-semibold lg:shadow-[0_1px_0_#3D8B42,0_4px_12px_-2px_rgba(76,175,80,0.35)]"
+                    onClick={requestNewManualBooking}
+                    className={`${mcBtnPrimary} h-11 min-h-[48px] w-full shadow-[0_4px_16px_-4px_rgba(46,125,50,0.35)] lg:min-w-[10rem]`}
                   >
                     <PlusIcon className="h-4 w-4 shrink-0" strokeWidth={2} aria-hidden />
                     Новая запись
@@ -1830,7 +1854,9 @@ export default function MasterDashboard() {
                   setClientsUpdateTrigger((t) => t + 1);
                 }}
                 onOpenSubscriptionModal={canPurchaseSubscription ? () => setShowSubscriptionModal(true) : null}
-                onOpenSchedule={handleCopyPublicLink}
+                onNavigateSchedule={() => handleTabChange('schedule')}
+                onCopyPublicLink={handleCopyPublicLink}
+                onNewManualBooking={requestNewManualBooking}
                 onOpenServices={() => handleTabChange('services')}
                 onOpenTariff={isIosAppWebSession ? null : () => handleTabChange('tariff')}
                 onOpenStoryImage={() => setIsStoryModalOpen(true)}
@@ -1846,46 +1872,19 @@ export default function MasterDashboard() {
             </div>
           )}
           {activeTab === 'schedule' && (
-            <div>
-              <h1 className="mb-3 text-2xl font-bold lg:mb-6 lg:text-3xl">Расписание</h1>
-              
-              {/* Режимы: на <lg — низкие сегменты без flex-1 «плашек» */}
-              <div className="mb-3 lg:mb-6">
-                <div
-                  className="inline-flex max-w-full rounded-md border border-gray-200/90 bg-gray-100/90 p-px shadow-sm lg:rounded-xl lg:p-1"
-                  role="tablist"
-                  aria-label="Режим просмотра расписания"
-                >
+            <div className="min-w-0 max-lg:-mx-4 max-lg:px-5">
+              {scheduleView === 'past' ? (
+                <div className="mb-4">
                   <button
                     type="button"
-                    role="tab"
-                    aria-selected={scheduleView === 'schedule'}
+                    className={mcBtnSecondary}
                     onClick={() => setScheduleView('schedule')}
-                    className={`rounded-[4px] px-2 py-0.5 text-center text-[11px] font-medium leading-snug transition-all lg:min-w-[9.5rem] lg:rounded-lg lg:px-5 lg:py-2.5 lg:text-sm lg:font-semibold ${
-                      scheduleView === 'schedule'
-                        ? 'bg-[#4CAF50] text-white shadow-sm ring-1 ring-green-600/25'
-                        : 'text-gray-600 hover:bg-white/60 hover:text-gray-900'
-                    }`}
                   >
-                    Расписание
-                  </button>
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={scheduleView === 'past'}
-                    onClick={() => setScheduleView('past')}
-                    className={`rounded-[4px] px-2 py-0.5 text-center text-[11px] font-medium leading-snug transition-all lg:min-w-[9.5rem] lg:rounded-lg lg:px-5 lg:py-2.5 lg:text-sm lg:font-semibold ${
-                      scheduleView === 'past'
-                        ? 'bg-[#4CAF50] text-white shadow-sm ring-1 ring-green-600/25'
-                        : 'text-gray-600 hover:bg-white/60 hover:text-gray-900'
-                    }`}
-                  >
-                    Прошедшие записи
+                    ← К календарю
                   </button>
                 </div>
-              </div>
+              ) : null}
 
-              {/* Контент в зависимости от выбранного вида */}
               {scheduleView === 'schedule' ? (
                 <>
                   {scheduleError && (
@@ -1895,20 +1894,23 @@ export default function MasterDashboard() {
                   )}
                   {scheduleLoading && !scheduleResolved ? (
                     <div className="text-center py-8">Загрузка расписания...</div>
-                  ) : (
-                    <MasterScheduleCalendar
-                        key="master-schedule-calendar"
-                        schedule={schedule}
-                        onChange={handleScheduleChange}
-                        currentWeekOffset={currentWeekOffset}
-                        setCurrentWeekOffset={setCurrentWeekOffset}
-                        onWeekChange={handleWeekChange}
-                        allConflicts={allConflicts}
-                        masterSettings={masterSettings}
-                        hasExtendedStats={canUseExtendedStats}
-                        onDayScheduleSaved={loadSchedule}
-                      />
-                  )}
+                  ) : null}
+                  <MasterScheduleCalendar
+                    key="master-schedule-calendar"
+                    scheduleSurfaceKey={scheduleSurfaceKey}
+                    schedule={schedule}
+                    onChange={handleScheduleChange}
+                    currentWeekOffset={currentWeekOffset}
+                    setCurrentWeekOffset={setCurrentWeekOffset}
+                    onWeekChange={handleWeekChange}
+                    allConflicts={allConflicts}
+                    masterSettings={masterSettings}
+                    hasExtendedStats={canUseExtendedStats}
+                    onDayScheduleSaved={loadSchedule}
+                    manualCreateIntentKey={manualCreateIntentKey}
+                    onManualCreateIntentConsumed={consumeManualCreateIntent}
+                    onOpenPastAppointments={() => setScheduleView('past')}
+                  />
                 </>
               ) : (
                 <PastAppointments />

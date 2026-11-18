@@ -7,6 +7,13 @@ def deny_booking_access():
     raise HTTPException(403, "Доступ запрещён")
 
 
+def reject_legacy_manual_mutation(booking) -> None:
+    """Manual rows are changed only by versioned B3 routes and visit completion."""
+
+    if booking is not None and getattr(booking, "source", None) == "manual":
+        raise HTTPException(status_code=404, detail="Бронирование не найдено")
+
+
 def require_booking_actor(db, user, booking):
     if booking is None:
         raise HTTPException(404, "Бронирование не найдено")

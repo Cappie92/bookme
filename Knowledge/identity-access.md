@@ -73,9 +73,21 @@ Authorization принадлежит backend endpoint dependencies и object que
 - `require_moderator_permission(...)` пропускает admin либо проверяет конкретный `ModeratorPermissions` flag;
 - object ownership для Booking mutations принадлежит `require_booking_actor` / `validate_booking_changes`; знание `booking_id` или `edit_request_id` само по себе не даёт права записи.
 
-Router composition неоднородна. Moderator, promo-engine, subscription-plan и service-function admin routers используют instantiated role checker. Core admin router подключает factory некорректно; endpoint-local checkers защищают только handlers, где они объявлены. Это [critical admin enforcement Debt](security-and-privacy.md#critical-admin-router-root-enforcement). Demo readonly — отдельный global dependency, см. §6.
+**CONFIRMED, 2026-11-14, локальная интеграция `cf0afa2` / `1830b5e`:** core admin
+router использует `Depends(require_admin_or_moderator())`, а endpoint guards
+проверяют конкретные права модератора. Admin имеет полный доступ; отсутствие
+записи `ModeratorPermissions` или флага не даёт разрешения. Исторический дефект
+root dependency закрыт в проверенном коде; [граница подтверждения](security-and-privacy.md#critical-admin-router-root-enforcement).
+Demo readonly остаётся отдельной глобальной dependency (§6).
 
-Frontend `AdminRoute` и role-based navigation — UX boundary. Они не компенсируют server-side gap и не являются security control.
+`GET /api/admin/access` возвращает только роль текущего staff-пользователя и
+boolean-снимок его разрешений с `Cache-Control: no-store`. Anonymous получает 401,
+non-staff — 403, moderator без разрешений — снимок с false. Снимок предназначен
+для UI и не заменяет endpoint authorization. Локально прошли 46 проверок в
+`test_admin_access_snapshot.py`, `test_admin_security_hotfix.py` и
+`test_booking_read_security.py`; это не свидетельство выкладки на staging/prod.
+
+Frontend `AdminRoute` и role-based navigation — UX boundary. Они не заменяют серверное enforcement и не являются security control.
 
 **Source:** `backend/auth.py`; router declarations under `backend/routers/`; `frontend/src/App.jsx`.
 

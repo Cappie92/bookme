@@ -10,6 +10,7 @@ import pytest
 from fastapi import HTTPException
 
 from auth import get_password_hash
+from tests.booking_fixture import apply_grid_walls_to_booking, grid_booking_walls
 from models import (
     AppliedDiscount,
     Booking,
@@ -115,16 +116,18 @@ def _booking(db, *, master, client_user, start, alias, note):
     service = Service(name="Стрижка", price=1500, duration=60, salon_id=None)
     db.add(service)
     db.flush()
+    start_wall, end_wall = grid_booking_walls(start, start + timedelta(hours=1))
     booking = Booking(
         client_id=client_user.id,
         service_id=service.id,
         master_id=master.id,
-        start_time=start,
-        end_time=start + timedelta(hours=1),
+        start_time=start_wall,
+        end_time=end_wall,
         status=BookingStatus.CREATED,
         payment_amount=1500,
         loyalty_points_used=0,
     )
+    apply_grid_walls_to_booking(booking)
     db.add(booking)
     db.add(
         MasterClientMetadata(
@@ -309,26 +312,33 @@ def test_ios_capacity_matches_paid_unlimited(client, db):
     db.add(service)
     db.flush()
     for index in range(20):
-        start = now + timedelta(hours=index + 1)
+        start, end = grid_booking_walls(
+            now + timedelta(hours=index + 1),
+            now + timedelta(hours=index + 2),
+        )
         db.add(
             Booking(
                 client_id=master_user.id,
                 service_id=service.id,
                 master_id=master.id,
                 start_time=start,
-                end_time=start + timedelta(hours=1),
+                end_time=end,
                 status=BookingStatus.CREATED,
                 payment_amount=100,
                 loyalty_points_used=0,
             )
         )
     db.commit()
+    cand_start, cand_end = grid_booking_walls(
+        now + timedelta(days=5),
+        now + timedelta(days=5, hours=1),
+    )
     candidate = {
         "client_id": master_user.id,
         "service_id": service.id,
         "master_id": master.id,
-        "start_time": now + timedelta(days=5),
-        "end_time": now + timedelta(days=5, hours=1),
+        "start_time": cand_start,
+        "end_time": cand_end,
         "status": BookingStatus.CREATED.value,
         "payment_amount": 100,
     }
@@ -980,21 +990,26 @@ def _fill_future_bookings(db, master, count):
     service = Service(name="Уже занято", price=100, duration=60, salon_id=None)
     db.add(service)
     db.flush()
-    origin = datetime.utcnow() + timedelta(days=40)
+    origin, _ = grid_booking_walls(
+        datetime.utcnow() + timedelta(days=40),
+        datetime.utcnow() + timedelta(days=40, hours=1),
+    )
     for index in range(count):
-        start = origin + timedelta(hours=index + 1)
-        db.add(
-            Booking(
-                client_id=master.user_id,
-                service_id=service.id,
-                master_id=master.id,
-                start_time=start,
-                end_time=start + timedelta(hours=1),
-                status=BookingStatus.CREATED,
-                payment_amount=100,
-                loyalty_points_used=0,
-            )
+        start, end = grid_booking_walls(
+            origin + timedelta(hours=index + 1),
+            origin + timedelta(hours=index + 2),
         )
+        row = Booking(
+            client_id=master.user_id,
+            service_id=service.id,
+            master_id=master.id,
+            start_time=start,
+            end_time=end,
+            status=BookingStatus.CREATED,
+            payment_amount=100,
+            loyalty_points_used=0,
+        )
+        db.add(row)
     db.commit()
 
 

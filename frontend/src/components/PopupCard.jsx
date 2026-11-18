@@ -4,7 +4,7 @@ import { apiPost } from '../utils/api'
 import { canCancelBooking, canShowFutureConfirmAction, canConfirmPostVisit, CANCELLATION_REASONS } from '../utils/bookingOutcome'
 import { useToast } from '../contexts/ToastContext'
 
-const PopupCard = ({ booking, position, visible, onClose, onCancelSuccess, onConfirmSuccess, masterSettings, onMouseEnter, onMouseLeave }) => {
+const PopupCard = ({ booking, position, visible, onClose, onCancelSuccess, onConfirmSuccess, masterSettings, onMouseEnter, onMouseLeave, onEditManual }) => {
   const { showToast } = useToast()
   const [showReasonPicker, setShowReasonPicker] = useState(false)
   const [cancelling, setCancelling] = useState(false)
@@ -55,7 +55,9 @@ const PopupCard = ({ booking, position, visible, onClose, onCancelSuccess, onCon
     }
   }
 
-  const showCancel = canCancelBooking(booking)
+  const manual = booking.source === 'manual'
+  const showCancel = !manual && canCancelBooking(booking)
+  const showManualActions = manual && typeof onEditManual === 'function'
 
   const formatTime = (dateString) => {
     const date = new Date(dateString)
@@ -199,7 +201,15 @@ const PopupCard = ({ booking, position, visible, onClose, onCancelSuccess, onCon
       </div>
 
       {/* Кнопки Подтвердить / Отменить */}
-      {(showConfirm || showCancel) && (
+      {showManualActions && (
+        <div className="mt-3 pt-3 border-t border-gray-200">
+          <button type="button" onClick={onEditManual} className="w-full rounded-lg border border-green-600 px-3 py-2 text-sm font-medium text-green-700">
+            Изменить или отменить
+          </button>
+        </div>
+      )}
+
+      {!manual && (showConfirm || showCancel) && (
         <div className="mt-3 pt-3 border-t border-gray-200 flex gap-2">
           {showConfirm && (
             <button

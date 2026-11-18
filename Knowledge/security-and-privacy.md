@@ -84,15 +84,13 @@ Repository-known security/privacy debt. Документ не содержит c
 
 ## Critical: admin router root enforcement
 
-- **Severity:** `critical`
-- **Confidence:** CONFIRMED
-- **Trust boundary:** authenticated identity → administrative mutations and operational data.
-- **Category:** dependency factory wired without instantiating its role checker.
-- **Confirmed scope:** the core admin router registers the factory itself as a root dependency; endpoint-local role/permission dependencies still protect only the handlers that declare them. Other admin/moderator routers use instantiated checkers correctly.
-- **Potential impact:** administrative handlers relying only on the ineffective root dependency may execute without the intended admin/moderator role enforcement.
-- **Sources:** `backend/auth.py` — `require_admin_or_moderator`; `backend/routers/admin.py` — router declaration and endpoint-local dependencies; comparison with `backend/routers/moderator.py`, `backend/routers/admin_promo_engine.py`, `backend/routers/subscription_plans.py`, `backend/routers/service_functions.py`.
-- **Status:** active repository-known debt; frontend route guards do not compensate for backend enforcement.
-- **Required action:** separate authorization remediation with endpoint inventory and regression tests.
+- **Severity:** was `critical`; heading retained for existing links.
+- **Confidence:** CONFIRMED for local repository implementation, 2026-11-14.
+- **Historical defect:** core admin router registered the dependency factory without invoking it, leaving handlers without endpoint-local guards exposed.
+- **Resolution:** `cf0afa2` instantiates `require_admin_or_moderator()` at the router root and adds endpoint permission checks. Current staff snapshot/UI contract: [Identity and access](identity-access.md#5-authorization-enforcement).
+- **Validation:** 46 focused backend tests passed locally across `test_admin_access_snapshot.py`, `test_admin_security_hotfix.py`, `test_booking_read_security.py`. Synthetic local smoke: anonymous access 401, restricted moderators denied stats 403, admin allowed stats 200.
+- **Status:** implementation remediated in the locally integrated code. This task did not deploy or verify staging/production; their rollout status remains outside this evidence.
+- **Sources:** `backend/auth.py`; `backend/routers/admin.py`; the three focused backend test modules above.
 
 ## Closed: legacy reverse-call verification
 

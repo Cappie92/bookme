@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test'
+import { openPastAppointmentsFromScheduleHub } from './helpers'
 import { localAppOrigins } from './localGuard'
 
 const forbidden = /pricing-catalog|subscription-plans|subscription|balance|payment\/init|loyalty|invitations/
@@ -31,13 +32,13 @@ for (const staleError of [false, true]) {
       await page.getByRole('button', { name: 'Следующая неделя', exact: true }).click()
       await expect.poll(() => held.has(offset)).toBe(true)
     }
-    const mondayEight = page.locator('#schedule-table tbody tr').nth(16).locator('td').nth(1)
+    const targetSlot = page.locator('[data-slot-key="2026-09-28_8_0"]')
     await held.get(3)!()
-    await expect(mondayEight).toHaveClass(/bg-green-100/)
+    await expect(targetSlot).toHaveAttribute('data-working', 'true')
     await held.get(2)!()
     await held.get(1)!()
     await page.waitForLoadState('networkidle')
-    await expect(mondayEight).toHaveClass(/bg-green-100/)
+    await expect(targetSlot).toHaveAttribute('data-working', 'true')
     await expect(page.getByText('Ошибка сети', { exact: true })).toHaveCount(0)
     // Development StrictMode replays initial mount; navigation itself fetches once.
     expect(calls).toEqual([0, 0, 1, 2, 3])
@@ -92,19 +93,23 @@ for (const origin of ['ios_app', null]) {
 
 for (const timezoneId of ['UTC', 'Europe/Moscow']) {
   test.describe(`batch A drawer ${timezoneId}`, () => {
-    test.use({ timezoneId })
-    test('00:15 and 23:45 stay in the selected local day', async ({ page }) => {
+    test.use({ timezoneId, viewport: { width: 1280, height: 900 } })
+    test('midnight grid edges stay in the selected local day', async ({ page }) => {
       const evidence = await fixture(page)
       await page.clock.setFixedTime(new Date('2026-09-11T12:00:00Z'))
       const offset = timezoneId === 'UTC' ? 'Z' : '+03:00'
       const bookings = [
-        { id: 1, service_name: 'Midnight local', start_time: `2026-09-11T00:15:00${offset}`, end_time: `2026-09-11T00:45:00${offset}`, status: 'confirmed' },
-        { id: 2, service_name: 'Late local', start_time: `2026-09-11T23:45:00${offset}`, end_time: `2026-09-12T00:00:00${offset}`, status: 'confirmed' },
-        { id: 3, service_name: 'Adjacent local', start_time: `2026-09-12T00:15:00${offset}`, end_time: `2026-09-12T00:45:00${offset}`, status: 'confirmed' },
+        { id: 1, service_name: 'Midnight local', start_time: `2026-09-11T00:00:00${offset}`, end_time: `2026-09-11T00:30:00${offset}`, status: 'confirmed' },
+        { id: 2, service_name: 'Late local', start_time: `2026-09-11T23:30:00${offset}`, end_time: `2026-09-12T00:00:00${offset}`, status: 'confirmed' },
+        { id: 3, service_name: 'Adjacent local', start_time: `2026-09-12T00:00:00${offset}`, end_time: `2026-09-12T00:30:00${offset}`, status: 'confirmed' },
       ]
       await page.route('**/api/master/bookings/detailed', route => route.fulfill({ json: bookings }))
       await page.goto('/master?tab=schedule')
-      await page.getByRole('button', { name: 'Настроить день', exact: true }).nth(4).click()
+      const fridayColumn = page
+        .getByRole('button', { name: 'пт 11 сент', exact: true })
+        .locator('xpath=ancestor::div[contains(@class,"group/header")][1]')
+      await fridayColumn.hover()
+      await fridayColumn.getByRole('button', { name: 'Слоты дня', exact: true }).click()
       const drawer = page.getByText('Локальные правки только на эту дату · правило недели не меняется').locator('../../..')
       await expect(drawer.getByText('Midnight local', { exact: true })).toBeVisible()
       await expect(drawer.getByText('Late local', { exact: true })).toBeVisible()
@@ -439,19 +444,19 @@ test('stabilization pending first load survives settings/request race without ta
 
 for (const timezoneId of ['UTC', 'Europe/Moscow']) {
   test.describe(`stabilization browser date ${timezoneId}`, () => {
-    test.use({ timezoneId })
+    test.use({ timezoneId, viewport: { width: 390, height: 900 } })
     test('Friday selection sends only Friday; no past Sunday, error dates localized', async ({ page }) => {
       const evidence = await fixture(page)
       await page.clock.setFixedTime(new Date('2026-09-10T21:15:00Z'))
       const payloads: any[] = []
       await page.route('**/api/master/schedule/day', route => {
-        payloads.push(route.request().postDataJSON())
+        const json = route.request().postDataJSON()
+        payloads.push(json)
         return route.fulfill({ status: 400, json: { detail: 'Дата 2026-09-06 уже прошла.' } })
       })
       await page.goto('/master?tab=schedule')
-      const cell = page.locator('#schedule-table tbody tr').nth(16).locator('td').nth(5)
-      await cell.click()
-      await page.getByRole('button', { name: 'Установить рабочее время', exact: true }).click()
+      await page.locator('[data-slot-key="2026-09-11_8_0"]').click()
+      await page.getByRole('button', { name: 'Рабочее время', exact: true }).click()
       await expect.poll(() => payloads.length).toBe(1)
       expect(payloads[0]).toEqual({ schedule_date: '2026-09-11', open_slots: [{ hour: 8, minute: 0 }] })
       await expect(page.getByText('Дата 06.09.2026 уже прошла.', { exact: true })).toBeVisible()
@@ -518,7 +523,7 @@ for (const width of [375, 430, 768, 820, 1024, 1180]) {
       await expect(nav).toBeVisible()
       for (const label of ['Дашборд', 'Расписание', 'Услуги', 'Настройки']) await expect(nav.getByRole('button', { name: label, exact: true })).toBeVisible()
       await expect(nav.getByRole('button')).toHaveCount(4)
-      await page.getByRole('tab', { name: 'Прошедшие записи', exact: true }).click()
+      await openPastAppointmentsFromScheduleHub(page)
       await expect(page.getByText('Fixture Client')).toBeVisible()
       await expect(page.getByText('Изменить статус', { exact: true })).toHaveCount(0)
       await expect(page.getByRole('button', { name: 'Сохранить', exact: true })).toHaveCount(0)
@@ -721,7 +726,7 @@ test('ordinary login still resolves profile and opens its normal master cabinet'
 test('ordinary web past accounting operation remains available', async ({ page }) => {
   await fixture(page, { origin: null, plan: 'Paid' })
   await page.goto('/master?tab=schedule')
-  await page.getByRole('tab', { name: 'Прошедшие записи', exact: true }).click()
+  await openPastAppointmentsFromScheduleHub(page)
   await expect(page.getByText('Изменить статус', { exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Сохранить', exact: true })).toBeVisible()
 })

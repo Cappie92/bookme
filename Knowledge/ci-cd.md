@@ -4,7 +4,7 @@ project: DeDato
 knowledge_class: living
 environment: common
 status: active
-last_verified: 2026-09-27
+last_verified: 2026-11-13
 ---
 
 # CI/CD
@@ -17,7 +17,7 @@ GitHub Actions discovers workflow files only under repository-root `.github/work
 
 | Workflow | Trigger | Repository-known action |
 |----------|---------|-------------------------|
-| `tests.yml` | `pull_request`; push to `main` | Application regression: backend pytest, frontend Vitest, mobile Jest unit + integration, Playwright E2E. Four parallel independent jobs. `contents: read`. No deploy. |
+| `tests.yml` | `pull_request`; `merge_group`; push to `main` and `v*` tags; nightly schedule; manual `workflow_dispatch` | Application regression with conservative suite selection, then backend pytest (two module shards or selected modules), frontend Vitest, mobile Jest unit + integration, Playwright E2E. `contents: read`. No deploy. |
 | `gitleaks.yml` | `pull_request_target`; push to `main`/`master`; manual | Checksum-pinned Gitleaks 8.21.2: directed history plus mandatory exact-tree scan; manual full history including merge diffs |
 | `mkdocs.yml` | every push; pull request | Prepares and builds MkDocs in strict mode, then uploads the generated site artifact |
 | `arch-overview.yml` | daily schedule; manual `workflow_dispatch` | Regenerates architecture overview and commits selected generated outputs when they differ |
@@ -29,14 +29,21 @@ Only the deploy job declares concurrency: one active run in the fixed `productio
 
 ## Application test workflow
 
-`.github/workflows/tests.yml` is the current repository-hosted application gate. Clean-checkout GitHub Actions runs of all **four** jobs have **passed**.
+`.github/workflows/tests.yml` is the current repository-hosted application gate. Clean-checkout full runs of all application suites have passed at least through commit `d072998`; newer selective/sharded workflow behavior is **CONFIRMED** in repository config as of 2026-11-13 but is not restated here as a fresh green gate for every later commit.
+
+### Suite selection (`select`)
+
+Job `select` runs `scripts/ci/select_tests.py` against the event diff. Policy unit tests live in `scripts/ci/test_*.py`. **Conservative default:** unrecognized paths, shared/CI/script tooling changes, configuration files and any selector uncertainty force **full** backend + frontend + mobile + Playwright. Changes confined to `Knowledge/*.md` may yield `docs_only` with all application suites off (MkDocs still has its own workflow). Deliberately reduced Playwright scope exists only for a small landing-page footprint (`playwright_mode: smoke` with named smoke specs). Backend can run in `selected` mode with an explicit pytest module list instead of full discovery.
+
+### Executable jobs
 
 | Job | Runtime | Install | Command |
 |-----|---------|---------|---------|
-| `backend` | Python 3.9 | `pip install -r requirements.txt` from `backend/` | `python -m pytest` |
+| `backend-shard` (×2) | Python 3.9 | `pip install -r requirements.txt` from `backend/` | `python -m pytest` on module shard **or** skipped when `backend_scope=selected` |
+| `backend` | Python 3.9 | same | full `python -m pytest` **or** selected module list from selector |
 | `frontend` | Node 20 | `npm ci` in `frontend/` | `npm test` |
 | `mobile` | Node 20; Python 3.9 for icon tooling only | `pip install -r scripts/dev/requirements.txt` then `npm ci` in `mobile/` | `npm test` then `npm run test:integration` |
-| `playwright` | Node 20 + Python 3.9 | frontend `npm ci`, backend `pip install -r requirements.txt`, Chromium only | `./scripts/run-playwright-e2e.sh` |
+| `playwright` | Node 20 + Python 3.9 | frontend `npm ci`, backend `pip install -r requirements.txt`, Chromium only | `./scripts/run-playwright-e2e.sh` (full **or** smoke spec subset) |
 
 The Playwright job is a self-contained loopback regression gate: disposable SQLite `/tmp/dedato-playwright-e2e.db`, `ENVIRONMENT=development`, `DEV_E2E=true`, provider stubs, mandatory E2E seed, no production/staging URLs or secrets. Schema bootstrap is application `create_all`, not empty-DB `alembic upgrade head`. Details: [Testing strategy](testing-strategy.md).
 
@@ -46,7 +53,7 @@ Not current root CI jobs: Maestro, EAS, Docker deploy, black/isort/flake8/mypy, 
 
 A nested `backend/.github/workflows/ci.yml` previously described pytest-cov, Redis, black/isort/flake8/mypy and Codecov on Python 3.11. GitHub never executed it. The file was **removed**. Those extra checks were never functioning GitHub checks.
 
-**Sources:** `.github/workflows/tests.yml`; `mobile/scripts/dev/requirements.txt`; `backend/Dockerfile`; `backend/pyproject.toml`; `frontend/Dockerfile.prod`; `frontend/package.json`; `mobile/package.json`; [Testing strategy](testing-strategy.md).
+**Sources:** `.github/workflows/tests.yml`; `scripts/ci/select_tests.py`; `scripts/ci/test_select_tests.py`; `scripts/ci/backend_shards.py`; `mobile/scripts/dev/requirements.txt`; `backend/Dockerfile`; `backend/pyproject.toml`; `frontend/Dockerfile.prod`; `frontend/package.json`; `mobile/package.json`; [Testing strategy](testing-strategy.md).
 
 ## Other pull-request / push gates
 
@@ -80,7 +87,7 @@ GitHub `deploy.yml` остаётся repository-defined manual workflow, но **
 9. component rollback при failure;
 10. migrations только при явной необходимости.
 
-Current production runtime is split: backend `dedato_backend:96f3f27`, frontend `dedato_frontend:fde8033-prod`. Canonical `main` / `origin/main` tip is `aa37b54` (`ci: add self-contained Playwright regression job`). Store versions remain iOS 1.1.0 (13) / Android 1.1.0 (6). Production backend is **not** at current `main`. Details of unsuccessful helper implementations are transient and not SSOT.
+Current production image tags and the `d072998` CI/deploy gate are the replaceable block in [Production topology](production-topology.md). Canonical `main` / `origin/main` tip checked 2026-10-19 is `d072998`. Store candidate is iOS 1.1.0 (16); Android remains 1.1.0 (6).
 
 ## Manual staging release gate
 
@@ -89,7 +96,7 @@ Current production runtime is split: backend `dedato_backend:96f3f27`, frontend 
 Текущий production flow:
 
 ```text
-main (backend runtime 96f3f27 / frontend runtime fde8033-prod / tip aa37b54)
+main
 → separately authorized manual production cutover
 → health/integrity gates
 ```

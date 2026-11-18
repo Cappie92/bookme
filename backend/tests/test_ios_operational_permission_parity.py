@@ -5,6 +5,7 @@ import pytest
 
 from models import BookingStatus, MasterSchedule, SubscriptionPlan, SubscriptionType
 from routers.auth import _issue_tokens_for_user
+from tests.booking_fixture import grid_booking_walls
 from test_confirm_booking_created import (
     _attach_master_subscription_with_features,
     _create_master_with_booking,
@@ -48,8 +49,12 @@ def test_same_operational_permissions(client, db, operational_account, origin, a
             headers=headers,
         )
     elif action == "pre_confirm":
-        booking.start_time = datetime.utcnow() + timedelta(days=2)
-        booking.end_time = booking.start_time + timedelta(hours=1)
+        start, end = grid_booking_walls(
+            datetime.utcnow() + timedelta(days=2),
+            datetime.utcnow() + timedelta(days=2, hours=1),
+        )
+        booking.start_time = start
+        booking.end_time = end
         db.commit()
         result = client.post(
             f"/api/master/accounting/update-booking-status/{booking_id}?new_status=confirmed",

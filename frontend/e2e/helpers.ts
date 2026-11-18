@@ -1,5 +1,4 @@
 import { APIRequestContext, Page } from '@playwright/test'
-import { expect } from '@playwright/test'
 import * as path from 'path'
 import { resolveE2eBackendURL } from './localGuard'
 
@@ -22,6 +21,18 @@ export async function ensureE2eSeed(request: APIRequestContext) {
 const LOGIN_TIMEOUT_MS = 45000
 const NAV_DASHBOARD_TIMEOUT_MS = 20000
 
+/** Master schedule hub → Ещё → Прошедшие записи (B3 template panel). */
+export async function openPastAppointmentsFromScheduleHub(page: Page) {
+  const modeTabs = page.getByTestId('master-schedule-mode-tabs')
+  await modeTabs.waitFor({ state: 'visible' })
+  const scheduleTab = modeTabs.locator('#master-schedule-tab-schedule')
+  await scheduleTab.focus()
+  await page.keyboard.press('Enter')
+  await page.getByTestId('master-schedule-hub').waitFor({ state: 'visible' })
+  await page.getByTestId('master-schedule-more').click()
+  await page.getByRole('menuitem', { name: 'Прошедшие записи', exact: true }).click()
+}
+
 export async function loginViaUI(page: Page, phone: string, password: string) {
   let loginStatus: number | null = null
   let loginBody: string | null = null
@@ -30,28 +41,7 @@ export async function loginViaUI(page: Page, phone: string, password: string) {
   const loginResPromise = page.waitForResponse(
     (res) => res.url().includes('auth/login') && res.request().method() === 'POST',
     { timeout: LOGIN_TIMEOUT_MS }
-  ).then(async (res) => {
-    loginStatus = res.status()
-    if (loginStatus !== 200) {
-      try {
-        const json = await res.json()
-        loginBody = JSON.stringify(json)
-          .replace(/"access_token"[^,}]*/g, '"access_token":"<redacted>"')
-          .replace(/"refresh_token"[^,}]*/g, '"refresh_token":"<redacted>"')
-      } catch {
-        loginBody = await res.text().catch(() => '')
-      }
-    }
-    return res
-  })
-
-  const usersMePromise = page.waitForResponse(
-    (res) => res.url().includes('users/me') && res.request().method() === 'GET',
-    { timeout: LOGIN_TIMEOUT_MS }
-  ).then((res) => {
-    usersMeStatus = res.status()
-    return res
-  })
+  )
 
   await page.goto('/')
   await page.getByRole('button', { name: /Войти/i }).first().click()
@@ -63,22 +53,32 @@ export async function loginViaUI(page: Page, phone: string, password: string) {
 
   await page.locator('[data-testid="auth-login-submit"]').click()
 
+  let loginRes
   try {
-    await loginResPromise
-  } catch (e) {
-    throw new Error(`Login timeout (${LOGIN_TIMEOUT_MS}ms). No auth/login response. ${loginStatus != null ? `Status: ${loginStatus}` : ''}`)
+    loginRes = await loginResPromise
+  } catch {
+    throw new Error(`Login timeout (${LOGIN_TIMEOUT_MS}ms). No auth/login response.`)
   }
+  loginStatus = loginRes.status()
   if (loginStatus !== 200) {
+    try {
+      const json = await loginRes.json()
+      loginBody = JSON.stringify(json)
+        .replace(/"access_token"[^,}]*/g, '"access_token":"<redacted>"')
+        .replace(/"refresh_token"[^,}]*/g, '"refresh_token":"<redacted>"')
+    } catch {
+      loginBody = await loginRes.text().catch(() => '')
+    }
     const msg = [`Login API returned ${loginStatus}`, loginBody].filter(Boolean).join(' | ')
     throw new Error(msg)
   }
 
-  try {
-    await usersMePromise
-  } catch (e) {
-    throw new Error(`users/me timeout. Login was 200.`)
-  }
-  if (usersMeStatus !== null && usersMeStatus !== 200) {
+  const usersMeRes = await page.waitForResponse(
+    (res) => res.url().includes('users/me') && res.request().method() === 'GET',
+    { timeout: LOGIN_TIMEOUT_MS }
+  )
+  usersMeStatus = usersMeRes.status()
+  if (usersMeStatus !== 200) {
     throw new Error(`users/me returned ${usersMeStatus}`)
   }
 

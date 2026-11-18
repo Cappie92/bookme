@@ -37,7 +37,7 @@ def test_session_version_migration_backfills_existing_user_and_downgrades(tmp_pa
     connection.commit()
     connection.close()
 
-    _alembic(database_url, "upgrade", "head")
+    _alembic(database_url, "upgrade", "20260812_session_version")
     connection = sqlite3.connect(database_path)
     assert "session_version" in _columns(connection)
     assert connection.execute(

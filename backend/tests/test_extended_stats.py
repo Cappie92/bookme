@@ -7,7 +7,19 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
 
-from models import User, UserRole, Master, Subscription, SubscriptionPlan, SubscriptionType, SubscriptionStatus, Booking, BookingStatus
+from models import (
+    Booking,
+    BookingStatus,
+    Master,
+    Service,
+    Subscription,
+    SubscriptionPlan,
+    SubscriptionStatus,
+    SubscriptionType,
+    User,
+    UserRole,
+)
+from tests.booking_fixture import on_grid_interval
 
 
 @pytest.fixture
@@ -151,32 +163,35 @@ class TestExtendedStats:
 
     def test_extended_stats_includes_comparison(self, client: TestClient, premium_token: str, db: Session, master_with_premium: User):
         """Тест что расширенная статистика включает сравнение периодов."""
-        # Создаем тестовые записи
         master = db.query(Master).filter(Master.user_id == master_with_premium.id).first()
-        
-        # Записи текущего месяца
+        svc = Service(name="ExtStat", price=1000, duration=60, salon_id=None)
+        db.add(svc)
+        db.commit()
+        db.refresh(svc)
+
         for i in range(5):
+            st, en = on_grid_interval(datetime.utcnow() - timedelta(days=i))
             booking = Booking(
                 master_id=master.id,
-                client_id=1,  # Заглушка
-                service_id=1,  # Заглушка
-                start_time=datetime.utcnow() - timedelta(days=i),
-                end_time=datetime.utcnow() - timedelta(days=i) + timedelta(hours=1),
+                client_id=master_with_premium.id,
+                service_id=svc.id,
+                start_time=st,
+                end_time=en,
                 status=BookingStatus.COMPLETED,
-                payment_amount=1000.0
+                payment_amount=1000.0,
             )
             db.add(booking)
-        
-        # Записи прошлого месяца
+
         for i in range(3):
+            st, en = on_grid_interval(datetime.utcnow() - timedelta(days=35 + i))
             booking = Booking(
                 master_id=master.id,
-                client_id=1,
-                service_id=1,
-                start_time=datetime.utcnow() - timedelta(days=35+i),
-                end_time=datetime.utcnow() - timedelta(days=35+i) + timedelta(hours=1),
+                client_id=master_with_premium.id,
+                service_id=svc.id,
+                start_time=st,
+                end_time=en,
                 status=BookingStatus.COMPLETED,
-                payment_amount=1000.0
+                payment_amount=1000.0,
             )
             db.add(booking)
         

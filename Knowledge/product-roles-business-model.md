@@ -4,7 +4,7 @@ project: DeDato
 knowledge_class: living
 environment: common
 status: active
-last_verified: 2026-09-24
+last_verified: 2026-10-20
 ---
 
 # DeDato — роли и бизнес-модель
@@ -77,7 +77,7 @@ Source: `backend/models.py` — `UserRole.CLIENT`, `Booking.client_id`.
 
 Source: `backend/models.py` — `Master`, `User.master_profile`.
 
-На iOS текущий master operational product — native-only companion (Dashboard / Schedule / Services / Settings / Bookings), без user-visible browser-editor CTA. Ordinary web/Android monetization не является iOS presentation. Fail-closed `ios_app` web isolation, если такая сессия появится, принадлежит [Web architecture](web.md). Free-20 остаётся backend limit бесплатного тарифа, не iOS presentation rule и не blocker текущей submission; см. [Feature entitlements](feature-entitlements.md).
+На iOS текущий master operational product — native-only Free Companion (Dashboard / Schedule / Services / Settings), без user-visible browser-editor CTA и без обычного UI создания записи клиенту. Ordinary web/Android monetization не является iOS presentation. Fail-closed `ios_app` web isolation, если такая сессия появится, принадлежит [Web architecture](web.md). Лимит 20 относится только к бесплатному аккаунту на всех поверхностях; `ios_fixed` его не сужает. Контракт: [Feature entitlements](feature-entitlements.md).
 
 **Флаг профиля:** `is_always_free` на `User` даёт полный доступ к платным функциям без обычной оплаты (операционный/внутренний режим).
 
@@ -310,7 +310,7 @@ Source: `subscriptions-billing.md`.
 | Indie master | **Legacy compatibility**, выключен default-настройкой |
 | Reviews | **Флаг без доменной модели Review** |
 | Произвольный deposit balance API | **Отключён** (410) |
-| Direct StoreKit / Apple IAP | **Реализовано в коде** для iOS-подписок мастера; dormant / unreachable в текущей iOS submission; **не** current release solution |
+| Direct StoreKit / Apple IAP | **Реализовано в коде** для iOS-подписок мастера; dormant / unreachable в текущем Free Companion; **не** current release solution |
 | Оплата услуги клиентом через Robokassa end-to-end как основной путь | **UNKNOWN / не канонизировать** без отдельного Domain — поля на Booking есть |
 
 ### Mobile Yandex Auth configuration (не бизнес-инвариант)
@@ -323,7 +323,7 @@ Source: `mobile/eas.json` — `YANDEX_MOBILE_AUTH_VISIBLE`.
 
 ## Текущий App Review constraint
 
-iOS 1.1.0 (13) submitted as a true free companion. Current status: **SUBMITTED / IN APP REVIEW PROCESS** — not approved, not released. IAP / RevenueCat **не** являются planned solution. Канон: внешне оплаченная подписка не должна открывать дополнительные digital capabilities внутри iOS app относительно Free. StoreKit path в репозитории остаётся historical/dormant code fact, не current release plan. Closed remediation summary: [Feature entitlements](feature-entitlements.md#9-ios-app-review-isolation). Store pointers: [Production topology](production-topology.md).
+iOS 1.1.0 (16) is the current Free Companion candidate, not approved and not released. Build 15 is superseded and is not the current version. IAP / RevenueCat **не** являются planned solution. Канон: внешне оплаченная подписка не должна открывать дополнительные digital capabilities внутри iOS app относительно Free. `ios_fixed` сохраняется для этих ограничений и больше не задаёт отдельный booking cap. StoreKit path в репозитории остаётся historical/dormant code fact. Contract: [Feature entitlements](feature-entitlements.md#9-ios-app-review-isolation). Store gate: [Production topology](production-topology.md). Prior store decisions: [iOS App Store releases](ios-app-store-releases.md).
 
 ---
 

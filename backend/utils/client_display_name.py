@@ -31,6 +31,50 @@ def get_meta_for_client(meta_map: Dict[str, Any], client_phone: Optional[str]) -
     return None
 
 
+def guest_manual_metadata(booking: Any, metadata_by_id: Dict[int, Any]) -> Optional[Any]:
+    """Metadata for a guest manual booking, matched by id and the same master."""
+
+    if getattr(booking, "source", None) != "manual" or getattr(booking, "client_id", None) is not None:
+        return None
+    meta_id = getattr(booking, "master_client_metadata_id", None)
+    if meta_id is None:
+        return None
+    meta = metadata_by_id.get(meta_id)
+    if meta is None or getattr(meta, "master_id", None) != getattr(booking, "master_id", None):
+        return None
+    return meta
+
+
+def resolve_booking_client_contact(
+    booking: Any,
+    client: Optional[Any],
+    meta_by_phone: Dict[str, Any],
+    meta_by_id: Dict[int, Any],
+) -> tuple[Optional[str], Optional[Any]]:
+    """Phone shown to the current master.
+
+    A guest manual booking reads the phone from its own metadata row.
+    Every other booking keeps the account phone and the phone-keyed alias lookup.
+    """
+
+    if getattr(booking, "source", None) == "manual" and getattr(booking, "client_id", None) is None:
+        meta = guest_manual_metadata(booking, meta_by_id)
+        phone = str(meta.client_phone).strip() if meta is not None and getattr(meta, "client_phone", None) else ""
+        return (phone or None), meta
+    phone = client.phone if client and getattr(client, "phone", None) else None
+    return phone, get_meta_for_client(meta_by_phone, phone)
+
+
+def booking_visible_client_name(booking: Any, meta: Optional[Any], client: Optional[Any], fallback: str = "Клиент") -> str:
+    """Manual bookings keep their own guest label and never borrow another client's alias."""
+
+    if client is None:
+        guest = getattr(booking, "guest_name", None)
+        if isinstance(guest, str) and guest.strip():
+            return guest.strip()
+    return get_client_display_name(meta, client, fallback)
+
+
 def get_client_display_name(
     meta: Optional[Any],
     client: Optional[Any],

@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 import pytest
 
 from auth import get_password_hash
+from tests.booking_fixture import apply_grid_walls_to_booking
 from models import (
     Booking,
     BookingStatus,
@@ -84,6 +85,7 @@ def _master_with_booking(db, *, payment_amount, loyalty_points_used=0, duration_
         payment_amount=payment_amount,
         loyalty_points_used=loyalty_points_used,
     )
+    apply_grid_walls_to_booking(b)
     db.add(b)
     db.commit()
     db.refresh(b)

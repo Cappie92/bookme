@@ -407,13 +407,14 @@ def test_legacy_payment_without_snapshot_deposits_payment_amount(client, db: Ses
     user_id = user.id
     from utils.payment_public_id import persist_new_robokassa_payment
 
+    plan_id = _create_premium_plan(db)
     payment = Payment(
         user_id=user_id,
         amount=1500.0,
         status="pending",
         payment_type="subscription",
         robokassa_invoice_id="tmp-pending",
-        plan_id=1,
+        plan_id=plan_id,
         subscription_apply_status="pending",
         payment_metadata={"upgrade_type": "immediate"},
     )

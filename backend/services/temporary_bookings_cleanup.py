@@ -28,8 +28,16 @@ def cleanup_expired_temporary_bookings():
         
         if expired_bookings:
             # Обновляем статус на 'expired'
-            for booking in expired_bookings:
-                booking.status = 'expired'
+            from services.booking_admission import (
+                expire_pending_holds,
+                unified_admission_enabled,
+            )
+
+            if unified_admission_enabled():
+                expire_pending_holds(db, [booking.id for booking in expired_bookings])
+            else:
+                for booking in expired_bookings:
+                    booking.status = 'expired'
             
             db.commit()
             logger.info(f"Очищено {len(expired_bookings)} просроченных временных броней")

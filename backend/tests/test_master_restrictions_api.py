@@ -169,13 +169,16 @@ def test_restriction_visible_in_master_clients(client, db, indie_master_user):
     db.refresh(service)
 
     from datetime import datetime, timedelta
-    start = datetime.utcnow() - timedelta(days=1)
+
+    from tests.booking_fixture import on_grid_interval
+
+    start, end = on_grid_interval(datetime.utcnow() - timedelta(days=1), duration_minutes=30)
     booking = Booking(
         client_id=client_user.id,
         service_id=service.id,
         indie_master_id=indie.id,
         start_time=start,
-        end_time=start + timedelta(minutes=30),
+        end_time=end,
         status=BookingStatus.COMPLETED,
         payment_amount=100,
     )

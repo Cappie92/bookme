@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from fastapi.testclient import TestClient
 
 from auth import get_password_hash
+from tests.booking_fixture import apply_grid_walls_to_booking
 from models import User, Master, Salon, Service, Booking, BookingStatus, Subscription, SubscriptionPlan, SubscriptionStatus, SubscriptionType
 from services.account_deletion import delete_account
 
@@ -120,6 +121,7 @@ def completed_booking(db, master_record, client_user, service, salon):
         status=BookingStatus.COMPLETED,
         payment_amount=1000,
     )
+    apply_grid_walls_to_booking(b)
     db.add(b)
     db.commit()
     db.refresh(b)

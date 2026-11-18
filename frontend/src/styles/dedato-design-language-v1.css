@@ -1,0 +1,60 @@
+/**
+ * DeDato Design Language v1.0 — semantic tokens from Figma file btC3DhbFLLZ6BtJy1FdaOj
+ * (WEB / Dashboard, Calendar, Manual Booking frames).
+ */
+:root {
+  --dedato-surface-base: #f9f7f6;
+  --dedato-surface-elevated: #ffffff;
+  --dedato-surface-subtle: #f3f4f6;
+  --dedato-surface-tint: #edf6ed;
+
+  --dedato-border-decorative: #e7e2df;
+  --dedato-border-default: #6f7972;
+  --dedato-border-width: 1px;
+
+  --dedato-action-primary: #4caf50;
+  --dedato-action-primary-hover: #45a049;
+  --dedato-action-primary-pressed: #3d9140;
+  --dedato-action-selected: #e8f5e9;
+  --dedato-brand-green: #4caf50;
+
+  --dedato-action-danger: #dc2626;
+  --dedato-action-danger-hover: #b91c1c;
+  --dedato-surface-disabled: #e7e2df;
+
+  --dedato-text-primary: #2d2d2d;
+  --dedato-text-secondary: #5f6368;
+  /** Primary CTA: green fill + white label (master cabinet primary buttons) */
+  --dedato-text-on-primary: #ffffff;
+
+  --dedato-radius-control: 8px;
+  --dedato-radius-card: 16px;
+
+  --dedato-space-1: 4px;
+  --dedato-space-2: 8px;
+  --dedato-space-3: 12px;
+  --dedato-space-4: 16px;
+  --dedato-space-8: 32px;
+
+  /* Calendar event semantics (Figma 119:92 / 121:883) */
+  --dedato-event-online: #0f6d69;
+  --dedato-event-onlineBg: #eaf7f5;
+  --dedato-event-manual: #1d4ed8;
+  --dedato-event-manualBg: #eff6ff;
+  --dedato-event-personal: #404040;
+  --dedato-event-personalBg: #f3f4f6;
+  --dedato-event-available: #6f7972;
+  --dedato-event-availableBg: #ffffff;
+  --dedato-event-unavailable: #737373;
+  --dedato-event-unavailableBg: #e7e2df;
+
+  --dedato-status-success: #1b5e20;
+
+  /* Legacy aliases */
+  --dedato-cal-online-bg: var(--dedato-event-onlineBg);
+  --dedato-cal-online-border: var(--dedato-event-online);
+  --dedato-cal-manual-bg: var(--dedato-event-manualBg);
+  --dedato-cal-manual-border: var(--dedato-event-manual);
+  --dedato-cal-personal-bg: var(--dedato-event-personalBg);
+  --dedato-cal-personal-border: var(--dedato-event-personal);
+}

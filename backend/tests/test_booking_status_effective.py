@@ -9,6 +9,7 @@ import pytest
 from auth import get_password_hash
 from models import Booking, BookingStatus, Master, Service, User, UserRole
 from utils.booking_status import get_effective_booking_status
+from tests.booking_fixture import grid_booking_walls
 
 
 def _create_booking(db, *, status: BookingStatus, start_time: datetime) -> Booking:
@@ -35,12 +36,16 @@ def _create_booking(db, *, status: BookingStatus, start_time: datetime) -> Booki
     db.commit()
     db.refresh(service)
 
+    start_wall, end_wall = grid_booking_walls(
+        start_time,
+        start_time + timedelta(hours=1),
+    )
     booking = Booking(
         client_id=user.id,
         service_id=service.id,
         master_id=master.id,
-        start_time=start_time,
-        end_time=start_time + timedelta(hours=1),
+        start_time=start_wall,
+        end_time=end_wall,
         status=status,
         payment_amount=500,
         loyalty_points_used=0,
@@ -106,9 +111,11 @@ def test_past_awaiting_confirmation_returns_awaiting_confirmation(db):
 
 def test_past_created_within_1_minute_returns_created(db):
     """past + created, но менее 1 минуты после start_time → created (не переходим сразу)."""
-    now = datetime.utcnow()
-    booking = _create_booking(db, status=BookingStatus.CREATED, start_time=now - timedelta(seconds=30))
-    effective = get_effective_booking_status(booking, db, now=now)
+    aligned = datetime.utcnow().replace(second=0, microsecond=0)
+    aligned = aligned.replace(minute=(aligned.minute // 30) * 30)
+    test_now = aligned + timedelta(seconds=15)
+    booking = _create_booking(db, status=BookingStatus.CREATED, start_time=aligned)
+    effective = get_effective_booking_status(booking, db, now=test_now)
     assert effective == BookingStatus.CREATED
 
 

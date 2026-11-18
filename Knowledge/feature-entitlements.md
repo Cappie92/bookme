@@ -4,7 +4,7 @@ project: DeDato
 knowledge_class: living
 environment: common
 status: active
-last_verified: 2026-09-24
+last_verified: 2026-10-20
 ---
 
 # Contract: Feature entitlements
@@ -88,13 +88,27 @@ This table is factual runtime behavior. Missing checks are not intended policy; 
 
 ## 6. Limits
 
-`limits.max_future_bookings` uses null/zero as unlimited in entitlement helpers. Canonical Free active-future booking limit is **20** (`FREE_ACTIVE_FUTURE_BOOKINGS_LIMIT`, error `free_active_booking_limit_reached`). This is a backend business rule of the free tariff, not iOS presentation isolation and not part of the `ios_app` commerce/isolation contract.
+`limits.max_future_bookings` uses null/zero as unlimited in entitlement helpers. Canonical Free active-future booking limit is **20** (`FREE_ACTIVE_FUTURE_BOOKINGS_LIMIT`, error `free_active_booking_limit_reached`). Paid finite plans use that plan limit. Paid unlimited and AlwaysFree stay unlimited. Expired or missing paid entitlement falls back to Free 20.
 
-Capacity endpoints count active future bookings and compare positive limits. The Booking create enforcement owner is `backend/utils/booking_limit_guard.py`; clients must treat the features response as display data and rely on server mutation result.
+Commit `d072998` removed only the extra `ios_fixed` booking-cap from `bc60c00` (`min(plan limit, 20)`, including unlimited forced to 20). `ios_fixed` itself is not removed. `future_bookings_limit_for_surface` now returns the ordinary account limit on web, Android and `ios_fixed`. Booking capacity is an account business rule, not an iOS surface rule. No migration and no mobile rebuild belong to this code change. Deploy state: [Production topology](production-topology.md).
+
+`client_surface=ios_fixed` continues to apply:
+
+- native capabilities;
+- paid-field projection;
+- CRM restrictions;
+- Finance restrictions;
+- Loyalty restrictions;
+- subscription/commerce restrictions;
+- web handoff and native Free Companion isolation.
+
+**CONFIRMED, 2026-11-14, B3 source:** plan-cap counters исключают только явный `Booking.source=manual`; legacy NULL source продолжает учитываться. Private calendar blocks не являются Booking и в cap не входят. Владелец SQL-предиката — `backend/utils/master_future_bookings_query.py` (`free_cap_source_filter`); B3 UI отдельно сообщает это пользователю.
+
+Capacity endpoints count active future non-manual bookings and compare positive limits. The Booking create enforcement owner is `backend/utils/booking_limit_guard.py`; clients must treat the features response as display data and rely on server mutation result.
 
 `features.max_page_modules` is returned and counted, but current create path is disabled by the legacy helper regardless of this number. `stats_retention_days` is returned as zero for unlimited; repository does not show a cleanup job enforcing this retention value.
 
-Trusted `ios_app` sessions additionally fail-closed for domain mutation and subscription/payment commerce endpoints even when the underlying plan would allow them; that is session-origin isolation, not a change to Free-20.
+Trusted `ios_app` sessions additionally fail-closed for domain mutation and subscription/payment commerce endpoints even when the underlying plan would allow them; that is session-origin isolation, not a booking-count cap.
 
 **Source:** `backend/utils/subscription_features.py`; `backend/routers/master.py`, `backend/routers/domain.py`, `backend/routers/master_page_modules.py`; `backend/services/bookings_limit_monitor.py`.
 
@@ -116,19 +130,17 @@ Disabling/deleting a `ServiceFunction` row without removing its already assigned
 
 ## 9. iOS App Review isolation
 
-iOS 1.1.0 (13) submitted under **true free companion**. Status: **SUBMITTED / IN APP REVIEW PROCESS**, not approved and not released. IAP is **not** the current release solution and remains dormant/unreachable.
+Current App Store candidate is **1.1.0 (16)**, Free Companion. It is not approved and not released. Build 15 is not the submission candidate. IAP is **not** the current release solution and remains dormant/unreachable. RevenueCat is not part of this runtime.
 
-An externally paid subscription must **not** unlock additional digital capabilities inside the iOS app compared with Free. Paid and Free iOS share the same native operational graph (Dashboard / Schedule / Services / Settings / Bookings).
+An externally paid subscription must **not** unlock additional digital capabilities inside the iOS app compared with Free. Paid and Free iOS share the same native operational graph (Dashboard / Schedule / Services / Settings). The locally integrated B3 source now adds a native manual booking flow; its source/API state is described in [Booking](booking.md#1a-native-ios-master-surface). This does not change the recorded App Store candidate or prove a new release.
 
-Free-companion remediation for this submission is **CLOSED**:
+Free-companion remediation remains **CLOSED** as product implementation:
 
-- no iOS-visible browser/editor CTA;
-- pricing / subscription / tariff / payment surfaces unreachable;
+- no iOS-visible browser/editor CTA, subscription purchase, upgrade, checkout or Restore;
 - iOS Welcome cleaned of monetization and revenue KPI;
 - retired commerce/deep-link routes redirect to dashboard;
-- User Agreement and Privacy Policy updated for the iOS-visible legal surface;
-- Privacy push-token fact corrected to current runtime.
+- `client_surface=ios_fixed` is retained for the restrictions listed in [Limits](#6-limits). It does not set booking capacity.
 
-Owner decision: backend Free-20 (`FREE_ACTIVE_FUTURE_BOOKINGS_LIMIT = 20`) remains unchanged and is **not** a blocker for this submission.
+Do not describe native iOS as «up to 20 bookings» or as gaining higher booking limits from paid web status. Free 20 remains only the ordinary Free account rule. Review copy, if used, should name `DeDato 1.1.0 (16)`.
 
-Next gate is Apple's review result, not another speculative free-companion rebuild. Living operational pointer: [Production topology](production-topology.md). Fail-closed `ios_app` web isolation, if such a session appears: [Web architecture](web.md).
+Operational gates: [Production topology](production-topology.md). Fail-closed `ios_app` web isolation: [Web architecture](web.md).
