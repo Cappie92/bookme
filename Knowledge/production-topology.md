@@ -48,15 +48,14 @@ Replaceable operational state. После CI или deploy обновить ст
 
 | Field | State |
 |-------|-------|
-| release candidate | `95beb70` on branch `release/calendar-b3-20261117` ([PR #7](https://github.com/Cappie92/bookme/pull/7)); код E2E в `a3c6dda`, docs gate в `95beb70`; PR merge commit **none** (open, **MERGEABLE**) |
-| CI status | **PASS** Application tests [run 44175733748](https://github.com/Cappie92/bookme/actions/runs/44175733748) @ `95beb70` (Playwright **178** passed, Full regression gate **success**). Код-only baseline: [44173241178](https://github.com/Cappie92/bookme/actions/runs/44173241178) @ `a3c6dda`. Prior fail [44104884292](https://github.com/Cappie92/bookme/actions/runs/44104884292) @ `9930809`: **147** passed **31** failed |
-| local full backend (release worktree) | **CONFIRMED 2026-11-17:** **1733** passed, **7** skipped, **0** failed, exit **0** |
-| local Playwright (release worktree) | **CONFIRMED 2026-11-17:** **178** passed, **0** failed, exit **0** |
-| production deploy | **not performed** — blocked before cutover |
-| production runtime (host check 2026-11-17) | backend `dedato_backend:a3fa405`, frontend `dedato_frontend:a3fa405`; Alembic **`20260914_push_notifications_v1`** |
-| migration preflight (copy of prod DB) | upgrades through `20261031_b3_master_svc` OK; **`20261114_calendar_grid_guard` aborts**: **29** invalid `bookings`, **0** `calendar_blocks` (27 confirmed_synthetic: 22×`STATS_SMOKE_2026_05` in notes, 5×demo batch; 2×`origin_unknown` #145/#1067). После owner repair на **расходной** копии + consequence verify `passed` → head `20261114_calendar_grid_guard` (lab 2026-11-18, не prod) — [owner decisions](calendar-b3-prod-grid-owner-decisions.md) |
-| backup | `/opt/dedato/backups/dedato_backup_20261117_173441.tar.gz`; SQLite `PRAGMA integrity_check` **ok** |
-| next gate | owner-approved repair of flagged rows (no auto-snap/delete) → migration dry-run on copy → green full CI → controlled container cutover |
+| deployed code | **`9a054844d1f22ac7ad058352a7792f9541c8f925`** (main, [PR #8](https://github.com/Cappie92/bookme/pull/8) hotfix); Calendar B3 merge **`14fe5f646a0bdd1d92edc83d172ef8cc9e443159`** ([PR #7](https://github.com/Cappie92/bookme/pull/7)) |
+| CI status | merge `14fe5f6`: **FAIL** [44317562332](https://github.com/Cappie92/bookme/actions/runs/44317562332) (`.venv` в grid-apply test). Pre-merge **`95beb70`**: **PASS** [44175733748](https://github.com/Cappie92/bookme/actions/runs/44175733748). После hotfix — ожидается green на `9a05484` |
+| production deploy | **CONFIRMED 2026-11-18:** controlled cutover без stack `down`/`recreate`; images `dedato_backend:14fe5f6`, `dedato_frontend:14fe5f6`; containers `dedato_backend_14fe5f6`, `dedato_frontend_14fe5f6` |
+| production runtime | Alembic **`20261114_calendar_grid_guard`**; grid invalid **0**; `integrity_check` **ok**; `foreign_key_check` **134** legacy (без изменений) |
+| owner grid repair | **29** bookings на live SQLite (`/opt/dedato/artifacts/decision-pack-prod.json`, validate ok) — см. [calendar-b3-prod-grid-owner-decisions.md](calendar-b3-prod-grid-owner-decisions.md) |
+| backup (pre-cutover) | `/opt/dedato/backups/dedato_backup_20261118_164932.tar.gz` |
+| rollback | Остановленные `dedato_candidate_a3fa405_{backend,frontend}_1` + `restore_sqlite.sh` с backup; UDF-триггеры снимаются только через откат Alembic/восстановление БД |
+| next gate | CI green на `9a05484`; FK 134 — отдельный debt |
 | mobile rebuild | none (native tree unchanged vs `main`) |
 
 Marketing version **1.1.0**. Production is not at `d072998`, пока эта строка deploy не заменена.
