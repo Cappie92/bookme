@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -198,7 +199,7 @@ def test_main_migration_failure_nonzero_exit(tmp_path, monkeypatch):
     monkeypatch.setattr("scripts.prod_calendar_grid_apply_repairs.run_alembic", _fail)
     proc = subprocess.run(
         [
-            str(ROOT / ".venv/bin/python"),
+            sys.executable,
             str(ROOT / "scripts/prod_calendar_grid_apply_repairs.py"),
             "--db",
             str(db),

@@ -4,7 +4,7 @@ project: DeDato
 knowledge_class: living
 environment: prod
 status: active
-last_verified: 2026-11-17
+last_verified: 2026-11-18
 ---
 
 # Production topology
