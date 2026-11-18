@@ -186,7 +186,9 @@ def test_canonical_update_uses_row_time_zone_not_master_tz(tmp_path):
     assert cols["time_zone"] == "Europe/Moscow"
 
 
-def test_main_migration_failure_nonzero_exit(tmp_path, monkeypatch):
+def test_main_migration_failure_nonzero_exit_inprocess(tmp_path, monkeypatch, capsys):
+    import scripts.prod_calendar_grid_apply_repairs as apply_mod
+
     db = tmp_path / "t.db"
     _minimal_booking_db(db)
     plan = _plan_one("2026-11-11 10:30:00")
@@ -196,11 +198,12 @@ def test_main_migration_failure_nonzero_exit(tmp_path, monkeypatch):
     def _fail(_path):
         return {"exit_code": 1, "alembic_version": "old", "stderr_tail": "boom"}
 
-    monkeypatch.setattr("scripts.prod_calendar_grid_apply_repairs.run_alembic", _fail)
-    proc = subprocess.run(
+    monkeypatch.setattr(apply_mod, "run_alembic", _fail)
+    monkeypatch.setattr(
+        sys,
+        "argv",
         [
-            sys.executable,
-            str(ROOT / "scripts/prod_calendar_grid_apply_repairs.py"),
+            "prod_calendar_grid_apply_repairs",
             "--db",
             str(db),
             "--plan",
@@ -209,11 +212,41 @@ def test_main_migration_failure_nonzero_exit(tmp_path, monkeypatch):
             "1",
             "--run-migration-after",
         ],
-        cwd=str(ROOT),
-        env={**__import__("os").environ, "PYTHONPATH": str(ROOT)},
-        capture_output=True,
-        text=True,
     )
-    assert proc.returncode == 1
-    payload = json.loads(proc.stdout)
+    exit_code = apply_mod.main()
+    assert exit_code == 1
+    payload = json.loads(capsys.readouterr().out)
     assert payload["outcome"] == "repair_committed_migration_failed"
+    assert len(payload.get("applied", [])) == 1
+    conn = sqlite3.connect(db)
+    end = conn.execute("SELECT end_time FROM bookings WHERE id=1").fetchone()[0]
+    conn.close()
+    assert end == "2026-11-11 10:30:00"
+
+
+def test_run_alembic_uses_sys_executable(monkeypatch, tmp_path):
+    import scripts.prod_calendar_grid_apply_repairs as apply_mod
+
+    captured: dict = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+
+        class _Proc:
+            returncode = 0
+            stderr = ""
+            stdout = ""
+
+        return _Proc()
+
+    db = tmp_path / "m.db"
+    conn = sqlite3.connect(db)
+    conn.execute("CREATE TABLE alembic_version (version_num VARCHAR(32))")
+    conn.execute("INSERT INTO alembic_version VALUES ('20261114_calendar_grid_guard')")
+    conn.commit()
+    conn.close()
+
+    monkeypatch.setattr(apply_mod.subprocess, "run", fake_run)
+    apply_mod.run_alembic(db)
+    assert captured["cmd"][0] == sys.executable
+    assert captured["cmd"][1:] == ["-m", "alembic", "upgrade", "head"]

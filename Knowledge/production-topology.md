@@ -32,9 +32,9 @@ Deploy procedure принадлежит [CI/CD](ci-cd.md) и [Deployment artifac
 |---------|---------------|------------|
 | Public site | `https://dedato.ru` | REPORTED |
 | Production server | `193.160.208.206` | REPORTED |
-| Canonical git `main` / `origin/main` | release gate still documents `d072998`; local `main` tip checked 2026-11-13: `19120d2` (includes mobile master tour `19120d2`, client nav fix `7d5b070`, CI selective/shard `f370ca6` + ancestors) | **Gate row:** CONFIRMED text in this document. **Tip row:** CONFIRMED `git` locally 2026-11-13; **not** restated as deployed/CI-green for post-`d072998` commits |
+| Canonical git `main` / `origin/main` | см. **Current release gate** — deployed runtime **`14fe5f6`**, repo tip отдельно (`9fefdbe` + pending CI fix) | CONFIRMED split 2026-11-18 |
 | Prior release commits on that tip | `60eba89` schedule/push; `eca7aff` iOS build 16 | CONFIRMED git history |
-| Production backend/frontend images | last named cut in this document was backend `96f3f27` and frontend `fde8033-prod` | REPORTED historical cut. No newer image tag is recorded. Neither tag nor `d072998` proves the current host image |
+| Production backend/frontend images | **`dedato_backend:14fe5f6`**, **`dedato_frontend:14fe5f6`** (см. gate) | CONFIRMED host 2026-11-18 |
 | Free Companion public baseline | `/ios-free-companion`, `/user-agreement`; web/backend runtime reported healthy before the booking-cap change | REPORTED |
 | Booking-cap deploy | see **Current release gate** below | REPORTED |
 | iOS | **1.1.0 (16)** candidate. Build produced; Transporter upload started; ASC processing/selection not confirmed as of 2026-10-19. Not approved. Not released. Build 15 is not this candidate | Version CONFIRMED in repo; ASC status REPORTED |
@@ -48,14 +48,16 @@ Replaceable operational state. После CI или deploy обновить ст
 
 | Field | State |
 |-------|-------|
-| deployed code | **`9a054844d1f22ac7ad058352a7792f9541c8f925`** (main, [PR #8](https://github.com/Cappie92/bookme/pull/8) hotfix); Calendar B3 merge **`14fe5f646a0bdd1d92edc83d172ef8cc9e443159`** ([PR #7](https://github.com/Cappie92/bookme/pull/7)) |
-| CI status | merge `14fe5f6`: **FAIL** [44317562332](https://github.com/Cappie92/bookme/actions/runs/44317562332) (`.venv` в grid-apply test). Pre-merge **`95beb70`**: **PASS** [44175733748](https://github.com/Cappie92/bookme/actions/runs/44175733748). После hotfix — ожидается green на `9a05484` |
-| production deploy | **CONFIRMED 2026-11-18:** controlled cutover без stack `down`/`recreate`; images `dedato_backend:14fe5f6`, `dedato_frontend:14fe5f6`; containers `dedato_backend_14fe5f6`, `dedato_frontend_14fe5f6` |
-| production runtime | Alembic **`20261114_calendar_grid_guard`**; grid invalid **0**; `integrity_check` **ok**; `foreign_key_check` **134** legacy (без изменений) |
-| owner grid repair | **29** bookings на live SQLite (`/opt/dedato/artifacts/decision-pack-prod.json`, validate ok) — см. [calendar-b3-prod-grid-owner-decisions.md](calendar-b3-prod-grid-owner-decisions.md) |
-| backup (pre-cutover) | `/opt/dedato/backups/dedato_backup_20261118_164932.tar.gz` |
-| rollback | Остановленные `dedato_candidate_a3fa405_{backend,frontend}_1` + `restore_sqlite.sh` с backup; UDF-триггеры снимаются только через откат Alembic/восстановление БД |
-| next gate | CI green на `9a05484`; FK 134 — отдельный debt |
+| **Deployed application runtime** (host, не `git`) | Images **`dedato_backend:14fe5f6`**, **`dedato_frontend:14fe5f6`**; containers `dedato_backend_14fe5f6`, `dedato_frontend_14fe5f6`. Image IDs (2026-11-18): backend `sha256:b4b3e569…`, frontend `sha256:437c953f…`. Built from merge **`14fe5f646a0bdd1d92edc83d172ef8cc9e443159`** ([PR #7](https://github.com/Cappie92/bookme/pull/7)) |
+| **Git `origin/main` tip** (repo gate, не обязательно в образе) | **`9fefdbed85905aaa7fdb634f8eb4612b5b600b1b`** после docs-only [run #84](https://github.com/Cappie92/bookme/actions/runs/44319788417); hotfix merge **`9a05484`** ([PR #8](https://github.com/Cappie92/bookme/pull/8)) — CI **FAIL** [#83](https://github.com/Cappie92/bookme/actions/runs/44319716206). Pending: deterministic grid-apply unit test + `run_alembic` → `sys.executable` |
+| **CI — Application tests** | **#84** `9fefdbe` **success** (docs-only: backend/frontend/mobile/Playwright/**skipped**, не полный gate). **#83** `9a05484` **failure** (backend shard 2: `test_main_migration_failure_nonzero_exit` subprocess/monkeypatch). **#82** `bbc30e5` **failure** (то же). **#81** `43e3378` **cancelled**. Merge `14fe5f6` **#80** **failure** (та же причина). Pre-merge release **`95beb70`**: **PASS** [44175733748](https://github.com/Cappie92/bookme/actions/runs/44175733748) |
+| **Cutover vs CI-gate** | **CONFIRMED:** controlled cutover **2026-11-18 выполнен до** green full Application tests на финальном `main` |
+| production deploy | **CONFIRMED 2026-11-18:** без stack `down`/`recreate`; только смена контейнеров на теги `14fe5f6` |
+| production runtime | Alembic **`20261114_calendar_grid_guard`**; triggers `bookings_calendar_guard_*`, `calendar_blocks_guard_*`; grid invalid **0**; off-grid INSERT blocked (`IntegrityError`); `integrity_check` **ok**; `foreign_key_check` **134** legacy (без изменений). Demo `/master?tab=schedule`: weekly/detailed/calendar-blocks API **200**, UI с **09:00** (read-only browser 2026-11-18) |
+| owner grid repair | **29** bookings на live SQLite до миграции (`/opt/dedato/artifacts/decision-pack-prod.json`) — см. [calendar-b3-prod-grid-owner-decisions.md](calendar-b3-prod-grid-owner-decisions.md). **Повторный repair не выполнять** |
+| backup (pre-cutover) | `/opt/dedato/backups/dedato_backup_20261118_164932.tar.gz` — содержимое **до** cutover; восстановление целиком **уничтожает** пользовательские изменения после 2026-11-18 ~16:49 MSK |
+| rollback (план, без auto-restore на red CI) | (1) **Контейнеры:** поднять прежние `dedato_*_a3fa405_*` только если образы совместимы с уже мигрированной БД (`20261114` + UDF triggers); иначе нужен согласованный downgrade миграции или restore. (2) **БД:** `restore_sqlite.sh` с pre-cutover backup — крайняя мера, откат repair+migration и **потеря пост-cutover данных**; снятие grid UDF только через restore/downgrade, не отдельным SQL. (3) **Не** запускать restore автоматически из-за красного CI; ops-only с пост-cutover backup, если появится |
+| next gate | Один **полный** green Application tests на коммите с фиксом grid-apply теста (без повторного deploy, если меняются только repair-скрипт/тесты). FK 134 — отдельный debt |
 | mobile rebuild | none (native tree unchanged vs `main`) |
 
 Marketing version **1.1.0**. Production is not at `d072998`, пока эта строка deploy не заменена.

@@ -265,7 +265,7 @@ def run_alembic(db_path: Path) -> Dict[str, Any]:
     import os
 
     proc = subprocess.run(
-        [str(ROOT / ".venv/bin/python"), "-m", "alembic", "upgrade", "head"],
+        [sys.executable, "-m", "alembic", "upgrade", "head"],
         cwd=str(ROOT),
         env={
             **os.environ,
