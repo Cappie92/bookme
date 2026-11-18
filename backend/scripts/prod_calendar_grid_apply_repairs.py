@@ -20,6 +20,7 @@ from scripts.prod_calendar_grid_repair_lib import (  # noqa: E402
     proposed_update_columns,
     register_sqlite_calendar_guard_udfs,
     sqlite_validate_booking_row,
+    table_columns,
     verify_decision_lock,
 )
 
@@ -147,6 +148,7 @@ def apply_repairs(
             "outcome": "dry_run_ok",
         }
 
+    has_version = "version" in table_columns(conn, "bookings")
     conn.execute("BEGIN IMMEDIATE")
     try:
         for item in pending:
@@ -188,10 +190,25 @@ def apply_repairs(
                         lock["status"] if lock else row["status"],
                     ),
                 )
-            else:
+            elif has_version:
                 cur = conn.execute(
                     """
                     UPDATE bookings SET start_time=?, end_time=?, version=version+1
+                    WHERE id=? AND start_time=? AND end_time=? AND status=?
+                    """,
+                    (
+                        cols["start_time"],
+                        cols["end_time"],
+                        bid,
+                        interval["start_time"],
+                        interval["end_time"],
+                        lock["status"] if lock else row["status"],
+                    ),
+                )
+            else:
+                cur = conn.execute(
+                    """
+                    UPDATE bookings SET start_time=?, end_time=?
                     WHERE id=? AND start_time=? AND end_time=? AND status=?
                     """,
                     (
