@@ -165,8 +165,19 @@ API: [Booking API](booking-api.md#calendar-b3-master-api).
 **CONFIRMED, 2026-11-17, изолированная копия prod SQLite (backup `20261117_173441`):**
 миграция `20261114_calendar_grid_guard` **падает** на **29** строках `bookings`.
 Ниже — план **без** автоматического округления, удаления записей или ослабления
-guard. Исполняемый отчёт: артефакт `prod-grid-report.json` (локальный анализ,
-не в git).
+guard. Инвентаризация: локальный `prod-grid-report.json` (не в git).
+Проверяемый план (read-only):
+
+```bash
+python3 backend/scripts/prod_calendar_grid_repair_plan.py \
+  --db /path/to/isolated-prod-copy.sqlite \
+  --out /path/to/prod-grid-repair-plan.json
+```
+
+Каждая строка: текущие времена, **2 варианта** (+30 мин / +60 мин от on-grid
+start, плюс отдельные ветки для subsecond и inverted), флаг `guard_valid`
+(wall-only); при наличии `start_utc_us` / `end_utc_us` — **обязателен**
+пересчёт canonical в той же транзакции, что и wall (скрипт не пишет в БД).
 
 ### Сводка нарушений
 
