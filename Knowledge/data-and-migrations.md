@@ -186,7 +186,7 @@ Backend `/health` не обращается к database и поэтому не �
 - `20261028_calendar_b22_edit_request_time.py`: proposed canonical time у edit requests;
 - `20261030_calendar_b3_guest_name.py`: nullable guest name;
 - `20261031_calendar_b3_master_service.py`: nullable `master_service_id`, FK на `master_services_list(id)` и индекс.
-- `20261114_calendar_grid_sqlite_guard.py`: UDF-триггеры off-grid guard; **fail-fast** на prod-копии пока 29 invalid `bookings` (см. [Scheduling](scheduling.md#production-grid-guard-remediation-plan-owner-approval-required)). Read-only planner: `backend/scripts/prod_calendar_grid_repair_plan.py`.
+- `20261114_calendar_grid_sqlite_guard.py`: UDF-триггеры off-grid guard; **fail-fast** на prod-копии пока 29 invalid `bookings` (см. [Scheduling](scheduling.md#production-grid-guard-remediation-plan-owner-approval-required)). Read-only planner: `backend/scripts/prod_calendar_grid_repair_plan.py`; apply на disposable копии: `prod_calendar_grid_apply_repairs.py`; consequence diff: `prod_calendar_grid_verify_repairs.py`; owner retro: [calendar-b3-prod-grid-owner-decisions.md](calendar-b3-prod-grid-owner-decisions.md). **CONFIRMED 2026-11-18:** на prod-копии `PRAGMA foreign_key_check` → **134** legacy-нарушения; grid repair **не** увеличивает и **не** чинит их — FK не считать «чистым».
 
 Все четыре файла находятся в `backend/alembic/versions/`. Они добавляют недостающие
 объекты и не backfill-ят неизвестные source/time facts. Legacy rows получают

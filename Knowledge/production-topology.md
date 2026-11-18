@@ -54,7 +54,7 @@ Replaceable operational state. После CI или deploy обновить ст
 | local Playwright (release worktree) | **CONFIRMED 2026-11-17:** **178** passed, **0** failed, exit **0** |
 | production deploy | **not performed** — blocked before cutover |
 | production runtime (host check 2026-11-17) | backend `dedato_backend:a3fa405`, frontend `dedato_frontend:a3fa405`; Alembic **`20260914_push_notifications_v1`** |
-| migration preflight (copy of prod DB) | upgrades through `20261031_b3_master_svc` OK; **`20261114_calendar_grid_guard` aborts**: **29** invalid `bookings` (off-grid wall times / bad intervals; mostly stats-smoke masters 11/15/16, one `#145` sub-second timestamps, one `#1067` inverted interval) |
+| migration preflight (copy of prod DB) | upgrades through `20261031_b3_master_svc` OK; **`20261114_calendar_grid_guard` aborts**: **29** invalid `bookings`, **0** `calendar_blocks` (27 confirmed_synthetic: 22×`STATS_SMOKE_2026_05` in notes, 5×demo batch; 2×`origin_unknown` #145/#1067). После owner repair на **расходной** копии + consequence verify `passed` → head `20261114_calendar_grid_guard` (lab 2026-11-18, не prod) — [owner decisions](calendar-b3-prod-grid-owner-decisions.md) |
 | backup | `/opt/dedato/backups/dedato_backup_20261117_173441.tar.gz`; SQLite `PRAGMA integrity_check` **ok** |
 | next gate | owner-approved repair of flagged rows (no auto-snap/delete) → migration dry-run on copy → green full CI → controlled container cutover |
 | mobile rebuild | none (native tree unchanged vs `main`) |

@@ -4,7 +4,7 @@ project: DeDato
 knowledge_class: living
 environment: common
 status: active
-last_verified: 2026-11-17
+last_verified: 2026-11-18
 ---
 
 # Scheduling and availability
@@ -162,22 +162,32 @@ API: [Booking API](booking-api.md#calendar-b3-master-api).
 
 ## Production grid-guard remediation plan (owner approval required)
 
-**CONFIRMED, 2026-11-17, изолированная копия prod SQLite (backup `20261117_173441`):**
-миграция `20261114_calendar_grid_guard` **падает** на **29** строках `bookings`.
-Ниже — план **без** автоматического округления, удаления записей или ослабления
-guard. Инвентаризация: локальный `prod-grid-report.json` (не в git).
-Проверяемый план (read-only):
+**CONFIRMED, 2026-11-18, изолированная копия prod SQLite (backup `20261117_173441`):**
+`PRAGMA integrity_check=ok`; pre-migration Alembic на копии `20261031_b3_master_svc`;
+миграция `20261114_calendar_grid_guard` **падает** на **29** `bookings`, **0**
+`calendar_blocks`. План **без** массового округления, удаления и ослабления guard.
+
+**Owner pack (retro):** [calendar-b3-prod-grid-owner-decisions.md](calendar-b3-prod-grid-owner-decisions.md)
+— таблица всех 29 строк, provenance, рекомендации. JSON: `decision-pack-migtest.json`
+на подготовленной машине релиза (`/tmp/prod-grid-work/`, не в git).
 
 ```bash
+# read-only, SQLite mode=ro + query_only; migration preflight — отдельная копия
 python3 backend/scripts/prod_calendar_grid_repair_plan.py \
   --db /path/to/isolated-prod-copy.sqlite \
-  --out /path/to/prod-grid-repair-plan.json
+  --out /path/to/decision-pack.json
+
+# apply только на disposable копии после согласования владельца
+python3 backend/scripts/prod_calendar_grid_apply_repairs.py \
+  --db /path/to/copy.sqlite --plan /path/to/decision-pack.json \
+  --booking-ids <ids> [--option-override 145:0] [--run-migration-after]
 ```
 
-Каждая строка: текущие времена, **2 варианта** (+30 мин / +60 мин от on-grid
-start, плюс отдельные ветки для subsecond и inverted), флаг `guard_valid`
-(wall-only); при наличии `start_utc_us` / `end_utc_us` — **обязателен**
-пересчёт canonical в той же транзакции, что и wall (скрипт не пишет в БД).
+Каждая строка: точные `violations`, observed duration (для subsecond — усечение
+для диагностики, не валидность), варианты сетки с опорой на seed **45 min**
+(`reseed_prod_stats_smoke.py`), отдельно subsecond/inverted. `wall_only_valid`
+≠ полная валидность строки при заполненном canonical. `migration_preflight_ok`
+в JSON — **false**, пока на копии после repair не пройдёт `alembic upgrade head`.
 
 ### Сводка нарушений
 
@@ -187,10 +197,13 @@ start, плюс отдельные ветки для subsecond и inverted), ф�
 | subsecond + off-grid start/end (**#145**) | 1 | `2026-04-14 22:02:38.047306` → `22:32:38.047306`, `completed`, `master_id=1` |
 | `inverted_interval` (**#1067**) | 1 | `start 16:00` / `end 15:00`, `cancelled`, `master_id=9`, `client_id=14` |
 
-**Происхождение (confidence):** для всех 29 строк в отчёте стоит
-`INFERRED` (пакетные даты `2026-04-23`, `2026-06-04/07`, subsecond/inverted).
-Это **не** доказательство тестовости: признак — совокупность метаданных, не
-только `master_id` 11/15/16.
+**Происхождение (2026-11-18):** **27** `confirmed_synthetic` — **22** с маркером
+`STATS_SMOKE_2026_05` в `booking.notes` (`reseed_prod_stats_smoke.py`), **5** demo
+batch (`demo_master_seed.py`: `demo-master-2` + `created_at` `2026-04-23 18:34:07`);
+**2** `origin_unknown` — **#145** (subsecond), **#1067** (inverted, нет seed-маркера).
+Домен `stats-smoke-master*` или inverted/cancelled **сами по себе** не доказывают
+синтетику. Верификация последствий: `prod_calendar_grid_verify_repairs.py`.
+Каталог `duration` сейчас не доказывает исторический wall-интервал.
 
 ### Связанные сущности (копия prod)
 

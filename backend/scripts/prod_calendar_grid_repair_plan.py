@@ -1,203 +1,133 @@
 #!/usr/bin/env python3
-"""Read-only repair planner for off-grid prod bookings on an isolated SQLite copy.
-
-Does not mutate the database. Outputs JSON proposals for owner review before
-`20261114_calendar_grid_guard` cutover.
-"""
+"""Read-only repair decision pack for prod grid guard (isolated SQLite copy)."""
 
 from __future__ import annotations
 
 import argparse
 import json
-import sqlite3
 import sys
-from datetime import datetime, timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from utils.sqlite_calendar_grid_guard import (  # noqa: E402
-    _naive_wall_duration_minutes,
-    _parse_wall_naive,
-    _wall_on_grid,
-    iter_invalid_booking_rows,
-    register_sqlite_calendar_guard_udfs,
-    sqlite_validate_booking_row,
+from scripts.prod_calendar_grid_repair_lib import (  # noqa: E402
+    build_recommendation,
+    connect_readonly,
+    decision_lock_from_row,
+    fetch_booking,
+    integrity_check,
+    list_invalid_ids,
+    run_migration_preflight,
+    schema_snapshot,
 )
 
 
-def _snap_start_down(dt: datetime) -> datetime:
-    minute = 0 if dt.minute < 30 else 30
-    return dt.replace(minute=minute, second=0, microsecond=0)
+from scripts.prod_calendar_grid_repair_lib import (  # noqa: E402
+    _master_service_join,
+    booking_row_select_clause,
+)
 
 
-def _options_on_grid(start: datetime, end: datetime) -> list[dict]:
-    """Minimal-change candidates: extend or shrink to 30-min grid duration."""
-    dur = _naive_wall_duration_minutes(start, end)
-    out: list[dict] = []
-    for target_min in (30, 60):
-        if target_min == dur and _wall_on_grid(end):
-            continue
-        cand_end = start + timedelta(minutes=target_min)
-        if not _wall_on_grid(cand_end):
-            continue
-        out.append(
-            {
-                "strategy": f"start_unchanged_end_plus_{target_min}m",
-                "start_time": start.isoformat(sep=" "),
-                "end_time": cand_end.isoformat(sep=" "),
-                "duration_minutes": target_min,
-            }
-        )
-    return out
-
-
-def _proposal_for_row(row: sqlite3.Row) -> dict:
-    rid = int(row["id"])
-    start_raw, end_raw = row["start_time"], row["end_time"]
-    start = _parse_wall_naive(start_raw)
-    end = _parse_wall_naive(end_raw)
-
-    base = {
-        "id": rid,
-        "status": row["status"],
-        "master_id": row["master_id"],
-        "client_id": row["client_id"],
-        "notes": (row["notes"] or "")[:120],
-        "current": {"start_time": start_raw, "end_time": end_raw},
-        "related": {
-            "incomes": row["income_count"],
-            "income_total": row["income_total"],
-            "confirmations": row["confirmation_count"],
-            "loyalty_tx": row["loyalty_count"],
-        },
-        "proposals": [],
-    }
-
-    if start is None or end is None:
-        if start is None and start_raw:
-            st = _parse_wall_naive(str(start_raw).split(".")[0])
-            if st:
-                start = st
-        if end is None and end_raw:
-            en = _parse_wall_naive(str(end_raw).split(".")[0])
-            if en:
-                end = en
-        if start and ("." in str(start_raw) or not _wall_on_grid(start)):
-            st0 = start.replace(microsecond=0)
-            if not _wall_on_grid(st0):
-                st0 = _snap_start_down(st0)
-            for minutes in (30, 60):
-                cand_end = st0 + timedelta(minutes=minutes)
-                if _wall_on_grid(cand_end):
-                    base["proposals"].append(
-                        {
-                            "strategy": f"truncate_subsecond_grid_{minutes}m",
-                            "start_time": st0.isoformat(sep=" "),
-                            "end_time": cand_end.isoformat(sep=" "),
-                            "duration_minutes": minutes,
-                        }
-                    )
-        return base
-
-    if end <= start:
-        cand_end = start + timedelta(minutes=30)
-        if _wall_on_grid(start) and _wall_on_grid(cand_end):
-            base["proposals"].append(
-                {
-                    "strategy": "inverted_interval_fix_plus_30m",
-                    "start_time": start.isoformat(sep=" "),
-                    "end_time": cand_end.isoformat(sep=" "),
-                    "duration_minutes": 30,
-                }
-            )
-        return base
-
-    if _wall_on_grid(start):
-        base["proposals"].extend(_options_on_grid(start, end))
-    else:
-        st0 = _snap_start_down(start)
-        for minutes in (30, 60):
-            cand_end = st0 + timedelta(minutes=minutes)
-            if _wall_on_grid(cand_end):
-                base["proposals"].append(
-                    {
-                        "strategy": f"snap_start_down_plus_{minutes}m",
-                        "start_time": st0.isoformat(sep=" "),
-                        "end_time": cand_end.isoformat(sep=" "),
-                        "duration_minutes": minutes,
-                    }
-                )
-
-    return base
-
-
-def _validate_proposal(row: sqlite3.Row, proposal: dict) -> bool:
-    start = proposal["start_time"]
-    end = proposal["end_time"]
-    # Wall-only check: after repair, owner must recompute canonical UTC if present.
-    return (
-        sqlite_validate_booking_row(start, end, None, None, None) == 0
-    )
+def _booking_select_sql(conn) -> str:
+    return f"""
+SELECT {booking_row_select_clause(conn).strip().rstrip(',')},
+       s.duration AS service_duration,
+       ms.duration AS master_service_duration,
+       ms.name AS master_service_name,
+       m.domain AS master_domain, m.timezone AS master_timezone,
+       (SELECT COUNT(*) FROM incomes WHERE booking_id=b.id) AS income_count,
+       (SELECT COALESCE(SUM(total_amount),0) FROM incomes WHERE booking_id=b.id) AS income_total,
+       (SELECT COUNT(*) FROM booking_confirmations WHERE booking_id=b.id) AS confirmation_count,
+       (SELECT COUNT(*) FROM loyalty_transactions WHERE booking_id=b.id) AS loyalty_count
+FROM bookings b
+LEFT JOIN services s ON s.id = b.service_id
+{_master_service_join(conn)}
+LEFT JOIN masters m ON m.id = b.master_id
+WHERE b.id IN ({{ids}})
+ORDER BY b.id
+"""
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--db", required=True, type=Path, help="Path to isolated prod SQLite copy")
-    parser.add_argument("--out", type=Path, help="Write JSON plan here (default: stdout)")
+    parser.add_argument("--db", required=True, type=Path, help="Isolated SQLite prod copy")
+    parser.add_argument("--out", required=True, type=Path, help="Write JSON decision pack")
+    parser.add_argument(
+        "--skip-migration-preflight",
+        action="store_true",
+        help="Skip disposable alembic upgrade (not recommended)",
+    )
     args = parser.parse_args()
 
     if not args.db.is_file():
         print(f"DB not found: {args.db}", file=sys.stderr)
         return 2
 
-    conn = sqlite3.connect(str(args.db))
-    conn.row_factory = sqlite3.Row
-    register_sqlite_calendar_guard_udfs(conn)
+    conn = connect_readonly(args.db)
+    schema = schema_snapshot(conn)
+    integrity = integrity_check(conn)
+    booking_ids, block_ids = list_invalid_ids(conn)
 
-    invalid_ids = {rid for rid, _ in iter_invalid_booking_rows(conn)}
-    if not invalid_ids:
-        payload = {"invalid_count": 0, "bookings": [], "note": "No invalid bookings; migration preflight OK"}
-        print(json.dumps(payload, ensure_ascii=False, indent=2))
-        return 0
+    preflight = None
+    if not args.skip_migration_preflight:
+        preflight = run_migration_preflight(ROOT, args.db)
 
-    sql = """
-    SELECT b.id, b.status, b.master_id, b.client_id, b.notes,
-           b.start_time, b.end_time, b.start_utc_us, b.end_utc_us, b.time_zone,
-           (SELECT COUNT(*) FROM incomes i WHERE i.booking_id = b.id) AS income_count,
-           (SELECT COALESCE(SUM(i.amount), 0) FROM incomes i WHERE i.booking_id = b.id) AS income_total,
-           (SELECT COUNT(*) FROM booking_confirmations c WHERE c.booking_id = b.id) AS confirmation_count,
-           (SELECT COUNT(*) FROM loyalty_transactions lt WHERE lt.booking_id = b.id) AS loyalty_count
-    FROM bookings b
-  WHERE b.id IN ({})
-    ORDER BY b.id
-    """.format(",".join(str(i) for i in sorted(invalid_ids)))
-
-    rows = conn.execute(sql).fetchall()
-    plans = []
-    for row in rows:
-        item = _proposal_for_row(row)
-        for p in item["proposals"]:
-            p["guard_valid"] = _validate_proposal(row, p)
-        item["owner_action"] = (
-            "choose one guard_valid proposal or define manual interval; "
-            "re-run alembic on copy after UPDATE"
+    decisions = []
+    if booking_ids:
+        sql = _booking_select_sql(conn).format(
+            ids=",".join(str(i) for i in booking_ids)
         )
-        plans.append(item)
+        for row in conn.execute(sql):
+            rec = build_recommendation(row)
+            decisions.append(
+                {
+                    "id": row["id"],
+                    "status": row["status"],
+                    "master_id": row["master_id"],
+                    "master_domain": row["master_domain"],
+                    "client_id": row["client_id"],
+                    "interval": {
+                        "start_time": str(row["start_time"]),
+                        "end_time": str(row["end_time"]),
+                    },
+                    "approval_lock": decision_lock_from_row(row),
+                    "notes": row["notes"],
+                    "created_at": row["created_at"],
+                    **rec,
+                }
+            )
+    conn.close()
+
+    by_category = {}
+    for d in decisions:
+        cat = d["provenance"]["category"]
+        by_category[cat] = by_category.get(cat, 0) + 1
 
     payload = {
-        "db": str(args.db.resolve()),
-        "invalid_count": len(invalid_ids),
-        "bookings": plans,
+        "source_db": str(args.db.resolve()),
+        "integrity_check": integrity,
+        "schema": schema,
+        "invalid_bookings_count": len(booking_ids),
+        "invalid_booking_ids": booking_ids,
+        "invalid_calendar_blocks_count": len(block_ids),
+        "invalid_calendar_block_ids": block_ids,
+        "provenance_summary": by_category,
+        "migration_preflight": preflight,
+        "migration_preflight_ok": bool(
+            preflight and preflight.get("grid_guard_passed")
+        ),
+        "decisions": decisions,
+        "note": (
+            "migration_preflight_ok is false until repairs applied on a copy and "
+            "alembic upgrade head succeeds including 20261114_calendar_grid_guard."
+        ),
     }
-    text = json.dumps(payload, ensure_ascii=False, indent=2)
-    if args.out:
-        args.out.write_text(text, encoding="utf-8")
-        print(f"Wrote {args.out}", file=sys.stderr)
-    else:
-        print(text)
+
+    args.out.parent.mkdir(parents=True, exist_ok=True)
+    args.out.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(f"Wrote {args.out} ({len(booking_ids)} booking decisions)", file=sys.stderr)
     return 0
 
 
